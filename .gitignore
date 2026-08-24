@@ -4,19 +4,17 @@
 .firebaserc
 
 # Firebase Hosting
-/firebase.json
 *.cache
 hosting/.cache
+firebase/.firebaserc
+/firebase/node_modules
+/firebase/functions/node_modules
+firebase/functions/.env
 
-# Firebase Functions
-/functions/node_modules/
-/functions/.env
-/functions/package-lock.json
 
 # Firebase Emulators
 /firebase-*.zip
 /.firebase/
-/emulator-ui/
 
 # Logs
 *.log
@@ -31,3 +29,42 @@ contracts/qft-tokens/.env
 /contracts/qft-tokens/artifacts
 /contracts/qft-tokens/cache
 /contracts/qft-tokens/deployments
+
+# Mac files 
+.DS_Store
+**/.DS_Store
+
+# Frontend
+/frontend/node_modules
+/frontend/dist
+frontend/.env.local
+frontend/.env.*.local
+
+# Secrets — `/.env.*` above matches .env.local but NOT a bare .env, and the root
+# README tells contributors to create one containing PRIVATE_KEY.
+.env
+**/.env
+!**/.env.example
+
+# Firebase emulator data exports (--export-on-exit / --import)
+firebase-export-*/
+**/.firebase/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test and build caches
+coverage/
+.eslintcache
+*.tsbuildinfo
+
+# OS files (Windows counterpart to .DS_Store, for teammates not on macOS)
+Thumbs.db
+ehthumbs.db
+
+# Claude Code local settings (also in your global ignore; repeated here so
+# teammates without that global config are covered too)
+**/.claude/settings.local.json

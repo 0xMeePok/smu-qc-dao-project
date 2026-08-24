@@ -1,0 +1,98 @@
+rules_version = '2';
+
+// Server-side authorisation for wallet onboarding.
+//
+// The security model rests on one fact: `request.auth.uid` IS the lowercase wallet
+// address, and a uid can only exist because firebase/functions/index.js verified a
+// signature over a server-issued, single-use nonce before minting the custom token.
+// A browser cannot forge one. That is why `request.auth.uid == address` below is a
+// real proof of wallet ownership rather than a claim the client made about itself.
+//
+// Role identifiers must stay in sync with frontend/src/lib/roles.js.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isWallet(address) {
+      return request.auth != null && request.auth.uid == address;
+    }
+
+    function allowedRole(role) {
+      return role in ['problem-owner', 'funder', 'researcher', 'evaluator', 'observer'];
+    }
+
+    function isWalletAddress(value) {
+      return value is string && value.matches('^0x[0-9a-f]{40}$');
+    }
+
+    function isNonEmptyString(value, maxLength) {
+      return value is string && value.size() > 1 && value.size() <= maxLength;
+    }
+
+    // Contribution counters must start at zero. A client that could seed its own
+    // karma at signup would make the whole reputation system meaningless.
+    function statsAreZeroed(stats) {
+      return stats.keys().hasOnly([
+               'comments', 'businessProblems', 'openFunding',
+               'fundingRequests', 'karma', 'reputation'
+             ])
+             && stats.keys().hasAll([
+                  'comments', 'businessProblems', 'openFunding',
+                  'fundingRequests', 'karma', 'reputation'
+                ])
+             && stats.comments == 0
+             && stats.businessProblems == 0
+             && stats.openFunding == 0
+             && stats.fundingRequests == 0
+             && stats.karma == 0
+             && stats.reputation == 0;
+    }
+
+    match /users/{address} {
+      // Profiles are public reads: the platform shows who published a problem or
+      // recorded an evaluation. Nothing sensitive is stored on them.
+      allow get, list: if true;
+
+      allow create: if isWallet(address)
+        && isWalletAddress(address)
+        && request.resource.data.address == address
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        && allowedRole(request.resource.data.role)
+        && statsAreZeroed(request.resource.data.stats)
+        && request.resource.data.onboardingComplete == false
+        && request.resource.data.termsAcceptedAt == request.time
+        && request.resource.data.createdAt == request.time;
+
+      // Only the wallet itself may edit its profile, on any device, because the uid
+      // is derived from a signature rather than from a per-browser session.
+      //
+      // `stats` has to come back byte-identical, so karma can only ever move via the
+      // Admin SDK from trusted server code, which bypasses these rules entirely.
+      allow update: if isWallet(address)
+        && resource != null
+        && request.resource.data.address == resource.data.address
+        && request.resource.data.stats == resource.data.stats
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.termsAcceptedAt == resource.data.termsAcceptedAt
+        && request.resource.data.walletVerified == resource.data.walletVerified
+        && allowedRole(request.resource.data.role)
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // Sign-in nonces are written and read only by the Admin SDK inside the callable
+    // functions. Exposing them to the browser would let an attacker read a pending
+    // nonce, or clear the `consumed` flag and replay a signature.
+    match /siweNonces/{address} {
+      allow read, write: if false;
+    }
+
+    // Deny everything not matched above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

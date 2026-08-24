@@ -1,0 +1,16 @@
+{
+  "name": "qc-dao-firebase",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Firestore security rules and their tests",
+  "scripts": {
+    "test": "firebase emulators:exec --only firestore --project qc-dao-rules-test \"node --test \\\"test/**/*.test.mjs\\\"\"",
+    "deploy:rules": "firebase deploy --only firestore:rules"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.0",
+    "firebase": "12.4.0",
+    "firebase-tools": "14.27.0"
+  }
+}
