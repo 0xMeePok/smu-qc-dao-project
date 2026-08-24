@@ -26,3 +26,8 @@ yarn-error.log*
 
 # Environment files (local configs)
 /.env.*
+contracts/qft-tokens/.env
+/contracts/qft-tokens/node_modules
+/contracts/qft-tokens/artifacts
+/contracts/qft-tokens/cache
+/contracts/qft-tokens/deployments
