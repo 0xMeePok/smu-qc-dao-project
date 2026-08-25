@@ -1,33 +1,62 @@
-# Firebase build and deployment files
-/firebase-debug.log
-/firebase-debug.*.log
-.firebaserc
+# Dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
 
-# Firebase Hosting
-/firebase.json
-*.cache
-hosting/.cache
+# Production & Build Outputs
+dist/
+dist-ssr/
+build/
+out/
+frontend/dist/
+*.local
 
-# Firebase Functions
-/functions/node_modules/
-/functions/.env
-/functions/package-lock.json
+# Solidity & Hardhat Artifacts
+artifacts/
+cache/
+contracts/qft-tokens/artifacts/
+contracts/qft-tokens/cache/
+contracts/qft-tokens/deployments/
 
-# Firebase Emulators
-/firebase-*.zip
-/.firebase/
-/emulator-ui/
+# Environment Files & Secrets
+.env
+.env.*
+!.env.example
+contracts/qft-tokens/.env
 
 # Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Environment files (local configs)
-/.env.*
-contracts/qft-tokens/.env
-/contracts/qft-tokens/node_modules
-/contracts/qft-tokens/artifacts
-/contracts/qft-tokens/cache
-/contracts/qft-tokens/deployments
+# Firebase
+firebase-debug.log
+firebase-debug.*.log
+.firebaserc
+firebase.json
+*.cache
+hosting/.cache
+.firebase/
+emulator-ui/
+
+# Editor & OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# IDE Directories
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

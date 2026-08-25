@@ -1,22 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
 import { opportunities, opportunityTypes } from "./data.js";
+import { ROLES, ROLE_LABELS, DEMO_USERS } from "./config/roles.js";
+import { FEATURES } from "./config/features.js";
+import { ROUTES_CONFIG, getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
+import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
+import { RouteGuard } from "./components/RouteGuard.jsx";
+import { Login } from "./components/Login.jsx";
+import { AccessDenied } from "./components/AccessDenied.jsx";
+import {
+  MyProblems,
+  ResearcherProposals,
+  EvaluatorQueue,
+  FundingPortfolio,
+  AdminAudit,
+} from "./components/RoleViews.jsx";
 
-const routes = [
-  ["home", "Home"],
-  ["discover", "Discover"],
-  ["create", "Create"],
-];
+function parseHash() {
+  const hash = window.location.hash.replace(/^#\/?/, "") || "home";
+  const [pathAndParams, queryString] = hash.split("?");
+  const params = new URLSearchParams(queryString || "");
+  const parts = pathAndParams.split("/");
+  const section = parts[0] || "home";
+  const id = parts[1] || null;
 
-function parseRoute() {
-  return window.location.hash.replace(/^#\/?/, "") || "home";
+  return { section, id, fullPath: pathAndParams, params };
 }
 
 function useRoute() {
-  const [route, setRoute] = useState(parseRoute);
+  const [routeInfo, setRouteInfo] = useState(parseHash);
 
   useEffect(() => {
     const updateRoute = () => {
-      setRoute(parseRoute());
+      setRouteInfo(parseHash());
       window.scrollTo({ top: 0, behavior: "instant" });
     };
 
@@ -24,11 +39,11 @@ function useRoute() {
     return () => window.removeEventListener("hashchange", updateRoute);
   }, []);
 
-  return route;
+  return routeInfo;
 }
 
 function go(route) {
-  window.location.hash = `/${route}`;
+  window.location.hash = route.startsWith("/") ? route : `/${route}`;
 }
 
 function ArrowIcon() {
@@ -48,33 +63,138 @@ function Logo() {
   );
 }
 
+function DemoToolbar() {
+  const { role, switchRole, user } = useAuth();
+
+  return (
+    <aside className="demo-toolbar" aria-label="Demo role switcher">
+      <div className="demo-toolbar-inner">
+        <div className="demo-title">
+          <span className="live-dot" />
+          <strong>O1-KR4 Role Access Tester</strong>
+          <small>Active: <span className="active-role-highlight">{ROLE_LABELS[role] || "Guest"}</span></small>
+        </div>
+        <div className="demo-roles-group">
+          <button
+            type="button"
+            className={`demo-role-btn ${role === ROLES.GUEST ? "selected" : ""}`}
+            onClick={() => switchRole(ROLES.GUEST)}
+          >
+            Guest
+          </button>
+          <button
+            type="button"
+            className={`demo-role-btn ${role === ROLES.OWNER ? "selected" : ""}`}
+            onClick={() => switchRole(ROLES.OWNER)}
+          >
+            Owner
+          </button>
+          <button
+            type="button"
+            className={`demo-role-btn ${role === ROLES.RESEARCHER ? "selected" : ""}`}
+            onClick={() => switchRole(ROLES.RESEARCHER)}
+          >
+            Researcher
+          </button>
+          <button
+            type="button"
+            className={`demo-role-btn ${role === ROLES.EVALUATOR ? "selected" : ""}`}
+            onClick={() => switchRole(ROLES.EVALUATOR)}
+          >
+            Evaluator
+          </button>
+          <button
+            type="button"
+            className={`demo-role-btn ${role === ROLES.FUNDER ? "selected" : ""}`}
+            onClick={() => switchRole(ROLES.FUNDER)}
+          >
+            Funder
+          </button>
+          <button
+            type="button"
+            className={`demo-role-btn ${role === ROLES.ADMIN ? "selected" : ""}`}
+            onClick={() => switchRole(ROLES.ADMIN)}
+          >
+            Admin
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function Shell({ route, children }) {
+  const { user, role, logout } = useAuth();
+  const navRoutes = getPermittedNavRoutes(role);
+
   return (
     <>
       <header className="topbar">
-        <Logo />
-        <nav aria-label="Primary navigation">
-          {routes.map(([key, label]) => (
+        <div className="topbar-left">
+          <Logo />
+          <nav aria-label="Primary navigation">
+            {navRoutes.map(({ key, label }) => (
+              <button
+                key={key}
+                className={route === key ? "active" : ""}
+                type="button"
+                onClick={() => go(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="topbar-right">
+          {user ? (
+            <div className="user-profile-badge">
+              <span className="role-tag">{ROLE_LABELS[role]}</span>
+              <span className="user-name">{user.name}</span>
+              <button
+                type="button"
+                className="logout-button"
+                onClick={() => {
+                  logout();
+                  go("home");
+                }}
+                title="Sign out"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
             <button
-              key={key}
-              className={route === key ? "active" : ""}
+              className="signin-button"
               type="button"
-              onClick={() => go(key)}
+              onClick={() => go("login")}
             >
-              {label}
+              Sign In
             </button>
-          ))}
-        </nav>
+          )}
+        </div>
       </header>
+
       <main>{children}</main>
+
       <footer>
         <Logo />
         <p>Clear opportunities. Accountable delivery. Transparent outcomes.</p>
         <div className="footer-links">
           <button type="button" onClick={() => go("discover")}>Discover</button>
-          <button type="button" onClick={() => go("create")}>Create</button>
+          {role === ROLES.OWNER || role === ROLES.FUNDER || role === ROLES.ADMIN ? (
+            <button type="button" onClick={() => go("create")}>Create Brief</button>
+          ) : null}
+          {user ? (
+            <button type="button" onClick={() => logout()}>Sign Out</button>
+          ) : (
+            <button type="button" onClick={() => go("login")}>Sign In</button>
+          )}
         </div>
       </footer>
+
+      {/* Demo Toolbar enabled conditionally via feature flag or ?demo=true */}
+      {FEATURES.DEMO_ROLE_SWITCHER ? <DemoToolbar /> : null}
     </>
   );
 }
@@ -205,6 +325,9 @@ function OpportunityList({ items }) {
 }
 
 function Home() {
+  const { role } = useAuth();
+  const canCreate = role === ROLES.OWNER || role === ROLES.RESEARCHER || role === ROLES.FUNDER || role === ROLES.ADMIN;
+
   return (
     <>
       <section className="hero">
@@ -213,7 +336,9 @@ function Home() {
           <p>Publish important problems, compare thoughtful proposals and support work through clear delivery stages.</p>
           <div className="actions">
             <button className="primary" type="button" onClick={() => go("discover")}>Explore opportunities</button>
-            <button className="secondary" type="button" onClick={() => go("create")}>Publish a brief</button>
+            {canCreate && (
+              <button className="secondary" type="button" onClick={() => go("create")}>Publish a brief</button>
+            )}
           </div>
         </div>
         <ResearchNetwork />
@@ -273,7 +398,11 @@ function Discover() {
 
 function OpportunityDetail({ id }) {
   const item = opportunities.find((candidate) => candidate.id === id);
+  const { role } = useAuth();
   if (!item) return <NotFound />;
+
+  const canCreate = role === ROLES.OWNER || role === ROLES.FUNDER || role === ROLES.ADMIN;
+  const isResearcher = role === ROLES.RESEARCHER;
 
   return (
     <section className="page detail-page">
@@ -298,23 +427,57 @@ function OpportunityDetail({ id }) {
             <div><dt>Timing</dt><dd>{item.deadline}</dd></div>
             <div><dt>Current stage</dt><dd>{item.status}</dd></div>
           </dl>
-          <button className="primary" type="button" onClick={() => go("create")}>Create a similar brief</button>
+          {isResearcher ? (
+            <button className="primary" type="button" onClick={() => go("proposals")}>
+              Submit Proposal for Brief
+            </button>
+          ) : canCreate ? (
+            <button className="primary" type="button" onClick={() => go("create")}>
+              Create a similar brief
+            </button>
+          ) : null}
         </aside>
       </div>
     </section>
   );
 }
 
-const initialForm = {
-  opportunityType: "business-problem",
-  title: "",
-  summary: "",
-  outcomes: "",
-  amount: "",
-};
+function getAvailableOpportunityTypes(role) {
+  if (role === ROLES.RESEARCHER) {
+    return opportunityTypes.filter((t) => t.value === "funding-request");
+  }
+  if (role === ROLES.OWNER) {
+    return opportunityTypes.filter((t) => t.value === "business-problem" || t.value === "open-funding");
+  }
+  if (role === ROLES.FUNDER) {
+    return opportunityTypes.filter((t) => t.value === "open-funding" || t.value === "business-problem");
+  }
+  // Admin or fallback
+  return opportunityTypes;
+}
 
 function CreateOpportunity() {
-  const [form, setForm] = useState(initialForm);
+  const { role } = useAuth();
+  const availableTypes = useMemo(() => getAvailableOpportunityTypes(role), [role]);
+
+  const [form, setForm] = useState(() => ({
+    opportunityType: availableTypes[0]?.value || "business-problem",
+    title: "",
+    summary: "",
+    outcomes: "",
+    amount: "",
+  }));
+
+  // Sync form default if role changes
+  useEffect(() => {
+    if (!availableTypes.some((t) => t.value === form.opportunityType)) {
+      setForm((prev) => ({
+        ...prev,
+        opportunityType: availableTypes[0]?.value || "business-problem",
+      }));
+    }
+  }, [availableTypes, form.opportunityType]);
+
   const [submitted, setSubmitted] = useState(false);
   const selectedType = useMemo(
     () => opportunityTypes.find((type) => type.value === form.opportunityType),
@@ -329,6 +492,11 @@ function CreateOpportunity() {
 
   const submit = (event) => {
     event.preventDefault();
+    // Security check: ensure only researcher or admin can submit funding-request
+    if (form.opportunityType === "funding-request" && role !== ROLES.RESEARCHER && role !== ROLES.ADMIN) {
+      alert("Only researchers are permitted to submit funding requests.");
+      return;
+    }
     setSubmitted(true);
   };
 
@@ -336,7 +504,11 @@ function CreateOpportunity() {
     <section className="page create-page">
       <div className="page-heading">
         <h1>Create a funding opportunity</h1>
-        <p>Choose the relationship that best fits the work, then add the details researchers and funders need.</p>
+        <p>
+          {role === ROLES.RESEARCHER
+            ? "Publish a researcher-led funding request to connect with grants and enterprise sponsors."
+            : "Choose the relationship that best fits the work, then add the details researchers and funders need."}
+        </p>
       </div>
       {submitted ? (
         <div className="submission-success" role="status">
@@ -351,7 +523,7 @@ function CreateOpportunity() {
       <form onSubmit={submit}>
         <fieldset className="workflow-picker">
           <legend>Opportunity type</legend>
-          {opportunityTypes.map((option) => (
+          {availableTypes.map((option) => (
             <label className={form.opportunityType === option.value ? "chosen" : ""} key={option.value}>
               <input
                 type="radio"
@@ -370,7 +542,7 @@ function CreateOpportunity() {
           <div><span className="form-step">01</span><h2>Opportunity overview</h2></div>
           <label>
             Title
-            <input required minLength="6" name="title" value={form.title} onChange={update} placeholder={`${selectedType.label} title`} />
+            <input required minLength="6" name="title" value={form.title} onChange={update} placeholder={`${selectedType?.label || "Opportunity"} title`} />
           </label>
           <label>
             Summary
@@ -402,21 +574,113 @@ function CreateOpportunity() {
 function NotFound() {
   return (
     <section className="page empty">
-      <h1>This research opportunity is not available.</h1>
+      <div className="empty-icon-wrapper" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M16 16s-1.5-2-4-2-4 2-4 2" />
+          <line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="3" />
+          <line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="3" />
+        </svg>
+      </div>
+      <span className="http-status">HTTP 404 · Not Found</span>
+      <h1>This page or research opportunity does not exist.</h1>
+      <p>The requested URL route was not found in the QC DAO platform registry.</p>
       <button className="primary" type="button" onClick={() => go("discover")}>Browse opportunities</button>
     </section>
   );
 }
 
+function AppContent() {
+  const { section, id, params } = useRoute();
+  const routeConfig = getRouteConfig(section);
+
+  let pageComponent = <NotFound />;
+
+  if (section === "home") {
+    pageComponent = <Home />;
+  } else if (section === "discover") {
+    pageComponent = <Discover />;
+  } else if (section === "opportunity") {
+    pageComponent = <OpportunityDetail id={id} />;
+  } else if (section === "login") {
+    pageComponent = <Login redirectTarget={params.get("redirect")} onNavigate={go} />;
+  } else if (section === "create") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <CreateOpportunity />
+      </RouteGuard>
+    );
+  } else if (section === "my-problems") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <MyProblems onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "proposals") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <ResearcherProposals onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "evaluations") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <EvaluatorQueue onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "funding") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <FundingPortfolio onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "admin") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <AdminAudit onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "access-denied") {
+    pageComponent = <AccessDenied onNavigate={go} />;
+  }
+
+  return <Shell route={section}>{pageComponent}</Shell>;
+}
+
 export default function App() {
-  const route = useRoute();
-  const [section, id] = route.split("/");
-
-  let content = <NotFound />;
-  if (section === "home") content = <Home />;
-  if (section === "discover") content = <Discover />;
-  if (section === "create") content = <CreateOpportunity />;
-  if (section === "opportunity") content = <OpportunityDetail id={id} />;
-
-  return <Shell route={section}>{content}</Shell>;
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
 }

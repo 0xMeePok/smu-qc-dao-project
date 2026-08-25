@@ -20,97 +20,87 @@ This creates an immutable audit trail for events that may be disputed across ins
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | [Placeholder: e.g. React / Next.js] |
-| Backend / Off-chain data | Firebase (Firestore, Auth, Storage) |
-| Smart Contracts | Solidity, deployed on Arbitrum Sepolia |
-| Contract Tooling | [Placeholder: e.g. Hardhat / Foundry] |
-| Wallet Integration | [Placeholder: e.g. MetaMask / wagmi / ethers.js] |
+| Layer | Technology | Description |
+|---|---|---|
+| Frontend | React 18, Vite 6, Vanilla CSS | Single-page application with role-based routing and zero UI framework dependencies. |
+| Backend / Off-chain Data | Firebase (Firestore, Auth, Storage) | Off-chain data store for user profiles, proposal drafts, and review feedback. |
+| Smart Contracts | Solidity (0.8.28), Arbitrum Sepolia | Verifiable audit log and hash anchoring (Chain ID: `421614`). |
+| Contract Tooling | Hardhat, Etherscan API v2 | Local testing, deployment pipelines, and automated Arbiscan verification. |
+| Wallet Integration | ethers.js / Web3 Provider | Wallet connectivity and cryptographic audit signing. |
 
 ## Architecture
 
 ```
-[Placeholder: architecture diagram or description]
-
-User → Web App → Firebase (off-chain data)
-                → Smart Contract (Arbitrum Sepolia) — hashes, timestamps, audit events
+User -> Web App (React + Vite) -> Firebase (off-chain profiles, briefs, proposals)
+                                -> Smart Contract (Arbitrum Sepolia: hashes, timestamps, audit events)
 ```
 
 ## Project Structure
 
 ```
 smu-qc-dao-project/
-├── contracts/          # [Placeholder: Solidity smart contracts]
-├── frontend/            # [Placeholder: Web application source]
-├── firebase/             # [Placeholder: Firebase config, functions, security rules]
-├── scripts/               # [Placeholder: Deployment/utility scripts]
-├── test/                   # [Placeholder: Contract and application tests]
-├── docs/                   # [Placeholder: Additional documentation]
+├── contracts/
+│   └── qft-tokens/         # Solidity contracts, Hardhat configuration, deploy scripts
+├── frontend/               # React frontend application
+│   ├── src/
+│   │   ├── components/     # RouteGuard, AccessDenied (403), Login, and role dashboards
+│   │   ├── config/         # Role definitions, route permissions, feature flags
+│   │   ├── context/        # AuthContext and session state management
+│   │   ├── App.jsx         # Main application shell and dynamic routing
+│   │   └── styles.css      # Core design system and styles
+│   ├── package.json
+│   └── vite.config.js
+├── docs/                   # Documentation and permission matrices
+│   └── ROLE_ROUTE_PERMISSIONS.md  # Living UAT reference for role-based access control
+├── .gitignore
 └── README.md
 ```
 
 ## Prerequisites
 
-- [Placeholder: e.g. Node.js v18+]
-- [Placeholder: e.g. npm / yarn / pnpm]
-- [Placeholder: e.g. Firebase CLI]
-- [Placeholder: e.g. MetaMask wallet with Arbitrum Sepolia testnet configured]
-- [Placeholder: e.g. Arbitrum Sepolia testnet ETH (from a faucet)]
+- Node.js v20.19.0 or higher
+- npm v10 or higher
+- MetaMask wallet configured with Arbitrum Sepolia testnet (Chain ID `421614`)
+- Arbitrum Sepolia testnet ETH (for contract deployment and audit transactions)
 
 ## Getting Started
 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/[Placeholder: org]/smu-qc-dao-project.git
+git clone https://github.com/0xMeePok/smu-qc-dao-project.git
 cd smu-qc-dao-project
 ```
 
-### 2. Install dependencies
+### 2. Run the frontend application
 
 ```bash
-[Placeholder: e.g. npm install]
+cd frontend
+npm install
+npm run dev
 ```
 
-### 3. Configure environment variables
+The web application will start at `http://localhost:5173/`.
 
-Create a `.env` file in the root directory:
+- **Standard Mode**: `http://localhost:5173/` (production layout, standard login form).
+- **Demo Mode**: `http://localhost:5173/?demo=true` (enables the bottom demo role-switcher toolbar and one-click persona selector for grading demonstrations).
 
-```
-[Placeholder: e.g. FIREBASE_API_KEY=]
-[Placeholder: e.g. FIREBASE_PROJECT_ID=]
-[Placeholder: e.g. ARBITRUM_SEPOLIA_RPC_URL=]
-[Placeholder: e.g. PRIVATE_KEY=]
-[Placeholder: e.g. CONTRACT_ADDRESS=]
-```
-
-### 4. Deploy smart contracts (if not already deployed)
+### 3. Deploy and test smart contracts
 
 ```bash
-[Placeholder: e.g. npx hardhat run scripts/deploy.js --network arbitrumSepolia]
+cd ../contracts/qft-tokens
+npm install
 ```
 
-### 5. Run the application locally
+Configure your `.env` from `.env.example` with your Arbitrum Sepolia RPC URL and private key, then run:
 
 ```bash
-[Placeholder: e.g. npm run dev]
+npm run deploy:arbitrum-sepolia
 ```
 
-The app should now be running at `[Placeholder: e.g. http://localhost:3000]`.
+## Documentation Reference
 
-## Smart Contracts
-
-| Contract | Address (Arbitrum Sepolia) | Purpose |
-|---|---|---|
-| [Placeholder: e.g. QCDAORegistry.sol] | [Placeholder: 0x...] | [Placeholder: e.g. Stores verification hashes and audit events] |
-
-## Testing
-
-```bash
-[Placeholder: e.g. npx hardhat test]
-[Placeholder: e.g. npm run test]
-```
+- [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions, opportunity creation rules, and demo mode specifications.
 
 ## Team
 
