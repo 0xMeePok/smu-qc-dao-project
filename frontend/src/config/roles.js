@@ -24,22 +24,3 @@ export const ROLE_DESCRIPTIONS = {
   [ROLES.FUNDER]: "Capital allocator funding vetted quantum research initiatives.",
   [ROLES.ADMIN]: "Platform governor overseeing system registries and on-chain audit trails.",
 };
-
-export const DEMO_USERS = {
-  // Unified Platform Member possessing all 4 standard stakeholder roles
-  member: {
-    id: "usr_member_01",
-    name: "Dr. Marcus Vance",
-    org: "Quantum Innovation Network",
-    roles: [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER],
-    address: "0x3F8...4A1e",
-  },
-  // Dedicated Governance Administrator
-  admin: {
-    id: "usr_admin_05",
-    name: "DAO Operations",
-    org: "SMU QC DAO Core",
-    roles: [ROLES.ADMIN],
-    address: "0x000...Ad01",
-  },
-};

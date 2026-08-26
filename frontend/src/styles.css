@@ -51,10 +51,6 @@ body {
   font-size: 15px;
   line-height: 1.6;
 }
-
-body:has(.demo-toolbar) {
-  padding-bottom: 72px; /* space for fixed demo toolbar when enabled */
-}
 button, input, textarea { color: inherit; font: inherit; }
 button { cursor: pointer; }
 h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.022em; line-height: 1.25; }
@@ -1104,92 +1100,7 @@ input[type="radio"] { accent-color: var(--brand); }
   color: var(--muted);
 }
 
-/* DEMO ROLE SWITCHER TOOLBAR (FIXED BOTTOM) */
-.demo-toolbar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 50;
-  background: rgba(13, 27, 46, 0.95);
-  backdrop-filter: saturate(180%) blur(10px);
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
-  color: white;
-  padding: 10px max(var(--gutter), calc((100vw - var(--container)) / 2));
-}
 
-.demo-toolbar-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.demo-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-}
-
-.live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
-  animation: pulseDot 2s infinite ease-in-out;
-}
-
-@keyframes pulseDot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
-}
-
-.demo-title strong {
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.demo-title small {
-  color: #94a3b8;
-}
-
-.active-role-highlight {
-  color: #38bdf8;
-  font-weight: 700;
-}
-
-.demo-roles-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.demo-role-btn {
-  padding: 5px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.08);
-  color: #e2e8f0;
-  font-size: 12px;
-  font-weight: 600;
-  transition: all 140ms ease;
-}
-
-.demo-role-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-}
-
-.demo-role-btn.selected {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: white;
-  box-shadow: 0 0 10px rgba(29, 78, 216, 0.5);
-}
 
 /* FOOTER */
 footer {
@@ -1222,7 +1133,6 @@ footer > p { margin: 0 auto 0 0; }
   .context-panel, .preview-panel { position: static; }
   .radio-group { grid-template-columns: 1fr; }
   .steps, .dashboard-stats-grid { grid-template-columns: 1fr; }
-  .demo-toolbar-inner { flex-direction: column; align-items: flex-start; }
 }
 
 @media (max-width: 680px) {

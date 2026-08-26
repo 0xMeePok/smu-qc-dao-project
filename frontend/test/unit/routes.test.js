@@ -112,6 +112,9 @@ describe("Unit Tests: Route Configurations & Navigation Filtering", () => {
     const invalidConfig = getRouteConfig("non-existent-route-key");
     assert.equal(invalidConfig, undefined);
 
+    const demoConfig = getRouteConfig("demo");
+    assert.equal(demoConfig, undefined);
+
     const emptyConfig = getRouteConfig("");
     assert.equal(emptyConfig, undefined);
   });

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunities, opportunityTypes } from "./data.js";
 import { ROLES } from "./config/roles.js";
-import { FEATURES } from "./config/features.js";
 import { getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { useSession } from "./context/SessionContext.jsx";
@@ -22,9 +21,20 @@ import {
 } from "./components/RoleViews.jsx";
 
 function parseHash() {
+  if (typeof window !== "undefined") {
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.has("demo") || window.location.pathname.includes("/demo")) {
+      return { section: "404-not-found", id: null, fullPath: "demo", params: new URLSearchParams() };
+    }
+  }
+
   const hash = window.location.hash.replace(/^#\/?/, "") || "home";
   const [pathAndParams, queryString] = hash.split("?");
   const params = new URLSearchParams(queryString || "");
+  if (params.has("demo") || pathAndParams === "demo" || pathAndParams.startsWith("demo/")) {
+    return { section: "404-not-found", id: null, fullPath: pathAndParams, params };
+  }
+
   const parts = pathAndParams.split("/");
   const section = parts[0] || "home";
   const id = parts[1] || null;
@@ -42,7 +52,11 @@ function useRoute() {
     };
 
     window.addEventListener("hashchange", updateRoute);
-    return () => window.removeEventListener("hashchange", updateRoute);
+    window.addEventListener("popstate", updateRoute);
+    return () => {
+      window.removeEventListener("hashchange", updateRoute);
+      window.removeEventListener("popstate", updateRoute);
+    };
   }, []);
 
   return routeInfo;
@@ -66,53 +80,6 @@ function Logo() {
       <span aria-hidden="true">Q</span>
       QC DAO
     </button>
-  );
-}
-
-function DemoToolbar() {
-  const { roles, login, logout, user } = useAuth();
-  const isAdminUser = roles.includes(ROLES.ADMIN);
-  const isMember = roles.includes(ROLES.OWNER) && roles.includes(ROLES.RESEARCHER);
-  const isGuest = !user;
-
-  return (
-    <aside className="demo-toolbar" aria-label="Demo role switcher">
-      <div className="demo-toolbar-inner">
-        <div className="demo-title">
-          <span className="live-dot" />
-          <strong>O1-KR4 Multi-Role Access Tester</strong>
-          <small>
-            Active:{" "}
-            <span className="active-role-highlight">
-              {isGuest ? "Guest (Unauthenticated)" : isAdminUser ? "DAO Admin" : "Platform Member (All Roles)"}
-            </span>
-          </small>
-        </div>
-        <div className="demo-roles-group">
-          <button
-            type="button"
-            className={`demo-role-btn ${isGuest ? "selected" : ""}`}
-            onClick={() => logout()}
-          >
-            Guest (Sign Out)
-          </button>
-          <button
-            type="button"
-            className={`demo-role-btn ${isMember ? "selected" : ""}`}
-            onClick={() => login("member")}
-          >
-            Platform Member (Multi-Role)
-          </button>
-          <button
-            type="button"
-            className={`demo-role-btn ${isAdminUser ? "selected" : ""}`}
-            onClick={() => login("admin")}
-          >
-            DAO Admin
-          </button>
-        </div>
-      </div>
-    </aside>
   );
 }
 
@@ -197,8 +164,8 @@ function WorkspacesDropdown({ route, workspaceRoutes }) {
 }
 
 function AccountControls() {
-  const { isSignedIn, profile, address, signOut: signOutWeb3 } = useSession();
-  const { user, logout: logoutDemo, hasRole } = useAuth();
+  const { isSignedIn, profile, address, signOut } = useSession();
+  const { hasRole } = useAuth();
 
   if (isSignedIn) {
     const isDaoAdmin = isAdmin(profile?.role) || hasRole(ROLES.ADMIN);
@@ -217,32 +184,7 @@ function AccountControls() {
               )}
             </div>
           </div>
-          <button className="signout-btn" type="button" onClick={() => signOutWeb3()} title="Sign Out">
-            Sign Out
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (user) {
-    const isDaoAdmin = hasRole(ROLES.ADMIN);
-    return (
-      <div className="account-controls">
-        <div className="user-session-pill">
-          <div className="user-session-info">
-            <span className="user-name">{user.name}</span>
-            <div className="role-tags-row">
-              {isDaoAdmin ? (
-                <span className="user-role-badge admin-badge">DAO Admin</span>
-              ) : (
-                <span className="user-role-badge member-badge" title="Owner · Researcher · Evaluator · Funder">
-                  Platform Member
-                </span>
-              )}
-            </div>
-          </div>
-          <button className="signout-btn" type="button" onClick={logoutDemo} title="Sign Out">
+          <button className="signout-btn" type="button" onClick={() => signOut()} title="Sign Out">
             Sign Out
           </button>
         </div>
@@ -295,8 +237,6 @@ function Shell({ route, children }) {
       </header>
 
       <main className="content">{children}</main>
-
-      {FEATURES.DEMO_ROLE_SWITCHER && <DemoToolbar />}
 
       <footer className="footer">
         <div>

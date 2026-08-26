@@ -1,27 +1,12 @@
 import { useState } from "react";
-import { DEMO_USERS } from "../config/roles.js";
-import { FEATURES } from "../config/features.js";
-import { useAuth } from "../context/AuthContext.jsx";
+import { SignInWithWallet } from "./SignInWithWallet.jsx";
 
 export function Login({ redirectTarget, onNavigate }) {
-  const { login } = useAuth();
-  const [selectedProfile, setSelectedProfile] = useState("member");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLogin = (e) => {
+  const handleInstitutionalLogin = (e) => {
     e.preventDefault();
-    login(selectedProfile);
-    const destination = redirectTarget || "home";
-    if (onNavigate) {
-      onNavigate(destination);
-    } else {
-      window.location.hash = `/${destination}`;
-    }
-  };
-
-  const handleDirectSelect = (profileKey) => {
-    login(profileKey);
     const destination = redirectTarget || "home";
     if (onNavigate) {
       onNavigate(destination);
@@ -54,148 +39,49 @@ export function Login({ redirectTarget, onNavigate }) {
             </div>
           ) : (
             <p className="login-subhead">
-              Sign in with your organization credentials to enter QC DAO.
+              Sign in with your Web3 wallet or organization credentials to enter QC DAO.
             </p>
           )}
         </div>
 
-        {FEATURES.DEMO_ROLE_SWITCHER ? (
-          <form onSubmit={handleLogin} className="role-selection-form">
-            <fieldset className="role-cards-grid">
-              <legend className="sr-only">Select Account Profile</legend>
+        <div className="wallet-signin-section">
+          <SignInWithWallet />
+        </div>
 
-              {/* Multi-Role Member Card */}
-              <div
-                className={`role-option-card ${selectedProfile === "member" ? "selected" : ""}`}
-                onClick={() => setSelectedProfile("member")}
-              >
-                <div className="role-option-radio">
-                  <input
-                    type="radio"
-                    id="profile-member"
-                    name="selectedProfile"
-                    value="member"
-                    checked={selectedProfile === "member"}
-                    onChange={() => setSelectedProfile("member")}
-                  />
-                </div>
-                <div className="role-option-body">
-                  <div className="role-title-row">
-                    <label htmlFor="profile-member" className="role-name">
-                      Platform Member
-                    </label>
-                    <span className="user-persona-tag">{DEMO_USERS.member.name}</span>
-                  </div>
-                  <p className="role-desc">
-                    Unified account with full access to Problem Owner, Researcher, Evaluator, and Funder workspaces.
-                  </p>
-                  <div className="role-meta">
-                    <span>{DEMO_USERS.member.org}</span> · <span className="mono">{DEMO_USERS.member.address}</span>
-                  </div>
-                  <div className="capabilities-badges">
-                    <span className="mini-badge">Problem Owner</span>
-                    <span className="mini-badge">Researcher</span>
-                    <span className="mini-badge">Evaluator</span>
-                    <span className="mini-badge">Funder</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="quick-enter-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDirectSelect("member");
-                  }}
-                  title="Sign in as Platform Member"
-                >
-                  Enter
-                </button>
-              </div>
+        <div className="login-divider">
+          <span>or continue with email</span>
+        </div>
 
-              {/* Standalone DAO Admin Card */}
-              <div
-                className={`role-option-card ${selectedProfile === "admin" ? "selected" : ""}`}
-                onClick={() => setSelectedProfile("admin")}
-              >
-                <div className="role-option-radio">
-                  <input
-                    type="radio"
-                    id="profile-admin"
-                    name="selectedProfile"
-                    value="admin"
-                    checked={selectedProfile === "admin"}
-                    onChange={() => setSelectedProfile("admin")}
-                  />
-                </div>
-                <div className="role-option-body">
-                  <div className="role-title-row">
-                    <label htmlFor="profile-admin" className="role-name">
-                      DAO Administrator
-                    </label>
-                    <span className="user-persona-tag">{DEMO_USERS.admin.name}</span>
-                  </div>
-                  <p className="role-desc">
-                    Governance administration for system registries, audit verification, and protocol oversight.
-                  </p>
-                  <div className="role-meta">
-                    <span>{DEMO_USERS.admin.org}</span> · <span className="mono">{DEMO_USERS.admin.address}</span>
-                  </div>
-                  <div className="capabilities-badges">
-                    <span className="mini-badge admin-badge">DAO Admin</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="quick-enter-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDirectSelect("admin");
-                  }}
-                  title="Sign in as DAO Admin"
-                >
-                  Enter
-                </button>
-              </div>
-            </fieldset>
+        <form onSubmit={handleInstitutionalLogin} className="standard-login-form">
+          <div className="form-field">
+            <label htmlFor="email">Institutional Email</label>
+            <input
+              id="email"
+              type="email"
+              required
+              placeholder="name@institution.edu"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="form-field">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              required
+              placeholder="Enter password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
 
-            <div className="login-actions">
-              <button className="primary full-width" type="submit">
-                Sign In as {selectedProfile === "admin" ? "DAO Admin" : "Platform Member"} {redirectTarget ? `& Continue to ${redirectTarget}` : ""}
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={handleLogin} className="standard-login-form">
-            <div className="form-field">
-              <label htmlFor="email">Institutional Email</label>
-              <input
-                id="email"
-                type="email"
-                required
-                placeholder="name@institution.edu"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                required
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-
-            <div className="login-actions">
-              <button className="primary full-width" type="submit">
-                Sign In {redirectTarget ? `& Continue to ${redirectTarget}` : ""}
-              </button>
-            </div>
-          </form>
-        )}
+          <div className="login-actions">
+            <button className="secondary full-width" type="submit">
+              Sign In {redirectTarget ? `& Continue to ${redirectTarget}` : ""}
+            </button>
+          </div>
+        </form>
       </div>
     </section>
   );
