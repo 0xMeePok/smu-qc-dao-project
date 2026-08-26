@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  frontend-test:
-    name: Run Frontend Tests
+  test:
+    name: Run Unit & Integration Tests
     runs-on: ubuntu-latest
     defaults:
       run:
