@@ -478,6 +478,21 @@ describe("problems/{problemId}", () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "problems", "p1")));
   });
+
+  it("[BIT-AAR-91] [QCDAO43] blocks mutating ownerId on update", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "p_imm"), { ownerId: ADDRESS, title: "Original" });
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(updateDoc(doc(db, "problems", "p_imm"), { ownerId: OTHER }));
+  });
+
+  it("[BIT-AAR-92] [QCDAO43] blocks unschemad fields on create and update", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "p_bad"), { ownerId: ADDRESS, invalidExtraField: "bad" }));
+    await assertSucceeds(setDoc(doc(db, "problems", "p_good"), { ownerId: ADDRESS, title: "Valid Title" }));
+    await assertFails(updateDoc(doc(db, "problems", "p_good"), { invalidExtraField: "bad" }));
+  });
 });
 
 describe("proposals/{proposalId}", () => {
@@ -498,6 +513,19 @@ describe("proposals/{proposalId}", () => {
   it("[BIT-AAR-81] [QCDAO43] blocks unauthenticated access", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "proposals", "prop1")));
+  });
+
+  it("[BIT-AAR-93] [QCDAO43] blocks mutating researcherId on update", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "proposals", "prop_imm"), { researcherId: ADDRESS, title: "Original" });
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(updateDoc(doc(db, "proposals", "prop_imm"), { researcherId: OTHER }));
+  });
+
+  it("[BIT-AAR-94] [QCDAO43] blocks unschemad fields on create and update", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "proposals", "prop_bad"), { researcherId: ADDRESS, injectedKey: "hack" }));
   });
 });
 
@@ -520,6 +548,19 @@ describe("evaluations/{evaluationId}", () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "evaluations", "e1")));
   });
+
+  it("[BIT-AAR-95] [QCDAO43] blocks mutating evaluatorId on update", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "evaluations", "e_imm"), { evaluatorId: ADDRESS, score: 90 });
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(updateDoc(doc(db, "evaluations", "e_imm"), { evaluatorId: OTHER }));
+  });
+
+  it("[BIT-AAR-96] [QCDAO43] blocks unschemad fields on create and update", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "evaluations", "e_bad"), { evaluatorId: ADDRESS, injectedKey: "hack" }));
+  });
 });
 
 describe("funding/{fundId}", () => {
@@ -540,6 +581,19 @@ describe("funding/{fundId}", () => {
   it("[BIT-AAR-87] [QCDAO43] blocks unauthenticated access", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "funding", "f1")));
+  });
+
+  it("[BIT-AAR-97] [QCDAO43] blocks mutating funderId on update", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "funding", "f_imm"), { funderId: ADDRESS, amount: "50000" });
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(updateDoc(doc(db, "funding", "f_imm"), { funderId: OTHER }));
+  });
+
+  it("[BIT-AAR-98] [QCDAO43] blocks unschemad fields on create and update", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "funding", "f_bad"), { funderId: ADDRESS, injectedKey: "hack" }));
   });
 });
 
