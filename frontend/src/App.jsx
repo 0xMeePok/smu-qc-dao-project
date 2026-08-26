@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { opportunities, opportunityTypes } from "./data.js";
+import { go, parseRoute } from "./lib/router.js";
+import { useSession } from "./context/SessionContext.jsx";
+import { shortenAddress } from "./lib/chain.js";
+import { isAdmin } from "./lib/roles.js";
+import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
+import { OnboardingModal } from "./components/OnboardingModal.jsx";
+import { NetworkBanner } from "./components/NetworkBanner.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 
 const routes = [
   ["home", "Home"],
   ["discover", "Discover"],
   ["create", "Create"],
 ];
-
-function parseRoute() {
-  return window.location.hash.replace(/^#\/?/, "") || "home";
-}
 
 function useRoute() {
   const [route, setRoute] = useState(parseRoute);
@@ -27,10 +31,6 @@ function useRoute() {
   return route;
 }
 
-function go(route) {
-  window.location.hash = `/${route}`;
-}
-
 function ArrowIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -45,6 +45,40 @@ function Logo() {
       <span aria-hidden="true">Q</span>
       QC DAO
     </button>
+  );
+}
+
+function AccountControls() {
+  const { isSignedIn, profile, address, signOut } = useSession();
+
+  if (!isSignedIn) {
+    return (
+      <div className="account-controls">
+        <SignInWithWallet />
+      </div>
+    );
+  }
+
+  const admin = isAdmin(profile?.role);
+
+  return (
+    <div className="account-controls">
+      {admin ? (
+        <button className="secondary" type="button" onClick={() => go("admin")}>
+          Admin
+        </button>
+      ) : null}
+      <span className="account-status" aria-label="Your account">
+        <strong>{profile?.fullName ?? "Your account"}</strong>
+        <small>
+          {shortenAddress(address)}
+          {admin ? " · Administrator" : ""}
+        </small>
+      </span>
+      <button className="secondary" type="button" onClick={() => signOut()}>
+        Sign out
+      </button>
+    </div>
   );
 }
 
@@ -65,6 +99,7 @@ function Shell({ route, children }) {
             </button>
           ))}
         </nav>
+        <AccountControls />
       </header>
       <main>{children}</main>
       <footer>
@@ -417,6 +452,13 @@ export default function App() {
   if (section === "discover") content = <Discover />;
   if (section === "create") content = <CreateOpportunity />;
   if (section === "opportunity") content = <OpportunityDetail id={id} />;
+  if (section === "admin") content = <AdminPage />;
 
-  return <Shell route={section}>{content}</Shell>;
+  return (
+    <>
+      <NetworkBanner />
+      <Shell route={section}>{content}</Shell>
+      <OnboardingModal />
+    </>
+  );
 }

@@ -1,0 +1,51 @@
+export function validateFullName(value = "") {
+  const trimmed = value.trim();
+  if (!trimmed) return "Enter your full name.";
+  if (trimmed.length < 2) return "Your full name needs at least 2 characters.";
+  if (trimmed.length > 80) return "Your full name cannot be longer than 80 characters.";
+  return null;
+}
+
+export function validateOrganisation(value = "") {
+  const trimmed = value.trim();
+  if (!trimmed) return "Enter the organisation you represent.";
+  if (trimmed.length < 2) return "The organisation name needs at least 2 characters.";
+  if (trimmed.length > 120) return "The organisation name cannot be longer than 120 characters.";
+  return null;
+}
+
+export function validateTerms(accepted) {
+  if (!accepted) return "You need to accept the platform terms to continue.";
+  return null;
+}
+
+// The signature itself is verified on the server before any of this runs, so all
+// that is left to check here is that we actually have a verified address to write to.
+export function validateWallet(address) {
+  if (!address) return "Connect and verify your wallet before continuing.";
+  if (!isAddress(address)) return "That wallet address is not a valid Ethereum address.";
+  return null;
+}
+
+function isAddress(value = "") {
+  return /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
+// Runs every rule and returns a field -> message map. Empty means the form is valid.
+//
+// There is no role field to collect: every account is created as a normal user
+// (roles.ROLE_USER), and administrator access is granted by hand in Firestore, not
+// chosen by the person signing up.
+export function validateOnboarding(form, address) {
+  const errors = {
+    fullName: validateFullName(form.fullName),
+    organisation: validateOrganisation(form.organisation),
+    acceptedTerms: validateTerms(form.acceptedTerms),
+    wallet: validateWallet(address),
+  };
+
+  for (const key of Object.keys(errors)) {
+    if (errors[key] === null) delete errors[key];
+  }
+  return errors;
+}
