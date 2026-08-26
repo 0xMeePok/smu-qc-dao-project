@@ -40,6 +40,7 @@ export function SessionProvider({ children }) {
     setStatus("signed-out");
     setProfile(null);
     setVerifiedAddress(null);
+    setError(null);
   }, []);
 
   // Firebase persists the custom-token session, so a reload restores it without
