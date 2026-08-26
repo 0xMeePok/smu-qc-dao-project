@@ -31,12 +31,10 @@ async function call(fn, data, { origin = "http://localhost:5173" } = {}) {
   return res.json().catch(() => ({}));
 }
 
-// A fresh account per test, not one shared "victim" for the whole file: getSiweNonce
-// now enforces a per-address cooldown (see NONCE_COOLDOWN_MS in index.js), so reusing
-// one address across many tests run in quick succession would trip the very rate
-// limit under test and fail every test after the first for reasons unrelated to what
-// it's actually checking. Real users don't share a wallet either, so this is also the
-// more faithful model.
+// A fresh account per test, not one shared "victim" for the whole file. getSiweNonce
+// is idempotent per address while a nonce is pending, so sharing one address would
+// make tests silently reuse each other's nonces. Real users don't share a wallet
+// either, so this is also the more faithful model.
 const attacker = privateKeyToAccount(generatePrivateKey());
 
 before(async () => {
@@ -140,48 +138,6 @@ describe("recovery after a failed attempt", () => {
   });
 });
 
-describe("getSiweNonce rate limiting", () => {
-  it("blocks a second nonce request for the same address while one is still pending", async () => {
-    const fresh = privateKeyToAccount(generatePrivateKey());
-    const first = await call("getSiweNonce", { address: fresh.address });
-    assert.ok(first.result?.message, "the first request should succeed");
-
-    const second = await call("getSiweNonce", { address: fresh.address });
-    assert.equal(second.result?.message, undefined, "an immediate second request must be rejected");
-    assert.equal(second.error?.status, "RESOURCE_EXHAUSTED");
-  });
-
-  it("does not let a rate-limited spam attempt invalidate a victim's pending nonce", async () => {
-    // This is the actual attack the cooldown exists to stop: request a nonce for a
-    // PUBLIC address (profiles are readable by anyone), then immediately request
-    // another one for the same address before the real owner can sign - if that
-    // second call succeeded, it would overwrite the nonce the victim already has
-    // open in their wallet, and their real signature would stop matching anything.
-    const fresh = privateKeyToAccount(generatePrivateKey());
-    const { result: victimNonce } = await call("getSiweNonce", { address: fresh.address });
-
-    const spam = await call("getSiweNonce", { address: fresh.address });
-    assert.equal(spam.result?.message, undefined, "the spam request must be rejected, not overwrite the nonce");
-
-    const signature = await fresh.signMessage({ message: victimNonce.message });
-    const outcome = await call("verifySiweSignature", { address: fresh.address, signature });
-    assert.ok(outcome.result?.token, "the victim's original nonce must still be valid and usable");
-  });
-
-  it("allows an immediate fresh nonce once the previous one has been consumed", async () => {
-    const fresh = privateKeyToAccount(generatePrivateKey());
-    const { result: nonce } = await call("getSiweNonce", { address: fresh.address });
-    const signature = await fresh.signMessage({ message: nonce.message });
-    const first = await call("verifySiweSignature", { address: fresh.address, signature });
-    assert.ok(first.result?.token, "the first sign-in should succeed");
-
-    // No cooldown wait here - a consumed nonce is not "pending", so a signed-out
-    // user reconnecting right away must not be rate-limited against themselves.
-    const again = await call("getSiweNonce", { address: fresh.address });
-    assert.ok(again.result?.message, "a fresh nonce after consumption should not be rate-limited");
-  });
-});
-
 describe("SIWE domain binding", () => {
   // The `domain` line in a SIWE message is what stops a signature collected on one
   // site being spent on another. When getSiweNonce echoed back the caller's Origin,
@@ -251,5 +207,96 @@ describe("SIWE domain binding", () => {
     const outcome = await call("verifySiweSignature", { address: fresh.address, signature });
 
     assert.ok(outcome.result?.token, "a legitimate user must still be able to sign in");
+  });
+});
+
+describe("nonce issuance is idempotent and cannot be griefed", () => {
+  it("returns the SAME pending nonce instead of overwriting it", async () => {
+    // The griefing vector: an attacker who knows a wallet address (they are public)
+    // repeatedly requests nonces for it, replacing the message the real owner is
+    // part-way through signing. Returning the pending nonce means nothing is ever
+    // invalidated, so there is nothing to grief.
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const first = await call("getSiweNonce", { address: fresh.address });
+    const second = await call("getSiweNonce", { address: fresh.address });
+
+    assert.ok(first.result?.nonce, "first request should issue a nonce");
+    assert.equal(second.result?.nonce, first.result.nonce, "the pending nonce must be reused");
+    assert.equal(second.result?.message, first.result.message, "and so must the message");
+  });
+
+  it("keeps a victim's in-flight signature valid through repeated attacker requests", async () => {
+    const victim = privateKeyToAccount(generatePrivateKey());
+    const { result: issued } = await call("getSiweNonce", { address: victim.address });
+
+    // Attacker hammers the endpoint for the victim's address while they are signing.
+    for (let i = 0; i < 5; i += 1) {
+      await call("getSiweNonce", { address: victim.address });
+    }
+
+    const signature = await victim.signMessage({ message: issued.message });
+    const outcome = await call("verifySiweSignature", { address: victim.address, signature });
+    assert.ok(outcome.result?.token, "the victim's original signature must still verify");
+  });
+
+  it("issues a genuinely new nonce once the previous one is consumed", async () => {
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const { result: first } = await call("getSiweNonce", { address: fresh.address });
+    const signature = await fresh.signMessage({ message: first.message });
+    await call("verifySiweSignature", { address: fresh.address, signature });
+
+    const { result: second } = await call("getSiweNonce", { address: fresh.address });
+    assert.ok(second?.nonce, "a fresh nonce should be issued after consumption");
+    assert.notEqual(second.nonce, first.nonce, "a consumed nonce must never be reissued");
+  });
+
+  it("does not burn the nonce when a bogus signature is submitted", async () => {
+    // Verification now reads the nonce and only consumes it AFTER the signature
+    // checks out. Previously it was marked consumed first and reset on failure,
+    // leaving a window where the real owner's signature was rejected as used.
+    const victim = privateKeyToAccount(generatePrivateKey());
+    const { result: issued } = await call("getSiweNonce", { address: victim.address });
+
+    for (let i = 0; i < 3; i += 1) {
+      const bogus = await attacker.signMessage({ message: issued.message });
+      const failed = await call("verifySiweSignature", { address: victim.address, signature: bogus });
+      assert.equal(failed.result?.token, undefined, "an attacker signature must not verify");
+    }
+
+    const real = await victim.signMessage({ message: issued.message });
+    const outcome = await call("verifySiweSignature", { address: victim.address, signature: real });
+    assert.ok(outcome.result?.token, "the legitimate signature must still work afterwards");
+  });
+
+  it("survives concurrent nonce requests for one address without splitting the nonce", async () => {
+    // Issuance is transactional, so parallel calls cannot each decide the record is
+    // absent and write different nonces - which would leave whichever user signed
+    // the losing message unable to verify.
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => call("getSiweNonce", { address: fresh.address })),
+    );
+
+    const nonces = new Set(results.map((r) => r.result?.nonce).filter(Boolean));
+    assert.equal(nonces.size, 1, `all concurrent callers must get one nonce, got ${nonces.size}`);
+
+    const [only] = [...nonces];
+    const signature = await fresh.signMessage({
+      message: results.find((r) => r.result?.nonce === only).result.message,
+    });
+    const outcome = await call("verifySiweSignature", { address: fresh.address, signature });
+    assert.ok(outcome.result?.token, "that nonce must be the one stored and therefore verifiable");
+  });
+
+  it("still rejects a replayed signature exactly once", async () => {
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const { result: issued } = await call("getSiweNonce", { address: fresh.address });
+    const signature = await fresh.signMessage({ message: issued.message });
+
+    const first = await call("verifySiweSignature", { address: fresh.address, signature });
+    assert.ok(first.result?.token, "first use succeeds");
+
+    const second = await call("verifySiweSignature", { address: fresh.address, signature });
+    assert.equal(second.result?.token, undefined, "the nonce must remain single use");
   });
 });

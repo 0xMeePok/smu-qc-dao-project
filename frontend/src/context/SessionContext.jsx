@@ -10,6 +10,13 @@ import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
 import { wagmiConfig } from "../lib/wagmi.js";
 import { isAdmin } from "../lib/roles.js";
 import { go } from "../lib/router.js";
+import {
+  IDLE_CHECK_INTERVAL_MS,
+  clearActivity,
+  hasActivityRecord,
+  isIdleExpired,
+  markActivity,
+} from "../lib/idleTimeout.js";
 
 const SessionContext = createContext(null);
 
@@ -91,12 +98,10 @@ export function SessionProvider({ children }) {
         // RPC/currency needed) when the wallet has never heard of the chain, so this
         // one call still covers both "wrong network" and "network not added yet".
         //
-        // Trade-off: if the user dismisses the switch prompt, a nonce may already have
-        // been issued and left pending - their very next retry can hit the 3-second
-        // per-address cooldown in getSiweNonce (see NONCE_COOLDOWN_MS) instead of
-        // going straight through. That's a rare edge case costing a few seconds, in
-        // exchange for the common case (switch approved, or already on the right
-        // chain) reaching the signing prompt measurably sooner every time.
+        // If the user dismisses the switch prompt a nonce may already have been
+        // issued and left pending, but that costs them nothing: getSiweNonce is
+        // idempotent while a nonce is unexpired, so the retry gets the same message
+        // back rather than an error.
         const needsSwitch = getConnection(wagmiConfig).chainId !== EXPECTED_CHAIN_ID;
         const [message] = await Promise.all([
           requestSignInMessage(target),
@@ -105,6 +110,8 @@ export function SessionProvider({ children }) {
 
         const signature = await signMessageAsync({ message, account: target });
         await exchangeSignatureForSession({ address: target, signature });
+        // Start the idle clock from a real, deliberate sign-in.
+        markActivity({ force: true });
         setVerifiedAddress(target);
         return { ok: true, rejected: false };
       } catch (caught) {
@@ -176,6 +183,7 @@ export function SessionProvider({ children }) {
     const switchedToADifferentAccount = address && address.toLowerCase() !== verifiedAddress;
     if (!switchedToADifferentAccount) return;
     if (isFirebaseConfigured && auth.currentUser) signOut(auth).catch(() => {});
+    clearActivity();
     reset();
   }, [address, verifiedAddress, reset]);
 
@@ -189,14 +197,68 @@ export function SessionProvider({ children }) {
     [verifiedAddress],
   );
 
-  const signOutOfSession = useCallback(async () => {
-    if (isFirebaseConfigured && auth.currentUser) {
-      await signOut(auth).catch(() => {});
+  const endSession = useCallback(
+    async ({ reason = null } = {}) => {
+      if (isFirebaseConfigured && auth.currentUser) {
+        await signOut(auth).catch(() => {});
+      }
+      await disconnectAsync().catch(() => {});
+      clearActivity();
+      reset();
+      setError(
+        reason === "idle"
+          ? "You were signed out after 15 minutes of inactivity. Sign in again to continue."
+          : null,
+      );
+    },
+    [disconnectAsync, reset],
+  );
+
+  const signOutOfSession = useCallback(() => endSession(), [endSession]);
+
+  // Idle timeout. Mounts only while a session exists, so nothing runs for a
+  // signed-out visitor.
+  useEffect(() => {
+    if (!verifiedAddress) return undefined;
+
+    // Runs on mount too, which is what catches a RESTORED session that already
+    // lapsed: Firebase persists the login indefinitely, so a tab reopened the next
+    // morning would otherwise come back signed in.
+    if (isIdleExpired()) {
+      endSession({ reason: "idle" });
+      return undefined;
     }
-    await disconnectAsync().catch(() => {});
-    reset();
-    setError(null);
-  }, [disconnectAsync, reset]);
+
+    // A restored session with no stored activity (cleared storage, or a session
+    // predating this) starts its clock now rather than being treated as infinitely
+    // idle and killed on sight.
+    if (!hasActivityRecord()) markActivity({ force: true });
+
+    const noteActivity = () => markActivity();
+    const activityEvents = ["pointerdown", "keydown", "scroll", "focus"];
+    activityEvents.forEach((name) =>
+      window.addEventListener(name, noteActivity, { passive: true }),
+    );
+
+    const checkExpiry = () => {
+      if (isIdleExpired()) endSession({ reason: "idle" });
+    };
+
+    // Background tabs get their timers throttled hard, so the interval alone can fire
+    // well past the deadline. Re-checking the moment a tab becomes visible covers the
+    // case an idle timeout actually exists for: left open, come back later.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") checkExpiry();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const interval = window.setInterval(checkExpiry, IDLE_CHECK_INTERVAL_MS);
+
+    return () => {
+      activityEvents.forEach((name) => window.removeEventListener(name, noteActivity));
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(interval);
+    };
+  }, [verifiedAddress, endSession]);
 
   const value = useMemo(
     () => ({

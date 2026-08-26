@@ -12,21 +12,15 @@ const db = getFirestore();
 const NONCE_COLLECTION = "siweNonces";
 const NONCE_TTL_MS = 5 * 60 * 1000;
 
-// Minimum time between two nonces for the SAME address. `getSiweNonce` is
-// unauthenticated by necessity (proving identity is the whole point of calling it),
-// so nothing stops it being called repeatedly for one address - and every prior
-// version of this function's `.set()` unconditionally overwrote whatever nonce was
-// already pending. That is a real, currently-live griefing path, not a hypothetical
-// one: request a nonce for a victim's PUBLIC address (profiles are readable by
-// anyone) faster than they can sign it, and their in-flight sign-in breaks every
-// time, because the message they already signed no longer matches what is stored.
-// This also bounds Firestore write volume from address-spam at close to zero cost
-// to legitimate traffic, since a real sign-in only ever calls this once.
-const NONCE_COOLDOWN_MS = 3_000;
+// There is deliberately no per-address cooldown any more. It was an attempt to limit
+// how often a pending nonce could be overwritten; getSiweNonce now never overwrites
+// one at all, so repeat calls for an address are harmless AND cheaper than before -
+// they resolve inside the read half of a transaction and write nothing. Reinstating a
+// cooldown would only add a way to refuse legitimate users.
 
 // Hard ceiling on concurrent instances. Bounds the worst-case cost and blast radius
-// of a volumetric flood (many distinct addresses, one call each, so the per-address
-// cooldown above does not apply) to a fixed number regardless of how much traffic
+// of a volumetric flood (many distinct addresses, one call each, so per-address
+// idempotency does not help) to a fixed number regardless of how much traffic
 // arrives - once instances are saturated, Cloud Run queues or fails fast rather than
 // autoscaling without limit. This adds no latency to normal traffic; a handful of
 // concurrent sign-ins never gets close to it.
@@ -155,41 +149,73 @@ export const getSiweNonce = onCall(
     const address = normaliseAddress(request.data?.address);
     const ref = db.collection(NONCE_COLLECTION).doc(address);
 
-    // Best-effort, not transactional: a plain read before the write below, not a
-    // read-check-write wrapped in a transaction. A transaction would close a
-    // negligible race (two calls for the same address landing in the same instant)
-    // at the cost of serialising every nonce issuance through extra round trips -
-    // real overhead on every legitimate sign-in to guard against a low-stakes edge
-    // case. What actually matters here is stopping SUSTAINED repeated calls from
-    // clobbering a live nonce, which this does.
-    const existing = await ref.get();
-    if (existing.exists) {
-      const data = existing.data();
-      const ageMs = Date.now() - data.createdAt.toMillis();
-      if (!data.consumed && ageMs < NONCE_COOLDOWN_MS) {
-        throw new HttpsError(
-          "resource-exhausted",
-          "A sign-in request was just issued for this wallet. Wait a few seconds and try again.",
-        );
-      }
-    }
-
-    const nonce = randomBytes(16).toString("hex");
-    const issuedAt = new Date().toISOString();
     const domain = resolveDomain(request);
-    const message = buildMessage({ address, nonce, issuedAt, domain });
 
-    await ref.set({
-      nonce,
-      issuedAt,
-      domain,
-      address,
-      consumed: false,
-      expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MS),
-      createdAt: Timestamp.now(),
+    // IDEMPOTENT while a nonce is pending: an unexpired, unconsumed nonce is
+    // returned as-is rather than replaced.
+    //
+    // The previous version overwrote any nonce older than a 3-second cooldown, which
+    // made login griefable by anyone who knew a wallet address (they are public).
+    // Requesting a nonce for a victim every few seconds replaced the message they
+    // were part-way through signing, so their signature no longer matched anything
+    // stored and sign-in failed - repeatably, for as long as the attacker kept
+    // polling. Simply refusing while one is pending would be worse still: a single
+    // attacker request would then lock that address out for the full 5-minute TTL.
+    //
+    // Returning the pending nonce removes the vector entirely, because nothing is
+    // ever invalidated. An attacker calling this for someone else's address learns
+    // only the message that address already had - which was always going to be shown
+    // to a user, and cannot be signed without their key.
+    //
+    // Wrapped in a transaction so two concurrent calls for one address cannot both
+    // decide the record is absent and write different nonces, which would have left
+    // whichever user signed the losing message unable to verify.
+    const issued = await db.runTransaction(async (tx) => {
+      const snapshot = await tx.get(ref);
+
+      if (snapshot.exists) {
+        const data = snapshot.data() ?? {};
+        // Timestamps are read defensively: a malformed record must be replaced, never
+        // treated as a pending nonce that can never expire and so blocks the address
+        // permanently.
+        const expiresAtMs = typeof data.expiresAt?.toMillis === "function"
+          ? data.expiresAt.toMillis()
+          : null;
+        const stillPending = data.consumed === false
+          && typeof data.nonce === "string"
+          && typeof data.issuedAt === "string"
+          && expiresAtMs !== null
+          && expiresAtMs > Date.now();
+
+        // Reissue when the pending nonce was minted for a different origin, so a
+        // message is never handed to one allowed origin bearing another's name.
+        if (stillPending && data.domain === domain) {
+          return { nonce: data.nonce, issuedAt: data.issuedAt, domain: data.domain };
+        }
+      }
+
+      const fresh = {
+        nonce: randomBytes(16).toString("hex"),
+        issuedAt: new Date().toISOString(),
+        domain,
+      };
+
+      tx.set(ref, {
+        ...fresh,
+        address,
+        consumed: false,
+        expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MS),
+        createdAt: Timestamp.now(),
+      });
+
+      return fresh;
     });
 
-    return { message, nonce, issuedAt };
+    return {
+      message: buildMessage({ address, ...issued }),
+      nonce: issued.nonce,
+      issuedAt: issued.issuedAt,
+    };
   },
 );
 
@@ -211,25 +237,33 @@ export const verifySiweSignature = onCall({ region: REGION }, async (request) =>
 
   const ref = db.collection(NONCE_COLLECTION).doc(address);
 
-  // The nonce is claimed inside a transaction so two parallel attempts cannot both
-  // spend it. A replayed signature therefore fails on the second use.
-  const record = await db.runTransaction(async (tx) => {
-    const snapshot = await tx.get(ref);
-    if (!snapshot.exists) {
-      throw new HttpsError("failed-precondition", "No sign-in request is pending for this wallet. Start again.");
-    }
+  // READ ONLY. The nonce is not touched until the signature is known to be good.
+  //
+  // This used to claim the nonce inside a transaction BEFORE verifying, then undo
+  // that with a second write when verification failed. Two problems: a bogus
+  // signature briefly marked a live nonce consumed, so a legitimate signature
+  // arriving inside that window was rejected as already-used; and if the undo
+  // failed, or the instance died between the two writes, the nonce stayed burned
+  // and the real owner was locked out until they started again.
+  const snapshot = await ref.get();
+  if (!snapshot.exists) {
+    throw new HttpsError("failed-precondition", "No sign-in request is pending for this wallet. Start again.");
+  }
 
-    const data = snapshot.data();
-    if (data.consumed) {
-      throw new HttpsError("failed-precondition", "That sign-in request was already used. Start again.");
-    }
-    if (data.expiresAt.toMillis() < Date.now()) {
-      throw new HttpsError("deadline-exceeded", "That sign-in request expired. Start again.");
-    }
+  const record = snapshot.data() ?? {};
+  const expiresAtMs = typeof record.expiresAt?.toMillis === "function"
+    ? record.expiresAt.toMillis()
+    : null;
 
-    tx.update(ref, { consumed: true, consumedAt: Timestamp.now() });
-    return data;
-  });
+  if (record.consumed) {
+    throw new HttpsError("failed-precondition", "That sign-in request was already used. Start again.");
+  }
+  if (expiresAtMs === null || typeof record.nonce !== "string" || typeof record.issuedAt !== "string") {
+    throw new HttpsError("failed-precondition", "That sign-in request is no longer valid. Start again.");
+  }
+  if (expiresAtMs < Date.now()) {
+    throw new HttpsError("deadline-exceeded", "That sign-in request expired. Start again.");
+  }
 
   // Rebuilt from what the server stored, never from anything the client sent.
   const message = buildMessage({
@@ -247,16 +281,36 @@ export const verifySiweSignature = onCall({ region: REGION }, async (request) =>
   }
 
   if (!valid) {
-    // The nonce was claimed inside the transaction above before verification ran,
-    // so a wrong or forged signature would otherwise burn it permanently - anyone
-    // who knows a target's PUBLIC address (profiles are readable by anyone) could
-    // call this with a garbage signature and lock the real owner out until they
-    // requested a fresh nonce. Reverting it here means a bogus attempt costs the
-    // legitimate holder nothing: their already-signed message still matches this
-    // same nonce and can be resubmitted immediately.
-    await ref.update({ consumed: false }).catch(() => {});
+    // No write happened, so a forged signature costs the legitimate holder nothing:
+    // their already-signed message still matches this same nonce.
     throw new HttpsError("permission-denied", "That signature does not match this wallet.");
   }
+
+  // Only now is the nonce spent, atomically and only if it is still the SAME record
+  // the signature was checked against.
+  //
+  // Re-reading `consumed` alone is not enough. The nonce read above could expire
+  // between that read and this write, letting getSiweNonce mint a replacement - and
+  // this transaction would then consume the NEW nonce on the strength of a signature
+  // over the OLD one. Comparing the nonce value closes that, and re-checking expiry
+  // stops a nonce that lapsed mid-verification from being spent at all.
+  await db.runTransaction(async (tx) => {
+    const current = await tx.get(ref);
+    const data = current.exists ? current.data() ?? {} : null;
+
+    if (!data || data.consumed || data.nonce !== record.nonce) {
+      throw new HttpsError("failed-precondition", "That sign-in request was already used. Start again.");
+    }
+
+    const currentExpiry = typeof data.expiresAt?.toMillis === "function"
+      ? data.expiresAt.toMillis()
+      : null;
+    if (currentExpiry === null || currentExpiry < Date.now()) {
+      throw new HttpsError("deadline-exceeded", "That sign-in request expired. Start again.");
+    }
+
+    tx.update(ref, { consumed: true, consumedAt: Timestamp.now() });
+  });
 
   const token = await getAuth().createCustomToken(address, {
     wallet: address,

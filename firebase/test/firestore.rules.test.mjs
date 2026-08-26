@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp } from "firebase/firestore";
 
 const ADDRESS = `0x${"a".repeat(40)}`;
 const OTHER = `0x${"b".repeat(40)}`;
@@ -237,13 +237,95 @@ describe("publicProfiles/{address}", () => {
     await assertFails(getDocs(collection(db, "publicProfiles")));
   });
 
-  it("lets a wallet create its own public record", async () => {
+  it("lets a wallet create its own public record when it matches the private one", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER, {
+        fullName: "Ada Lovelace",
+      }));
+    });
+
     const db = env.authenticatedContext(OTHER).firestore();
     await assertSucceeds(setDoc(doc(db, "publicProfiles", OTHER), {
       address: OTHER,
       fullName: "Ada Lovelace",
       organisation: "Singapore Management University",
     }));
+  });
+
+  it("blocks a public record with no private profile behind it", async () => {
+    // A verified wallet could otherwise publish a name and organisation without ever
+    // holding an account - attribution pointing at nothing.
+    const ORPHAN = `0x${"c".repeat(40)}`;
+    const db = env.authenticatedContext(ORPHAN).firestore();
+    await assertFails(setDoc(doc(db, "publicProfiles", ORPHAN), {
+      address: ORPHAN,
+      fullName: "Ghost Account",
+      organisation: "Nowhere",
+    }));
+  });
+
+  it("blocks a public name that differs from the private profile", async () => {
+    // Without this, the name shown beside published work could drift away from the
+    // name on the account, making attribution meaningless.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER, {
+        fullName: "Ada Lovelace",
+      }));
+    });
+
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(setDoc(doc(db, "publicProfiles", OTHER), {
+      address: OTHER,
+      fullName: "Someone Else Entirely",
+      organisation: "Singapore Management University",
+    }));
+  });
+
+  it("blocks a public organisation that differs from the private profile", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER, {
+        fullName: "Ada Lovelace",
+      }));
+    });
+
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(setDoc(doc(db, "publicProfiles", OTHER), {
+      address: OTHER,
+      fullName: "Ada Lovelace",
+      organisation: "A Different Institution",
+    }));
+  });
+
+  it("allows both documents to be created together in one batch", async () => {
+    // getAfter() evaluates against the post-commit state, which is what lets
+    // createProfile write the private and public records in a single batch.
+    const FRESH = `0x${"d".repeat(40)}`;
+    const db = env.authenticatedContext(FRESH).firestore();
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, "users", FRESH), baseProfile(null, FRESH, { fullName: "Grace Hopper" }));
+    batch.set(doc(db, "publicProfiles", FRESH), {
+      address: FRESH,
+      fullName: "Grace Hopper",
+      organisation: "Singapore Management University",
+    });
+
+    await assertSucceeds(batch.commit());
+  });
+
+  it("blocks a batch whose public and private names disagree", async () => {
+    const FRESH = `0x${"e".repeat(40)}`;
+    const db = env.authenticatedContext(FRESH).firestore();
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, "users", FRESH), baseProfile(null, FRESH, { fullName: "Grace Hopper" }));
+    batch.set(doc(db, "publicProfiles", FRESH), {
+      address: FRESH,
+      fullName: "Not Grace",
+      organisation: "Singapore Management University",
+    });
+
+    await assertFails(batch.commit());
   });
 
   it("blocks writing a public record for someone else's address", async () => {

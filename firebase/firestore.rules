@@ -126,19 +126,36 @@ service cloud.firestore {
       // `get` but NOT `list`: you may look up an address you already have
       allow get: if true;
 
+      // getAfter() reads the /users document as it will be once THIS write commits,
+      // which is what lets the two be written together in one batch and still be
+      // checked against each other. Without it a verified wallet could create a
+      // public record with no account behind it, or drift its public name away from
+      // its private profile - making attribution meaningless, since the name shown
+      // beside published work would no longer be the name on the account.
+      function matchesPrivateProfile(data) {
+        let profile = getAfter(/databases/$(database)/documents/users/$(address)).data;
+        return profile.address == data.address
+               && profile.fullName == data.fullName
+               && profile.organisation == data.organisation;
+      }
+
       allow create: if isWallet(address)
         && isWalletAddress(address)
         && hasPublicSchema(request.resource.data)
         && request.resource.data.address == address
         && isNonEmptyString(request.resource.data.fullName, 80)
-        && isNonEmptyString(request.resource.data.organisation, 120);
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        && existsAfter(/databases/$(database)/documents/users/$(address))
+        && matchesPrivateProfile(request.resource.data);
 
       allow update: if isWallet(address)
         && resource != null
         && hasPublicSchema(request.resource.data)
         && request.resource.data.address == resource.data.address
         && isNonEmptyString(request.resource.data.fullName, 80)
-        && isNonEmptyString(request.resource.data.organisation, 120);
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        && existsAfter(/databases/$(database)/documents/users/$(address))
+        && matchesPrivateProfile(request.resource.data);
 
       allow delete: if false;
     }
