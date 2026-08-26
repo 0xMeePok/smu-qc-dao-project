@@ -31,3 +31,9 @@ contracts/qft-tokens/.env
 /contracts/qft-tokens/artifacts
 /contracts/qft-tokens/cache
 /contracts/qft-tokens/deployments
+/contracts/stable-faucet/artifacts
+/contracts/stable-faucet/cache
+/contracts/stable-faucet/node_modules
+/contracts/stable-faucet/deployments
+/contracts/stable-faucet/site/node_modules
+/contracts/stable-faucet/site/dist
