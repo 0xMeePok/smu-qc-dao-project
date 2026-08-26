@@ -458,6 +458,118 @@ describe("users/{address} update", () => {
   });
 });
 
+describe("problems/{problemId}", () => {
+  it("allows access to the owner", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "p1"), { ownerId: ADDRESS }));
+    await assertSucceeds(getDoc(doc(db, "problems", "p1")));
+  });
+
+  it("blocks access to non-owners", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "p2"), { ownerId: ADDRESS });
+    });
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "problems", "p2")));
+    await assertFails(updateDoc(doc(db, "problems", "p2"), { title: "Hacked" }));
+  });
+
+  it("blocks unauthenticated access", async () => {
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, "problems", "p1")));
+  });
+});
+
+describe("proposals/{proposalId}", () => {
+  it("allows access to the researcher", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "proposals", "prop1"), { researcherId: ADDRESS }));
+    await assertSucceeds(getDoc(doc(db, "proposals", "prop1")));
+  });
+
+  it("blocks access to non-owners", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "proposals", "prop2"), { researcherId: ADDRESS });
+    });
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "proposals", "prop2")));
+  });
+
+  it("blocks unauthenticated access", async () => {
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, "proposals", "prop1")));
+  });
+});
+
+describe("evaluations/{evaluationId}", () => {
+  it("allows access to the evaluator", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "evaluations", "e1"), { evaluatorId: ADDRESS }));
+    await assertSucceeds(getDoc(doc(db, "evaluations", "e1")));
+  });
+
+  it("blocks access to non-evaluators", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "evaluations", "e2"), { evaluatorId: ADDRESS });
+    });
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "evaluations", "e2")));
+  });
+
+  it("blocks unauthenticated access", async () => {
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, "evaluations", "e1")));
+  });
+});
+
+describe("funding/{fundId}", () => {
+  it("allows access to the funder", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "funding", "f1"), { funderId: ADDRESS }));
+    await assertSucceeds(getDoc(doc(db, "funding", "f1")));
+  });
+
+  it("blocks access to non-funders", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "funding", "f2"), { funderId: ADDRESS });
+    });
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "funding", "f2")));
+  });
+
+  it("blocks unauthenticated access", async () => {
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, "funding", "f1")));
+  });
+});
+
+describe("audits/{auditId}", () => {
+  const ADMIN = `0x${"c".repeat(40)}`;
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ADMIN), baseProfile(null, ADMIN, { role: 1 }));
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER, { role: 0 }));
+      await setDoc(doc(ctx.firestore(), "audits", "a1"), { action: "TEST_EVENT" });
+    });
+  });
+
+  it("allows read for administrators (role == 1)", async () => {
+    const db = env.authenticatedContext(ADMIN).firestore();
+    await assertSucceeds(getDoc(doc(db, "audits", "a1")));
+  });
+
+  it("blocks read for normal users (role == 0)", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "audits", "a1")));
+  });
+
+  it("blocks writes for everyone (even admins)", async () => {
+    const db = env.authenticatedContext(ADMIN).firestore();
+    await assertFails(setDoc(doc(db, "audits", "a2"), { action: "HACK" }));
+  });
+});
+
 describe("collections outside the schema", () => {
   it("denies reads and writes anywhere else", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
