@@ -1,0 +1,30 @@
+{
+  "name": "tap-arbitrum-faucet",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "test:unit": "vitest run",
+    "test": "npm run lint && npm run test:unit && npm run build"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "@types/node": "22.19.19",
+    "eslint": "9.39.4",
+    "globals": "16.4.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.59.3",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  },
+  "type": "module"
+}
