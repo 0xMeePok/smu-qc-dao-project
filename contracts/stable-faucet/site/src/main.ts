@@ -1,4 +1,5 @@
 import { BrowserProvider } from "ethers";
+import { readFaucetResult } from "./api-client";
 import {
   CHAIN_ID,
   currentUnixTime,
@@ -135,10 +136,7 @@ async function claim(token: TokenSymbol) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token, recipient, issuedAt, signature }),
     });
-    const result = (await response.json()) as {
-      error?: string;
-      txHash?: string;
-    };
+    const result = await readFaucetResult(response);
     if (!response.ok || !result.txHash) {
       throw new Error(result.error ?? "Mint request failed.");
     }
