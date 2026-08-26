@@ -11,7 +11,7 @@ export function MyProblems({ onNavigate }) {
     <section className="page dashboard-page">
       <div className="page-heading">
         <div className="eyebrow-row">
-          <RoleBadge role={user?.role} />
+          <RoleBadge role="owner" />
           <span>Organization: {user?.org}</span>
         </div>
         <h1>My Problem Statements</h1>
@@ -63,7 +63,7 @@ export function ResearcherProposals({ onNavigate }) {
     <section className="page dashboard-page">
       <div className="page-heading">
         <div className="eyebrow-row">
-          <RoleBadge role={user?.role} />
+          <RoleBadge role="researcher" />
           <span>Affiliation: {user?.org}</span>
         </div>
         <h1>My Research Proposals</h1>
@@ -115,7 +115,7 @@ export function EvaluatorQueue() {
     <section className="page dashboard-page">
       <div className="page-heading">
         <div className="eyebrow-row">
-          <RoleBadge role={user?.role} />
+          <RoleBadge role="evaluator" />
           <span>Panel: {user?.org}</span>
         </div>
         <h1>Evaluation & Peer Review Queue</h1>
@@ -166,7 +166,7 @@ export function FundingPortfolio({ onNavigate }) {
     <section className="page dashboard-page">
       <div className="page-heading">
         <div className="eyebrow-row">
-          <RoleBadge role={user?.role} />
+          <RoleBadge role="funder" />
           <span>Fund: {user?.org}</span>
         </div>
         <h1>Funding Commitments & Escrow</h1>
@@ -211,7 +211,7 @@ export function AdminAudit() {
     <section className="page dashboard-page">
       <div className="page-heading">
         <div className="eyebrow-row">
-          <RoleBadge role={user?.role} />
+          <RoleBadge role="admin" />
           <span>System Governance</span>
         </div>
         <h1>DAO Platform Administration & Audit Trail</h1>

@@ -4,19 +4,19 @@ import { Login } from "./Login.jsx";
 
 /**
  * RouteGuard
- * Enforces authentication and role-based permissions (O1-KR4).
+ * Enforces authentication and multi-role permission sets (O1-KR4).
  */
 export function RouteGuard({ targetRoute, allowedRoles, authRequired, children, onNavigate }) {
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, hasAnyRole } = useAuth();
 
   // 1. Check Authentication
   if (authRequired && !isAuthenticated) {
     return <Login redirectTarget={targetRoute} onNavigate={onNavigate} />;
   }
 
-  // 2. Check Role Permissions
+  // 2. Check Role Permissions (User must possess at least one permitted role)
   if (allowedRoles && allowedRoles.length > 0) {
-    const hasPermission = allowedRoles.includes(role);
+    const hasPermission = hasAnyRole(allowedRoles);
     if (!hasPermission) {
       return (
         <AccessDenied

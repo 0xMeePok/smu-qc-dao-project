@@ -26,39 +26,20 @@ export const ROLE_DESCRIPTIONS = {
 };
 
 export const DEMO_USERS = {
-  [ROLES.OWNER]: {
-    id: "usr_owner_01",
-    name: "Dr. Elena Rostova",
-    org: "Aster Quantum Systems",
-    role: ROLES.OWNER,
-    address: "0x71C...9B2a",
-  },
-  [ROLES.RESEARCHER]: {
-    id: "usr_res_02",
+  // Unified Platform Member possessing all 4 standard stakeholder roles
+  member: {
+    id: "usr_member_01",
     name: "Dr. Marcus Vance",
-    org: "Centre for Quantum Technologies",
-    role: ROLES.RESEARCHER,
+    org: "Quantum Innovation Network",
+    roles: [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER],
     address: "0x3F8...4A1e",
   },
-  [ROLES.EVALUATOR]: {
-    id: "usr_eval_03",
-    name: "Prof. Sophia Wei",
-    org: "Quantum Advisory Panel",
-    role: ROLES.EVALUATOR,
-    address: "0x98A...51C0",
-  },
-  [ROLES.FUNDER]: {
-    id: "usr_fund_04",
-    name: "David Sterling",
-    org: "DeepTech Innovation Fund",
-    role: ROLES.FUNDER,
-    address: "0x12D...88e4",
-  },
-  [ROLES.ADMIN]: {
+  // Dedicated Governance Administrator
+  admin: {
     id: "usr_admin_05",
     name: "DAO Operations",
     org: "SMU QC DAO Core",
-    role: ROLES.ADMIN,
+    roles: [ROLES.ADMIN],
     address: "0x000...Ad01",
   },
 };

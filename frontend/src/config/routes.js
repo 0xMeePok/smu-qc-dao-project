@@ -104,11 +104,15 @@ export function getRouteConfig(routeKey) {
   return ROUTES_CONFIG.find((route) => route.key === routeKey);
 }
 
-export function getPermittedNavRoutes(role) {
+/**
+ * Returns navigation routes permitted for the given role or list of roles.
+ */
+export function getPermittedNavRoutes(roles) {
+  const roleList = Array.isArray(roles) ? roles : roles ? [roles] : [];
   return ROUTES_CONFIG.filter((route) => {
     if (!route.showInNav) return false;
     if (!route.authRequired) return true;
-    if (!role || role === ROLES.GUEST) return false;
-    return route.allowedRoles?.includes(role);
+    if (roleList.length === 0 || (roleList.length === 1 && roleList[0] === ROLES.GUEST)) return false;
+    return route.allowedRoles?.some((allowed) => roleList.includes(allowed));
   });
 }

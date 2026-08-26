@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunities, opportunityTypes } from "./data.js";
 import { ROLES, ROLE_LABELS, DEMO_USERS } from "./config/roles.js";
 import { FEATURES } from "./config/features.js";
@@ -64,58 +64,45 @@ function Logo() {
 }
 
 function DemoToolbar() {
-  const { role, switchRole, user } = useAuth();
+  const { roles, login, logout, user } = useAuth();
+  const isAdmin = roles.includes(ROLES.ADMIN);
+  const isMember = roles.includes(ROLES.OWNER) && roles.includes(ROLES.RESEARCHER);
+  const isGuest = !user;
 
   return (
     <aside className="demo-toolbar" aria-label="Demo role switcher">
       <div className="demo-toolbar-inner">
         <div className="demo-title">
           <span className="live-dot" />
-          <strong>O1-KR4 Role Access Tester</strong>
-          <small>Active: <span className="active-role-highlight">{ROLE_LABELS[role] || "Guest"}</span></small>
+          <strong>O1-KR4 Multi-Role Access Tester</strong>
+          <small>
+            Active:{" "}
+            <span className="active-role-highlight">
+              {isGuest ? "Guest (Unauthenticated)" : isAdmin ? "DAO Admin" : "Platform Member (All Roles)"}
+            </span>
+          </small>
         </div>
         <div className="demo-roles-group">
           <button
             type="button"
-            className={`demo-role-btn ${role === ROLES.GUEST ? "selected" : ""}`}
-            onClick={() => switchRole(ROLES.GUEST)}
+            className={`demo-role-btn ${isGuest ? "selected" : ""}`}
+            onClick={() => logout()}
           >
-            Guest
+            Guest (Sign Out)
           </button>
           <button
             type="button"
-            className={`demo-role-btn ${role === ROLES.OWNER ? "selected" : ""}`}
-            onClick={() => switchRole(ROLES.OWNER)}
+            className={`demo-role-btn ${isMember ? "selected" : ""}`}
+            onClick={() => login("member")}
           >
-            Owner
+            Platform Member (Multi-Role)
           </button>
           <button
             type="button"
-            className={`demo-role-btn ${role === ROLES.RESEARCHER ? "selected" : ""}`}
-            onClick={() => switchRole(ROLES.RESEARCHER)}
+            className={`demo-role-btn ${isAdmin ? "selected" : ""}`}
+            onClick={() => login("admin")}
           >
-            Researcher
-          </button>
-          <button
-            type="button"
-            className={`demo-role-btn ${role === ROLES.EVALUATOR ? "selected" : ""}`}
-            onClick={() => switchRole(ROLES.EVALUATOR)}
-          >
-            Evaluator
-          </button>
-          <button
-            type="button"
-            className={`demo-role-btn ${role === ROLES.FUNDER ? "selected" : ""}`}
-            onClick={() => switchRole(ROLES.FUNDER)}
-          >
-            Funder
-          </button>
-          <button
-            type="button"
-            className={`demo-role-btn ${role === ROLES.ADMIN ? "selected" : ""}`}
-            onClick={() => switchRole(ROLES.ADMIN)}
-          >
-            Admin
+            DAO Admin
           </button>
         </div>
       </div>
@@ -123,9 +110,95 @@ function DemoToolbar() {
   );
 }
 
+function WorkspacesDropdown({ route, workspaceRoutes }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const isCurrentWorkspace = workspaceRoutes.some((w) => w.key === route);
+  const activeWorkspace = workspaceRoutes.find((w) => w.key === route);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const workspaceDescriptions = {
+    "my-problems": "Manage owned challenges & proposals",
+    "proposals": "Track grant proposals & deliverables",
+    "evaluations": "Conduct blind evaluations & scoring",
+    "funding": "Oversee capital & escrow releases",
+  };
+
+  return (
+    <div className="nav-dropdown-wrapper" ref={dropdownRef}>
+      <button
+        type="button"
+        className={`nav-dropdown-trigger ${isCurrentWorkspace ? "active" : ""}`}
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+      >
+        <span>{activeWorkspace ? `Workspaces: ${activeWorkspace.label}` : "Workspaces"}</span>
+        <svg
+          className={`dropdown-chevron ${isOpen ? "open" : ""}`}
+          viewBox="0 0 20 20"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <polyline points="6 9 10 13 14 9" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="nav-dropdown-menu" role="menu">
+          <div className="nav-dropdown-header">
+            <span className="eyebrow">Member Workspaces</span>
+          </div>
+          {workspaceRoutes.map(({ key, label }) => {
+            const isActive = route === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`nav-dropdown-item ${isActive ? "selected" : ""}`}
+                role="menuitem"
+                onClick={() => {
+                  setIsOpen(false);
+                  go(key);
+                }}
+              >
+                <div className="dropdown-item-content">
+                  <div className="dropdown-item-title">
+                    <strong>{label}</strong>
+                    {isActive && <span className="current-dot" />}
+                  </div>
+                  <small>{workspaceDescriptions[key] || ""}</small>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Shell({ route, children }) {
-  const { user, role, logout } = useAuth();
-  const navRoutes = getPermittedNavRoutes(role);
+  const { user, roles, logout, hasRole } = useAuth();
+  const navRoutes = getPermittedNavRoutes(roles);
+  const isAdmin = hasRole(ROLES.ADMIN);
+
+  // Group primary navigation vs stakeholder workspaces
+  const workspaceKeys = new Set(["my-problems", "proposals", "evaluations", "funding"]);
+  const primaryRoutes = navRoutes.filter((r) => !workspaceKeys.has(r.key));
+  const workspaceRoutes = navRoutes.filter((r) => workspaceKeys.has(r.key));
 
   return (
     <>
@@ -133,7 +206,7 @@ function Shell({ route, children }) {
         <div className="topbar-left">
           <Logo />
           <nav aria-label="Primary navigation">
-            {navRoutes.map(({ key, label }) => (
+            {primaryRoutes.map(({ key, label }) => (
               <button
                 key={key}
                 className={route === key ? "active" : ""}
@@ -143,58 +216,54 @@ function Shell({ route, children }) {
                 {label}
               </button>
             ))}
+
+            {workspaceRoutes.length > 0 && (
+              <WorkspacesDropdown route={route} workspaceRoutes={workspaceRoutes} />
+            )}
           </nav>
         </div>
 
         <div className="topbar-right">
           {user ? (
-            <div className="user-profile-badge">
-              <span className="role-tag">{ROLE_LABELS[role]}</span>
-              <span className="user-name">{user.name}</span>
-              <button
-                type="button"
-                className="logout-button"
-                onClick={() => {
-                  logout();
-                  go("home");
-                }}
-                title="Sign out"
-              >
+            <div className="user-session-pill">
+              <div className="user-session-info">
+                <span className="user-name">{user.name}</span>
+                <div className="role-tags-row">
+                  {isAdmin ? (
+                    <span className="user-role-badge admin-badge">DAO Admin</span>
+                  ) : (
+                    <span className="user-role-badge member-badge" title="Owner · Researcher · Evaluator · Funder">
+                      Platform Member
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button className="signout-btn" type="button" onClick={logout} title="Sign Out">
                 Sign Out
               </button>
             </div>
           ) : (
-            <button
-              className="signin-button"
-              type="button"
-              onClick={() => go("login")}
-            >
+            <button className="primary small signin-nav-btn" type="button" onClick={() => go("login")}>
               Sign In
             </button>
           )}
         </div>
       </header>
 
-      <main>{children}</main>
+      <main className="content">{children}</main>
 
-      <footer>
-        <Logo />
-        <p>Clear opportunities. Accountable delivery. Transparent outcomes.</p>
+      {FEATURES.DEMO_ROLE_SWITCHER && <DemoToolbar />}
+
+      <footer className="footer">
+        <div>
+          <strong>QC DAO</strong> — Multi-role quantum funding platform with verifiable on-chain audit trails.
+        </div>
         <div className="footer-links">
-          <button type="button" onClick={() => go("discover")}>Discover</button>
-          {role === ROLES.OWNER || role === ROLES.FUNDER || role === ROLES.ADMIN ? (
-            <button type="button" onClick={() => go("create")}>Create Brief</button>
-          ) : null}
-          {user ? (
-            <button type="button" onClick={() => logout()}>Sign Out</button>
-          ) : (
-            <button type="button" onClick={() => go("login")}>Sign In</button>
-          )}
+          <span>Arbitrum Sepolia (421614)</span>
+          <span>·</span>
+          <span>Proof of Concept</span>
         </div>
       </footer>
-
-      {/* Demo Toolbar enabled conditionally via feature flag or ?demo=true */}
-      {FEATURES.DEMO_ROLE_SWITCHER ? <DemoToolbar /> : null}
     </>
   );
 }
@@ -238,8 +307,8 @@ function StakeholderIcon({ type }) {
   if (type === "evaluator") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="8.25" />
-        <path d="m8.25 12.1 2.45 2.45 5.25-5.35" />
+        <path d="M12 4.25l6 3.25v5c0 4.25-2.75 7.5-6 8.5-3.25-1-6-4.25-6-8.5v-5z" />
+        <path d="M9.5 12.25l1.75 1.75 3.25-3.5" />
       </svg>
     );
   }
@@ -247,64 +316,38 @@ function StakeholderIcon({ type }) {
   if (type === "researcher") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M9 3.75h6M10.25 3.75v5.4L6.1 17.2a2.1 2.1 0 0 0 1.86 3.05h8.08a2.1 2.1 0 0 0 1.86-3.05l-4.15-8.05v-5.4" />
-        <path d="M8.45 15h7.1" />
+        <path d="M10 4.5h4M12 4.5v6M8.5 19.5h7l-1.5-6h-4z" />
+        <circle cx="12" cy="10.5" r="1.5" />
       </svg>
     );
   }
 
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m4 9 8-5 8 5M5 9h14M7 10.5v6M10.33 10.5v6M13.67 10.5v6M17 10.5v6M4.5 18h15M3.5 20.25h17" />
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5v9M14.5 10a2.5 2.5 0 0 0-5 0c0 3 5 2 5 5a2.5 2.5 0 0 1-5 0" />
     </svg>
-  );
-}
-
-function ResearchNetwork() {
-  const stakeholders = [
-    ["owner", "Problem owners"],
-    ["evaluator", "Evaluators"],
-    ["researcher", "Researchers"],
-    ["funder", "Funders"],
-  ];
-
-  return (
-    <div className="research-network" aria-label="Stakeholders collaborate through QC DAO">
-      <svg className="network-lines" viewBox="0 0 520 300" aria-hidden="true">
-        <path d="M110 72 260 150 412 62M112 235 260 150 414 232M110 72 414 232M112 235 412 62" />
-        <circle cx="110" cy="72" r="3" />
-        <circle cx="412" cy="62" r="3" />
-        <circle cx="112" cy="235" r="3" />
-        <circle cx="414" cy="232" r="3" />
-      </svg>
-      <span className="network-core" aria-hidden="true">Q</span>
-      {stakeholders.map(([type, label]) => (
-        <span className={`network-node ${type}`} key={type}>
-          <span className="network-icon"><StakeholderIcon type={type} /></span>
-          <small>{label}</small>
-        </span>
-      ))}
-    </div>
   );
 }
 
 function OpportunityCard({ item }) {
   return (
-    <button
-      className="opportunity-card"
-      type="button"
-      onClick={() => go(`opportunity/${item.id}`)}
-      aria-label={`Open ${item.title}`}
-    >
-      <span className="opportunity-mark"><OpportunityIcon type={item.type} /></span>
-      <span className="opportunity-summary">
-        <strong>{item.title}</strong>
-        <small>{item.type} · {item.owner}</small>
+    <button className="opportunity-card" type="button" onClick={() => go(`opportunity/${item.id}`)}>
+      <span className="opportunity-mark">
+        <OpportunityIcon type={item.type} />
       </span>
-      <span className="status-dot">{item.status}</span>
-      <strong className="opportunity-amount">{item.amount}</strong>
-      <span className="opportunity-deadline">{item.deadline}</span>
-      <span className="row-arrow"><ArrowIcon /></span>
+      <div className="opportunity-summary">
+        <strong>{item.title}</strong>
+        <small>{item.owner} · {item.type}</small>
+      </div>
+      <div>
+        <span className="status-dot">{item.status}</span>
+      </div>
+      <div className="opportunity-amount">{item.amount}</div>
+      <div className="opportunity-deadline">{item.deadline}</div>
+      <span className="row-arrow">
+        <ArrowIcon />
+      </span>
     </button>
   );
 }
@@ -312,11 +355,11 @@ function OpportunityCard({ item }) {
 function OpportunityList({ items }) {
   return (
     <div className="opportunity-list">
-      <div className="opportunity-list-head" aria-hidden="true">
-        <span>Opportunity</span>
+      <div className="opportunity-list-head">
+        <span>Problem or funding call</span>
         <span>Status</span>
-        <span>Budget</span>
-        <span>Timing</span>
+        <span>Indicative budget</span>
+        <span>Timeline</span>
         <span />
       </div>
       {items.map((item) => <OpportunityCard item={item} key={item.id} />)}
@@ -324,10 +367,47 @@ function OpportunityList({ items }) {
   );
 }
 
-function Home() {
-  const { role } = useAuth();
-  const canCreate = role === ROLES.OWNER || role === ROLES.RESEARCHER || role === ROLES.FUNDER || role === ROLES.ADMIN;
+function ResearchNetwork() {
+  return (
+    <div className="research-network" aria-label="Stakeholder network">
+      <svg className="network-lines" viewBox="0 0 460 320" aria-hidden="true">
+        <path d="M100 80 L230 160" />
+        <path d="M360 70 L230 160" />
+        <path d="M90 240 L230 160" />
+        <path d="M370 250 L230 160" />
+        <path d="M100 80 L90 240" />
+        <path d="M360 70 L370 250" />
+        <circle cx="100" cy="80" r="4" />
+        <circle cx="360" cy="70" r="4" />
+        <circle cx="90" cy="240" r="4" />
+        <circle cx="370" cy="250" r="4" />
+      </svg>
+      <div className="network-core">QC</div>
+      <div className="network-node owner">
+        <div className="network-icon"><StakeholderIcon type="owner" /></div>
+        <strong>Problem owner</strong>
+        <span>Defines problem</span>
+      </div>
+      <div className="network-node evaluator">
+        <div className="network-icon"><StakeholderIcon type="evaluator" /></div>
+        <strong>Evaluator</strong>
+        <span>Scores proposals</span>
+      </div>
+      <div className="network-node researcher">
+        <div className="network-icon"><StakeholderIcon type="researcher" /></div>
+        <strong>Researcher</strong>
+        <span>Delivers work</span>
+      </div>
+      <div className="network-node funder">
+        <div className="network-icon"><StakeholderIcon type="funder" /></div>
+        <strong>Funder</strong>
+        <span>Backs outcomes</span>
+      </div>
+    </div>
+  );
+}
 
+function Home() {
   return (
     <>
       <section className="hero">
@@ -336,9 +416,7 @@ function Home() {
           <p>Publish important problems, compare thoughtful proposals and support work through clear delivery stages.</p>
           <div className="actions">
             <button className="primary" type="button" onClick={() => go("discover")}>Explore opportunities</button>
-            {canCreate && (
-              <button className="secondary" type="button" onClick={() => go("create")}>Publish a brief</button>
-            )}
+            <button className="secondary" type="button" onClick={() => go("create")}>Publish a brief</button>
           </div>
         </div>
         <ResearchNetwork />
@@ -398,11 +476,11 @@ function Discover() {
 
 function OpportunityDetail({ id }) {
   const item = opportunities.find((candidate) => candidate.id === id);
-  const { role } = useAuth();
+  const { hasRole, isAuthenticated } = useAuth();
   if (!item) return <NotFound />;
 
-  const canCreate = role === ROLES.OWNER || role === ROLES.FUNDER || role === ROLES.ADMIN;
-  const isResearcher = role === ROLES.RESEARCHER;
+  const canSubmitProposal = !isAuthenticated || hasRole(ROLES.RESEARCHER);
+  const canCreateBrief = !isAuthenticated || hasRole(ROLES.OWNER) || hasRole(ROLES.FUNDER);
 
   return (
     <section className="page detail-page">
@@ -427,38 +505,54 @@ function OpportunityDetail({ id }) {
             <div><dt>Timing</dt><dd>{item.deadline}</dd></div>
             <div><dt>Current stage</dt><dd>{item.status}</dd></div>
           </dl>
-          {isResearcher ? (
-            <button className="primary" type="button" onClick={() => go("proposals")}>
-              Submit Proposal for Brief
-            </button>
-          ) : canCreate ? (
-            <button className="primary" type="button" onClick={() => go("create")}>
-              Create a similar brief
-            </button>
-          ) : null}
+          <div className="context-panel-actions">
+            {canSubmitProposal && (
+              <button className="primary" type="button" onClick={() => go("proposals")}>
+                Submit Proposal for Brief
+              </button>
+            )}
+            {canCreateBrief && (
+              <button className="secondary" type="button" onClick={() => go("create")}>
+                Create a similar brief
+              </button>
+            )}
+          </div>
         </aside>
       </div>
     </section>
   );
 }
 
-function getAvailableOpportunityTypes(role) {
-  if (role === ROLES.RESEARCHER) {
-    return opportunityTypes.filter((t) => t.value === "funding-request");
+function getAvailableOpportunityTypes(roles) {
+  const roleList = Array.isArray(roles) ? roles : roles ? [roles] : [];
+  if (roleList.includes(ROLES.ADMIN)) {
+    return opportunityTypes;
   }
-  if (role === ROLES.OWNER) {
-    return opportunityTypes.filter((t) => t.value === "business-problem" || t.value === "open-funding");
+
+  const allowedTypes = new Set();
+  if (roleList.includes(ROLES.RESEARCHER)) {
+    allowedTypes.add("funding-request");
   }
-  if (role === ROLES.FUNDER) {
-    return opportunityTypes.filter((t) => t.value === "open-funding" || t.value === "business-problem");
+  if (roleList.includes(ROLES.OWNER)) {
+    allowedTypes.add("business-problem");
+    allowedTypes.add("open-funding");
   }
-  // Admin or fallback
-  return opportunityTypes;
+  if (roleList.includes(ROLES.FUNDER)) {
+    allowedTypes.add("open-funding");
+    allowedTypes.add("business-problem");
+  }
+
+  // If user has no specific role (e.g. guest fallback), return standard options
+  if (allowedTypes.size === 0) {
+    return opportunityTypes;
+  }
+
+  return opportunityTypes.filter((t) => allowedTypes.has(t.value));
 }
 
 function CreateOpportunity() {
-  const { role } = useAuth();
-  const availableTypes = useMemo(() => getAvailableOpportunityTypes(role), [role]);
+  const { roles, hasRole } = useAuth();
+  const availableTypes = useMemo(() => getAvailableOpportunityTypes(roles), [roles]);
 
   const [form, setForm] = useState(() => ({
     opportunityType: availableTypes[0]?.value || "business-problem",
@@ -468,7 +562,6 @@ function CreateOpportunity() {
     amount: "",
   }));
 
-  // Sync form default if role changes
   useEffect(() => {
     if (!availableTypes.some((t) => t.value === form.opportunityType)) {
       setForm((prev) => ({
@@ -492,8 +585,7 @@ function CreateOpportunity() {
 
   const submit = (event) => {
     event.preventDefault();
-    // Security check: ensure only researcher or admin can submit funding-request
-    if (form.opportunityType === "funding-request" && role !== ROLES.RESEARCHER && role !== ROLES.ADMIN) {
+    if (form.opportunityType === "funding-request" && !hasRole(ROLES.RESEARCHER) && !hasRole(ROLES.ADMIN)) {
       alert("Only researchers are permitted to submit funding requests.");
       return;
     }
@@ -503,70 +595,133 @@ function CreateOpportunity() {
   return (
     <section className="page create-page">
       <div className="page-heading">
-        <h1>Create a funding opportunity</h1>
-        <p>
-          {role === ROLES.RESEARCHER
-            ? "Publish a researcher-led funding request to connect with grants and enterprise sponsors."
-            : "Choose the relationship that best fits the work, then add the details researchers and funders need."}
-        </p>
+        <h1>Create a research brief</h1>
+        <p>Publish a clear challenge, open funding offer, or researcher-led funding request.</p>
       </div>
-      {submitted ? (
-        <div className="submission-success" role="status">
-          <span aria-hidden="true">✓</span>
-          <div>
-            <h2>Brief preview created</h2>
-            <p>Your brief is ready to review. Changes remain available for this session.</p>
-          </div>
-          <button className="secondary" type="button" onClick={() => setSubmitted(false)}>Continue editing</button>
-        </div>
-      ) : null}
-      <form onSubmit={submit}>
-        <fieldset className="workflow-picker">
-          <legend>Opportunity type</legend>
-          {availableTypes.map((option) => (
-            <label className={form.opportunityType === option.value ? "chosen" : ""} key={option.value}>
+
+      <div className="form-layout">
+        <form className="brief-form" onSubmit={submit}>
+          <fieldset className="field-group">
+            <legend>1. Opportunity type</legend>
+            <p className="field-hint">Choose your publishing capacity for this brief.</p>
+            <div className="radio-group" role="radiogroup">
+              {availableTypes.map((type) => (
+                <label
+                  key={type.value}
+                  className={`radio-card ${form.opportunityType === type.value ? "selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="opportunityType"
+                    value={type.value}
+                    checked={form.opportunityType === type.value}
+                    onChange={update}
+                  />
+                  <div>
+                    <strong>{type.label}</strong>
+                    <span>{type.note}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset className="field-group">
+            <legend>2. Core details</legend>
+            <div className="field">
+              <label htmlFor="title">Opportunity title</label>
               <input
-                type="radio"
-                name="opportunityType"
-                value={option.value}
-                checked={form.opportunityType === option.value}
+                id="title"
+                name="title"
+                type="text"
+                required
+                placeholder="e.g. Robust error decoding for neutral atom systems"
+                value={form.title}
                 onChange={update}
               />
-              <strong>{option.label}</strong>
-              <span>{option.note}</span>
-            </label>
-          ))}
-        </fieldset>
+            </div>
+            <div className="field">
+              <label htmlFor="summary">Problem summary & scope</label>
+              <textarea
+                id="summary"
+                name="summary"
+                rows={4}
+                required
+                placeholder="Describe the context, technical bottleneck and what a solution should achieve."
+                value={form.summary}
+                onChange={update}
+              />
+            </div>
+          </fieldset>
 
-        <div className="form-section">
-          <div><span className="form-step">01</span><h2>Opportunity overview</h2></div>
-          <label>
-            Title
-            <input required minLength="6" name="title" value={form.title} onChange={update} placeholder={`${selectedType?.label || "Opportunity"} title`} />
-          </label>
-          <label>
-            Summary
-            <textarea required minLength="20" name="summary" value={form.summary} onChange={update} placeholder="Explain the need or research direction in plain language." />
-          </label>
-        </div>
+          <fieldset className="field-group">
+            <legend>3. Deliverables & funding</legend>
+            <div className="field">
+              <label htmlFor="outcomes">Key deliverables & milestones</label>
+              <textarea
+                id="outcomes"
+                name="outcomes"
+                rows={3}
+                required
+                placeholder="List verification milestones required before funds are unlocked."
+                value={form.outcomes}
+                onChange={update}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="amount">Target funding / budget allocation</label>
+              <input
+                id="amount"
+                name="amount"
+                type="text"
+                required
+                placeholder="e.g. $80,000"
+                value={form.amount}
+                onChange={update}
+              />
+            </div>
+          </fieldset>
 
-        <div className="form-section">
-          <div><span className="form-step">02</span><h2>Expected result</h2></div>
-          <label>
-            Outcomes
-            <textarea required minLength="10" name="outcomes" value={form.outcomes} onChange={update} placeholder="What should be demonstrably true when the work is complete?" />
-          </label>
-          <label>
-            Indicative budget
-            <input required min="1" type="number" name="amount" value={form.amount} onChange={update} placeholder="Amount in USD" />
-          </label>
-        </div>
+          <div className="form-actions">
+            <button className="primary" type="submit">Publish brief to registry</button>
+            <button className="secondary" type="button" onClick={() => go("discover")}>Cancel</button>
+          </div>
 
-        <div className="form-actions">
-          <p>Review your information before creating the preview.</p>
-          <button className="primary" type="submit">Preview brief</button>
-        </div>
-      </form>
+          {submitted && (
+            <div className="success-banner" role="status">
+              <strong>Brief published successfully!</strong>
+              <p>Your brief "{form.title}" is now available in the platform registry.</p>
+              <button className="text-button" type="button" onClick={() => go("discover")}>
+                View in Discover <ArrowIcon />
+              </button>
+            </div>
+          )}
+        </form>
+
+        <aside className="preview-panel" aria-label="Live preview">
+          <div className="preview-sticky">
+            <span className="eyebrow">Registry Live Preview</span>
+            <div className="preview-card">
+              <div className="card-top">
+                <span className="eyebrow">{selectedType?.label || "Opportunity"}</span>
+                <span className="status-dot">Draft Preview</span>
+              </div>
+              <h3>{form.title || "Untitled Research Brief"}</h3>
+              <p>{form.summary || "Summary and problem description will appear here as you type."}</p>
+              <div className="preview-meta">
+                <div>
+                  <small>Funding</small>
+                  <strong>{form.amount || "$0"}</strong>
+                </div>
+                <div>
+                  <small>Deliverables</small>
+                  <span>{form.outcomes ? "Milestones defined" : "Pending entry"}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
     </section>
   );
 }

@@ -1,17 +1,17 @@
 import { useState } from "react";
-import { DEMO_USERS, ROLE_DESCRIPTIONS, ROLE_LABELS, ROLES } from "../config/roles.js";
+import { DEMO_USERS, ROLE_LABELS, ROLES } from "../config/roles.js";
 import { FEATURES } from "../config/features.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 export function Login({ redirectTarget, onNavigate }) {
   const { login } = useAuth();
-  const [selectedRole, setSelectedRole] = useState(ROLES.OWNER);
+  const [selectedProfile, setSelectedProfile] = useState("member");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const handleLogin = (e) => {
     e.preventDefault();
-    login(selectedRole);
+    login(selectedProfile);
     const destination = redirectTarget || "home";
     if (onNavigate) {
       onNavigate(destination);
@@ -20,8 +20,8 @@ export function Login({ redirectTarget, onNavigate }) {
     }
   };
 
-  const handleDirectSelect = (roleKey) => {
-    login(roleKey);
+  const handleDirectSelect = (profileKey) => {
+    login(profileKey);
     const destination = redirectTarget || "home";
     if (onNavigate) {
       onNavigate(destination);
@@ -62,57 +62,105 @@ export function Login({ redirectTarget, onNavigate }) {
         {FEATURES.DEMO_ROLE_SWITCHER ? (
           <form onSubmit={handleLogin} className="role-selection-form">
             <fieldset className="role-cards-grid">
-              <legend className="sr-only">Select Platform Role</legend>
-              {[ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER, ROLES.ADMIN].map((roleKey) => {
-                const demoUser = DEMO_USERS[roleKey];
-                const isSelected = selectedRole === roleKey;
-                return (
-                  <div
-                    key={roleKey}
-                    className={`role-option-card ${isSelected ? "selected" : ""}`}
-                    onClick={() => setSelectedRole(roleKey)}
-                  >
-                    <div className="role-option-radio">
-                      <input
-                        type="radio"
-                        id={`role-${roleKey}`}
-                        name="selectedRole"
-                        value={roleKey}
-                        checked={isSelected}
-                        onChange={() => setSelectedRole(roleKey)}
-                      />
-                    </div>
-                    <div className="role-option-body">
-                      <div className="role-title-row">
-                        <label htmlFor={`role-${roleKey}`} className="role-name">
-                          {ROLE_LABELS[roleKey]}
-                        </label>
-                        <span className="user-persona-tag">{demoUser.name}</span>
-                      </div>
-                      <p className="role-desc">{ROLE_DESCRIPTIONS[roleKey]}</p>
-                      <div className="role-meta">
-                        <span>{demoUser.org}</span> · <span className="mono">{demoUser.address}</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="quick-enter-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDirectSelect(roleKey);
-                      }}
-                      title={`Sign in as ${ROLE_LABELS[roleKey]}`}
-                    >
-                      Enter
-                    </button>
+              <legend className="sr-only">Select Account Profile</legend>
+
+              {/* Multi-Role Member Card */}
+              <div
+                className={`role-option-card ${selectedProfile === "member" ? "selected" : ""}`}
+                onClick={() => setSelectedProfile("member")}
+              >
+                <div className="role-option-radio">
+                  <input
+                    type="radio"
+                    id="profile-member"
+                    name="selectedProfile"
+                    value="member"
+                    checked={selectedProfile === "member"}
+                    onChange={() => setSelectedProfile("member")}
+                  />
+                </div>
+                <div className="role-option-body">
+                  <div className="role-title-row">
+                    <label htmlFor="profile-member" className="role-name">
+                      Platform Member
+                    </label>
+                    <span className="user-persona-tag">{DEMO_USERS.member.name}</span>
                   </div>
-                );
-              })}
+                  <p className="role-desc">
+                    Unified account with full access to Problem Owner, Researcher, Evaluator, and Funder workspaces.
+                  </p>
+                  <div className="role-meta">
+                    <span>{DEMO_USERS.member.org}</span> · <span className="mono">{DEMO_USERS.member.address}</span>
+                  </div>
+                  <div className="capabilities-badges">
+                    <span className="mini-badge">Problem Owner</span>
+                    <span className="mini-badge">Researcher</span>
+                    <span className="mini-badge">Evaluator</span>
+                    <span className="mini-badge">Funder</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="quick-enter-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDirectSelect("member");
+                  }}
+                  title="Sign in as Platform Member"
+                >
+                  Enter
+                </button>
+              </div>
+
+              {/* Standalone DAO Admin Card */}
+              <div
+                className={`role-option-card ${selectedProfile === "admin" ? "selected" : ""}`}
+                onClick={() => setSelectedProfile("admin")}
+              >
+                <div className="role-option-radio">
+                  <input
+                    type="radio"
+                    id="profile-admin"
+                    name="selectedProfile"
+                    value="admin"
+                    checked={selectedProfile === "admin"}
+                    onChange={() => setSelectedProfile("admin")}
+                  />
+                </div>
+                <div className="role-option-body">
+                  <div className="role-title-row">
+                    <label htmlFor="profile-admin" className="role-name">
+                      DAO Administrator
+                    </label>
+                    <span className="user-persona-tag">{DEMO_USERS.admin.name}</span>
+                  </div>
+                  <p className="role-desc">
+                    Governance administration for system registries, audit verification, and protocol oversight.
+                  </p>
+                  <div className="role-meta">
+                    <span>{DEMO_USERS.admin.org}</span> · <span className="mono">{DEMO_USERS.admin.address}</span>
+                  </div>
+                  <div className="capabilities-badges">
+                    <span className="mini-badge admin-badge">DAO Admin</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="quick-enter-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDirectSelect("admin");
+                  }}
+                  title="Sign in as DAO Admin"
+                >
+                  Enter
+                </button>
+              </div>
             </fieldset>
 
             <div className="login-actions">
               <button className="primary full-width" type="submit">
-                Sign In as {ROLE_LABELS[selectedRole]} {redirectTarget ? `& Continue to ${redirectTarget}` : ""}
+                Sign In as {selectedProfile === "admin" ? "DAO Admin" : "Platform Member"} {redirectTarget ? `& Continue to ${redirectTarget}` : ""}
               </button>
             </div>
           </form>
@@ -139,21 +187,6 @@ export function Login({ redirectTarget, onNavigate }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
-            </div>
-            <div className="form-field">
-              <label htmlFor="authRole">Assigned Platform Role</label>
-              <select
-                id="authRole"
-                value={selectedRole}
-                onChange={(e) => setSelectedRole(e.target.value)}
-                className="role-select-dropdown"
-              >
-                <option value={ROLES.OWNER}>Problem Owner</option>
-                <option value={ROLES.RESEARCHER}>Researcher</option>
-                <option value={ROLES.EVALUATOR}>Evaluator</option>
-                <option value={ROLES.FUNDER}>Funder</option>
-                <option value={ROLES.ADMIN}>DAO Admin</option>
-              </select>
             </div>
 
             <div className="login-actions">

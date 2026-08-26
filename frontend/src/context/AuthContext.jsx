@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { DEMO_USERS, ROLES } from "../config/roles.js";
 
 const AuthContext = createContext(null);
@@ -26,14 +26,33 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
-  const login = (role) => {
-    if (!role || role === ROLES.GUEST) {
+  const roles = useMemo(() => {
+    if (!user) return [ROLES.GUEST];
+    if (Array.isArray(user.roles)) return user.roles;
+    if (user.role) return [user.role];
+    return [ROLES.GUEST];
+  }, [user]);
+
+  const hasRole = (targetRole) => roles.includes(targetRole);
+
+  const hasAnyRole = (targetRoles) => {
+    if (!targetRoles || targetRoles.length === 0) return true;
+    return targetRoles.some((r) => roles.includes(r));
+  };
+
+  const login = (roleOrProfile) => {
+    if (!roleOrProfile || roleOrProfile === ROLES.GUEST) {
       setUser(null);
       return;
     }
-    const profile = DEMO_USERS[role];
-    if (profile) {
-      setUser(profile);
+
+    if (typeof roleOrProfile === "string") {
+      const profile = DEMO_USERS[roleOrProfile] || DEMO_USERS.member;
+      if (profile) {
+        setUser(profile);
+      }
+    } else if (typeof roleOrProfile === "object") {
+      setUser(roleOrProfile);
     }
   };
 
@@ -41,21 +60,16 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  const switchRole = (newRole) => {
-    if (newRole === ROLES.GUEST) {
-      logout();
-    } else {
-      login(newRole);
-    }
-  };
-
   const value = {
     user,
-    role: user?.role || ROLES.GUEST,
+    roles,
+    role: roles[0] || ROLES.GUEST, // Primary role for legacy single-role display
     isAuthenticated: Boolean(user),
+    isMultiRole: roles.filter((r) => r !== ROLES.GUEST).length > 1,
+    hasRole,
+    hasAnyRole,
     login,
     logout,
-    switchRole,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
