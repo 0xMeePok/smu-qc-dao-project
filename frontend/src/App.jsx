@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunities, opportunityTypes } from "./data.js";
-import { ROLES, ROLE_LABELS, DEMO_USERS } from "./config/roles.js";
+import { ROLES } from "./config/roles.js";
 import { FEATURES } from "./config/features.js";
-import { ROUTES_CONFIG, getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
+import { getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
@@ -32,7 +32,7 @@ function useRoute() {
   useEffect(() => {
     const updateRoute = () => {
       setRouteInfo(parseHash());
-      window.scrollTo({ top: 0, behavior: "instant" });
+      window.scrollTo({ top: 0, behavior: "auto" });
     };
 
     window.addEventListener("hashchange", updateRoute);

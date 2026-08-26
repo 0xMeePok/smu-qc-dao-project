@@ -116,3 +116,42 @@ export function getPermittedNavRoutes(roles) {
     return route.allowedRoles?.some((allowed) => roleList.includes(allowed));
   });
 }
+
+/**
+ * Evaluates route access for a given route key and user profile.
+ * Core authorization logic shared by RouteGuard and test suites.
+ */
+export function evaluateRouteAccess(routeKey, user) {
+  const routeConfig = getRouteConfig(routeKey);
+  if (!routeConfig) {
+    return { status: 404, allowed: false, action: "NOT_FOUND" };
+  }
+
+  // 1. Public route check
+  if (!routeConfig.authRequired) {
+    return { status: 200, allowed: true, action: "RENDER" };
+  }
+
+  // 2. Authentication check
+  const userRoles = Array.isArray(user?.roles) ? user.roles : user?.role ? [user.role] : [];
+  const isAuthenticated = Boolean(user) && userRoles.some((r) => r !== ROLES.GUEST);
+
+  if (!isAuthenticated) {
+    return {
+      status: 302,
+      allowed: false,
+      action: "REDIRECT_LOGIN",
+      target: `login?redirect=${encodeURIComponent(routeKey)}`,
+    };
+  }
+
+  // 3. Capability / set intersection check
+  const hasCapability = routeConfig.allowedRoles?.some((role) => userRoles.includes(role));
+
+  if (hasCapability) {
+    return { status: 200, allowed: true, action: "RENDER" };
+  }
+
+  // 4. Unauthorized role
+  return { status: 403, allowed: false, action: "DENY_403" };
+}

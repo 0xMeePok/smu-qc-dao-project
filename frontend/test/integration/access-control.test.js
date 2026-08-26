@@ -1,45 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ROLES } from "../../src/config/roles.js";
-import { getRouteConfig } from "../../src/config/routes.js";
-
-/**
- * Access Control Decision Evaluator
- * Models the runtime evaluation performed by RouteGuard & AuthContext
- */
-function evaluateAccess(routeKey, user) {
-  const routeConfig = getRouteConfig(routeKey);
-  if (!routeConfig) {
-    return { status: 404, allowed: false, action: "NOT_FOUND" };
-  }
-
-  // 1. Public route check
-  if (!routeConfig.authRequired) {
-    return { status: 200, allowed: true, action: "RENDER" };
-  }
-
-  // 2. Authentication check
-  if (!user || !user.roles || user.roles.length === 0 || (user.roles.length === 1 && user.roles[0] === ROLES.GUEST)) {
-    return {
-      status: 302,
-      allowed: false,
-      action: "REDIRECT_LOGIN",
-      target: `login?redirect=${encodeURIComponent(routeKey)}`,
-    };
-  }
-
-  // 3. Multi-role capability / set intersection check
-  const hasCapability = user.roles.some((role) =>
-    routeConfig.allowedRoles?.includes(role)
-  );
-
-  if (hasCapability) {
-    return { status: 200, allowed: true, action: "RENDER" };
-  }
-
-  // 4. Unauthorized role
-  return { status: 403, allowed: false, action: "DENY_403" };
-}
+import { evaluateRouteAccess } from "../../src/config/routes.js";
 
 describe("Integration Tests: Capability-Based Access Control & Route Guard Security", () => {
   // Test user fixtures independent of temporary demo objects
@@ -59,7 +21,7 @@ describe("Integration Tests: Capability-Based Access Control & Route Guard Secur
     const publicRoutes = ["home", "discover", "opportunity", "login", "access-denied"];
 
     for (const route of publicRoutes) {
-      const decision = evaluateAccess(route, guestUser);
+      const decision = evaluateRouteAccess(route, guestUser);
       assert.equal(decision.status, 200, `Guest should access public route: ${route}`);
       assert.equal(decision.allowed, true);
       assert.equal(decision.action, "RENDER");
@@ -77,7 +39,7 @@ describe("Integration Tests: Capability-Based Access Control & Route Guard Secur
     ];
 
     for (const route of protectedRoutes) {
-      const decision = evaluateAccess(route, guestUser);
+      const decision = evaluateRouteAccess(route, guestUser);
       assert.equal(
         decision.status,
         302,
@@ -90,7 +52,7 @@ describe("Integration Tests: Capability-Based Access Control & Route Guard Secur
   });
 
   it("[FIT-AAR-003] should grant multi-role member access to Create Brief across publishing capacities", () => {
-    const decision = evaluateAccess("create", memberUser);
+    const decision = evaluateRouteAccess("create", memberUser);
     assert.equal(decision.status, 200);
     assert.equal(decision.allowed, true);
     assert.equal(decision.action, "RENDER");
@@ -105,7 +67,7 @@ describe("Integration Tests: Capability-Based Access Control & Route Guard Secur
     const workspaces = ["my-problems", "proposals", "evaluations", "funding"];
 
     for (const ws of workspaces) {
-      const decision = evaluateAccess(ws, memberUser);
+      const decision = evaluateRouteAccess(ws, memberUser);
       assert.equal(
         decision.status,
         200,
@@ -117,14 +79,14 @@ describe("Integration Tests: Capability-Based Access Control & Route Guard Secur
   });
 
   it("[FIT-AAR-005] should strictly bar multi-role member from DAO Admin Audit route with 403 Forbidden", () => {
-    const decision = evaluateAccess("admin", memberUser);
+    const decision = evaluateRouteAccess("admin", memberUser);
     assert.equal(decision.status, 403);
     assert.equal(decision.allowed, false);
     assert.equal(decision.action, "DENY_403");
   });
 
   it("[FIT-AAR-006] should grant DAO Admin access to Admin Audit console", () => {
-    const decision = evaluateAccess("admin", adminUser);
+    const decision = evaluateRouteAccess("admin", adminUser);
     assert.equal(decision.status, 200);
     assert.equal(decision.allowed, true);
     assert.equal(decision.action, "RENDER");
@@ -140,7 +102,7 @@ describe("Integration Tests: Capability-Based Access Control & Route Guard Secur
     ];
 
     for (const route of restrictedRoutes) {
-      const decision = evaluateAccess(route, adminUser);
+      const decision = evaluateRouteAccess(route, adminUser);
       assert.equal(
         decision.status,
         403,

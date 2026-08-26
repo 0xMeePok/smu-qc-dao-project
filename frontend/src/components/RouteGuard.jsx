@@ -1,6 +1,6 @@
+import { useEffect } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { AccessDenied } from "./AccessDenied.jsx";
-import { Login } from "./Login.jsx";
 
 /**
  * RouteGuard
@@ -9,9 +9,20 @@ import { Login } from "./Login.jsx";
 export function RouteGuard({ targetRoute, allowedRoles, authRequired, children, onNavigate }) {
   const { isAuthenticated, hasAnyRole } = useAuth();
 
-  // 1. Check Authentication
+  // 1. Check Authentication - Redirect to #/login?redirect=...
+  useEffect(() => {
+    if (authRequired && !isAuthenticated) {
+      const redirectHash = `login?redirect=${encodeURIComponent(targetRoute || "home")}`;
+      if (onNavigate) {
+        onNavigate(redirectHash);
+      } else {
+        window.location.hash = `#/${redirectHash}`;
+      }
+    }
+  }, [authRequired, isAuthenticated, targetRoute, onNavigate]);
+
   if (authRequired && !isAuthenticated) {
-    return <Login redirectTarget={targetRoute} onNavigate={onNavigate} />;
+    return null;
   }
 
   // 2. Check Role Permissions (User must possess at least one permitted role)

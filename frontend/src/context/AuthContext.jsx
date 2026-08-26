@@ -64,7 +64,7 @@ export function AuthProvider({ children }) {
     user,
     roles,
     role: roles[0] || ROLES.GUEST, // Primary role for legacy single-role display
-    isAuthenticated: Boolean(user),
+    isAuthenticated: Boolean(user) && roles.some((r) => r !== ROLES.GUEST),
     isMultiRole: roles.filter((r) => r !== ROLES.GUEST).length > 1,
     hasRole,
     hasAnyRole,

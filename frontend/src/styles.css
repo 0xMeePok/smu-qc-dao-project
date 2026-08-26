@@ -50,7 +50,10 @@ body {
   color: var(--ink);
   font-size: 15px;
   line-height: 1.6;
-  padding-bottom: 72px; /* space for fixed demo toolbar */
+}
+
+body:has(.demo-toolbar) {
+  padding-bottom: 72px; /* space for fixed demo toolbar when enabled */
 }
 button, input, textarea { color: inherit; font: inherit; }
 button { cursor: pointer; }

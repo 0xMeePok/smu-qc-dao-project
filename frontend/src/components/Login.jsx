@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DEMO_USERS, ROLE_LABELS, ROLES } from "../config/roles.js";
+import { DEMO_USERS } from "../config/roles.js";
 import { FEATURES } from "../config/features.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
