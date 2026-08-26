@@ -1,19 +1,20 @@
-import { useState } from "react";
+import { useEffect } from "react";
+import { useAuth } from "../context/AuthContext.jsx";
 import { SignInWithWallet } from "./SignInWithWallet.jsx";
 
 export function Login({ redirectTarget, onNavigate }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const { isAuthenticated } = useAuth();
 
-  const handleInstitutionalLogin = (e) => {
-    e.preventDefault();
-    const destination = redirectTarget || "home";
-    if (onNavigate) {
-      onNavigate(destination);
-    } else {
-      window.location.hash = `/${destination}`;
+  useEffect(() => {
+    if (isAuthenticated) {
+      const destination = redirectTarget || "home";
+      if (onNavigate) {
+        onNavigate(destination);
+      } else {
+        window.location.hash = `/${destination}`;
+      }
     }
-  };
+  }, [isAuthenticated, redirectTarget, onNavigate]);
 
   return (
     <section className="page login-page">
@@ -39,7 +40,7 @@ export function Login({ redirectTarget, onNavigate }) {
             </div>
           ) : (
             <p className="login-subhead">
-              Sign in with your Web3 wallet or organization credentials to enter QC DAO.
+              Sign in with your verified Web3 wallet to access your SMU QC DAO workspaces.
             </p>
           )}
         </div>
@@ -47,42 +48,8 @@ export function Login({ redirectTarget, onNavigate }) {
         <div className="wallet-signin-section">
           <SignInWithWallet />
         </div>
-
-        <div className="login-divider">
-          <span>or continue with email</span>
-        </div>
-
-        <form onSubmit={handleInstitutionalLogin} className="standard-login-form">
-          <div className="form-field">
-            <label htmlFor="email">Institutional Email</label>
-            <input
-              id="email"
-              type="email"
-              required
-              placeholder="name@institution.edu"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <div className="form-field">
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              required
-              placeholder="Enter password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-
-          <div className="login-actions">
-            <button className="secondary full-width" type="submit">
-              Sign In {redirectTarget ? `& Continue to ${redirectTarget}` : ""}
-            </button>
-          </div>
-        </form>
       </div>
     </section>
   );
 }
+

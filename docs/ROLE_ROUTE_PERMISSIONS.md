@@ -80,24 +80,16 @@ When creating a brief on `#/create`:
 
 ---
 
-## 6. Temporary Demo Mode & Multi-Role Switcher
+## 6. Authentication & Role Capability Resolution
 
-### 6.1 Purpose
-During early proof-of-concept testing and grading evaluation, a temporary Demo Mode is supported to allow evaluators to test multi-role member access and admin isolation without managing individual database accounts.
+### 6.1 Authentication Architecture
+Authentication is strictly enforced via Web3 Sign-In with Ethereum (SIWE) through Firebase Cloud Functions and custom auth tokens:
+1. **Wallet Verification**: Users sign a server-issued cryptographic nonce to verify wallet ownership.
+2. **Session & Profile Resolution**: On successful authentication, the user's registered Firestore profile (`/users/{address}`) is loaded into `SessionContext` and mapped into `AuthContext`.
+3. **Capability Set Assignment**:
+   - **Platform Participant**: User profiles (`role == 0` in Firestore) receive the full participant capability set: `[owner, researcher, evaluator, funder]`.
+   - **DAO Administrator**: Dedicated admin profiles (`role == 1` in Firestore, assigned out-of-band/admin SDK) receive the isolated `[admin]` capability set.
+   - **Unauthenticated Visitor**: Resolves to `[guest]`.
 
-### 6.2 Implementation Details
-- Feature Flag: Controlled in `frontend/src/config/features.js` (`FEATURES.DEMO_ROLE_SWITCHER`).
-- Activation:
-  - URL Query Parameter: Append `?demo=true` to the URL (e.g. `http://localhost:5173/?demo=true`).
-  - Environment Variable: Set `VITE_ENABLE_DEMO_MODE=true` in the frontend environment.
-- Default State: Disabled by default in production (`http://localhost:5173/`), presenting the standard institutional sign-in form and hiding the demo toolbar.
-- Components Involved:
-  - `DemoToolbar` in `frontend/src/App.jsx`
-  - Profile selection cards in `frontend/src/components/Login.jsx`
-  - Demo profiles in `DEMO_USERS` inside `frontend/src/config/roles.js`
-
-### 6.3 Mandatory Decommissioning Requirement
-Once account details and role resolution are permanently integrated with Firebase Auth and Firestore:
-1. **Remove Demo Components**: The `DemoToolbar` component, mock profile cards in `Login.jsx`, and mock `DEMO_USERS` dictionary in `roles.js` must be deleted from the repository.
-2. **Remove Feature Flag**: Delete `frontend/src/config/features.js` and remove conditional demo checks from `App.jsx`.
-3. **Enforce Backend Authority**: Role capabilities array (`roles: string[]`) must strictly originate from authenticated Firebase ID Token custom claims or Firestore user profile documents (`/users/{uid}`). Client-side role spoofing or switching must not exist in production builds.
+### 6.2 Decommissioned Demo Mode
+Temporary client-side role switching and demo query parameters (`?demo=true`, `FEATURES.DEMO_ROLE_SWITCHER`) have been permanently decommissioned. Access control strictly follows authenticated user session profiles.

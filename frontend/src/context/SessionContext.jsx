@@ -18,7 +18,7 @@ import {
   markActivity,
 } from "../lib/idleTimeout.js";
 
-const SessionContext = createContext(null);
+export const SessionContext = createContext(null);
 
 /**
  * Session states:
