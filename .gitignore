@@ -42,6 +42,12 @@ hosting/.cache
 .firebase/
 emulator-ui/
 
+# Contracts / Stable Faucet
+/contracts/stable-faucet/artifacts
+/contracts/stable-faucet/cache
+/contracts/stable-faucet/deployments
+/contracts/stable-faucet/site/dist
+
 # Editor & OS Files
 .DS_Store
 .DS_Store?
@@ -60,3 +66,4 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+

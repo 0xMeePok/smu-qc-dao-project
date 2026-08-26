@@ -1,0 +1,29 @@
+{
+  "name": "tap-faucet-contracts-release",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mock faucet token contracts for Arbitrum Sepolia",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test mocha",
+    "deploy:faucet": "hardhat run scripts/deploy-faucet.js --build-profile production --network arbitrumSepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "4.0.15",
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "3.0.11",
+    "@nomicfoundation/hardhat-mocha": "3.1.0",
+    "chai": "6.2.2",
+    "dotenv": "17.4.2",
+    "ethers": "6.17.0",
+    "hardhat": "3.13.0",
+    "mocha": "11.8.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.6.1"
+  },
+  "overrides": {
+    "diff": "8.0.4",
+    "serialize-javascript": "7.1.0"
+  }
+}
