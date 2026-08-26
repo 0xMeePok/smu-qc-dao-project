@@ -1,3 +1,6 @@
+import { useState, useEffect } from "react";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "../lib/firebase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { ROLE_LABELS } from "../config/roles.js";
 
@@ -7,6 +10,29 @@ function RoleBadge({ role }) {
 
 export function MyProblems({ onNavigate }) {
   const { user } = useAuth();
+  const [data, setData] = useState([]);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      if (!user?.id || !db) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const q = query(collection(db, "problems"), where("ownerId", "==", user.id));
+        const querySnapshot = await getDocs(q);
+        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [user?.id]);
+
   return (
     <section className="page dashboard-page">
       <div className="page-heading">
@@ -18,40 +44,29 @@ export function MyProblems({ onNavigate }) {
         <p>Manage your published research challenges, track submission deadlines, and evaluate inbound researcher proposals.</p>
       </div>
 
-      <div className="dashboard-stats-grid">
-        <div className="stat-card">
-          <span className="stat-num">2</span>
-          <span className="stat-label">Active Challenges</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">5</span>
-          <span className="stat-label">Proposals Received</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">$200,000</span>
-          <span className="stat-label">Committed Capital</span>
-        </div>
-      </div>
-
       <div className="card-table">
         <div className="table-header">
           <h3>Published Problem Statements</h3>
           <button className="primary small" type="button" onClick={() => onNavigate("create")}>+ New Brief</button>
         </div>
-        <div className="table-row">
-          <div>
-            <strong>Reduce calibration drift in topological qubit arrays</strong>
-            <small>Status: Accepting proposals · 3 submissions received</small>
+        
+        {loading ? (
+          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
+        ) : error ? (
+          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
+             <strong>Error:</strong> {error.message}
           </div>
-          <span className="status-dot">Active</span>
-        </div>
-        <div className="table-row">
-          <div>
-            <strong>Error mitigation protocols for noisy intermediate-scale hardware</strong>
-            <small>Status: Under evaluation · 2 submissions received</small>
-          </div>
-          <span className="status-dot">In Review</span>
-        </div>
+        ) : data.length === 0 ? (
+          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No problems found.</div>
+        ) : (
+          data.map(item => (
+            <div className="table-row" key={item.id}>
+              <div>
+                <strong>{item.title}</strong>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );
@@ -59,6 +74,29 @@ export function MyProblems({ onNavigate }) {
 
 export function ResearcherProposals({ onNavigate }) {
   const { user } = useAuth();
+  const [data, setData] = useState([]);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      if (!user?.id || !db) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const q = query(collection(db, "proposals"), where("researcherId", "==", user.id));
+        const querySnapshot = await getDocs(q);
+        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [user?.id]);
+
   return (
     <section className="page dashboard-page">
       <div className="page-heading">
@@ -70,40 +108,29 @@ export function ResearcherProposals({ onNavigate }) {
         <p>Track your submitted grant proposals, reviewer scoring outcomes, milestone deliverables, and verification escrow.</p>
       </div>
 
-      <div className="dashboard-stats-grid">
-        <div className="stat-card">
-          <span className="stat-num">3</span>
-          <span className="stat-label">Submitted Proposals</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">1</span>
-          <span className="stat-label">Awarded & Active</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">$80,000</span>
-          <span className="stat-label">Funded Grants</span>
-        </div>
-      </div>
-
       <div className="card-table">
         <div className="table-header">
           <h3>Active Proposal Records</h3>
           <button className="secondary small" type="button" onClick={() => onNavigate("discover")}>Browse Open Calls</button>
         </div>
-        <div className="table-row">
-          <div>
-            <strong>Formal verification for hybrid quantum compilers</strong>
-            <small>Target: Northstar Applied Research · Submitted: Aug 2026</small>
+        
+        {loading ? (
+          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
+        ) : error ? (
+          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
+             <strong>Error:</strong> {error.message}
           </div>
-          <span className="status-dot">Under Review</span>
-        </div>
-        <div className="table-row">
-          <div>
-            <strong>Machine-checkable proof suite covering agreed compiler core</strong>
-            <small>Milestone 1 Deliverable · Due in 14 days</small>
-          </div>
-          <span className="status-dot">In Progress</span>
-        </div>
+        ) : data.length === 0 ? (
+          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No proposals found.</div>
+        ) : (
+          data.map(item => (
+            <div className="table-row" key={item.id}>
+              <div>
+                <strong>{item.title}</strong>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );
@@ -111,6 +138,29 @@ export function ResearcherProposals({ onNavigate }) {
 
 export function EvaluatorQueue() {
   const { user } = useAuth();
+  const [data, setData] = useState([]);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      if (!user?.id || !db) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const q = query(collection(db, "evaluations"), where("evaluatorId", "==", user.id));
+        const querySnapshot = await getDocs(q);
+        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [user?.id]);
+
   return (
     <section className="page dashboard-page">
       <div className="page-heading">
@@ -122,39 +172,28 @@ export function EvaluatorQueue() {
         <p>Conduct double-blind technical assessments, assign criterion scores, and sign review hashes for on-chain anchoring.</p>
       </div>
 
-      <div className="dashboard-stats-grid">
-        <div className="stat-card">
-          <span className="stat-num">4</span>
-          <span className="stat-label">Pending Reviews</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">12</span>
-          <span className="stat-label">Completed Reviews</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">98.4%</span>
-          <span className="stat-label">Consensus Score</span>
-        </div>
-      </div>
-
       <div className="card-table">
         <div className="table-header">
           <h3>Assigned Blind Submissions</h3>
         </div>
-        <div className="table-row">
-          <div>
-            <strong>Submission #PROP-2026-081 · "Topological Drift Compensation"</strong>
-            <small>Double-blind assessment · Rubric: Feasibility, Novelty, Methodology</small>
+        
+        {loading ? (
+          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
+        ) : error ? (
+          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
+             <strong>Error:</strong> {error.message}
           </div>
-          <button className="primary small" type="button">Score Proposal</button>
-        </div>
-        <div className="table-row">
-          <div>
-            <strong>Submission #PROP-2026-094 · "Photonic Error Mapping Toolkit"</strong>
-            <small>Double-blind assessment · Rubric: Feasibility, Novelty, Methodology</small>
-          </div>
-          <button className="primary small" type="button">Score Proposal</button>
-        </div>
+        ) : data.length === 0 ? (
+          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No evaluations pending.</div>
+        ) : (
+          data.map(item => (
+            <div className="table-row" key={item.id}>
+              <div>
+                <strong>{item.title}</strong>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );
@@ -162,6 +201,29 @@ export function EvaluatorQueue() {
 
 export function FundingPortfolio({ onNavigate }) {
   const { user } = useAuth();
+  const [data, setData] = useState([]);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      if (!user?.id || !db) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const q = query(collection(db, "funding"), where("funderId", "==", user.id));
+        const querySnapshot = await getDocs(q);
+        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [user?.id]);
+
   return (
     <section className="page dashboard-page">
       <div className="page-heading">
@@ -173,33 +235,29 @@ export function FundingPortfolio({ onNavigate }) {
         <p>Oversee capital allocation, approve milestone disbursement tranches, and monitor portfolio performance.</p>
       </div>
 
-      <div className="dashboard-stats-grid">
-        <div className="stat-card">
-          <span className="stat-num">$450,000</span>
-          <span className="stat-label">Total Allocated</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">$180,000</span>
-          <span className="stat-label">Locked in Escrow</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">4</span>
-          <span className="stat-label">Active Research Grants</span>
-        </div>
-      </div>
-
       <div className="card-table">
         <div className="table-header">
           <h3>Disbursement Schedule</h3>
           <button className="primary small" type="button" onClick={() => onNavigate("create")}>+ New Funding Call</button>
         </div>
-        <div className="table-row">
-          <div>
-            <strong>Open benchmark suite for photonic error models (Dr. Mira Chen)</strong>
-            <small>Tranche 1 ($22,500) Released · Tranche 2 Pending Milestone 2</small>
+        
+        {loading ? (
+          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
+        ) : error ? (
+          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
+             <strong>Error:</strong> {error.message}
           </div>
-          <span className="status-dot">Escrow Active</span>
-        </div>
+        ) : data.length === 0 ? (
+          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No funding commitments found.</div>
+        ) : (
+          data.map(item => (
+            <div className="table-row" key={item.id}>
+              <div>
+                <strong>{item.title}</strong>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );
@@ -207,6 +265,28 @@ export function FundingPortfolio({ onNavigate }) {
 
 export function AdminAudit() {
   const { user } = useAuth();
+  const [data, setData] = useState([]);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      if (!user?.id || !db) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const querySnapshot = await getDocs(collection(db, "audits"));
+        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [user?.id]);
+
   return (
     <section className="page dashboard-page">
       <div className="page-heading">
@@ -218,39 +298,28 @@ export function AdminAudit() {
         <p>Monitor platform state transitions, inspect Arbitrum Sepolia audit event hashes, and enforce RBAC integrity.</p>
       </div>
 
-      <div className="dashboard-stats-grid">
-        <div className="stat-card">
-          <span className="stat-num">1,420</span>
-          <span className="stat-label">On-chain Audit Events</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">100%</span>
-          <span className="stat-label">O1-KR4 RBAC Enforcement</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-num">Arbitrum Sepolia</span>
-          <span className="stat-label">Chain ID 421614</span>
-        </div>
-      </div>
-
       <div className="card-table">
         <div className="table-header">
           <h3>Recent System Audit Events</h3>
         </div>
-        <div className="table-row">
-          <div>
-            <strong>PROPOSAL_HASH_ANCHORED · Tx: 0x8a92...b411</strong>
-            <small>Block #18239102 · Verified SHA-256 Merkle root committed</small>
+        
+        {loading ? (
+          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
+        ) : error ? (
+          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
+             <strong>Error:</strong> {error.message}
           </div>
-          <span className="status-dot">Verified</span>
-        </div>
-        <div className="table-row">
-          <div>
-            <strong>EVALUATOR_RUBRIC_COMMITTED · Tx: 0x4f12...99ca</strong>
-            <small>Block #18239088 · Blind score consensus calculated (3/3 signatures)</small>
-          </div>
-          <span className="status-dot">Verified</span>
-        </div>
+        ) : data.length === 0 ? (
+          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No audit events found.</div>
+        ) : (
+          data.map(item => (
+            <div className="table-row" key={item.id}>
+              <div>
+                <strong>{item.title}</strong>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );

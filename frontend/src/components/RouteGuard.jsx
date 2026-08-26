@@ -4,7 +4,12 @@ import { AccessDenied } from "./AccessDenied.jsx";
 
 /**
  * RouteGuard
- * Enforces authentication and multi-role permission sets (O1-KR4).
+ * Enforces authentication and multi-role permission sets for UX routing (O1-KR4).
+ *
+ * ARCHITECTURAL NOTE: This component acts ONLY as a client-side UX mechanism to 
+ * prevent unnecessary data fetches and provide smooth redirects. It is NOT a security 
+ * boundary. True data authorization must be enforced via Firestore Security Rules 
+ * and/or Cloud Functions to protect against direct API access.
  */
 export function RouteGuard({ targetRoute, allowedRoles, authRequired, children, onNavigate }) {
   const { isAuthenticated, hasAnyRole } = useAuth();
