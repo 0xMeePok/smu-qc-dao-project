@@ -1,0 +1,175 @@
+rules_version = '2';
+
+// Server-side authorisation for wallet onboarding.
+//
+// The security model rests on one fact: `request.auth.uid` IS the lowercase wallet
+// address, and a uid can only exist because firebase/functions/index.js verified a
+// signature over a server-issued, single-use nonce before minting the custom token.
+// A browser cannot forge one. That is why `request.auth.uid == address` below is a
+// real proof of wallet ownership rather than a claim the client made about itself.
+//
+// `role` is 0 (user) or 1 (administrator) - see frontend/src/lib/roles.js. It is
+// fixed to 0 on create and immutable on every client update below, so becoming an
+// administrator is only ever done by hand in the Firestore console (or via the
+// Admin SDK), which bypasses these rules entirely. No amount of frontend code can
+// grant it.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isWallet(address) {
+      return request.auth != null && request.auth.uid == address;
+    }
+
+    function isWalletAddress(value) {
+      return value is string && value.matches('^0x[0-9a-f]{40}$');
+    }
+
+    function isNonEmptyString(value, maxLength) {
+      return value is string && value.size() > 1 && value.size() <= maxLength;
+    }
+
+    // Contribution counters must start at zero. A client that could seed its own
+    // karma at signup would make the whole reputation system meaningless.
+    function statsAreZeroed(stats) {
+      return stats.keys().hasOnly([
+               'comments', 'businessProblems', 'openFunding',
+               'fundingRequests', 'karma', 'reputation'
+             ])
+             && stats.keys().hasAll([
+                  'comments', 'businessProblems', 'openFunding',
+                  'fundingRequests', 'karma', 'reputation'
+                ])
+             && stats.comments == 0
+             && stats.businessProblems == 0
+             && stats.openFunding == 0
+             && stats.fundingRequests == 0
+             && stats.karma == 0
+             && stats.reputation == 0;
+    }
+
+    match /users/{address} {
+      // The exact field set frontend/src/lib/profile.js writes at creation. Locking
+      // this with hasOnly() means a client cannot smuggle in an extra field (e.g. a
+      // self-granted `isAdmin`) that later code might start trusting without
+      // re-checking - the schema is enforced here, not just assumed from the client.
+      function hasProfileSchema(data) {
+        return data.keys().hasOnly([
+          'address', 'fullName', 'organisation', 'role', 'chainId', 'stats',
+          'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt'
+        ]);
+      }
+
+      // PRIVATE. Only the wallet that owns this document may read it.
+      // Note there is no `list` here at all, only `get`.
+      allow get: if isWallet(address);
+
+      allow create: if isWallet(address)
+        && isWalletAddress(address)
+        && hasProfileSchema(request.resource.data)
+        && request.resource.data.address == address
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        // 0 = normal user. Every new account is one - there is no self-service path
+        // to 1 (administrator) anywhere in this rule. Becoming an admin means
+        // someone with Firestore console access edits this field by hand; nothing
+        // the client can send, at signup or ever after, can set it to 1 itself.
+        && request.resource.data.role == 0
+        // Fixed testnet id for now; this becomes a real chain allow-list if the
+        // platform ever supports more than one network.
+        && request.resource.data.chainId == 421614
+        && statsAreZeroed(request.resource.data.stats)
+        // Only reachable at all with a uid a signature verification minted, so this
+        // is safe to require outright rather than merely permit.
+        && request.resource.data.walletVerified == true
+        && isNonEmptyString(request.resource.data.termsVersion, 40)
+        && request.resource.data.termsAcceptedAt == request.time
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // Only the wallet itself may edit its profile, on any device, because the uid
+      // is derived from a signature rather than from a per-browser session.
+      //
+      // `role` and `stats` both have to come back byte-identical. `stats` moves only
+      // via the Admin SDK; `role` moves only by hand in the Firestore console - if a
+      // signed-in user could ever change their own role, "administrator" would be
+      // available to anyone with a browser console, not something granted.
+      allow update: if isWallet(address)
+        && resource != null
+        && hasProfileSchema(request.resource.data)
+        && request.resource.data.address == resource.data.address
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.stats == resource.data.stats
+        && request.resource.data.chainId == resource.data.chainId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.termsAcceptedAt == resource.data.termsAcceptedAt
+        && request.resource.data.termsVersion == resource.data.termsVersion
+        && request.resource.data.walletVerified == resource.data.walletVerified
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // The deliberately-small public face of a profile: enough to attribute a
+    // published problem or an evaluation to someone, and nothing else.
+    //
+    // Kept as a SEPARATE document rather than a field-level filter on /users because
+    // Firestore rules cannot restrict which fields a read returns - `allow get` is
+    // all-or-nothing on the whole document. The only way to publish two fields while
+    // keeping nine private is to store them apart.
+    match /publicProfiles/{address} {
+      function hasPublicSchema(data) {
+        return data.keys().hasOnly(['address', 'fullName', 'organisation']);
+      }
+
+      // `get` but NOT `list`: you may look up an address you already have
+      allow get: if true;
+
+      // getAfter() reads the /users document as it will be once THIS write commits,
+      // which is what lets the two be written together in one batch and still be
+      // checked against each other. Without it a verified wallet could create a
+      // public record with no account behind it, or drift its public name away from
+      // its private profile - making attribution meaningless, since the name shown
+      // beside published work would no longer be the name on the account.
+      function matchesPrivateProfile(data) {
+        let profile = getAfter(/databases/$(database)/documents/users/$(address)).data;
+        return profile.address == data.address
+               && profile.fullName == data.fullName
+               && profile.organisation == data.organisation;
+      }
+
+      allow create: if isWallet(address)
+        && isWalletAddress(address)
+        && hasPublicSchema(request.resource.data)
+        && request.resource.data.address == address
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        && existsAfter(/databases/$(database)/documents/users/$(address))
+        && matchesPrivateProfile(request.resource.data);
+
+      allow update: if isWallet(address)
+        && resource != null
+        && hasPublicSchema(request.resource.data)
+        && request.resource.data.address == resource.data.address
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120)
+        && existsAfter(/databases/$(database)/documents/users/$(address))
+        && matchesPrivateProfile(request.resource.data);
+
+      allow delete: if false;
+    }
+
+    // Sign-in nonces are written and read only by the Admin SDK inside the callable
+    // functions. Exposing them to the browser would let an attacker read a pending
+    // nonce, or clear the `consumed` flag and replay a signature.
+    match /siweNonces/{address} {
+      allow read, write: if false;
+    }
+
+    // Deny everything not matched above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

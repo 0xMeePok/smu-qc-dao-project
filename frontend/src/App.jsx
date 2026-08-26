@@ -4,9 +4,15 @@ import { ROLES } from "./config/roles.js";
 import { FEATURES } from "./config/features.js";
 import { getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
+import { useSession } from "./context/SessionContext.jsx";
+import { shortenAddress } from "./lib/chain.js";
+import { isAdmin } from "./lib/roles.js";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
 import { AccessDenied } from "./components/AccessDenied.jsx";
+import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
+import { OnboardingModal } from "./components/OnboardingModal.jsx";
+import { NetworkBanner } from "./components/NetworkBanner.jsx";
 import {
   MyProblems,
   ResearcherProposals,
@@ -65,7 +71,7 @@ function Logo() {
 
 function DemoToolbar() {
   const { roles, login, logout, user } = useAuth();
-  const isAdmin = roles.includes(ROLES.ADMIN);
+  const isAdminUser = roles.includes(ROLES.ADMIN);
   const isMember = roles.includes(ROLES.OWNER) && roles.includes(ROLES.RESEARCHER);
   const isGuest = !user;
 
@@ -78,7 +84,7 @@ function DemoToolbar() {
           <small>
             Active:{" "}
             <span className="active-role-highlight">
-              {isGuest ? "Guest (Unauthenticated)" : isAdmin ? "DAO Admin" : "Platform Member (All Roles)"}
+              {isGuest ? "Guest (Unauthenticated)" : isAdminUser ? "DAO Admin" : "Platform Member (All Roles)"}
             </span>
           </small>
         </div>
@@ -99,7 +105,7 @@ function DemoToolbar() {
           </button>
           <button
             type="button"
-            className={`demo-role-btn ${isAdmin ? "selected" : ""}`}
+            className={`demo-role-btn ${isAdminUser ? "selected" : ""}`}
             onClick={() => login("admin")}
           >
             DAO Admin
@@ -190,10 +196,70 @@ function WorkspacesDropdown({ route, workspaceRoutes }) {
   );
 }
 
+function AccountControls() {
+  const { isSignedIn, profile, address, signOut: signOutWeb3 } = useSession();
+  const { user, logout: logoutDemo, hasRole } = useAuth();
+
+  if (isSignedIn) {
+    const isDaoAdmin = isAdmin(profile?.role) || hasRole(ROLES.ADMIN);
+    return (
+      <div className="account-controls">
+        <div className="user-session-pill">
+          <div className="user-session-info">
+            <span className="user-name">{profile?.fullName || shortenAddress(address)}</span>
+            <div className="role-tags-row">
+              {isDaoAdmin ? (
+                <span className="user-role-badge admin-badge">DAO Admin</span>
+              ) : (
+                <span className="user-role-badge member-badge" title="Owner · Researcher · Evaluator · Funder">
+                  Platform Member
+                </span>
+              )}
+            </div>
+          </div>
+          <button className="signout-btn" type="button" onClick={() => signOutWeb3()} title="Sign Out">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (user) {
+    const isDaoAdmin = hasRole(ROLES.ADMIN);
+    return (
+      <div className="account-controls">
+        <div className="user-session-pill">
+          <div className="user-session-info">
+            <span className="user-name">{user.name}</span>
+            <div className="role-tags-row">
+              {isDaoAdmin ? (
+                <span className="user-role-badge admin-badge">DAO Admin</span>
+              ) : (
+                <span className="user-role-badge member-badge" title="Owner · Researcher · Evaluator · Funder">
+                  Platform Member
+                </span>
+              )}
+            </div>
+          </div>
+          <button className="signout-btn" type="button" onClick={logoutDemo} title="Sign Out">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="account-controls">
+      <SignInWithWallet />
+    </div>
+  );
+}
+
 function Shell({ route, children }) {
-  const { user, roles, logout, hasRole } = useAuth();
+  const { roles } = useAuth();
   const navRoutes = getPermittedNavRoutes(roles);
-  const isAdmin = hasRole(ROLES.ADMIN);
 
   // Group primary navigation vs stakeholder workspaces
   const workspaceKeys = new Set(["my-problems", "proposals", "evaluations", "funding"]);
@@ -224,29 +290,7 @@ function Shell({ route, children }) {
         </div>
 
         <div className="topbar-right">
-          {user ? (
-            <div className="user-session-pill">
-              <div className="user-session-info">
-                <span className="user-name">{user.name}</span>
-                <div className="role-tags-row">
-                  {isAdmin ? (
-                    <span className="user-role-badge admin-badge">DAO Admin</span>
-                  ) : (
-                    <span className="user-role-badge member-badge" title="Owner · Researcher · Evaluator · Funder">
-                      Platform Member
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button className="signout-btn" type="button" onClick={logout} title="Sign Out">
-                Sign Out
-              </button>
-            </div>
-          ) : (
-            <button className="primary small signin-nav-btn" type="button" onClick={() => go("login")}>
-              Sign In
-            </button>
-          )}
+          <AccountControls />
         </div>
       </header>
 
@@ -829,7 +873,13 @@ function AppContent() {
     pageComponent = <AccessDenied onNavigate={go} />;
   }
 
-  return <Shell route={section}>{pageComponent}</Shell>;
+  return (
+    <>
+      <NetworkBanner />
+      <Shell route={section}>{pageComponent}</Shell>
+      <OnboardingModal />
+    </>
+  );
 }
 
 export default function App() {

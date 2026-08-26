@@ -1,0 +1,47 @@
+import { initializeApp, getApps } from "firebase/app";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
+
+const config = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+// Must match the region the callable functions are deployed to (see firebase/functions/index.js).
+export const FUNCTIONS_REGION = "asia-southeast1";
+
+// Only these three are load-bearing for this app:
+//   apiKey    - Identity Toolkit (custom-token sign-in) and Firestore
+//   projectId - Firestore and the callable Cloud Functions
+//   appId     - app identity used by the SDK
+// authDomain matters only for OAuth popup/redirect flows (Google, GitHub, email
+// link), which this app does not use - verified: signInWithCustomToken succeeds
+// with it absent. storageBucket and messagingSenderId are for Storage and FCM,
+// neither of which is wired up. Keep them in .env if you like; a missing one must
+// not stop the app from starting.
+const REQUIRED_KEYS = ["apiKey", "projectId", "appId"];
+
+export const missingFirebaseConfig = REQUIRED_KEYS
+  .filter((key) => !config[key])
+  .map((key) => `VITE_FIREBASE_${key.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}`);
+
+export const isFirebaseConfigured = missingFirebaseConfig.length === 0;
+
+const app = isFirebaseConfigured ? (getApps()[0] ?? initializeApp(config)) : null;
+
+export const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app) : null;
+export const functions = app ? getFunctions(app, FUNCTIONS_REGION) : null;
+
+if (app && import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true") {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+}
+
+export default app;

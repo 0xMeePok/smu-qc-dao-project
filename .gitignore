@@ -2,6 +2,10 @@
 node_modules/
 */node_modules/
 **/node_modules/
+/firebase/node_modules
+/firebase/functions/node_modules
+/contracts/qft-tokens/node_modules
+/frontend/node_modules
 
 # Production & Build Outputs
 dist/
@@ -9,6 +13,7 @@ dist-ssr/
 build/
 out/
 frontend/dist/
+/frontend/dist
 *.local
 
 # Solidity & Hardhat Artifacts
@@ -17,12 +22,35 @@ cache/
 contracts/qft-tokens/artifacts/
 contracts/qft-tokens/cache/
 contracts/qft-tokens/deployments/
+/contracts/qft-tokens/artifacts
+/contracts/qft-tokens/cache
+/contracts/qft-tokens/deployments
+/contracts/stable-faucet/artifacts
+/contracts/stable-faucet/cache
+/contracts/stable-faucet/deployments
+/contracts/stable-faucet/site/dist
 
 # Environment Files & Secrets
 .env
+**/.env
 .env.*
-!.env.example
+/.env.*
+frontend/.env.local
+frontend/.env.*.local
 contracts/qft-tokens/.env
+firebase/functions/.env
+!**/.env.example
+
+# Firebase Hosting, Emulators & Data Exports
+*.cache
+hosting/.cache
+firebase/.firebaserc
+.firebaserc
+/firebase-*.zip
+/.firebase/
+**/.firebase/
+firebase-export-*/
+emulator-ui/
 
 # Logs
 *.log
@@ -31,39 +59,32 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
-# Firebase
 firebase-debug.log
 firebase-debug.*.log
-.firebaserc
-firebase.json
-*.cache
-hosting/.cache
-.firebase/
-emulator-ui/
 
-# Contracts / Stable Faucet
-/contracts/stable-faucet/artifacts
-/contracts/stable-faucet/cache
-/contracts/stable-faucet/deployments
-/contracts/stable-faucet/site/dist
+# Editors & IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+**/.claude/settings.local.json
 
-# Editor & OS Files
+# Test & Build Caches
+coverage/
+.eslintcache
+*.tsbuildinfo
+
+# OS Files (macOS & Windows)
 .DS_Store
-.DS_Store?
+**/.DS_Store
 ._*
 .Spotlight-V100
 .Trashes
 ehthumbs.db
 Thumbs.db
 [Dd]esktop.ini
-
-# IDE Directories
-.idea/
-.vscode/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-

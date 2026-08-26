@@ -1,11 +1,21 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { DEMO_USERS, ROLES } from "../config/roles.js";
+import { useSession } from "./SessionContext.jsx";
+import { shortenAddress } from "../lib/chain.js";
+import { isAdmin } from "../lib/roles.js";
 
 const AuthContext = createContext(null);
 const STORAGE_KEY = "qc_dao_active_user";
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
+  let session = null;
+  try {
+    session = useSession();
+  } catch {
+    // In standalone tests or environments without SessionProvider, session remains null
+  }
+
+  const [demoUser, setDemoUser] = useState(() => {
     try {
       const saved = sessionStorage.getItem(STORAGE_KEY);
       return saved ? JSON.parse(saved) : null;
@@ -16,15 +26,31 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     try {
-      if (user) {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+      if (demoUser) {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(demoUser));
       } else {
         sessionStorage.removeItem(STORAGE_KEY);
       }
     } catch (e) {
       console.error("Failed to persist session:", e);
     }
-  }, [user]);
+  }, [demoUser]);
+
+  const user = useMemo(() => {
+    if (session?.isSignedIn && session?.profile) {
+      const isUserAdmin = isAdmin(session.profile.role);
+      return {
+        id: session.address,
+        name: session.profile.fullName || shortenAddress(session.address),
+        org: session.profile.organisation || "QC Network",
+        role: isUserAdmin ? ROLES.ADMIN : ROLES.OWNER,
+        roles: isUserAdmin
+          ? [ROLES.ADMIN]
+          : [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER],
+      };
+    }
+    return demoUser;
+  }, [session?.isSignedIn, session?.profile, session?.address, demoUser]);
 
   const roles = useMemo(() => {
     if (!user) return [ROLES.GUEST];
@@ -42,22 +68,25 @@ export function AuthProvider({ children }) {
 
   const login = (roleOrProfile) => {
     if (!roleOrProfile || roleOrProfile === ROLES.GUEST) {
-      setUser(null);
+      setDemoUser(null);
       return;
     }
 
     if (typeof roleOrProfile === "string") {
       const profile = DEMO_USERS[roleOrProfile] || DEMO_USERS.member;
       if (profile) {
-        setUser(profile);
+        setDemoUser(profile);
       }
     } else if (typeof roleOrProfile === "object") {
-      setUser(roleOrProfile);
+      setDemoUser(roleOrProfile);
     }
   };
 
   const logout = () => {
-    setUser(null);
+    setDemoUser(null);
+    if (session?.signOut) {
+      session.signOut();
+    }
   };
 
   const value = {
