@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 
 const ADDRESS = `0x${"a".repeat(40)}`;
 const OTHER = `0x${"b".repeat(40)}`;
@@ -140,9 +140,171 @@ describe("users/{address} create", () => {
 });
 
 describe("users/{address} read", () => {
-  it("allows public profile reads", async () => {
-    const db = env.unauthenticatedContext().firestore();
+  it("lets a wallet read its own profile", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(getDoc(doc(db, "users", ADDRESS)));
+  });
+
+  it("blocks an unauthenticated read of a profile", async () => {
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, "users", ADDRESS)));
+  });
+
+  it("blocks one signed-in wallet from reading another wallet's profile", async () => {
+    // /users carries the real name, organisation, role and signup timestamps.
+    // Signing in proves you own YOUR wallet; it does not entitle you to anyone
+    // else's record.
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "users", ADDRESS)));
+  });
+
+  it("blocks enumerating the whole user base", async () => {
+    // The original rule was `allow get, list: if true`. `list` is a separate
+    // capability from `get`, and it let anyone page through every profile in the
+    // project and export the lot - names, organisations, wallets, signup times.
+    // Nothing in this app has ever needed to enumerate users.
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDocs(collection(db, "users")));
+  });
+
+  it("blocks a signed-in wallet from enumerating the user base either", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(getDocs(collection(db, "users")));
+  });
+
+  it("never exposes which wallets are administrators", async () => {
+    // The reason role must not be publicly readable: it hands an attacker a
+    // precise target list of the only accounts whose compromise matters.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER, { role: 1 }));
+      await setDoc(doc(ctx.firestore(), "publicProfiles", OTHER), {
+        address: OTHER,
+        fullName: "An Administrator",
+        organisation: "Singapore Management University",
+      });
+    });
+
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, "users", OTHER)));
+
+    // Nor may a different signed-in wallet read it - being logged in is not a
+    // licence to inspect other people's records.
+    const asSomeoneElse = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(getDoc(doc(asSomeoneElse, "users", OTHER)));
+
+    // The public record for that same admin must carry no hint of the role.
+    const publicSnapshot = await assertSucceeds(getDoc(doc(db, "publicProfiles", OTHER)));
+    assert.equal(publicSnapshot.data().role, undefined, "role must not leak via publicProfiles");
+    assert.deepEqual(
+      Object.keys(publicSnapshot.data()).sort(),
+      ["address", "fullName", "organisation"],
+      "the public record must expose exactly these three fields and nothing more",
+    );
+  });
+
+  it("still lets an administrator read their OWN role", async () => {
+    // The other half of the requirement: hiding `role` from everyone else must not
+    // hide it from its owner, or the app could never tell an admin they are one.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER, { role: 1 }));
+    });
+
+    const db = env.authenticatedContext(OTHER).firestore();
+    const snapshot = await assertSucceeds(getDoc(doc(db, "users", OTHER)));
+    assert.equal(snapshot.data().role, 1, "an admin must still see their own role");
+  });
+});
+
+describe("publicProfiles/{address}", () => {
+  it("lets anyone look up a known address, so published work can be attributed", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "publicProfiles", ADDRESS), {
+        address: ADDRESS,
+        fullName: "Ashley Chung",
+        organisation: "Singapore Management University",
+      });
+    });
+
+    const db = env.unauthenticatedContext().firestore();
+    await assertSucceeds(getDoc(doc(db, "publicProfiles", ADDRESS)));
+  });
+
+  it("blocks enumerating public profiles", async () => {
+    // Lookup is allowed, listing is not. Permitting `list` here would rebuild the
+    // exact directory-export breach this collection was created to prevent, just
+    // one collection over.
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDocs(collection(db, "publicProfiles")));
+  });
+
+  it("lets a wallet create its own public record", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertSucceeds(setDoc(doc(db, "publicProfiles", OTHER), {
+      address: OTHER,
+      fullName: "Ada Lovelace",
+      organisation: "Singapore Management University",
+    }));
+  });
+
+  it("blocks writing a public record for someone else's address", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(setDoc(doc(db, "publicProfiles", ADDRESS), {
+      address: ADDRESS,
+      fullName: "Impersonator",
+      organisation: "Elsewhere",
+    }));
+  });
+
+  it("lets another signed-in wallet look up a public record", async () => {
+    // Attribution has to work for OTHER people, not just anonymous visitors -
+    // otherwise signing in would paradoxically remove your ability to see who
+    // published something.
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertSucceeds(getDoc(doc(db, "publicProfiles", ADDRESS)));
+  });
+
+  // Every private field, checked one at a time on BOTH write paths. The previous
+  // version of this test only tried `role`, and only on create - so a rule that
+  // leaked `stats`, or that locked create but left update open, would have passed
+  // it. hasOnly() is the thing under test here, and it has to hold everywhere.
+  const FORBIDDEN_PUBLIC_FIELDS = {
+    role: 1,
+    stats: { comments: 0, businessProblems: 0, openFunding: 0, fundingRequests: 0, karma: 0, reputation: 0 },
+    walletVerified: true,
+    chainId: 421614,
+    termsVersion: "2026-08-24",
+    createdAt: serverTimestamp(),
+    isAdmin: true,
+  };
+
+  for (const [field, value] of Object.entries(FORBIDDEN_PUBLIC_FIELDS)) {
+    it(`blocks smuggling '${field}' into a public record on create`, async () => {
+      const db = env.authenticatedContext(OTHER).firestore();
+      await assertFails(setDoc(doc(db, "publicProfiles", OTHER), {
+        address: OTHER,
+        fullName: "Ada Lovelace",
+        organisation: "Singapore Management University",
+        [field]: value,
+      }));
+    });
+
+    it(`blocks adding '${field}' to an existing public record via update`, async () => {
+      await env.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), "publicProfiles", OTHER), {
+          address: OTHER,
+          fullName: "Ada Lovelace",
+          organisation: "Singapore Management University",
+        });
+      });
+
+      const db = env.authenticatedContext(OTHER).firestore();
+      await assertFails(updateDoc(doc(db, "publicProfiles", OTHER), { [field]: value }));
+    });
+  }
+
+  it("blocks deleting a public record", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(deleteDoc(doc(db, "publicProfiles", ADDRESS)));
   });
 });
 

@@ -25,7 +25,7 @@ fields are required versus optional, and why.
 npm test
 ```
 
-18 tests over `src/lib/validation.js` — field rules, the default role assigned at
+47 tests over `src/lib/*` — field rules, the default role assigned at
 account creation, and the whole-form validator. No emulator or network needed.
 
 ## Build
@@ -38,7 +38,8 @@ npm run build
 
 ```
 src/
-├── lib/            # Firebase/wagmi setup, validation, SIWE client calls, roles, stats
+├── lib/            # Firebase/wagmi setup, validation, SIWE client calls, roles, stats,
+│                  #   profile.js (writes users/ + publicProfiles/ in one batch)
 ├── context/         # SessionContext — the wallet -> verified -> onboarding/signed-in state machine
 ├── components/      # Modal shell, connector picker, onboarding form, sign-in button
 ├── pages/            # AdminPage (only reachable when the signed-in profile has role == 1)

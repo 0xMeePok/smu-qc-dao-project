@@ -11,17 +11,17 @@ for anyone editing `firestore.rules` or `functions/index.js` and redeploying.
 ```
 firebase/
 ├── deploy.sh                    # One-shot production setup - see "Deploy" below
-├── firestore.rules              # Server-side authorisation for the users/{address} schema
+├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, siweNonces/
 ├── firestore.indexes.json       # No composite indexes needed yet
 ├── firebase.json                # Emulator ports, hosting config, functions source path
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
 ├── test/
-│   └── firestore.rules.test.mjs # 18 tests against firestore.rules, via the emulator
+│   └── firestore.rules.test.mjs # 50 tests against firestore.rules, via the emulator
 └── functions/
     ├── index.js                 # getSiweNonce + verifySiweSignature (see below)
     ├── package.json
     └── test/
-        └── siwe.test.mjs        # 7 adversarial tests: replay, forged signature, wrong signer, etc.
+        └── siwe.test.mjs        # 16 adversarial tests: replay, forged signature, spoofed origin, etc.
 ```
 
 ### What the two Cloud Functions do
@@ -104,13 +104,60 @@ npm --prefix functions test
 FUNCTIONS_BASE_URL=https://asia-southeast1-<project-id>.cloudfunctions.net npm --prefix functions test
 ```
 
-The rules suite (18 tests) checks things like: a wallet can only create its own
-profile, `stats` can never be written non-zero at signup, one signed-in wallet cannot
-edit another's profile, and `siweNonces` is unreachable from any client.
+The rules suite (50 tests) checks things like: a wallet can only create its own
+profile and can only read its own, `stats` can never be written non-zero at signup,
+the user base cannot be enumerated, `role` never leaks through `publicProfiles`, and
+`siweNonces` is unreachable from any client.
 
-The functions suite (7 tests) checks that a replayed signature, a signature from the
-wrong key, a fabricated signature, and a signature over a different message are all
-rejected — and that a legitimate signature succeeds.
+The functions suite (16 tests) checks that a replayed signature, a signature from the
+wrong key, a fabricated signature, a signature over a different message, and a nonce
+request from an unrecognised origin are all rejected — and that a legitimate
+signature succeeds.
+
+### Allowed sign-in origins
+
+The SIWE message names a domain, and that name is what binds a signature to this
+site. `getSiweNonce` refuses to issue a message to a browser origin it does not
+recognise — otherwise anyone could request a message naming *their* domain, get a
+user to sign it, and exchange that signature here for a real session.
+
+**This fails closed.** An unlisted origin gets `permission-denied`, which surfaces in
+the app as *"The sign-in server refused the request."* Recognised automatically, with
+no configuration:
+
+- `<project-id>.web.app` and `<project-id>.firebaseapp.com`
+- `localhost:5173` / `127.0.0.1:5173`, **only** under the emulator — never in a
+  deployed function, where allow-listing localhost would reopen the hole
+
+Additional origins (a custom domain) go in `functions/.env`, which is gitignored:
+
+```
+SIWE_DOMAIN=qcdao.example.edu
+SIWE_ALLOWED_HOSTS=qcdao.example.edu,www.qcdao.example.edu
+```
+
+`SIWE_DOMAIN` is the canonical name used when a request has no `Origin` header at all
+(a server, curl, the test suite). `SIWE_ALLOWED_HOSTS` is a comma-separated list of
+additional browser origins allowed to request a message.
+
+Do **not** add `localhost` to `SIWE_ALLOWED_HOSTS` on a deployed project to make local
+development work. It would let anyone forge `Origin: localhost:5173` and obtain a
+signable message again. Use the emulator instead — see below.
+
+### Local development against the emulator
+
+Because deployed functions refuse `localhost`, a local frontend pointed at the live
+backend will fail sign-in with *"The sign-in server refused the request."* Run the
+emulator instead, where dev origins are allowed automatically:
+
+```bash
+npx firebase emulators:start --only functions,firestore,auth --project qc-dao-demo
+```
+
+Then set `VITE_FIREBASE_USE_EMULATORS=true` in `frontend/.env.local` and run
+`npm run dev` as usual. The app still opens at `http://localhost:5173`; only the
+backend changes. Emulator data starts empty and is discarded on shutdown, so you will
+re-onboard a test wallet each session unless you pass `--export-on-exit`.
 
 ### Deploy
 
@@ -140,6 +187,26 @@ firebase functions:list --project <project-id>
 
 You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
 
+## Collections
+
+| Collection | Who can read | Contents |
+|---|---|---|
+| `users/{address}` | the owning wallet only (`get`, never `list`) | the full profile, including `role` |
+| `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation` — nothing else |
+| `siweNonces/{address}` | nobody; Admin SDK only | pending sign-in nonces |
+
+A profile is split across two documents because Firestore rules can only allow or
+deny a whole document — there is no way to publish some fields and hide others
+within one. `role` therefore lives only in `users`, so nothing can reveal which
+wallets are administrators.
+
+Neither collection grants `list`. An address can be looked up when it is already
+known (because it was attached to something published), but the directory cannot be
+enumerated.
+
+`createProfile` in `frontend/src/lib/profile.js` writes both documents in a single
+batch, so an account can never end up half-created.
+
 ## The `users/{address}` schema these rules enforce
 
 | Field | Type | Notes |
@@ -157,6 +224,18 @@ You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
 No other fields are allowed — `create` and `update` both reject a document with any
 field outside this list, so a client can't smuggle in something like a self-granted
 `isAdmin` for later code to trust by accident.
+
+## The `publicProfiles/{address}` schema
+
+| Field | Type | Notes |
+|---|---|---|
+| `address` | string | lowercase `0x…`, must equal the document id |
+| `fullName` | string | 2–80 chars |
+| `organisation` | string | 2–120 chars |
+
+Locked with `hasOnly()` on both `create` and `update`, so `role`, `stats`,
+`walletVerified`, `chainId` and the timestamps cannot be written here even by the
+wallet that owns the record.
 
 `stats` can only ever move via the Admin SDK, which bypasses these rules — nothing
 currently writes to it, since comments/problems/funding/proposals are not built yet.

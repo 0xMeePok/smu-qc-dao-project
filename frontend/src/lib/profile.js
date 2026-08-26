@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { OnboardingError } from "./errors.js";
@@ -15,9 +15,36 @@ function profileRef(address) {
   return doc(db, "users", address.toLowerCase());
 }
 
+// The public face of a profile - name and organisation only. Split out of /users
+// because Firestore rules cannot filter which FIELDS a read returns: `allow get` is
+// all-or-nothing per document, so the only way to publish two fields while keeping
+// `role`, `stats` and the timestamps private is to keep them in different documents.
+// See the publicProfiles block in firebase/firestore.rules.
+function publicProfileRef(address) {
+  return doc(db, "publicProfiles", address.toLowerCase());
+}
+
+function toPublicProfile(profile) {
+  return {
+    address: profile.address,
+    fullName: profile.fullName,
+    organisation: profile.organisation,
+  };
+}
+
+/**
+ * Reads the signed-in user's OWN profile. /users is readable only by its owner, so
+ * this will be denied for any other address - use findPublicProfileByAddress for
+ * attributing published work to someone else.
+ */
 export async function findProfileByAddress(address) {
   requireFirebase();
   const snapshot = await getDoc(profileRef(address));
+  return snapshot.exists() ? snapshot.data() : null;
+}
+export async function findPublicProfileByAddress(address) {
+  requireFirebase();
+  const snapshot = await getDoc(publicProfileRef(address));
   return snapshot.exists() ? snapshot.data() : null;
 }
 
@@ -51,6 +78,14 @@ export async function createProfile({ form, address }) {
     updatedAt: serverTimestamp(),
   };
 
-  await setDoc(profileRef(lower), profile);
+  // Batched so the private profile and its public face are created in one atomic
+  // commit. Two sequential setDoc calls could leave an account half-created if the
+  // second failed - either a private profile nobody can attribute work to, or a
+  // public name with no account behind it.
+  const batch = writeBatch(db);
+  batch.set(profileRef(lower), profile);
+  batch.set(publicProfileRef(lower), toPublicProfile(profile));
+  await batch.commit();
+
   return profile;
 }

@@ -48,8 +48,16 @@ signInWithCustomToken()
       +-- users/{address} exists?  --> signed in
       |
       +-- not found?               --> onboarding popup (full name, organisation)
-                                        creates the profile as a normal user
+                                        creates the profile as a normal user, writing
+                                        users/{address} and publicProfiles/{address}
+                                        in one batch
 ```
+
+Profiles are stored across two collections. `users/{address}` holds the full record —
+including `role` — and is readable only by the wallet that owns it.
+`publicProfiles/{address}` holds just `address`, `fullName` and `organisation`, and is
+readable by anyone so published work can be attributed. Neither can be listed, so the
+user base cannot be enumerated and nothing reveals which wallets are administrators.
 
 `request.auth.uid` **is** the lowercase wallet address, and that uid can only exist
 because a Cloud Function verified a real signature first. That is what makes
@@ -83,7 +91,7 @@ smu-qc-dao-project/
 │   └── test/                            # Validation unit tests
 ├── firebase/                  # Firestore rules, Cloud Functions, their tests
 │   ├── functions/                # getSiweNonce + verifySiweSignature
-│   └── test/                       # Firestore rules tests (18, via emulator)
+│   └── test/                       # Firestore rules tests (50, via emulator)
 └── README.md
 ```
 
@@ -169,19 +177,20 @@ need to redeploy, or want to run everything against local emulators instead, see
 ## Testing
 
 ```bash
-npm test --prefix frontend      # 18 tests — validation rules, default role, whole-form checks
-npm test --prefix firebase      # 18 tests — Firestore rules, via a local emulator (needs Java)
-npm test --prefix firebase/functions   # 7 tests — adversarial signature verification
+npm test --prefix frontend      # 47 tests — validation rules, default role, whole-form checks
+npm test --prefix firebase      # 50 tests — Firestore rules, via a local emulator (needs Java)
+npm test --prefix firebase/functions   # 16 tests — adversarial signature verification
 ```
 
-The functions tests need the Functions emulator running, or `FUNCTIONS_BASE_URL`
-pointed at a live deployment — see [`firebase/README.md`](firebase/README.md).
+Each suite boots and tears down whatever emulator it needs, so no manual setup is
+required — see [`firebase/README.md`](firebase/README.md).
 
 ## Current implementation status
 
 Implemented: wallet sign-in with server-verified signatures, onboarding (name +
 organisation), a two-level access model (normal user / administrator, granted by
-hand), an admin-only page shell, and the Firestore schema for user profiles including
+hand), an admin-only page shell, and the Firestore schema for user profiles — split
+into a private `users` record and a minimal public `publicProfiles` record — including
 placeholder contribution counters (`comments`, `businessProblems`, `openFunding`,
 `fundingRequests`, `karma`, `reputation` — all currently `0`, nothing increments them
 yet).

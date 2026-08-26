@@ -59,9 +59,9 @@ service cloud.firestore {
         ]);
       }
 
-      // Profiles are public reads: the platform shows who published a problem or
-      // recorded an evaluation. Nothing sensitive is stored on them.
-      allow get, list: if true;
+      // PRIVATE. Only the wallet that owns this document may read it.
+      // Note there is no `list` here at all, only `get`.
+      allow get: if isWallet(address);
 
       allow create: if isWallet(address)
         && isWalletAddress(address)
@@ -107,6 +107,38 @@ service cloud.firestore {
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
         && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // The deliberately-small public face of a profile: enough to attribute a
+    // published problem or an evaluation to someone, and nothing else.
+    //
+    // Kept as a SEPARATE document rather than a field-level filter on /users because
+    // Firestore rules cannot restrict which fields a read returns - `allow get` is
+    // all-or-nothing on the whole document. The only way to publish two fields while
+    // keeping nine private is to store them apart.
+    match /publicProfiles/{address} {
+      function hasPublicSchema(data) {
+        return data.keys().hasOnly(['address', 'fullName', 'organisation']);
+      }
+
+      // `get` but NOT `list`: you may look up an address you already have
+      allow get: if true;
+
+      allow create: if isWallet(address)
+        && isWalletAddress(address)
+        && hasPublicSchema(request.resource.data)
+        && request.resource.data.address == address
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120);
+
+      allow update: if isWallet(address)
+        && resource != null
+        && hasPublicSchema(request.resource.data)
+        && request.resource.data.address == resource.data.address
+        && isNonEmptyString(request.resource.data.fullName, 80)
+        && isNonEmptyString(request.resource.data.organisation, 120);
 
       allow delete: if false;
     }
