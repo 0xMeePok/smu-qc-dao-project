@@ -76,22 +76,37 @@ Every account is a normal user (`role: 0`). There is no self-service way to beco
 administrator (`role: 1`) — that is set by hand in the Firestore console, and an
 admin-only page appears in the app automatically once it is.
 
+## Tech Stack
+
+| Layer | Technology | Description |
+|---|---|---|
+| Frontend | React 18, Vite 6, Vanilla CSS | Single-page application with role-based routing and zero UI framework dependencies. |
+| Backend / Off-chain Data | Firebase (Firestore, Auth, Storage) | Off-chain data store for user profiles, proposal drafts, and review feedback. |
+| Smart Contracts | Solidity (0.8.28), Arbitrum Sepolia | Verifiable audit log and hash anchoring (Chain ID: `421614`). |
+| Contract Tooling | Hardhat, Etherscan API v2 | Local testing, deployment pipelines, and automated Arbiscan verification. |
+| Wallet Integration | wagmi / viem / Web3 Provider | Wallet connectivity and cryptographic audit signing. |
+
 ## Project Structure
 
 ```
 smu-qc-dao-project/
 ├── contracts/
 │   └── qft-tokens/          # QFT ERC-20 (fixed supply), Hardhat project, Arbitrum Sepolia
-├── frontend/                 # Vite + React app — wallet sign-in, marketplace pages
+├── frontend/                # Vite + React app — wallet sign-in, marketplace pages, RBAC
 │   ├── src/
-│   │   ├── lib/                 # Firebase/wagmi setup, validation, SIWE client calls
-│   │   ├── context/               # SessionContext — the sign-in state machine
-│   │   ├── components/              # Modal shell, connector picker, onboarding form
-│   │   └── pages/                     # AdminPage (only reachable with role == 1)
-│   └── test/                            # Validation unit tests
-├── firebase/                  # Firestore rules, Cloud Functions, their tests
-│   ├── functions/                # getSiweNonce + verifySiweSignature
-│   └── test/                       # Firestore rules tests (50, via emulator)
+│   │   ├── components/      # Modals, role views, RouteGuard, and UI components
+│   │   ├── config/          # Role definitions, route permissions, feature flags
+│   │   ├── context/         # AuthContext and SessionContext state machines
+│   │   ├── lib/             # Firebase/wagmi setup, validation, SIWE client calls
+│   │   ├── pages/           # AdminPage (only reachable with role == 1)
+│   │   ├── App.jsx          # Main application shell and dynamic routing
+│   │   └── styles.css       # Core design system and styles
+│   └── test/                # Unit and integration test suites
+├── firebase/                # Firestore rules, Cloud Functions, their tests
+│   ├── functions/           # getSiweNonce + verifySiweSignature
+│   └── test/                # Firestore rules tests (50, via emulator)
+├── docs/                    # Architecture and RBAC documentation
+│   └── ROLE_ROUTE_PERMISSIONS.md  # Living UAT reference for role-based access control
 └── README.md
 ```
 
@@ -132,7 +147,10 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints (`http://localhost:5173` by default).
+The web application will start at `http://localhost:5173/`.
+
+- **Standard Mode**: `http://localhost:5173/` (production layout, standard wallet login).
+- **Demo Mode**: `http://localhost:5173/?demo=true` (enables the bottom demo role-switcher toolbar and one-click persona selector for grading demonstrations).
 
 ### 4. (Optional) Deploy the QFT token
 
@@ -154,7 +172,7 @@ Firestore, Authentication, and both Cloud Functions are already deployed to the
 project's Firebase backend. You only need the client config:
 
 1. Ask Ashley for the six `VITE_FIREBASE_*` values (or get them yourself
-   from the Firebase console.  — Project settings → General → Your apps → Web app).
+   from the Firebase console: Project settings → General → Your apps → Web app).
 2. ```bash
    cd frontend
    cp .env.example .env.local
@@ -168,6 +186,10 @@ If you're changing `firestore.rules` or `firebase/functions/index.js` yourself a
 need to redeploy, or want to run everything against local emulators instead, see
 [`firebase/README.md`](firebase/README.md).
 
+## Documentation Reference
+
+- [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions, opportunity creation rules, and demo mode specifications.
+
 ## Smart Contracts
 
 | Contract | Address (Arbitrum Sepolia) | Purpose |
@@ -177,9 +199,9 @@ need to redeploy, or want to run everything against local emulators instead, see
 ## Testing
 
 ```bash
-npm test --prefix frontend      # 47 tests — validation rules, default role, whole-form checks
-npm test --prefix firebase      # 50 tests — Firestore rules, via a local emulator (needs Java)
-npm test --prefix firebase/functions   # 16 tests — adversarial signature verification
+npm test --prefix frontend            # Unit and integration test suite
+npm test --prefix firebase            # 50 tests — Firestore rules, via a local emulator (needs Java)
+npm test --prefix firebase/functions  # 16 tests — adversarial signature verification
 ```
 
 Each suite boots and tears down whatever emulator it needs, so no manual setup is
@@ -188,12 +210,11 @@ required — see [`firebase/README.md`](firebase/README.md).
 ## Current implementation status
 
 Implemented: wallet sign-in with server-verified signatures, onboarding (name +
-organisation), a two-level access model (normal user / administrator, granted by
-hand), an admin-only page shell, and the Firestore schema for user profiles — split
-into a private `users` record and a minimal public `publicProfiles` record — including
+organisation), a multi-role access control model and admin audit capabilities, an
+admin-only page shell, and the Firestore schema for user profiles — split into a
+private `users` record and a minimal public `publicProfiles` record — including
 placeholder contribution counters (`comments`, `businessProblems`, `openFunding`,
-`fundingRequests`, `karma`, `reputation` — all currently `0`, nothing increments them
-yet).
+`fundingRequests`, `karma`, `reputation`).
 
 ## Team
 

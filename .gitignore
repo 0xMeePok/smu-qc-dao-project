@@ -1,76 +1,90 @@
-# Firebase build and deployment files
-/firebase-debug.log
-/firebase-debug.*.log
-.firebaserc
+# Dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
+/firebase/node_modules
+/firebase/functions/node_modules
+/contracts/qft-tokens/node_modules
+/frontend/node_modules
 
-# Firebase Hosting
+# Production & Build Outputs
+dist/
+dist-ssr/
+build/
+out/
+frontend/dist/
+/frontend/dist
+*.local
+
+# Solidity & Hardhat Artifacts
+artifacts/
+cache/
+contracts/qft-tokens/artifacts/
+contracts/qft-tokens/cache/
+contracts/qft-tokens/deployments/
+/contracts/qft-tokens/artifacts
+/contracts/qft-tokens/cache
+/contracts/qft-tokens/deployments
+/contracts/stable-faucet/artifacts
+/contracts/stable-faucet/cache
+/contracts/stable-faucet/deployments
+/contracts/stable-faucet/site/dist
+
+# Environment Files & Secrets
+.env
+**/.env
+.env.*
+/.env.*
+frontend/.env.local
+frontend/.env.*.local
+contracts/qft-tokens/.env
+firebase/functions/.env
+!**/.env.example
+
+# Firebase Hosting, Emulators & Data Exports
 *.cache
 hosting/.cache
 firebase/.firebaserc
-/firebase/node_modules
-/firebase/functions/node_modules
-firebase/functions/.env
-
-
-# Firebase Emulators
+.firebaserc
 /firebase-*.zip
 /.firebase/
+**/.firebase/
+firebase-export-*/
+emulator-ui/
 
 # Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+firebase-debug.log
+firebase-debug.*.log
 
-# Environment files (local configs)
-/.env.*
-contracts/qft-tokens/.env
-/contracts/qft-tokens/node_modules
-/contracts/qft-tokens/artifacts
-/contracts/qft-tokens/cache
-/contracts/qft-tokens/deployments
-
-# Mac files 
-.DS_Store
-**/.DS_Store
-
-# Frontend
-/frontend/node_modules
-/frontend/dist
-frontend/.env.local
-frontend/.env.*.local
-
-# Secrets — `/.env.*` above matches .env.local but NOT a bare .env, and the root
-# README tells contributors to create one containing PRIVATE_KEY.
-.env
-**/.env
-!**/.env.example
-
-# Firebase emulator data exports (--export-on-exit / --import)
-firebase-export-*/
-**/.firebase/
-
-# Editors
+# Editors & IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+**/.claude/settings.local.json
 
-# Test and build caches
+# Test & Build Caches
 coverage/
 .eslintcache
 *.tsbuildinfo
 
-# OS files (Windows counterpart to .DS_Store, for teammates not on macOS)
-Thumbs.db
+# OS Files (macOS & Windows)
+.DS_Store
+**/.DS_Store
+._*
+.Spotlight-V100
+.Trashes
 ehthumbs.db
-
-# Claude Code local settings (also in your global ignore; repeated here so
-# teammates without that global config are covered too)
-**/.claude/settings.local.json
-/contracts/stable-faucet/artifacts
-/contracts/stable-faucet/cache
-/contracts/stable-faucet/node_modules
-/contracts/stable-faucet/deployments
-/contracts/stable-faucet/site/node_modules
-/contracts/stable-faucet/site/dist
+Thumbs.db
+[Dd]esktop.ini

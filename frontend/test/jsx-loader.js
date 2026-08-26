@@ -1,0 +1,1 @@
+// jsx-loader scratch removed
