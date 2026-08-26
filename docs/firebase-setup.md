@@ -65,7 +65,7 @@ reference, the schema is:
 | `address` | string | lowercase `0x…`, equals the document id |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
-| `role` | string | one of the five stakeholder roles |
+| `role` | number | `0` (user) or `1` (administrator) access level |
 | `chainId` | number | `421614` (Arbitrum Sepolia) |
 | `walletVerified` | bool | `true` — the server proved it |
 | `stats` | map | `comments`, `businessProblems`, `openFunding`, `fundingRequests`, `karma`, `reputation` — all start at `0` |
