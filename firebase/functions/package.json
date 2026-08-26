@@ -11,7 +11,8 @@
   "scripts": {
     "serve": "firebase emulators:start --only functions,firestore,auth",
     "deploy": "firebase deploy --only functions",
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "firebase emulators:exec --config ../firebase.json --only functions,firestore,auth --project qc-dao-demo \"node --test \\\"test/**/*.test.mjs\\\"\"",
+    "test:attach": "node --test \"test/**/*.test.mjs\""
   },
   "dependencies": {
     "firebase-admin": "13.6.0",
