@@ -459,13 +459,13 @@ describe("users/{address} update", () => {
 });
 
 describe("problems/{problemId}", () => {
-  it("allows access to the owner", async () => {
+  it("[BIT-AAR-76] [QCDAO43] allows access to the owner", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "p1"), { ownerId: ADDRESS }));
     await assertSucceeds(getDoc(doc(db, "problems", "p1")));
   });
 
-  it("blocks access to non-owners", async () => {
+  it("[BIT-AAR-77] [QCDAO43] blocks access to non-owners", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "problems", "p2"), { ownerId: ADDRESS });
     });
@@ -474,20 +474,20 @@ describe("problems/{problemId}", () => {
     await assertFails(updateDoc(doc(db, "problems", "p2"), { title: "Hacked" }));
   });
 
-  it("blocks unauthenticated access", async () => {
+  it("[BIT-AAR-78] [QCDAO43] blocks unauthenticated access", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "problems", "p1")));
   });
 });
 
 describe("proposals/{proposalId}", () => {
-  it("allows access to the researcher", async () => {
+  it("[BIT-AAR-79] [QCDAO43] allows access to the researcher", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "proposals", "prop1"), { researcherId: ADDRESS }));
     await assertSucceeds(getDoc(doc(db, "proposals", "prop1")));
   });
 
-  it("blocks access to non-owners", async () => {
+  it("[BIT-AAR-80] [QCDAO43] blocks access to non-owners", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "proposals", "prop2"), { researcherId: ADDRESS });
     });
@@ -495,20 +495,20 @@ describe("proposals/{proposalId}", () => {
     await assertFails(getDoc(doc(db, "proposals", "prop2")));
   });
 
-  it("blocks unauthenticated access", async () => {
+  it("[BIT-AAR-81] [QCDAO43] blocks unauthenticated access", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "proposals", "prop1")));
   });
 });
 
 describe("evaluations/{evaluationId}", () => {
-  it("allows access to the evaluator", async () => {
+  it("[BIT-AAR-82] [QCDAO43] allows access to the evaluator", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "evaluations", "e1"), { evaluatorId: ADDRESS }));
     await assertSucceeds(getDoc(doc(db, "evaluations", "e1")));
   });
 
-  it("blocks access to non-evaluators", async () => {
+  it("[BIT-AAR-83] [QCDAO43] blocks access to non-evaluators", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "evaluations", "e2"), { evaluatorId: ADDRESS });
     });
@@ -516,20 +516,20 @@ describe("evaluations/{evaluationId}", () => {
     await assertFails(getDoc(doc(db, "evaluations", "e2")));
   });
 
-  it("blocks unauthenticated access", async () => {
+  it("[BIT-AAR-84] [QCDAO43] blocks unauthenticated access", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "evaluations", "e1")));
   });
 });
 
 describe("funding/{fundId}", () => {
-  it("allows access to the funder", async () => {
+  it("[BIT-AAR-85] [QCDAO43] allows access to the funder", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "funding", "f1"), { funderId: ADDRESS }));
     await assertSucceeds(getDoc(doc(db, "funding", "f1")));
   });
 
-  it("blocks access to non-funders", async () => {
+  it("[BIT-AAR-86] [QCDAO43] blocks access to non-funders", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "funding", "f2"), { funderId: ADDRESS });
     });
@@ -537,7 +537,7 @@ describe("funding/{fundId}", () => {
     await assertFails(getDoc(doc(db, "funding", "f2")));
   });
 
-  it("blocks unauthenticated access", async () => {
+  it("[BIT-AAR-87] [QCDAO43] blocks unauthenticated access", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "funding", "f1")));
   });
@@ -554,17 +554,17 @@ describe("audits/{auditId}", () => {
     });
   });
 
-  it("allows read for administrators (role == 1)", async () => {
+  it("[BIT-AAR-88] [QCDAO43] allows read for administrators (role == 1)", async () => {
     const db = env.authenticatedContext(ADMIN).firestore();
     await assertSucceeds(getDoc(doc(db, "audits", "a1")));
   });
 
-  it("blocks read for normal users (role == 0)", async () => {
+  it("[BIT-AAR-89] [QCDAO43] blocks read for normal users (role == 0)", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(getDoc(doc(db, "audits", "a1")));
   });
 
-  it("blocks writes for everyone (even admins)", async () => {
+  it("[BIT-AAR-90] [QCDAO43] blocks writes for everyone (even admins)", async () => {
     const db = env.authenticatedContext(ADMIN).firestore();
     await assertFails(setDoc(doc(db, "audits", "a2"), { action: "HACK" }));
   });
