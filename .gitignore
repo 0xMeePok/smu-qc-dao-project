@@ -68,3 +68,9 @@ ehthumbs.db
 # Claude Code local settings (also in your global ignore; repeated here so
 # teammates without that global config are covered too)
 **/.claude/settings.local.json
+/contracts/stable-faucet/artifacts
+/contracts/stable-faucet/cache
+/contracts/stable-faucet/node_modules
+/contracts/stable-faucet/deployments
+/contracts/stable-faucet/site/node_modules
+/contracts/stable-faucet/site/dist
