@@ -17,10 +17,15 @@ const BASE =
   process.env.FUNCTIONS_BASE_URL ??
   "http://127.0.0.1:5001/qc-dao-demo/asia-southeast1";
 
-async function call(fn, data) {
+// `origin` is overridable (and omittable, via null) so the SIWE domain-binding tests
+// below can pose as a browser on some other site.
+async function call(fn, data, { origin = "http://localhost:5173" } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (origin !== null) headers.Origin = origin;
+
   const res = await fetch(`${BASE}/${fn}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Origin: "http://localhost:5173" },
+    headers,
     body: JSON.stringify({ data }),
   });
   return res.json().catch(() => ({}));
@@ -174,5 +179,77 @@ describe("getSiweNonce rate limiting", () => {
     // user reconnecting right away must not be rate-limited against themselves.
     const again = await call("getSiweNonce", { address: fresh.address });
     assert.ok(again.result?.message, "a fresh nonce after consumption should not be rate-limited");
+  });
+});
+
+describe("SIWE domain binding", () => {
+  // The `domain` line in a SIWE message is what stops a signature collected on one
+  // site being spent on another. When getSiweNonce echoed back the caller's Origin,
+  // that binding was decided by the caller and therefore meant nothing: a request
+  // carrying `Origin: https://evil.example` came back with "evil.example wants you
+  // to sign in...", and a user tricked into signing it on that site handed over a
+  // real session for THIS project. Verified against the deployed function before the
+  // fix, so these tests cover a hole that was genuinely open, not a hypothetical.
+  it("refuses to mint a signable message for an origin it does not serve", async () => {
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call(
+      "getSiweNonce",
+      { address: fresh.address },
+      { origin: "https://totally-evil-phishing-site.example" },
+    );
+
+    assert.equal(res.result?.message, undefined, "an unknown origin must not receive a message");
+    assert.equal(res.error?.status, "PERMISSION_DENIED");
+  });
+
+  it("never names an attacker-supplied domain in the message it signs", async () => {
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call(
+      "getSiweNonce",
+      { address: fresh.address },
+      { origin: "https://evil.example" },
+    );
+
+    // Belt and braces: even if the call were somehow allowed, the attacker's domain
+    // must never appear in a message this server produced.
+    assert.ok(
+      !JSON.stringify(res).includes("evil.example"),
+      "the attacker's domain must not be reflected back anywhere in the response",
+    );
+  });
+
+  it("serves an allow-listed development origin normally", async () => {
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call("getSiweNonce", { address: fresh.address });
+
+    assert.ok(res.result?.message, "the app's own origin must still work");
+    assert.ok(
+      res.result.message.includes("localhost:5173"),
+      "an allow-listed origin is still named accurately, so the user sees where they are signing in",
+    );
+  });
+
+  it("falls back to this deployment's own domain when there is no Origin at all", async () => {
+    // A request with no Origin cannot be a browser, so there is nothing to spoof and
+    // nothing to validate - it should still produce a usable message rather than an
+    // error, and that message must name this deployment.
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call("getSiweNonce", { address: fresh.address }, { origin: null });
+
+    assert.ok(res.result?.message, "a non-browser caller should still get a message");
+    assert.ok(
+      !res.result.message.includes("localhost:5173"),
+      "the no-Origin fallback must be the server's own domain, not a dev origin",
+    );
+  });
+
+  it("still completes a real sign-in end to end from an allowed origin", async () => {
+    // Guards against a fix that secures the domain by breaking sign-in.
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const { result: nonce } = await call("getSiweNonce", { address: fresh.address });
+    const signature = await fresh.signMessage({ message: nonce.message });
+    const outcome = await call("verifySiweSignature", { address: fresh.address, signature });
+
+    assert.ok(outcome.result?.token, "a legitimate user must still be able to sign in");
   });
 });

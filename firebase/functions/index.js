@@ -39,16 +39,9 @@ const NONCE_MAX_INSTANCES = 10;
 // then a write), and every one of them crosses regions if this doesn't match. That
 // was previously true here (functions in asia-southeast1, Firestore left on its
 // default nam5/US location) and measured out to ~400ms-1.3s per sign-in from cross-
-// Pacific latency alone, dwarfing everything else on the critical path. A plain
-// region mismatch on the FUNCTIONS side shows up as a browser CORS error instead
-// (the wrong-region URL 404s, and a 404 page carries no CORS headers), so it fails
-// loudly - a Firestore location mismatch fails silently, as just "slow."
+// Pacific latency alone, dwarfing everything else on the critical path. 
 const REGION = "asia-southeast1";
 
-// EIP-1271 lets a smart contract wallet (Safe, Argent, most account-abstraction
-// wallets) "sign" without an EOA private key. viem's verifyMessage falls back to an
-// on-chain isValidSignature call when the address has bytecode, so those wallets work
-// too - but only if it has a chain to ask, hence the public client.
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,
   transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL || undefined),
@@ -85,14 +78,70 @@ function buildMessage({ address, nonce, issuedAt, domain }) {
   ].join("\n");
 }
 
+// The SIWE `domain` field binds a signature to ONE site. Its whole purpose is to
+// make a signature collected on one origin useless on another.
+// Now the domain is server-controlled: an Origin is only honoured when it appears on
+// an allow-list this deployment owns, and anything else is refused outright.
+const SIWE_DOMAIN_FALLBACK = "smu-qc-dao";
+
+// Cloud Functions sets GCLOUD_PROJECT; Firebase Hosting always provisions
+// <project>.web.app and <project>.firebaseapp.com. Deriving them means the common
+// deployment needs no configuration and still keeps the message accurate for real
+// users, instead of a hardcoded guess that rots the moment the project is renamed.
+function defaultAllowedHosts() {
+  const projectId = (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "").trim();
+  return projectId ? [`${projectId}.web.app`, `${projectId}.firebaseapp.com`] : [];
+}
+
+// Dev origins are allowed ONLY under the emulator. Allow-listing localhost in
+// production would reopen the hole: an attacker would forge `Origin:
+// localhost:5173` and be handed a signable message again.
+const DEV_HOSTS = ["localhost:5173", "127.0.0.1:5173"];
+
+function canonicalDomain() {
+  return (process.env.SIWE_DOMAIN || "").trim().toLowerCase()
+    || defaultAllowedHosts()[0]
+    || SIWE_DOMAIN_FALLBACK;
+}
+
+function allowedHosts() {
+  const configured = (process.env.SIWE_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  const hosts = [canonicalDomain(), ...defaultAllowedHosts(), ...configured];
+  if (process.env.FUNCTIONS_EMULATOR === "true") hosts.push(...DEV_HOSTS);
+
+  return new Set(hosts.filter(Boolean));
+}
+
 function resolveDomain(request) {
   const origin = request.rawRequest?.headers?.origin;
-  if (!origin) return "smu-qc-dao";
+
+  // No Origin at all means this cannot be a browser (curl, a server, the test
+  // suite). There is nothing to validate, so the message names this deployment -
+  // which is the truthful answer and the one a phishing victim most needs to see.
+  if (!origin) return canonicalDomain();
+
+  let host;
   try {
-    return new URL(origin).host;
+    host = new URL(origin).host.toLowerCase();
   } catch {
-    return "smu-qc-dao";
+    throw new HttpsError("permission-denied", "Sign-in is not available from this origin.");
   }
+
+  // Fails CLOSED. An unrecognised Origin is a positive signal that a browser on a
+  // site we do not serve is asking for a signable message, so it is refused rather
+  // than quietly downgraded. Note this is deliberately NOT the shape of a check
+  // that skips itself when the env var is unset - a security control that does
+  // nothing until someone remembers to configure it is one that will be forgotten
+  // exactly once, in production.
+  if (!allowedHosts().has(host)) {
+    throw new HttpsError("permission-denied", "Sign-in is not available from this origin.");
+  }
+
+  return host;
 }
 
 /**

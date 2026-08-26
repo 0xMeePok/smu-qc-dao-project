@@ -145,6 +145,7 @@ export function OnboardingModal() {
                 checked={form.acceptedTerms}
                 onChange={update}
                 aria-invalid={Boolean(errors.acceptedTerms)}
+                aria-describedby={errors.acceptedTerms ? "acceptedTerms-error" : undefined}
               />
               <span>
                 I accept the platform terms and understand that proposal hashes and
@@ -152,7 +153,9 @@ export function OnboardingModal() {
               </span>
             </label>
             {errors.acceptedTerms ? (
-              <p className="field-error" role="alert">{errors.acceptedTerms}</p>
+              <p className="field-error" id="acceptedTerms-error" role="alert">
+                {errors.acceptedTerms}
+              </p>
             ) : null}
           </div>
 
