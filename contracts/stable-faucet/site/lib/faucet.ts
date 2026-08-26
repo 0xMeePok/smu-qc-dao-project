@@ -9,7 +9,7 @@ import {
 import {
   completeWalletDistribution,
   reserveWalletDistribution,
-} from "./rate-limit";
+} from "./rate-limit.js";
 
 export interface FaucetEnvironment {
   ARBITRUM_SEPOLIA_RPC_URL?: string;
@@ -173,7 +173,7 @@ export async function handleFaucet(
   }
 
   const rateLimit = reserveWalletDistribution(normalizedRecipient, token);
-  if (!rateLimit.allowed) {
+  if (rateLimit.allowed === false) {
     if (rateLimit.capacityExceeded) {
       return json(
         { error: "The faucet is temporarily busy. Please try again shortly." },
