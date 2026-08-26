@@ -31,7 +31,7 @@ export function RouteGuard({ targetRoute, allowedRoles, authRequired, children, 
   }
 
   // 2. Check Role Permissions (User must possess at least one permitted role)
-  if (allowedRoles && allowedRoles.length > 0) {
+  if (authRequired) {
     const hasPermission = hasAnyRole(allowedRoles);
     if (!hasPermission) {
       return (

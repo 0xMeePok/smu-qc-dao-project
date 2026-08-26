@@ -1,13 +1,18 @@
 import { useEffect } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { SignInWithWallet } from "./SignInWithWallet.jsx";
+import { getRouteConfig } from "../config/routes.js";
 
 export function Login({ redirectTarget, onNavigate }) {
   const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     if (isAuthenticated) {
-      const destination = redirectTarget || "home";
+      let destination = redirectTarget || "home";
+      if (redirectTarget && !getRouteConfig(redirectTarget)) {
+        destination = "home";
+      }
+      
       if (onNavigate) {
         onNavigate(destination);
       } else {
