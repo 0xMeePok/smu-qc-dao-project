@@ -1,11 +1,11 @@
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { OnboardingError } from "./errors.js";
 import { validateOnboarding } from "./validation.js";
 import { initialStats } from "./stats.js";
 import { EXPECTED_CHAIN_ID } from "./chain.js";
-import { DEFAULT_ROLE } from "./roles.js";
+import { ROLE_USER } from "./roles.js";
 
 export const TERMS_VERSION = "2026-08-24";
 
@@ -35,9 +35,11 @@ export async function createProfile({ form, address }) {
     address: lower,
     fullName: form.fullName.trim(),
     organisation: form.organisation.trim(),
-    // The real role choice happens on the role-selection screen right after this;
-    // see the comment on validateOnboarding for why it is not asked here too.
-    role: DEFAULT_ROLE,
+    // Every account starts as a normal user. Nothing in the client can write 1
+    // here or later: firebase/firestore.rules fixes this to 0 on create and makes
+    // it immutable on every update, so becoming an administrator is only ever done
+    // by hand, directly in Firestore, by someone with console access.
+    role: ROLE_USER,
     chainId: EXPECTED_CHAIN_ID,
     stats: initialStats,
     // Safe to assert: this write is only possible with a uid the server minted
@@ -45,20 +47,10 @@ export async function createProfile({ form, address }) {
     walletVerified: true,
     termsAcceptedAt: serverTimestamp(),
     termsVersion: TERMS_VERSION,
-    onboardingComplete: false,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
 
   await setDoc(profileRef(lower), profile);
   return profile;
-}
-
-export async function updateRole({ address, role }) {
-  requireFirebase();
-  await updateDoc(profileRef(address), {
-    role,
-    onboardingComplete: true,
-    updatedAt: serverTimestamp(),
-  });
 }

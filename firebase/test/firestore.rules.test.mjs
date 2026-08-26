@@ -22,11 +22,12 @@ function baseProfile(_uid, address = ADDRESS, overrides = {}) {
     address,
     fullName: "Ashley Chung",
     organisation: "Singapore Management University",
-    role: "researcher",
-    chainId: "0x66eee",
+    // 0 = normal user, 1 = administrator. Every signup writes 0; see
+    // frontend/src/lib/roles.js and the create rule below.
+    role: 0,
+    chainId: 421614,
     stats: { ...ZERO_STATS },
     walletVerified: true,
-    onboardingComplete: false,
     termsAcceptedAt: serverTimestamp(),
     termsVersion: "2026-08-24",
     createdAt: serverTimestamp(),
@@ -59,8 +60,18 @@ describe("users/{address} create", () => {
     await assertFails(setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER)));
   });
 
-  it("blocks a role outside the five stakeholders", async () => {
+  it("blocks self-granting admin (role 1) at signup", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { role: 1 })),
+    );
+  });
+
+  it("blocks a role outside 0 or 1", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { role: 2 })),
+    );
     await assertFails(
       setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { role: "admin" })),
     );
@@ -105,6 +116,27 @@ describe("users/{address} create", () => {
       setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { fullName: "" })),
     );
   });
+
+  it("blocks a chain id other than Arbitrum Sepolia", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { chainId: 1 })),
+    );
+  });
+
+  it("blocks claiming walletVerified false at signup", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { walletVerified: false })),
+    );
+  });
+
+  it("blocks a profile with an extra, unschemad field", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { isAdmin: true })),
+    );
+  });
 });
 
 describe("users/{address} read", () => {
@@ -121,12 +153,19 @@ describe("users/{address} update", () => {
     });
   });
 
-  it("allows a role change", async () => {
+  it("allows editing name and organisation", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertSucceeds(
       updateDoc(doc(db, "users", OTHER), {
-        role: "evaluator", onboardingComplete: true, updatedAt: serverTimestamp(),
+        organisation: "New Employer Pte Ltd", updatedAt: serverTimestamp(),
       }),
+    );
+  });
+
+  it("blocks a signed-in user promoting their own role to admin", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      updateDoc(doc(db, "users", OTHER), { role: 1, updatedAt: serverTimestamp() }),
     );
   });
 
@@ -136,6 +175,13 @@ describe("users/{address} update", () => {
       updateDoc(doc(db, "users", OTHER), {
         "stats.karma": 500, updatedAt: serverTimestamp(),
       }),
+    );
+  });
+
+  it("blocks changing the chain id after creation", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      updateDoc(doc(db, "users", OTHER), { chainId: 1, updatedAt: serverTimestamp() }),
     );
   });
 
@@ -157,7 +203,7 @@ describe("users/{address} update", () => {
     const attacker = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(
       updateDoc(doc(attacker, "users", OTHER), {
-        fullName: "Attacker Controlled", role: "funder", updatedAt: serverTimestamp(),
+        fullName: "Attacker Controlled", role: 1, updatedAt: serverTimestamp(),
       }),
     );
   });

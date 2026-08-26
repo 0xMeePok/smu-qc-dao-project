@@ -1,10 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useDisconnect, useSignMessage } from "wagmi";
+import { getConnection, switchChain } from "wagmi/actions";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "../lib/firebase.js";
 import { exchangeSignatureForSession, requestSignInMessage } from "../lib/authFlow.js";
 import { createProfile, findProfileByAddress } from "../lib/profile.js";
 import { messageForFirebaseError } from "../lib/errors.js";
+import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
+import { wagmiConfig } from "../lib/wagmi.js";
+import { isAdmin } from "../lib/roles.js";
+import { go } from "../lib/router.js";
 
 const SessionContext = createContext(null);
 
@@ -60,18 +65,67 @@ export function SessionProvider({ children }) {
       setStatus("verifying");
 
       try {
-        const message = await requestSignInMessage(target);
+        // `getConnection(config).chainId` - NOT `getChainId(config)`. wagmi keeps two
+        // separate ideas of "chain": a top-level `config.state.chainId` that is
+        // seeded from `chains[0]` at startup and is only ever touched by an explicit
+        // `switchChain()` call, and each connection's own `chainId`, set from what
+        // the wallet actually reported at connect time. `getChainId()` reads the
+        // first one, which is why it silently returned 421614 (our only configured
+        // chain) even while a wallet sitting on mainnet was connected - it was never
+        // wired to the real connection at all, not a matter of the value being stale.
+        //
+        // The network switch and the nonce fetch run CONCURRENTLY, not one after the
+        // other. They used to be sequential because the switch reads as a
+        // prerequisite for "the wallet should be on the right chain before it sees a
+        // message claiming Chain ID: 421614" - but that message text is static server
+        // side (see buildMessage() in functions/index.js) and never actually depends
+        // on what chain the wallet is on AT REQUEST TIME, only at signing time, which
+        // is still safely after both of these resolve. Running them together removes
+        // a whole network round trip from the critical path (the wallet's own
+        // wallet_addEthereumChain/wallet_switchEthereumChain RPC) every time a switch
+        // is needed - previously the getSiweNonce call (already the slowest single
+        // step here - a cross-region Cloud Functions request) didn't even START until
+        // that finished. wagmi's switchChain already falls back to
+        // `wallet_addEthereumChain` (using arbitrumSepolia's own defaults - no custom
+        // RPC/currency needed) when the wallet has never heard of the chain, so this
+        // one call still covers both "wrong network" and "network not added yet".
+        //
+        // Trade-off: if the user dismisses the switch prompt, a nonce may already have
+        // been issued and left pending - their very next retry can hit the 3-second
+        // per-address cooldown in getSiweNonce (see NONCE_COOLDOWN_MS) instead of
+        // going straight through. That's a rare edge case costing a few seconds, in
+        // exchange for the common case (switch approved, or already on the right
+        // chain) reaching the signing prompt measurably sooner every time.
+        const needsSwitch = getConnection(wagmiConfig).chainId !== EXPECTED_CHAIN_ID;
+        const [message] = await Promise.all([
+          requestSignInMessage(target),
+          needsSwitch ? switchChain(wagmiConfig, { chainId: EXPECTED_CHAIN_ID }) : null,
+        ]);
+
         const signature = await signMessageAsync({ message, account: target });
         await exchangeSignatureForSession({ address: target, signature });
         setVerifiedAddress(target);
         return { ok: true, rejected: false };
       } catch (caught) {
-        // A rejected signature is a normal user choice, not a failure to report loudly.
+        // A rejected signature or a declined network switch is a normal user choice,
+        // not a failure to report loudly.
         const rejected = caught?.name === "UserRejectedRequestError" || caught?.code === 4001;
-        setError(rejected ? null : messageForFirebaseError(caught));
+        const failureMessage = rejected
+          ? null
+          : caught?.name === "SwitchChainNotSupportedError"
+            ? `Your wallet does not support switching networks automatically. Switch to ${EXPECTED_CHAIN_NAME} yourself, then try again.`
+            : messageForFirebaseError(caught);
+        setError(failureMessage);
         setStatus("signed-out");
         await disconnectAsync().catch(() => {});
-        return { ok: false, rejected };
+        // The message is returned, not just set into context state, because a caller
+        // that awaits signIn() and immediately reads `error` off useSession() (as
+        // ConnectWalletModal used to) gets a STALE value: `error` was destructured
+        // from context at that component's last render, before this setError() call
+        // existed, and closures do not retroactively pick up a later state update.
+        // That bug meant every failure showed the same generic fallback string no
+        // matter what messageForFirebaseError actually produced.
+        return { ok: false, rejected, message: failureMessage };
       }
     },
     [address, signMessageAsync, disconnectAsync],
@@ -93,6 +147,11 @@ export function SessionProvider({ children }) {
         if (token !== lookupToken.current) return;
         setProfile(found);
         setStatus(found ? "signed-in" : "needs-onboarding");
+        // Fires once per session establishment (this effect only re-runs when
+        // verifiedAddress changes - a fresh sign-in or a restored session on page
+        // load), not on every render, so navigating elsewhere afterward doesn't
+        // keep yanking an admin back here.
+        if (found && isAdmin(found.role)) go("admin");
       } catch (caught) {
         if (token !== lookupToken.current) return;
         setError(messageForFirebaseError(caught));
@@ -138,10 +197,6 @@ export function SessionProvider({ children }) {
     setError(null);
   }, [disconnectAsync, reset]);
 
-  const applyProfilePatch = useCallback((patch) => {
-    setProfile((current) => (current ? { ...current, ...patch } : current));
-  }, []);
-
   const value = useMemo(
     () => ({
       status,
@@ -157,9 +212,8 @@ export function SessionProvider({ children }) {
       completeOnboarding,
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
-      applyProfilePatch,
     }),
-    [status, profile, error, verifiedAddress, signIn, completeOnboarding, signOutOfSession, applyProfilePatch],
+    [status, profile, error, verifiedAddress, signIn, completeOnboarding, signOutOfSession],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

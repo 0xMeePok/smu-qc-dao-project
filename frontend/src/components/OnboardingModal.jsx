@@ -61,7 +61,7 @@ export function OnboardingModal() {
     setSubmitting(true);
     try {
       await completeOnboarding(form);
-      go("role-selection");
+      go("home");
     } catch (caught) {
       const field = fieldForFirebaseError(caught);
       const message = messageForFirebaseError(caught);

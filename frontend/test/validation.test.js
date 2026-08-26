@@ -4,12 +4,11 @@ import {
   validateFullName,
   validateOnboarding,
   validateOrganisation,
-  validateRole,
   validateTerms,
   validateWallet,
 } from "../src/lib/validation.js";
 import { initialStats, statKeys, withDefaults } from "../src/lib/stats.js";
-import { DEFAULT_ROLE, roleValues } from "../src/lib/roles.js";
+import { isAdmin, roleLabel, ROLE_ADMIN, ROLE_USER } from "../src/lib/roles.js";
 
 const VALID_ADDRESS = `0x${"a".repeat(40)}`;
 
@@ -37,28 +36,28 @@ describe("name and organisation", () => {
   });
 });
 
-describe("role and terms", () => {
-  it("rejects a role outside the five stakeholders", () => {
-    assert.match(validateRole("hacker"), /not one of the available options/);
-    assert.match(validateRole(""), /Choose the role/);
-  });
-
-  it("accepts each of the five roles", () => {
-    for (const role of ["problem-owner", "funder", "researcher", "evaluator", "observer"]) {
-      assert.equal(validateRole(role), null, `${role} should be accepted`);
-    }
-  });
-
-  it("has a default role that is itself one of the five valid roles", () => {
-    // The account is created with this before the user has visited the role-selection
-    // screen, so it must pass the same validation as a real, deliberate choice.
-    assert.ok(roleValues.includes(DEFAULT_ROLE));
-    assert.equal(validateRole(DEFAULT_ROLE), null);
-  });
-
+describe("terms", () => {
   it("requires the terms to be accepted", () => {
     assert.match(validateTerms(false), /accept the platform terms/);
     assert.equal(validateTerms(true), null);
+  });
+});
+
+describe("roles", () => {
+  it("has exactly two levels: 0 (user) and 1 (administrator)", () => {
+    assert.equal(ROLE_USER, 0);
+    assert.equal(ROLE_ADMIN, 1);
+  });
+
+  it("only recognises the admin constant as an admin", () => {
+    assert.equal(isAdmin(ROLE_ADMIN), true);
+    assert.equal(isAdmin(ROLE_USER), false);
+    assert.equal(isAdmin(undefined), false);
+  });
+
+  it("labels each level for display", () => {
+    assert.equal(roleLabel(ROLE_ADMIN), "Administrator");
+    assert.equal(roleLabel(ROLE_USER), "User");
   });
 });
 
@@ -102,7 +101,7 @@ describe("whole-form validation", () => {
     assert.deepEqual(Object.keys(errors), ["wallet"]);
   });
 
-  it("collects no email, password or role fields - role is chosen once, on the role-selection screen", () => {
+  it("collects no email, password or role fields - every account starts as a normal user and role is never a form field", () => {
     const errors = validateOnboarding(
       { fullName: "", organisation: "", acceptedTerms: false },
       null,

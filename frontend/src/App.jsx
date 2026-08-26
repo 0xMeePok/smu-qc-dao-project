@@ -3,10 +3,11 @@ import { opportunities, opportunityTypes } from "./data.js";
 import { go, parseRoute } from "./lib/router.js";
 import { useSession } from "./context/SessionContext.jsx";
 import { shortenAddress } from "./lib/chain.js";
-import { roleLabel } from "./lib/roles.js";
+import { isAdmin } from "./lib/roles.js";
 import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
-import RoleSelection from "./pages/RoleSelection.jsx";
+import { NetworkBanner } from "./components/NetworkBanner.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 
 const routes = [
   ["home", "Home"],
@@ -58,20 +59,22 @@ function AccountControls() {
     );
   }
 
+  const admin = isAdmin(profile?.role);
+
   return (
     <div className="account-controls">
-      <button
-        className="account-status"
-        type="button"
-        onClick={() => go("role-selection")}
-        aria-label="Open your account"
-      >
+      {admin ? (
+        <button className="secondary" type="button" onClick={() => go("admin")}>
+          Admin
+        </button>
+      ) : null}
+      <span className="account-status" aria-label="Your account">
         <strong>{profile?.fullName ?? "Your account"}</strong>
         <small>
           {shortenAddress(address)}
-          {profile?.role ? ` · ${roleLabel(profile.role)}` : ""}
+          {admin ? " · Administrator" : ""}
         </small>
-      </button>
+      </span>
       <button className="secondary" type="button" onClick={() => signOut()}>
         Sign out
       </button>
@@ -449,10 +452,11 @@ export default function App() {
   if (section === "discover") content = <Discover />;
   if (section === "create") content = <CreateOpportunity />;
   if (section === "opportunity") content = <OpportunityDetail id={id} />;
-  if (section === "role-selection") content = <RoleSelection />;
+  if (section === "admin") content = <AdminPage />;
 
   return (
     <>
+      <NetworkBanner />
       <Shell route={section}>{content}</Shell>
       <OnboardingModal />
     </>

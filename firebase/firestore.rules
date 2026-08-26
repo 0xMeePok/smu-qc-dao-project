@@ -8,16 +8,16 @@ rules_version = '2';
 // A browser cannot forge one. That is why `request.auth.uid == address` below is a
 // real proof of wallet ownership rather than a claim the client made about itself.
 //
-// Role identifiers must stay in sync with frontend/src/lib/roles.js.
+// `role` is 0 (user) or 1 (administrator) - see frontend/src/lib/roles.js. It is
+// fixed to 0 on create and immutable on every client update below, so becoming an
+// administrator is only ever done by hand in the Firestore console (or via the
+// Admin SDK), which bypasses these rules entirely. No amount of frontend code can
+// grant it.
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function isWallet(address) {
       return request.auth != null && request.auth.uid == address;
-    }
-
-    function allowedRole(role) {
-      return role in ['problem-owner', 'funder', 'researcher', 'evaluator', 'observer'];
     }
 
     function isWalletAddress(value) {
@@ -48,34 +48,62 @@ service cloud.firestore {
     }
 
     match /users/{address} {
+      // The exact field set frontend/src/lib/profile.js writes at creation. Locking
+      // this with hasOnly() means a client cannot smuggle in an extra field (e.g. a
+      // self-granted `isAdmin`) that later code might start trusting without
+      // re-checking - the schema is enforced here, not just assumed from the client.
+      function hasProfileSchema(data) {
+        return data.keys().hasOnly([
+          'address', 'fullName', 'organisation', 'role', 'chainId', 'stats',
+          'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt'
+        ]);
+      }
+
       // Profiles are public reads: the platform shows who published a problem or
       // recorded an evaluation. Nothing sensitive is stored on them.
       allow get, list: if true;
 
       allow create: if isWallet(address)
         && isWalletAddress(address)
+        && hasProfileSchema(request.resource.data)
         && request.resource.data.address == address
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
-        && allowedRole(request.resource.data.role)
+        // 0 = normal user. Every new account is one - there is no self-service path
+        // to 1 (administrator) anywhere in this rule. Becoming an admin means
+        // someone with Firestore console access edits this field by hand; nothing
+        // the client can send, at signup or ever after, can set it to 1 itself.
+        && request.resource.data.role == 0
+        // Fixed testnet id for now; this becomes a real chain allow-list if the
+        // platform ever supports more than one network.
+        && request.resource.data.chainId == 421614
         && statsAreZeroed(request.resource.data.stats)
-        && request.resource.data.onboardingComplete == false
+        // Only reachable at all with a uid a signature verification minted, so this
+        // is safe to require outright rather than merely permit.
+        && request.resource.data.walletVerified == true
+        && isNonEmptyString(request.resource.data.termsVersion, 40)
         && request.resource.data.termsAcceptedAt == request.time
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
 
       // Only the wallet itself may edit its profile, on any device, because the uid
       // is derived from a signature rather than from a per-browser session.
       //
-      // `stats` has to come back byte-identical, so karma can only ever move via the
-      // Admin SDK from trusted server code, which bypasses these rules entirely.
+      // `role` and `stats` both have to come back byte-identical. `stats` moves only
+      // via the Admin SDK; `role` moves only by hand in the Firestore console - if a
+      // signed-in user could ever change their own role, "administrator" would be
+      // available to anyone with a browser console, not something granted.
       allow update: if isWallet(address)
         && resource != null
+        && hasProfileSchema(request.resource.data)
         && request.resource.data.address == resource.data.address
+        && request.resource.data.role == resource.data.role
         && request.resource.data.stats == resource.data.stats
+        && request.resource.data.chainId == resource.data.chainId
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.termsAcceptedAt == resource.data.termsAcceptedAt
+        && request.resource.data.termsVersion == resource.data.termsVersion
         && request.resource.data.walletVerified == resource.data.walletVerified
-        && allowedRole(request.resource.data.role)
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
         && request.resource.data.updatedAt == request.time;

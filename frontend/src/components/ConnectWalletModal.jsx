@@ -6,12 +6,12 @@ import { WalletIcon } from "./WalletIcon.jsx";
 import { Modal } from "./Modal.jsx";
 
 /**
- * Connector picker. Every entry comes from EIP-6963 discovery, so the list is exactly
- * the wallets installed in this browser that can sign for an EVM chain.
+ * Connector picker. Entries come from EIP-6963 discovery, filtered by
+ * `isUsableConnector` to MetaMask and Rabby only - see lib/wagmi.js.
  */
 export function ConnectWalletModal({ onClose }) {
   const { connectors, connectAsync } = useConnect();
-  const { signIn, error: sessionError } = useSession();
+  const { signIn } = useSession();
   const [pending, setPending] = useState(null);
   const [error, setError] = useState(null);
 
@@ -30,10 +30,12 @@ export function ConnectWalletModal({ onClose }) {
         return;
       }
       if (!outcome.rejected) {
-        // sessionError carries the specific reason (functions not deployed, config
-        // missing, signature refused by the server). Showing it beats a generic
-        // "could not be verified" that sends people hunting in the wrong place.
-        setError(sessionError ?? "Sign-in could not be verified. Please try again.");
+        // `outcome.message` is returned directly from signIn(), not read back off
+        // context state - reading useSession().error here used to be stale (it was
+        // captured at this component's last render, before signIn() had set it),
+        // so every real failure fell through to the generic string below regardless
+        // of what actually went wrong.
+        setError(outcome.message ?? "Sign-in could not be verified. Please try again.");
       }
       // A rejected signature needs no error text - the button just becomes
       // available again so the user can retry.
@@ -68,7 +70,7 @@ export function ConnectWalletModal({ onClose }) {
           <p>
             {available.length > 0
               ? "Choose a wallet. You will be asked to sign a short message proving the wallet is yours — it costs no gas and moves no funds."
-              : "We could not find a wallet in this browser. You will need one to sign in."}
+              : "We could not find MetaMask or Rabby in this browser. Install one of them to sign in."}
           </p>
         </div>
       </header>
@@ -102,18 +104,29 @@ export function ConnectWalletModal({ onClose }) {
       ) : (
         <div className="connector-empty">
           <p>
-            MetaMask is the usual choice and takes about a minute to set up. Install it,
-            then reload this page and your wallet will appear here.
+            MetaMask or Rabby, either works — install one, then reload this page and
+            it will appear here.
           </p>
-          <a
-            className="primary wallet-button"
-            href="https://metamask.io/download/"
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            <WalletIcon />
-            Get MetaMask
-          </a>
+          <div className="connector-empty-links">
+            <a
+              className="primary wallet-button"
+              href="https://metamask.io/download/"
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              <WalletIcon />
+              Get MetaMask
+            </a>
+            <a
+              className="secondary wallet-button"
+              href="https://rabby.io/"
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              <WalletIcon />
+              Get Rabby
+            </a>
+          </div>
         </div>
       )}
 

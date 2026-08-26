@@ -40,6 +40,8 @@ const FUNCTIONS_MESSAGES = {
     "No sign-in request is pending for this wallet. Start the sign-in again.",
   "functions/deadline-exceeded":
     "The sign-in server took too long to respond. Please try again.",
+  "functions/resource-exhausted":
+    "A sign-in request was just issued for this wallet. Wait a few seconds and try again.",
 };
 
 const FIRESTORE_MESSAGES = {
@@ -63,7 +65,16 @@ export class OnboardingError extends Error {
 }
 
 export function messageForFirebaseError(error) {
-  const code = error?.code ?? "";
+  // Firebase's own SDKs always use string codes ("auth/xyz", "permission-denied").
+  // This function is also the catch-all for the chain-switch step in signIn() and
+  // for whatever a wallet extension throws, though - and EIP-1193 wallet errors
+  // (Backpack, MetaMask, etc.) commonly carry a NUMERIC code (4001, 4902, -32603).
+  // `error?.code ?? ""` only guards against undefined/null, so a numeric code sailed
+  // through as a number and crashed the very first `.includes()` call below with
+  // "code.includes is not a function" - hiding whatever the wallet's real error was
+  // behind a JS crash instead of showing it. Coercing to a string up front fixes it
+  // for every error shape, not just Firebase's.
+  const code = String(error?.code ?? "");
 
   if (FIREBASE_AUTH_MESSAGES[code]) return FIREBASE_AUTH_MESSAGES[code];
   if (FUNCTIONS_MESSAGES[code]) return FUNCTIONS_MESSAGES[code];
@@ -75,7 +86,13 @@ export function messageForFirebaseError(error) {
 
   if (error instanceof OnboardingError) return error.message;
 
-  return "Something went wrong while creating your account. Please try again, and contact the platform team if it keeps happening.";
+  // Surface whatever the wallet/SDK actually said instead of a pure guess - this is
+  // what lets a genuinely wallet-specific failure (e.g. a chain switch Backpack
+  // itself refuses) be diagnosed from what the user sees, rather than staying invisible.
+  const detail = error?.shortMessage || error?.reason || error?.message;
+  return detail
+    ? `Something went wrong: ${detail}`
+    : "Something went wrong. Please try again, and contact the platform team if it keeps happening.";
 }
 
 // Wallet-level failures (connect rejected, wrong network, extension errors) are

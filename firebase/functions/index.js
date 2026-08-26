@@ -12,9 +12,37 @@ const db = getFirestore();
 const NONCE_COLLECTION = "siweNonces";
 const NONCE_TTL_MS = 5 * 60 * 1000;
 
-// Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js, and ideally the
-// Firestore location too. A mismatch shows up in the browser as a CORS error,
-// because the wrong-region URL 404s and a 404 page carries no CORS headers.
+// Minimum time between two nonces for the SAME address. `getSiweNonce` is
+// unauthenticated by necessity (proving identity is the whole point of calling it),
+// so nothing stops it being called repeatedly for one address - and every prior
+// version of this function's `.set()` unconditionally overwrote whatever nonce was
+// already pending. That is a real, currently-live griefing path, not a hypothetical
+// one: request a nonce for a victim's PUBLIC address (profiles are readable by
+// anyone) faster than they can sign it, and their in-flight sign-in breaks every
+// time, because the message they already signed no longer matches what is stored.
+// This also bounds Firestore write volume from address-spam at close to zero cost
+// to legitimate traffic, since a real sign-in only ever calls this once.
+const NONCE_COOLDOWN_MS = 3_000;
+
+// Hard ceiling on concurrent instances. Bounds the worst-case cost and blast radius
+// of a volumetric flood (many distinct addresses, one call each, so the per-address
+// cooldown above does not apply) to a fixed number regardless of how much traffic
+// arrives - once instances are saturated, Cloud Run queues or fails fast rather than
+// autoscaling without limit. This adds no latency to normal traffic; a handful of
+// concurrent sign-ins never gets close to it.
+const NONCE_MAX_INSTANCES = 10;
+
+// Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js. Must ALSO match the
+// Firestore database's own location (see `firebase firestore:databases:get
+// "(default)" --project <id>`, and firebase/README.md for how to set it on a fresh
+// project) - getSiweNonce does two sequential Firestore round trips per call (a read
+// then a write), and every one of them crosses regions if this doesn't match. That
+// was previously true here (functions in asia-southeast1, Firestore left on its
+// default nam5/US location) and measured out to ~400ms-1.3s per sign-in from cross-
+// Pacific latency alone, dwarfing everything else on the critical path. A plain
+// region mismatch on the FUNCTIONS side shows up as a browser CORS error instead
+// (the wrong-region URL 404s, and a 404 page carries no CORS headers), so it fails
+// loudly - a Firestore location mismatch fails silently, as just "slow."
 const REGION = "asia-southeast1";
 
 // EIP-1271 lets a smart contract wallet (Safe, Argent, most account-abstraction
@@ -72,25 +100,49 @@ function resolveDomain(request) {
  * The nonce document is written with the Admin SDK, so it is unreachable from any
  * browser: firestore.rules denies the whole collection.
  */
-export const getSiweNonce = onCall({ region: REGION }, async (request) => {
-  const address = normaliseAddress(request.data?.address);
-  const nonce = randomBytes(16).toString("hex");
-  const issuedAt = new Date().toISOString();
-  const domain = resolveDomain(request);
-  const message = buildMessage({ address, nonce, issuedAt, domain });
+export const getSiweNonce = onCall(
+  { region: REGION, maxInstances: NONCE_MAX_INSTANCES },
+  async (request) => {
+    const address = normaliseAddress(request.data?.address);
+    const ref = db.collection(NONCE_COLLECTION).doc(address);
 
-  await db.collection(NONCE_COLLECTION).doc(address).set({
-    nonce,
-    issuedAt,
-    domain,
-    address,
-    consumed: false,
-    expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MS),
-    createdAt: Timestamp.now(),
-  });
+    // Best-effort, not transactional: a plain read before the write below, not a
+    // read-check-write wrapped in a transaction. A transaction would close a
+    // negligible race (two calls for the same address landing in the same instant)
+    // at the cost of serialising every nonce issuance through extra round trips -
+    // real overhead on every legitimate sign-in to guard against a low-stakes edge
+    // case. What actually matters here is stopping SUSTAINED repeated calls from
+    // clobbering a live nonce, which this does.
+    const existing = await ref.get();
+    if (existing.exists) {
+      const data = existing.data();
+      const ageMs = Date.now() - data.createdAt.toMillis();
+      if (!data.consumed && ageMs < NONCE_COOLDOWN_MS) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "A sign-in request was just issued for this wallet. Wait a few seconds and try again.",
+        );
+      }
+    }
 
-  return { message, nonce, issuedAt };
-});
+    const nonce = randomBytes(16).toString("hex");
+    const issuedAt = new Date().toISOString();
+    const domain = resolveDomain(request);
+    const message = buildMessage({ address, nonce, issuedAt, domain });
+
+    await ref.set({
+      nonce,
+      issuedAt,
+      domain,
+      address,
+      consumed: false,
+      expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MS),
+      createdAt: Timestamp.now(),
+    });
+
+    return { message, nonce, issuedAt };
+  },
+);
 
 /**
  * Step 2 of sign-in. Verifies the signature against the message this server issued,
@@ -146,6 +198,14 @@ export const verifySiweSignature = onCall({ region: REGION }, async (request) =>
   }
 
   if (!valid) {
+    // The nonce was claimed inside the transaction above before verification ran,
+    // so a wrong or forged signature would otherwise burn it permanently - anyone
+    // who knows a target's PUBLIC address (profiles are readable by anyone) could
+    // call this with a garbage signature and lock the real owner out until they
+    // requested a fresh nonce. Reverting it here means a bogus attempt costs the
+    // legitimate holder nothing: their already-signed message still matches this
+    // same nonce and can be resubmitted immediately.
+    await ref.update({ consumed: false }).catch(() => {});
     throw new HttpsError("permission-denied", "That signature does not match this wallet.");
   }
 

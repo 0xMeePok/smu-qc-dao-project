@@ -1,5 +1,3 @@
-import { roleValues } from "./roles.js";
-
 export function validateFullName(value = "") {
   const trimmed = value.trim();
   if (!trimmed) return "Enter your full name.";
@@ -13,12 +11,6 @@ export function validateOrganisation(value = "") {
   if (!trimmed) return "Enter the organisation you represent.";
   if (trimmed.length < 2) return "The organisation name needs at least 2 characters.";
   if (trimmed.length > 120) return "The organisation name cannot be longer than 120 characters.";
-  return null;
-}
-
-export function validateRole(value = "") {
-  if (!value) return "Choose the role that matches how you will use the platform.";
-  if (!roleValues.includes(value)) return "That role is not one of the available options.";
   return null;
 }
 
@@ -41,12 +33,9 @@ function isAddress(value = "") {
 
 // Runs every rule and returns a field -> message map. Empty means the form is valid.
 //
-// Role is deliberately not collected or validated here. It used to be, but that
-// meant asking for it twice - once in this onboarding form, once again on the
-// role-selection screen right after - and only the second answer was ever kept,
-// since createProfile wrote whatever role-selection later overwrote. The account is
-// created with roles.DEFAULT_ROLE and the role-selection screen is now the one place
-// a role is actually chosen and stored.
+// There is no role field to collect: every account is created as a normal user
+// (roles.ROLE_USER), and administrator access is granted by hand in Firestore, not
+// chosen by the person signing up.
 export function validateOnboarding(form, address) {
   const errors = {
     fullName: validateFullName(form.fullName),

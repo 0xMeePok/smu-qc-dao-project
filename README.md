@@ -48,10 +48,7 @@ signInWithCustomToken()
       +-- users/{address} exists?  --> signed in
       |
       +-- not found?               --> onboarding popup (full name, organisation)
-                                              |
-                                              v
-                                        role-selection screen
-                                        (the one place a role is chosen and saved)
+                                        creates the profile as a normal user
 ```
 
 `request.auth.uid` **is** the lowercase wallet address, and that uid can only exist
@@ -65,8 +62,11 @@ skip that check.
 across page reloads). The same signing step is what any future state-changing
 action — posting a comment, committing funding, submitting a proposal — will also
 require at the point of that action, once those features exist. Right now, only
-account creation and role selection are implemented; nothing else writes to
-Firestore yet.
+account creation is implemented; nothing else writes to Firestore yet.
+
+Every account is a normal user (`role: 0`). There is no self-service way to become an
+administrator (`role: 1`) — that is set by hand in the Firestore console, and an
+admin-only page appears in the app automatically once it is.
 
 ## Project Structure
 
@@ -79,7 +79,7 @@ smu-qc-dao-project/
 │   │   ├── lib/                 # Firebase/wagmi setup, validation, SIWE client calls
 │   │   ├── context/               # SessionContext — the sign-in state machine
 │   │   ├── components/              # Modal shell, connector picker, onboarding form
-│   │   └── pages/                     # RoleSelection
+│   │   └── pages/                     # AdminPage (only reachable with role == 1)
 │   └── test/                            # Validation unit tests
 ├── firebase/                  # Firestore rules, Cloud Functions, their tests
 │   ├── functions/                # getSiweNonce + verifySiweSignature
@@ -180,7 +180,8 @@ pointed at a live deployment — see [`firebase/README.md`](firebase/README.md).
 ## Current implementation status
 
 Implemented: wallet sign-in with server-verified signatures, onboarding (name +
-organisation), role selection, and the Firestore schema for user profiles including
+organisation), a two-level access model (normal user / administrator, granted by
+hand), an admin-only page shell, and the Firestore schema for user profiles including
 placeholder contribution counters (`comments`, `businessProblems`, `openFunding`,
 `fundingRequests`, `karma`, `reputation` — all currently `0`, nothing increments them
 yet).

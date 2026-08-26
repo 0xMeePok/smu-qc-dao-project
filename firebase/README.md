@@ -10,6 +10,7 @@ for anyone editing `firestore.rules` or `functions/index.js` and redeploying.
 
 ```
 firebase/
+├── deploy.sh                    # One-shot production setup - see "Deploy" below
 ├── firestore.rules              # Server-side authorisation for the users/{address} schema
 ├── firestore.indexes.json       # No composite indexes needed yet
 ├── firebase.json                # Emulator ports, hosting config, functions source path
@@ -39,9 +40,7 @@ because one of these functions verified a real signature first:
 
 ## Connect to the shared backend
 
-This is all most people need — no install in this folder, no deploy, no Firebase CLI.
-
-1. Ask the project owner for the six `VITE_FIREBASE_*` values.
+1. Ask Ashley for the six `VITE_FIREBASE_*` values.
 2. Put them in `frontend/.env.local` (copy `frontend/.env.example` as a starting
    point).
 3. `npm install && npm run dev` in `frontend/` — sign-in talks straight to the live
@@ -57,8 +56,7 @@ curl -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json
 
 `200` means it's up. If you get a CORS error in the browser console instead, it
 almost always means the URL is wrong (region or project id) rather than an actual
-CORS misconfiguration — a 404 page carries no CORS headers, and the browser reports
-the missing header instead of the 404.
+CORS misconfiguration.
 
 ---
 
@@ -116,6 +114,20 @@ rejected — and that a legitimate signature succeeds.
 
 ### Deploy
 
+For a brand-new production project (a fresh Firebase project with nothing deployed
+yet), use `deploy.sh` — it creates the Firestore database in the correct region if
+one doesn't exist, deploys rules/indexes/functions, and prints what's left to do by
+hand. It never deletes or moves an existing database:
+
+```bash
+./deploy.sh --project <project-id>
+```
+
+Run `./deploy.sh --help` for the full rundown of what it checks and why.
+
+For a one-off change to rules or functions on an already-set-up project, the plain
+CLI commands are enough:
+
 ```bash
 firebase deploy --only firestore:rules,functions --project <project-id>
 ```
@@ -135,12 +147,16 @@ You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
 | `address` | string | lowercase `0x…`, must equal the document id |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
-| `role` | string | one of the five roles in `frontend/src/lib/roles.js` — keep both files in sync |
-| `chainId` | number | `421614` (Arbitrum Sepolia) |
-| `walletVerified` | bool | always `true` — only reachable after server-side verification |
+| `role` | number | `0` (user) or `1` (administrator). Fixed to `0` on create and immutable on every client update — the only way to grant `1` is by hand in the Firestore console (or via the Admin SDK), never through the app |
+| `chainId` | number | must be `421614` (Arbitrum Sepolia); immutable after creation |
+| `walletVerified` | bool | must be `true` at creation — only reachable after server-side verification |
 | `stats` | map | `comments`, `businessProblems`, `openFunding`, `fundingRequests`, `karma`, `reputation` — all `0` at creation, frozen against every client write |
-| `onboardingComplete` | bool | flips to `true` once the role-selection step is confirmed |
+| `termsVersion` | string | 1–40 chars; immutable after creation |
 | `termsAcceptedAt`, `createdAt`, `updatedAt` | timestamp | must equal server time, not client-supplied time |
+
+No other fields are allowed — `create` and `update` both reject a document with any
+field outside this list, so a client can't smuggle in something like a self-granted
+`isAdmin` for later code to trust by accident.
 
 `stats` can only ever move via the Admin SDK, which bypasses these rules — nothing
 currently writes to it, since comments/problems/funding/proposals are not built yet.

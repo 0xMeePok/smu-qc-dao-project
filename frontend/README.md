@@ -41,7 +41,7 @@ src/
 ├── lib/            # Firebase/wagmi setup, validation, SIWE client calls, roles, stats
 ├── context/         # SessionContext — the wallet -> verified -> onboarding/signed-in state machine
 ├── components/      # Modal shell, connector picker, onboarding form, sign-in button
-├── pages/            # RoleSelection (the one place a role is actually chosen and saved)
+├── pages/            # AdminPage (only reachable when the signed-in profile has role == 1)
 ├── App.jsx            # Hash router, marketplace pages, top bar
 └── main.jsx             # WagmiProvider -> QueryClientProvider -> SessionProvider -> App
 ```
