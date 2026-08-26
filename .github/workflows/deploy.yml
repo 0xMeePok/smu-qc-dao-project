@@ -1,0 +1,179 @@
+name: Deploy
+
+# Full continuous deployment on every push to main.
+#
+# ORDER MATTERS, and it is enforced by `needs:` rather than by luck of scheduling.
+# The backend deploys FIRST and hosting waits for it, because the frontend depends
+# on the backend and not the other way round: createProfile() writes to
+# publicProfiles/{address}, and until firestore.rules declares that collection the
+# catch-all rule denies it.
+#
+# Everything is one workflow because that dependency cannot be expressed between
+# two workflow files without `workflow_run`, which starts a detached run against
+# the default branch and gives no ordering guarantee tied to this push.
+on:
+  push:
+    branches: [main]
+  # Redeploy the current main by hand from the Actions tab.
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FIREBASE_PROJECT_ID: qcdao-a0c7a
+
+jobs:
+  # ---------------------------------------------------------------- backend gate
+  test-backend:
+    name: Test backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            firebase/package-lock.json
+            firebase/functions/package-lock.json
+
+      # Java is required by the Firestore rules emulator. Preinstalled on
+      # ubuntu-latest, so this asserts the assumption rather than installing it.
+      - name: Verify Java is available for the Firestore emulator
+        run: java -version
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefix firebase
+          npm ci --prefix firebase/functions
+
+      # Both suites boot and tear down their own emulators, so no service account
+      # or access to the real project is needed to run them.
+      - name: Firestore rules tests
+        run: npm test --prefix firebase
+
+      - name: Cloud Functions tests
+        run: npm test --prefix firebase/functions
+
+  # --------------------------------------------------------------- frontend gate
+  test-frontend:
+    name: Test frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix frontend
+
+      # Files are named explicitly rather than using `npm test`, whose
+      # `test/**/*.test.js` glob also sweeps in test/unit/ and test/integration/ -
+      # a separate workstream's suite, already run by ci.yml on this same push.
+      # ADD NEW TEST FILES HERE, or they will not gate the deploy.
+      - name: Frontend unit tests
+        working-directory: frontend
+        run: node --test test/validation.test.js test/routeAccess.test.js test/idleTimeout.test.js
+
+  # ------------------------------------------------------- backend deploy (first)
+  deploy-backend:
+    name: Deploy rules and functions
+    needs: test-backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            firebase/package-lock.json
+            firebase/functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefix firebase
+          npm ci --prefix firebase/functions
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_QCDAO_A0C7A }}' > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      # Rules and functions go together in one command so a rules change and the
+      # function that relies on it cannot land seconds apart. The Firebase CLI
+      # skips functions whose source is unchanged, so pushing a frontend-only
+      # commit costs little here.
+      - name: Deploy Firestore rules, indexes and Cloud Functions
+        working-directory: firebase
+        run: |
+          npx firebase deploy \
+            --only firestore:rules,firestore:indexes,functions \
+            --project "$FIREBASE_PROJECT_ID" \
+            --non-interactive
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
+
+  # ------------------------------------------------------ hosting deploy (second)
+  deploy-hosting:
+    name: Build and deploy hosting
+    # Waits for the frontend tests AND for the backend to be live. If either fails,
+    # the site is not updated - which is the safe outcome, since a frontend without
+    # its backend is worse than a slightly stale one.
+    needs: [test-frontend, deploy-backend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
+          VITE_FIREBASE_USE_EMULATORS: "false"
+        run: npm run build --prefix frontend
+
+      # Fails the deploy rather than shipping a bundle that cannot reach Firebase.
+      # A missing secret otherwise produces a build that looks fine and only breaks
+      # when a user tries to sign in.
+      - name: Verify the build carries a Firebase config
+        run: |
+          if ! grep -rq "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" firebase/public/assets/*.js; then
+            echo "::error::Built bundle contains no Firebase project id. Check the VITE_FIREBASE_* repository secrets."
+            exit 1
+          fi
+          echo "Firebase config present in bundle."
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_QCDAO_A0C7A }}
+          projectId: ${{ env.FIREBASE_PROJECT_ID }}
+          channelId: live
+          # firebase.json lives in firebase/, and hosting.public is firebase/public -
+          # where Vite builds to (see frontend/vite.config.js). firebase-tools refuses
+          # a public path outside the directory holding firebase.json.
+          entryPoint: ./firebase

@@ -110,6 +110,28 @@ function allowedHosts() {
   return new Set(hosts.filter(Boolean));
 }
 
+// Firebase Hosting preview channels get a generated URL of the form
+// <project>--<channel>-<hash>.web.app, so continuous deployment produces a host name
+// nobody can predict or configure in advance. Matching the prefix instead of a fixed
+// string means every preview this project deploys is trusted automatically, with no
+// redeploy of these functions.
+//
+// This is not a wildcard on someone else's namespace: only a principal that can
+// deploy to THIS project can create a host beginning `<project>--`. An attacker
+// cannot register qcdao-a0c7a--evil.web.app any more than they could take
+// qcdao-a0c7a.web.app itself. Note the check is anchored on the project id and
+// requires one of the two Firebase suffixes, so `qcdao-a0c7a--evil.attacker.com`
+// does not match.
+function isOwnHostingPreview(host) {
+  const projectId = (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "")
+    .trim()
+    .toLowerCase();
+  if (!projectId) return false;
+
+  return host.startsWith(`${projectId}--`)
+    && (host.endsWith(".web.app") || host.endsWith(".firebaseapp.com"));
+}
+
 function resolveDomain(request) {
   const origin = request.rawRequest?.headers?.origin;
 
@@ -131,7 +153,7 @@ function resolveDomain(request) {
   // that skips itself when the env var is unset - a security control that does
   // nothing until someone remembers to configure it is one that will be forgotten
   // exactly once, in production.
-  if (!allowedHosts().has(host)) {
+  if (!allowedHosts().has(host) && !isOwnHostingPreview(host)) {
     throw new HttpsError("permission-denied", "Sign-in is not available from this origin.");
   }
 

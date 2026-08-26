@@ -300,3 +300,70 @@ describe("nonce issuance is idempotent and cannot be griefed", () => {
     assert.equal(second.result?.token, undefined, "the nonce must remain single use");
   });
 });
+
+describe("hosting origins, including CD preview channels", () => {
+  // The emulator runs as project qc-dao-demo, so its hosting namespace is
+  // qc-dao-demo.web.app and qc-dao-demo--<channel>-<hash>.web.app.
+  const PROJECT = "qc-dao-demo";
+
+  it("accepts the project's own live hosting domains", async () => {
+    // Derived from GCLOUD_PROJECT at runtime, so a deployed site needs no origin
+    // configuration of its own.
+    for (const host of [`${PROJECT}.web.app`, `${PROJECT}.firebaseapp.com`]) {
+      const fresh = privateKeyToAccount(generatePrivateKey());
+      const res = await call("getSiweNonce", { address: fresh.address }, { origin: `https://${host}` });
+      assert.ok(res.result?.message, `${host} must be served`);
+    }
+  });
+
+  it("accepts a generated preview-channel URL without any configuration", async () => {
+    // hosting:channel:deploy mints an unpredictable hash, so a preview host cannot
+    // be allow-listed ahead of time. Without this, sign-in fails on every preview.
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call(
+      "getSiweNonce",
+      { address: fresh.address },
+      { origin: `https://${PROJECT}--test-cd-wm5z6dh8.web.app` },
+    );
+
+    assert.ok(res.result?.message, "a preview channel of this project must be served");
+    assert.ok(
+      res.result.message.includes(`${PROJECT}--test-cd-wm5z6dh8.web.app`),
+      "the message must name the preview host the user is actually on",
+    );
+  });
+
+  it("refuses a preview-shaped host belonging to a DIFFERENT project", async () => {
+    // The prefix is anchored on this project id, so another project's previews are
+    // not ours to trust.
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call(
+      "getSiweNonce",
+      { address: fresh.address },
+      { origin: "https://some-other-project--pr-1-aaaa.web.app" },
+    );
+    assert.equal(res.error?.status, "PERMISSION_DENIED");
+  });
+
+  it("refuses an attacker domain that merely starts with the project prefix", async () => {
+    // qc-dao-demo--evil.attacker.com is registrable by anyone; requiring a Firebase
+    // suffix is what stops the prefix match being a wildcard on the open internet.
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call(
+      "getSiweNonce",
+      { address: fresh.address },
+      { origin: `https://${PROJECT}--evil.attacker.com` },
+    );
+    assert.equal(res.error?.status, "PERMISSION_DENIED");
+  });
+
+  it("refuses a host that merely ends with a Firebase suffix", async () => {
+    const fresh = privateKeyToAccount(generatePrivateKey());
+    const res = await call(
+      "getSiweNonce",
+      { address: fresh.address },
+      { origin: "https://attacker.web.app" },
+    );
+    assert.equal(res.error?.status, "PERMISSION_DENIED");
+  });
+});
