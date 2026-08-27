@@ -116,13 +116,16 @@ smu-qc-dao-project/
 - npm
 - [Firebase CLI](https://firebase.google.com/docs/cli) (`npm install -g firebase-tools`) —
   only needed if you're redeploying rules/functions or running emulators, not for
-  ordinary frontend work
-- Java — only needed to run the Firestore rules test suite locally, which boots its
-  own emulator
+  ordinary frontend work against the live backend
+- Java — needed by the Firestore emulator (local emulators **and** the rules test suite)
 - A browser wallet (MetaMask is the simplest) with Arbitrum Sepolia testnet ETH from
   a faucet, for deploying/interacting with the QFT contract
 
 ## Getting Started
+
+Do these **in order**. GitHub Actions installs packages for you; your laptop does not.
+Starting the emulators or `npm run dev` on a fresh clone without step 2 fails with
+`Cannot find module 'firebase-functions'` (or a missing Vite/React install).
 
 ### 1. Clone the repository
 
@@ -131,27 +134,70 @@ git clone https://github.com/0xMeePok/smu-qc-dao-project.git
 cd smu-qc-dao-project
 ```
 
-### 2. Connect to Firebase
+### 2. Install dependencies (first, once, from the repo root)
 
-The Firestore database and both Cloud Functions are already deployed — you don't set
-up your own project. See **[Connect to Firebase](#connect-to-firebase)** below for
-what you need from the project owner.
+There is no root `package.json`. Each folder below is its own npm package — install
+all three before anything else:
 
-### 3. Install and run the frontend
+```bash
+npm install --prefix firebase
+npm install --prefix firebase/functions
+npm install --prefix frontend
+```
+
+Re-run these only after a clean clone, a deleted `node_modules`, or a change to a
+`package.json` / lockfile.
+
+### 3. Frontend env
+
+```bash
+cp frontend/.env.example frontend/.env.local
+```
+
+Fill in `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, and
+`VITE_FIREBASE_APP_ID` (ask Ashley, or copy from Firebase console — see
+[Connect to Firebase](#connect-to-firebase)).
+
+To talk to **local emulators** instead of production, also set:
+
+```
+VITE_FIREBASE_USE_EMULATORS=true
+```
+
+Use the same project id in `.env.local` as you pass to `--project` in step 4
+(the shared project is `qcdao-a0c7a`). Without the emulator flag, `npm run dev`
+hits the live Firebase project.
+
+### 4. Run locally (emulators first, then the app)
+
+Two terminals. Start the emulators **before** the frontend.
+
+**Terminal 1 — Firebase emulators**
+
+```bash
+cd firebase
+npx firebase emulators:start --only functions,firestore,auth --project qcdao-a0c7a
+```
+
+Wait until you see `All emulators ready` **and** the functions loaded
+(`getSiweNonce`, `verifySiweSignature`). If you see `Cannot find module
+'firebase-functions'`, go back to step 2.
+
+Emulator UI: http://127.0.0.1:4000
+
+**Terminal 2 — frontend**
 
 ```bash
 cd frontend
-cp .env.example .env.local
-# fill in VITE_FIREBASE_API_KEY, VITE_FIREBASE_PROJECT_ID, VITE_FIREBASE_APP_ID
-npm install
 npm run dev
 ```
 
-The web application will start at `http://localhost:5173/`.
+App: http://localhost:5173/
 
-- **Standard Mode**: `http://localhost:5173/` (production layout, standard wallet login).
+To skip emulators and use the shared production backend, omit
+`VITE_FIREBASE_USE_EMULATORS=true` and only run terminal 2.
 
-### 4. (Optional) Deploy the QFT token
+### 5. (Optional) Deploy the QFT token
 
 ```bash
 cd contracts/qft-tokens
@@ -172,17 +218,13 @@ project's Firebase backend. You only need the client config:
 
 1. Ask Ashley for the six `VITE_FIREBASE_*` values (or get them yourself
    from the Firebase console: Project settings → General → Your apps → Web app).
-2. ```bash
-   cd frontend
-   cp .env.example .env.local
-   # paste in the six values
-   npm install && npm run dev
-   ```
+2. Follow [Getting Started](#getting-started) steps 2–4. For production (no
+   emulators), skip `VITE_FIREBASE_USE_EMULATORS` and only run the frontend.
 
-That's it — sign-in talks straight to the shared backend.
+That's it — sign-in talks straight to the shared backend unless emulators are on.
 
 If you're changing `firestore.rules` or `firebase/functions/index.js` yourself and
-need to redeploy, or want to run everything against local emulators instead, see
+need to redeploy, or want more detail on local emulators, see
 [`firebase/README.md`](firebase/README.md).
 
 ## Documentation Reference
@@ -204,7 +246,9 @@ npm test --prefix firebase/functions  # 25 tests — adversarial signature verif
 ```
 
 Each suite boots and tears down whatever emulator it needs, so no manual setup is
-required — see [`firebase/README.md`](firebase/README.md).
+required — see [`firebase/README.md`](firebase/README.md). Still run step 2 of
+[Getting Started](#getting-started) first, or the functions suite cannot find
+`firebase-functions` / `firebase-tools`.
 
 Run everything in one go:
 
@@ -225,7 +269,7 @@ Pushing to `main` deploys automatically via
 test-backend  (Cloud Functions) ──┐
                                   ├──→ deploy-backend ──→ deploy-hosting
 test-rules    (Firestore rules) ──┘                            ↑
-test-frontend ─────────────────────────────────────────────────┘
+test-frontend ─────────────────────────────────────────────────────┘
 ```
 
 The backend deploys **before** hosting, and hosting waits for it. That order is
@@ -257,7 +301,7 @@ placeholder contribution counters (`comments`, `businessProblems`, `openFunding`
 ## Team
 
 | Name | Role |
-|---|---|
+|---|---|---|
 | Ashley Chung Beng Hunn | Product Owner |
 | Anthony Chew Jian Yee | Scrum Master |
 | Daryl Yeo Yao Hong | Full Stack Developer |
