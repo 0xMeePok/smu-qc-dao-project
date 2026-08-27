@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 import {
   assertFails,
   assertSucceeds,
@@ -11,6 +11,8 @@ import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBa
 const ADDRESS = `0x${"a".repeat(40)}`;
 const OTHER = `0x${"b".repeat(40)}`;
 let env;
+
+
 
 const ZERO_STATS = {
   comments: 0, businessProblems: 0, openFunding: 0,
@@ -135,6 +137,16 @@ describe("users/{address} create", () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(
       setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { isAdmin: true })),
+    );
+  });
+
+  it("blocks setting suspended at signup", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { suspended: false })),
+    );
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { suspended: true })),
     );
   });
 });
@@ -452,6 +464,47 @@ describe("users/{address} update", () => {
     );
   });
 
+  it("blocks updating profile when suspended is present on the document", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), "users", SUSPENDED_USER),
+        baseProfile(null, SUSPENDED_USER, { suspended: true }),
+      );
+    });
+
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(
+      updateDoc(doc(db, "users", SUSPENDED_USER), {
+        organisation: "Updated Org",
+        suspended: true,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it("blocks self-unsuspending or adding suspended during profile update", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    // Attempting to clear suspended or change to false
+    await assertFails(
+      updateDoc(doc(db, "users", SUSPENDED_USER), {
+        organisation: "Updated Org",
+        suspended: false,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+
+    // Attempting to add suspended: true to an existing un-suspended user
+    const dbOther = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      updateDoc(doc(dbOther, "users", OTHER), {
+        suspended: true,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
   it("blocks deletes outright", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(deleteDoc(doc(db, "users", OTHER)));
@@ -615,6 +668,15 @@ describe("audits/{auditId}", () => {
 
   it("[BIT-AAR-89] [QCDAO43] blocks read for normal users (role == 0)", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "audits", "a1")));
+  });
+
+  it("[BIT-AAR-99] [QCDAO47] blocks read for suspended administrators", async () => {
+    const SUSPENDED_ADMIN = `0x${"e".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_ADMIN), baseProfile(null, SUSPENDED_ADMIN, { role: 1, suspended: true }));
+    });
+    const db = env.authenticatedContext(SUSPENDED_ADMIN).firestore();
     await assertFails(getDoc(doc(db, "audits", "a1")));
   });
 

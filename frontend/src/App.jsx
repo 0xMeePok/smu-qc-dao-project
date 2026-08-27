@@ -12,6 +12,7 @@ import { AccessDenied } from "./components/AccessDenied.jsx";
 import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
 import { NetworkBanner } from "./components/NetworkBanner.jsx";
+import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import {
   MyProblems,
   ResearcherProposals,
@@ -19,6 +20,7 @@ import {
   FundingPortfolio,
   AdminAudit,
 } from "./components/RoleViews.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 
 function parseHash() {
   if (typeof window !== "undefined") {
@@ -806,7 +808,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <AdminAudit onNavigate={go} />
+        <AdminPage />
       </RouteGuard>
     );
   } else if (section === "access-denied") {
@@ -816,6 +818,7 @@ function AppContent() {
   return (
     <>
       <NetworkBanner />
+      <SuspensionBanner />
       <Shell route={section}>{pageComponent}</Shell>
       <OnboardingModal />
     </>

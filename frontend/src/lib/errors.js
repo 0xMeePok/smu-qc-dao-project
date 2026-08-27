@@ -33,7 +33,7 @@ const FUNCTIONS_MESSAGES = {
   "functions/unavailable":
     "The sign-in server is unreachable. Check your connection, then confirm the Cloud Functions are deployed.",
   "functions/permission-denied":
-    "The sign-in server refused the request. Confirm the functions allow unauthenticated invocation.",
+    "Your account has been suspended, contact an administrator.",
   "functions/unauthenticated":
     "The sign-in server rejected the request as unauthenticated. Confirm the functions allow unauthenticated invocation.",
   "functions/failed-precondition":
@@ -75,6 +75,10 @@ export function messageForFirebaseError(error) {
   // behind a JS crash instead of showing it. Coercing to a string up front fixes it
   // for every error shape, not just Firebase's.
   const code = String(error?.code ?? "");
+
+  if (error?.message && typeof error.message === "string" && error.message.toLowerCase().includes("suspended")) {
+    return "Your account has been suspended, contact an administrator.";
+  }
 
   if (FIREBASE_AUTH_MESSAGES[code]) return FIREBASE_AUTH_MESSAGES[code];
   if (FUNCTIONS_MESSAGES[code]) return FUNCTIONS_MESSAGES[code];

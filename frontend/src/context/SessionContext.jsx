@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAccount, useDisconnect, useSignMessage } from "wagmi";
 import { getConnection, switchChain } from "wagmi/actions";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { auth, isFirebaseConfigured } from "../lib/firebase.js";
+import { onSnapshot, doc } from "firebase/firestore";
+import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
 import { exchangeSignatureForSession, requestSignInMessage } from "../lib/authFlow.js";
 import { createProfile, findProfileByAddress } from "../lib/profile.js";
 import { messageForFirebaseError } from "../lib/errors.js";
@@ -149,23 +150,33 @@ export function SessionProvider({ children }) {
     const token = (lookupToken.current += 1);
     setStatus("checking");
 
-    (async () => {
-      try {
-        const found = await findProfileByAddress(verifiedAddress);
+    let hasRoutedToAdmin = false;
+
+    const unsubscribe = onSnapshot(
+      doc(db, "users", verifiedAddress.toLowerCase()),
+      (snapshot) => {
         if (token !== lookupToken.current) return;
+        const found = snapshot.exists() ? snapshot.data() : null;
         setProfile(found);
         setStatus(found ? "signed-in" : "needs-onboarding");
+        
         // Fires once per session establishment (this effect only re-runs when
         // verifiedAddress changes - a fresh sign-in or a restored session on page
         // load), not on every render, so navigating elsewhere afterward doesn't
         // keep yanking an admin back here.
-        if (found && isAdmin(found.role)) go("admin");
-      } catch (caught) {
+        if (found && isAdmin(found.role) && !found.suspended && !hasRoutedToAdmin) {
+          hasRoutedToAdmin = true;
+          go("admin");
+        }
+      },
+      (caught) => {
         if (token !== lookupToken.current) return;
         setError(messageForFirebaseError(caught));
         setStatus("signed-out");
       }
-    })();
+    );
+
+    return () => unsubscribe();
   }, [verifiedAddress, reset]);
 
   // If the wallet switches to a DIFFERENT account, the Firebase session belongs to
@@ -267,6 +278,7 @@ export function SessionProvider({ children }) {
       error,
       address: verifiedAddress,
       isSignedIn: status === "signed-in",
+      isSuspended: Boolean(profile?.suspended),
       needsOnboarding: status === "needs-onboarding",
       isVerifying: status === "verifying",
       isChecking: status === "checking",
