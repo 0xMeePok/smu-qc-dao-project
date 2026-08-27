@@ -24,3 +24,14 @@ export const ROLE_DESCRIPTIONS = {
   [ROLES.FUNDER]: "Capital allocator funding vetted quantum research initiatives.",
   [ROLES.ADMIN]: "Platform governor overseeing system registries and on-chain audit trails.",
 };
+
+/**
+ * Where a user belongs immediately after signing in, when no interrupted route is
+ * waiting. Administrators land on their own workspace; everyone else lands home.
+ *
+ * Returns a route id, not a URL, so callers decide how to navigate.
+ */
+export function landingRouteFor(roles) {
+  const list = Array.isArray(roles) ? roles : [roles];
+  return list.includes(ROLES.ADMIN) ? "admin" : "home";
+}

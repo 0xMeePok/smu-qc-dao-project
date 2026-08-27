@@ -1,16 +1,21 @@
 import { useEffect } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
+import { landingRouteFor } from "../config/roles.js";
 import { SignInWithWallet } from "./SignInWithWallet.jsx";
 import { getRouteConfig } from "../config/routes.js";
 
 export function Login({ redirectTarget, onNavigate }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, roles, isLoading } = useAuth();
 
   useEffect(() => {
+    if (isLoading) return;
     if (isAuthenticated) {
-      let destination = redirectTarget || "home";
+      // An interrupted route wins; otherwise land on the screen this role actually
+      // works from, rather than sending an administrator to the public home page.
+      const landing = landingRouteFor(roles);
+      let destination = redirectTarget || landing;
       if (redirectTarget && !getRouteConfig(redirectTarget)) {
-        destination = "home";
+        destination = landing;
       }
       
       if (onNavigate) {
@@ -19,7 +24,7 @@ export function Login({ redirectTarget, onNavigate }) {
         window.location.hash = `/${destination}`;
       }
     }
-  }, [isAuthenticated, redirectTarget, onNavigate]);
+  }, [isLoading, isAuthenticated, roles, redirectTarget, onNavigate]);
 
   return (
     <section className="page login-page">

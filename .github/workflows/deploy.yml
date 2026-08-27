@@ -80,7 +80,7 @@ jobs:
       # ADD NEW TEST FILES HERE, or they will not gate the deploy.
       - name: Frontend unit tests
         working-directory: frontend
-        run: node --test test/validation.test.js test/routeAccess.test.js test/idleTimeout.test.js
+        run: node --test test/validation.test.js test/routeAccess.test.js test/idleTimeout.test.js test/session.test.js
 
   # ------------------------------------------------------------------ rules gate
   test-rules:

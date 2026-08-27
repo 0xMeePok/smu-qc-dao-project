@@ -63,6 +63,11 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     roles,
+    // Passed through from SessionContext so every consumer - route guards included -
+    // can distinguish "not signed in" from "not known yet". Defaults to true when
+    // there is no SessionProvider, because in that case nothing has resolved at all
+    // and reporting "resolved, signed out" would be a lie.
+    isLoading: session ? session.isLoading : true,
     role: roles[0] || ROLES.GUEST,
     isAuthenticated: Boolean(user) && roles.some((r) => r !== ROLES.GUEST) && !session?.profile?.suspended,
     isMultiRole: roles.filter((r) => r !== ROLES.GUEST).length > 1,

@@ -12,10 +12,15 @@ import { AccessDenied } from "./AccessDenied.jsx";
  * and/or Cloud Functions to protect against direct API access.
  */
 export function RouteGuard({ targetRoute, allowedRoles, authRequired, children, onNavigate }) {
-  const { isAuthenticated, hasAnyRole } = useAuth();
+  const { isAuthenticated, hasAnyRole, isLoading } = useAuth();
 
   // 1. Check Authentication - Redirect to #/login?redirect=...
   useEffect(() => {
+    // Wait for the session to resolve before redirecting anyone. Firebase reports a
+    // persisted session a tick AFTER mount, so on every refresh isAuthenticated is
+    // briefly false for a user who is in fact signed in. Redirecting on that would
+    // bounce them to #/login on each reload - the flash this guard exists to prevent.
+    if (isLoading) return;
     if (authRequired && !isAuthenticated) {
       const redirectHash = `login?redirect=${encodeURIComponent(targetRoute || "home")}`;
       if (onNavigate) {
@@ -24,7 +29,18 @@ export function RouteGuard({ targetRoute, allowedRoles, authRequired, children, 
         window.location.hash = `#/${redirectHash}`;
       }
     }
-  }, [authRequired, isAuthenticated, targetRoute, onNavigate]);
+  }, [isLoading, authRequired, isAuthenticated, targetRoute, onNavigate]);
+
+  // Render nothing while the role is unresolved, so a protected screen never appears
+  // before we know the viewer may see it - and equally, never flashes AccessDenied at
+  // someone who turns out to be authorised.
+  if (isLoading) {
+    return (
+      <section className="page empty" role="status" aria-live="polite">
+        <p className="lead">Restoring your session…</p>
+      </section>
+    );
+  }
 
   if (authRequired && !isAuthenticated) {
     return null;
