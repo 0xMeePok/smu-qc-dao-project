@@ -43,7 +43,8 @@ export function accessFor(route) {
  * alternative was a test that reimplements these rules, which would pass happily
  * while the real function was broken.
  */
-export function allows(required, { isSignedIn = false, role = undefined } = {}) {
+export function allows(required, { isSignedIn = false, role = undefined, isSuspended = false } = {}) {
+  if (isSuspended) return required === PUBLIC;
   if (required === PUBLIC) return true;
   if (!isSignedIn) return false;
   if (required === ADMIN) return isAdmin(role);
@@ -58,6 +59,6 @@ export function canAccess(route, session = {}) {
  * Where a user belongs immediately after an interactive sign-in, when there is no
  * interrupted route to return them to.
  */
-export function landingFor(role) {
-  return isAdmin(role) ? "admin" : "home";
+export function landingFor(role, isSuspended = false) {
+  return (isAdmin(role) && !isSuspended) ? "admin" : "home";
 }

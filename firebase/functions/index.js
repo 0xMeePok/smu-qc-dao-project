@@ -343,6 +343,12 @@ export const verifySiweSignature = onCall({ region: REGION }, async (request) =>
     tx.update(ref, { consumed: true, consumedAt: Timestamp.now() });
   });
 
+  // Check if account has been administratively suspended
+  const userProfileSnap = await db.collection("users").doc(address).get();
+  if (userProfileSnap.exists && userProfileSnap.data()?.suspended) {
+    throw new HttpsError("permission-denied", "This account has been suspended by an administrator.");
+  }
+
   const token = await getAuth().createCustomToken(address, {
     wallet: address,
     chainId: arbitrumSepolia.id,
@@ -350,3 +356,218 @@ export const verifySiweSignature = onCall({ region: REGION }, async (request) =>
 
   return { token, address };
 });
+
+/**
+ * Validates that the caller is an authenticated administrator (role == 1) and not suspended.
+ */
+async function requireAdmin(request) {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Authentication required.");
+  }
+  const userDoc = await db.collection("users").doc(uid.toLowerCase()).get();
+  if (!userDoc.exists || userDoc.data()?.role !== 1) {
+    throw new HttpsError("permission-denied", "Administrator privilege required.");
+  }
+  if (userDoc.data()?.suspended) {
+    throw new HttpsError("permission-denied", "This administrator account is suspended.");
+  }
+  return { uid: uid.toLowerCase(), adminUser: userDoc.data() };
+}
+
+/**
+ * Admin: List platform users with search, filtering, and pagination.
+ */
+export const adminListUsers = onCall({ region: REGION }, async (request) => {
+  await requireAdmin(request);
+
+  const {
+    page = 1,
+    pageSize = 20,
+    search = "",
+    roleFilter = null,
+    orgFilter = "",
+  } = request.data ?? {};
+
+  let usersQuery = db.collection("users");
+  if (typeof roleFilter === "number" && (roleFilter === 0 || roleFilter === 1)) {
+    usersQuery = usersQuery.where("role", "==", roleFilter);
+  }
+
+  const snapshot = await usersQuery.get();
+  let users = snapshot.docs.map((docSnap) => {
+    const data = docSnap.data();
+    return {
+      address: docSnap.id,
+      fullName: data.fullName || "",
+      organisation: data.organisation || "",
+      role: typeof data.role === "number" ? data.role : 0,
+      suspended: Boolean(data.suspended),
+      createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
+      updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null,
+    };
+  });
+  if (typeof orgFilter === "string" && orgFilter.trim().length > 0) {
+    const orgLower = orgFilter.trim().toLowerCase();
+    users = users.filter((u) => u.organisation.toLowerCase().includes(orgLower));
+  }
+  if (typeof search === "string" && search.trim().length > 0) {
+    const searchLower = search.trim().toLowerCase();
+    users = users.filter((u) =>
+      u.fullName.toLowerCase().includes(searchLower) ||
+      u.address.toLowerCase().includes(searchLower) ||
+      u.organisation.toLowerCase().includes(searchLower),
+    );
+  }
+
+  users.sort((a, b) => a.fullName.localeCompare(b.fullName) || a.address.localeCompare(b.address));
+
+  const total = users.length;
+  const safePage = Math.max(1, parseInt(page, 10) || 1);
+  const safePageSize = Math.max(1, Math.min(100, parseInt(pageSize, 10) || 20));
+  const startIndex = (safePage - 1) * safePageSize;
+  const paginatedUsers = users.slice(startIndex, startIndex + safePageSize);
+
+  return {
+    users: paginatedUsers,
+    total,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages: Math.ceil(total / safePageSize) || 1,
+  };
+});
+
+/**
+ * Admin: Change a user's role assignment with written reason and audit recording.
+ */
+export const adminChangeRole = onCall({ region: REGION }, async (request) => {
+  const { uid: actorUid, adminUser } = await requireAdmin(request);
+
+  const targetAddress = normaliseAddress(request.data?.targetAddress);
+  const newRole = request.data?.newRole;
+  const reason = request.data?.reason;
+
+  if (typeof newRole !== "number" || (newRole !== 0 && newRole !== 1)) {
+    throw new HttpsError("invalid-argument", "Valid role (0 for User, 1 for Admin) is required.");
+  }
+  if (typeof reason !== "string" || reason.trim().length < 5 || reason.length > 500) {
+    throw new HttpsError("invalid-argument", "A reason between 5 and 500 characters is required.");
+  }
+  if (targetAddress === actorUid) {
+    throw new HttpsError("failed-precondition", "Administrators cannot modify their own role assignment.");
+  }
+
+  const targetRef = db.collection("users").doc(targetAddress);
+  const targetSnap = await targetRef.get();
+  if (!targetSnap.exists) {
+    throw new HttpsError("not-found", "Target user profile not found.");
+  }
+
+  const targetData = targetSnap.data();
+  const previousRole = typeof targetData.role === "number" ? targetData.role : 0;
+  if (previousRole === newRole) {
+    throw new HttpsError("failed-precondition", "Target user already possesses this role assignment.");
+  }
+
+  await targetRef.update({
+    role: newRole,
+    updatedAt: Timestamp.now(),
+  });
+
+  const auditEntry = {
+    type: "role_change",
+    action: "ROLE_CHANGE",
+    actor: actorUid,
+    actorName: adminUser.fullName || actorUid,
+    targetAddress,
+    targetName: targetData.fullName || targetAddress,
+    previousRole,
+    newRole,
+    reason: reason.trim(),
+    timestamp: Timestamp.now(),
+    createdAt: Timestamp.now(),
+  };
+  await db.collection("audits").add(auditEntry);
+
+  return {
+    success: true,
+    targetAddress,
+    previousRole,
+    newRole,
+    updatedAt: new Date().toISOString(),
+  };
+});
+
+/**
+ * Admin: Suspend or reinstate a user account with written reason and audit recording.
+ */
+export const adminSetSuspended = onCall({ region: REGION }, async (request) => {
+  const { uid: actorUid, adminUser } = await requireAdmin(request);
+
+  const targetAddress = normaliseAddress(request.data?.targetAddress);
+  const suspended = request.data?.suspended;
+  const reason = request.data?.reason;
+
+  if (typeof suspended !== "boolean") {
+    throw new HttpsError("invalid-argument", "A boolean suspended flag is required.");
+  }
+  if (typeof reason !== "string" || reason.trim().length < 5 || reason.length > 500) {
+    throw new HttpsError("invalid-argument", "A reason between 5 and 500 characters is required.");
+  }
+  if (targetAddress === actorUid && suspended) {
+    throw new HttpsError("failed-precondition", "Administrators cannot suspend their own account.");
+  }
+
+  const targetRef = db.collection("users").doc(targetAddress);
+  const targetSnap = await targetRef.get();
+  if (!targetSnap.exists) {
+    throw new HttpsError("not-found", "Target user profile not found.");
+  }
+
+  const targetData = targetSnap.data();
+  const currentSuspended = Boolean(targetData.suspended);
+  if (currentSuspended === suspended) {
+    throw new HttpsError(
+      "failed-precondition",
+      suspended ? "User account is already suspended." : "User account is not currently suspended.",
+    );
+  }
+
+  await targetRef.update({
+    suspended,
+    updatedAt: Timestamp.now(),
+  });
+
+  if (suspended) {
+    try {
+      await getAuth().revokeRefreshTokens(targetAddress);
+    } catch (err) {
+      if (err?.code !== "auth/user-not-found") {
+        console.error(`Failed to revoke refresh tokens for ${targetAddress}:`, err);
+      }
+    }
+  }
+
+  const auditEntry = {
+    type: "suspension_change",
+    action: suspended ? "USER_SUSPENDED" : "USER_REINSTATED",
+    actor: actorUid,
+    actorName: adminUser.fullName || actorUid,
+    targetAddress,
+    targetName: targetData.fullName || targetAddress,
+    previousState: currentSuspended,
+    newState: suspended,
+    reason: reason.trim(),
+    timestamp: Timestamp.now(),
+    createdAt: Timestamp.now(),
+  };
+  await db.collection("audits").add(auditEntry);
+
+  return {
+    success: true,
+    targetAddress,
+    suspended,
+    updatedAt: new Date().toISOString(),
+  };
+});
+

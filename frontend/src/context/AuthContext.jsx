@@ -16,6 +16,16 @@ export function AuthProvider({ children }) {
 
   const user = useMemo(() => {
     if (session?.isSignedIn && session?.profile) {
+      if (session.profile.suspended) {
+        return {
+          id: session.address,
+          name: session.profile.fullName || shortenAddress(session.address),
+          org: session.profile.organisation || "QC Network",
+          role: ROLES.GUEST,
+          roles: [ROLES.GUEST],
+          isSuspended: true,
+        };
+      }
       const isUserAdmin = isAdmin(session.profile.role);
       return {
         id: session.address,
@@ -40,7 +50,7 @@ export function AuthProvider({ children }) {
   const hasRole = (targetRole) => roles.includes(targetRole);
 
   const hasAnyRole = (targetRoles) => {
-    if (!targetRoles || targetRoles.length === 0) return false;
+    if (!targetRoles || targetRoles.length === 0) return true;
     return targetRoles.some((r) => roles.includes(r));
   };
 
@@ -54,8 +64,9 @@ export function AuthProvider({ children }) {
     user,
     roles,
     role: roles[0] || ROLES.GUEST,
-    isAuthenticated: Boolean(user) && roles.some((r) => r !== ROLES.GUEST),
+    isAuthenticated: Boolean(user) && roles.some((r) => r !== ROLES.GUEST) && !session?.profile?.suspended,
     isMultiRole: roles.filter((r) => r !== ROLES.GUEST).length > 1,
+    isSuspended: Boolean(session?.profile?.suspended),
     hasRole,
     hasAnyRole,
     logout,
