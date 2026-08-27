@@ -232,7 +232,7 @@ export function SessionProvider({ children }) {
   );
 
   const endSession = useCallback(
-    async ({ reason = null } = {}) => {
+    async ({ reason = null, redirectToLogin = false } = {}) => {
       if (isFirebaseConfigured && auth.currentUser) {
         await signOut(auth).catch(() => { });
       }
@@ -244,11 +244,15 @@ export function SessionProvider({ children }) {
           ? "You were signed out after 15 minutes of inactivity. Sign in again to continue."
           : null,
       );
+      if (redirectToLogin) go("login");
     },
     [disconnectAsync, reset],
   );
 
-  const signOutOfSession = useCallback(() => endSession(), [endSession]);
+  const signOutOfSession = useCallback(
+    () => endSession({ redirectToLogin: true }),
+    [endSession],
+  );
 
   // Idle timeout. Mounts only while a session exists, so nothing runs for a
   // signed-out visitor.
