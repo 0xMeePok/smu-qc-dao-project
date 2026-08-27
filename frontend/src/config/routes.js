@@ -26,6 +26,14 @@ export const ROUTES_CONFIG = [
     showInNav: true,
   },
   {
+    key: "profile",
+    path: "profile",
+    label: "Profile",
+    allowedRoles: null,
+    authRequired: true,
+    showInNav: true,
+  },
+  {
     key: "create",
     path: "create",
     label: "Create Brief",

@@ -12,6 +12,7 @@ import { AccessDenied } from "./components/AccessDenied.jsx";
 import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
 import { NetworkBanner } from "./components/NetworkBanner.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
 import {
   MyProblems,
   ResearcherProposals,
@@ -173,7 +174,9 @@ function AccountControls() {
       <div className="account-controls">
         <div className="user-session-pill">
           <div className="user-session-info">
-            <span className="user-name">{profile?.fullName || shortenAddress(address)}</span>
+            <button className="user-name account-profile-link" type="button" onClick={() => go("profile")}>
+              {profile?.fullName || shortenAddress(address)}
+            </button>
             <div className="role-tags-row">
               {isDaoAdmin ? (
                 <span className="user-role-badge admin-badge">DAO Admin</span>
@@ -739,6 +742,17 @@ function AppContent() {
     pageComponent = <Home />;
   } else if (section === "discover") {
     pageComponent = <Discover />;
+  } else if (section === "profile") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <ProfilePage />
+      </RouteGuard>
+    );
   } else if (section === "opportunity") {
     pageComponent = <OpportunityDetail id={id} />;
   } else if (section === "login") {
