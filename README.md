@@ -104,7 +104,7 @@ smu-qc-dao-project/
 │   └── test/                # Unit and integration test suites
 ├── firebase/                # Firestore rules, Cloud Functions, their tests
 │   ├── functions/           # getSiweNonce + verifySiweSignature
-│   └── test/                # Firestore rules tests (50, via emulator)
+│   └── test/                # Firestore rules tests (78, via emulator)
 ├── docs/                    # Architecture and RBAC documentation
 │   └── ROLE_ROUTE_PERMISSIONS.md  # Living UAT reference for role-based access control
 └── README.md
@@ -198,13 +198,52 @@ need to redeploy, or want to run everything against local emulators instead, see
 ## Testing
 
 ```bash
-npm test --prefix frontend            # Unit and integration test suite
-npm test --prefix firebase            # 50 tests — Firestore rules, via a local emulator (needs Java)
-npm test --prefix firebase/functions  # 16 tests — adversarial signature verification
+npm test --prefix frontend            # 73 tests — validation, roles, routing, idle session
+npm test --prefix firebase            # 78 tests — Firestore rules, via a local emulator (needs Java)
+npm test --prefix firebase/functions  # 25 tests — adversarial signature verification
 ```
 
 Each suite boots and tears down whatever emulator it needs, so no manual setup is
 required — see [`firebase/README.md`](firebase/README.md).
+
+Run everything in one go:
+
+```bash
+npm test --prefix frontend && npm test --prefix firebase && npm test --prefix firebase/functions
+```
+
+If a suite fails to start with a port error, an emulator is already running from
+another terminal — stop it first (`pkill -f "firebase.*emulators"`), since each suite
+starts its own.
+
+## Deployment
+
+Pushing to `main` deploys automatically via
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
+
+```
+test-backend  (Cloud Functions) ──┐
+                                  ├──→ deploy-backend ──→ deploy-hosting
+test-rules    (Firestore rules) ──┘                            ↑
+test-frontend ─────────────────────────────────────────────────┘
+```
+
+The backend deploys **before** hosting, and hosting waits for it. That order is
+required, not cosmetic: `createProfile()` writes to `publicProfiles/{address}`, and
+until `firestore.rules` declares that collection the catch-all rule denies it — so a
+frontend released ahead of its rules breaks onboarding for every new user.
+
+Live site: **https://qcdao-a0c7a.web.app**
+
+To deploy by hand (same order the pipeline uses):
+
+```bash
+cd firebase && npx firebase deploy --only firestore:rules,firestore:indexes,functions --project qcdao-a0c7a
+npm run build --prefix frontend && (cd firebase && npx firebase deploy --only hosting --project qcdao-a0c7a)
+```
+
+To try a change on a real URL without touching the live site, deploy a preview
+channel — see [`firebase/README.md`](firebase/README.md#preview-channels).
 
 ## Current implementation status
 

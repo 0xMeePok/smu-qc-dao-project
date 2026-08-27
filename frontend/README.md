@@ -25,13 +25,28 @@ fields are required versus optional, and why.
 npm test
 ```
 
-47 tests over `src/lib/*` — field rules, the default role assigned at
-account creation, and the whole-form validator. No emulator or network needed.
+73 tests, no emulator or network needed. Covers field validation, the default role
+assigned at account creation, the whole-form validator, route-permission resolution,
+and the 15-minute idle session.
+
+The deploy pipeline runs a narrower set — only the files it owns:
+
+```bash
+node --test test/validation.test.js test/routeAccess.test.js test/idleTimeout.test.js
+```
+
+If you add a test file that should block a deploy, add it to that list in
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml); it is not globbed.
 
 ## Build
 
 ```bash
 npm run build
+```
+Preview the production build locally:
+
+```bash
+npm run preview
 ```
 
 ## Source layout
