@@ -18,10 +18,8 @@ export default function AdminPage() {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState(null);
   const [orgFilter, setOrgFilter] = useState("");
-  const [debouncedOrgFilter, setDebouncedOrgFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState(null);
@@ -31,22 +29,6 @@ export default function AdminPage() {
   const [roleChangeTarget, setRoleChangeTarget] = useState(null);
   const [suspendTarget, setSuspendTarget] = useState(null);
 
-  // Debounce search input
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedSearch(search);
-    }, 300);
-    return () => clearTimeout(handler);
-  }, [search]);
-
-  // Debounce organisation filter input
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedOrgFilter(orgFilter);
-    }, 300);
-    return () => clearTimeout(handler);
-  }, [orgFilter]);
-
   const loadUsers = useCallback(async () => {
     if (!isSignedIn || !isAdmin(profile?.role) || profile?.suspended) return;
     setIsFetching(true);
@@ -55,9 +37,9 @@ export default function AdminPage() {
       const data = await fetchAdminUsers({
         page,
         pageSize,
-        search: debouncedSearch,
+        search,
         roleFilter,
-        orgFilter: debouncedOrgFilter,
+        orgFilter,
       });
       setUsers(data.users || []);
       setTotalUsers(data.total || 0);
@@ -68,7 +50,7 @@ export default function AdminPage() {
       setLoading(false);
       setIsFetching(false);
     }
-  }, [isSignedIn, profile?.role, profile?.suspended, page, pageSize, debouncedSearch, roleFilter, debouncedOrgFilter]);
+  }, [isSignedIn, profile?.role, profile?.suspended, page, pageSize, search, roleFilter, orgFilter]);
 
   useEffect(() => {
     loadUsers();

@@ -126,7 +126,7 @@ export function SessionProvider({ children }) {
             : messageForFirebaseError(caught);
         setError(failureMessage);
         setStatus("signed-out");
-        await disconnectAsync().catch(() => {});
+        await disconnectAsync().catch(() => { });
         // The message is returned, not just set into context state, because a caller
         // that awaits signIn() and immediately reads `error` off useSession() (as
         // ConnectWalletModal used to) gets a STALE value: `error` was destructured
@@ -159,7 +159,7 @@ export function SessionProvider({ children }) {
         const found = snapshot.exists() ? snapshot.data() : null;
         setProfile(found);
         setStatus(found ? "signed-in" : "needs-onboarding");
-        
+
         // Fires once per session establishment (this effect only re-runs when
         // verifiedAddress changes - a fresh sign-in or a restored session on page
         // load), not on every render, so navigating elsewhere afterward doesn't
@@ -193,7 +193,7 @@ export function SessionProvider({ children }) {
     if (!verifiedAddress) return;
     const switchedToADifferentAccount = address && address.toLowerCase() !== verifiedAddress;
     if (!switchedToADifferentAccount) return;
-    if (isFirebaseConfigured && auth.currentUser) signOut(auth).catch(() => {});
+    if (isFirebaseConfigured && auth.currentUser) signOut(auth).catch(() => { });
     clearActivity();
     reset();
   }, [address, verifiedAddress, reset]);
@@ -211,9 +211,9 @@ export function SessionProvider({ children }) {
   const endSession = useCallback(
     async ({ reason = null } = {}) => {
       if (isFirebaseConfigured && auth.currentUser) {
-        await signOut(auth).catch(() => {});
+        await signOut(auth).catch(() => { });
       }
-      await disconnectAsync().catch(() => {});
+      await disconnectAsync().catch(() => { });
       clearActivity();
       reset();
       setError(

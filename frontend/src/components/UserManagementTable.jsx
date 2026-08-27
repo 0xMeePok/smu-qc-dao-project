@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { shortenAddress } from "../lib/chain.js";
 import { roleLabel } from "../lib/roles.js";
 
@@ -23,6 +24,31 @@ export function UserManagementTable({
 }) {
   const isInitialLoading = loading && users.length === 0;
 
+  const [localSearch, setLocalSearch] = useState(search);
+  const [localOrgFilter, setLocalOrgFilter] = useState(orgFilter);
+
+  useEffect(() => {
+    setLocalSearch(search);
+  }, [search]);
+
+  useEffect(() => {
+    setLocalOrgFilter(orgFilter);
+  }, [orgFilter]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      onSearchChange(localSearch);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [localSearch, onSearchChange]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      onOrgFilterChange(localOrgFilter);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [localOrgFilter, onOrgFilterChange]);
+
   return (
     <div className="admin-user-management">
       <div className="table-controls-bar">
@@ -43,15 +69,15 @@ export function UserManagementTable({
             <input
               type="text"
               placeholder="Search by name, address, or org..."
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
               aria-label="Search platform users"
             />
-            {search && (
+            {localSearch && (
               <button
                 className="clear-search-btn"
                 type="button"
-                onClick={() => onSearchChange("")}
+                onClick={() => setLocalSearch("")}
                 aria-label="Clear search"
               >
                 ✕
@@ -81,8 +107,8 @@ export function UserManagementTable({
             <input
               type="text"
               placeholder="Filter by organisation..."
-              value={orgFilter}
-              onChange={(e) => onOrgFilterChange(e.target.value)}
+              value={localOrgFilter}
+              onChange={(e) => setLocalOrgFilter(e.target.value)}
               aria-label="Filter by organisation"
             />
           </div>
