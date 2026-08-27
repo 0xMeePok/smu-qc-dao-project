@@ -149,6 +149,15 @@ describe("users/{address} create", () => {
       setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { suspended: true })),
     );
   });
+
+  it("blocks expertise entries that are not strings or outside the 2-80 character bound", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    for (const expertise of [[42], ["x"], ["x".repeat(81)]]) {
+      await assertFails(
+        setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { expertise })),
+      );
+    }
+  });
 });
 
 describe("users/{address} read", () => {
@@ -306,6 +315,22 @@ describe("publicProfiles/{address}", () => {
       fullName: "Ada Lovelace",
       organisation: "A Different Institution",
     }));
+  });
+
+  it("blocks invalid expertise entries on public profile create", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER));
+    });
+
+    const db = env.authenticatedContext(OTHER).firestore();
+    for (const expertise of [[42], ["x"], ["x".repeat(81)]]) {
+      await assertFails(setDoc(doc(db, "publicProfiles", OTHER), {
+        address: OTHER,
+        fullName: "Ashley Chung",
+        organisation: "Singapore Management University",
+        expertise,
+      }));
+    }
   });
 
   it("allows both documents to be created together in one batch", async () => {
