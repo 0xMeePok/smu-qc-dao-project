@@ -34,6 +34,14 @@ function toPublicProfile(profile) {
   };
 }
 
+function withProfileDefaults(profile) {
+  return {
+    ...profile,
+    biography: profile.biography ?? "",
+    expertise: Array.isArray(profile.expertise) ? profile.expertise : [],
+  };
+}
+
 /**
  * Reads the signed-in user's OWN profile. /users is readable only by its owner, so
  * this will be denied for any other address - use findPublicProfileByAddress for
@@ -42,12 +50,12 @@ function toPublicProfile(profile) {
 export async function findProfileByAddress(address) {
   requireFirebase();
   const snapshot = await getDoc(profileRef(address));
-  return snapshot.exists() ? snapshot.data() : null;
+  return snapshot.exists() ? withProfileDefaults(snapshot.data()) : null;
 }
 export async function findPublicProfileByAddress(address) {
   requireFirebase();
   const snapshot = await getDoc(publicProfileRef(address));
-  return snapshot.exists() ? snapshot.data() : null;
+  return snapshot.exists() ? withProfileDefaults(snapshot.data()) : null;
 }
 
 export async function createProfile({ form, address }) {

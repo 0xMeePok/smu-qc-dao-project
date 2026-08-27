@@ -13,6 +13,7 @@ import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
 import { NetworkBanner } from "./components/NetworkBanner.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
+import PublicProfilePage from "./pages/PublicProfilePage.jsx";
 import {
   MyProblems,
   ResearcherProposals,
@@ -743,7 +744,9 @@ function AppContent() {
   } else if (section === "discover") {
     pageComponent = <Discover />;
   } else if (section === "profile") {
-    pageComponent = (
+    pageComponent = id ? (
+      <PublicProfilePage address={id} onNavigate={go} />
+    ) : (
       <RouteGuard
         targetRoute={section}
         allowedRoles={routeConfig?.allowedRoles}
