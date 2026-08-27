@@ -1,5 +1,11 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, connectAuthEmulator } from "firebase/auth";
+import {
+  browserLocalPersistence,
+  connectAuthEmulator,
+  getAuth,
+  indexedDBLocalPersistence,
+  setPersistence,
+} from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 
@@ -35,6 +41,44 @@ export const isFirebaseConfigured = missingFirebaseConfig.length === 0;
 const app = isFirebaseConfigured ? (getApps()[0] ?? initializeApp(config)) : null;
 
 export const auth = app ? getAuth(app) : null;
+
+// Persist the session across reloads AND across closing the tab, so a refresh in the
+// middle of a multi-step workflow does not throw the user back to sign-in.
+//
+// indexedDBLocalPersistence first, browserLocalPersistence second. Note that despite
+// the name, browserLocalPersistence is localStorage - indexedDBLocalPersistence is the
+// IndexedDB one. IndexedDB is preferred because it is Firebase's own default and is
+// not subject to localStorage's small synchronous quota, but the two are equivalent
+// for security: both are readable by any script on this origin, so neither protects a
+// token from XSS. That is what the Content-Security-Policy in firebase/firebase.json
+// is for.
+//
+// Session LENGTH is not decided here - either option keeps a session indefinitely.
+// SessionContext enforces the idle cap on top.
+if (auth) {
+  setPersistence(auth, indexedDBLocalPersistence)
+    .catch((indexedDbError) => {
+      // Falls back rather than failing: some browsers block IndexedDB in private
+      // windows or under strict privacy settings, and localStorage still works there.
+      console.warn(
+        "[auth] IndexedDB persistence unavailable, falling back to localStorage.",
+        indexedDbError,
+      );
+      return setPersistence(auth, browserLocalPersistence);
+    })
+    .catch((error) => {
+      // Both failed. Firebase silently drops to IN-MEMORY persistence here, which
+      // means the session dies on every reload - the exact thing this app is built
+      // not to do. Previously this was swallowed by an empty catch, so the app
+      // degraded invisibly and looked like an unrelated bug. Warn loudly instead.
+      console.error(
+        "[auth] Session persistence could not be configured. The session will NOT "
+        + "survive a page reload. Check whether this browser is blocking site data.",
+        error,
+      );
+    });
+}
+
 export const db = app ? getFirestore(app) : null;
 export const functions = app ? getFunctions(app, FUNCTIONS_REGION) : null;
 

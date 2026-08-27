@@ -41,6 +41,11 @@ export function SessionProvider({ children }) {
   const [error, setError] = useState(null);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
 
+  // Starts TRUE when Firebase was never configured: there is no persisted session
+  // that could arrive late, so the app should render immediately rather than hang on
+  // a loading state forever.
+  const [authResolved, setAuthResolved] = useState(!isFirebaseConfigured);
+
   const lookupToken = useRef(0);
 
   const reset = useCallback(() => {
@@ -56,8 +61,17 @@ export function SessionProvider({ children }) {
   useEffect(() => {
     if (!isFirebaseConfigured) return undefined;
     return onAuthStateChanged(auth, (user) => {
-      if (user?.uid) setVerifiedAddress(user.uid.toLowerCase());
-      else setVerifiedAddress(null);
+      if (user?.uid) {
+        setVerifiedAddress(user.uid.toLowerCase());
+        // Set alongside the address rather than left to the lookup effect below.
+        // That effect runs a tick later, and in the gap `status` would still say
+        // "signed-out" while `verifiedAddress` was already set - a one-frame
+        // contradiction a route guard reads as "not signed in" and acts on.
+        setStatus("checking");
+      } else {
+        setVerifiedAddress(null);
+      }
+      setAuthResolved(true);
     });
   }, []);
 
@@ -286,6 +300,10 @@ export function SessionProvider({ children }) {
       profile,
       error,
       address: verifiedAddress,
+      // True while the app cannot yet answer "who is this, and what may they see?" -
+      // either Firebase has not reported on a persisted session, or it has and the
+      // profile carrying the role is still being fetched. Route guards block on this.
+      isLoading: !authResolved || status === "checking",
       isSignedIn: status === "signed-in",
       isSuspended: Boolean(profile?.suspended),
       needsOnboarding: status === "needs-onboarding",
@@ -298,7 +316,7 @@ export function SessionProvider({ children }) {
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
     }),
-    [status, profile, error, verifiedAddress, signIn, completeOnboarding, saveProfile, signOutOfSession],
+    [status, profile, error, verifiedAddress, authResolved, signIn, completeOnboarding, saveProfile, signOutOfSession],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
