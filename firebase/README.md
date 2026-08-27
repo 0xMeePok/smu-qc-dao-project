@@ -16,12 +16,12 @@ firebase/
 ├── firebase.json                # Emulator ports, hosting config, functions source path
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
 ├── test/
-│   └── firestore.rules.test.mjs # 78 tests against firestore.rules, via the emulator
+│   └── firestore.rules.test.mjs # 50 tests against firestore.rules, via the emulator
 └── functions/
     ├── index.js                 # getSiweNonce + verifySiweSignature (see below)
     ├── package.json
     └── test/
-        └── siwe.test.mjs        # 25 adversarial tests: replay, forged signature, spoofed origin, etc.
+        └── siwe.test.mjs        # 16 adversarial tests: replay, forged signature, spoofed origin, etc.
 ```
 
 ### What the two Cloud Functions do
@@ -98,17 +98,18 @@ trying out a rules or functions change without touching the shared backend.
 # Firestore rules — boots its own emulator, needs Java
 npm test
 
-# Cloud Functions — adversarial signature tests. Boots its own emulator; no setup:
+# Cloud Functions — adversarial signature tests. Needs the functions emulator running
+# (see above), or point at the live backend:
 npm --prefix functions test
 FUNCTIONS_BASE_URL=https://asia-southeast1-<project-id>.cloudfunctions.net npm --prefix functions test
 ```
 
-The rules suite (78 tests) checks things like: a wallet can only create its own
+The rules suite (50 tests) checks things like: a wallet can only create its own
 profile and can only read its own, `stats` can never be written non-zero at signup,
 the user base cannot be enumerated, `role` never leaks through `publicProfiles`, and
 `siweNonces` is unreachable from any client.
 
-The functions suite (25 tests) checks that a replayed signature, a signature from the
+The functions suite (16 tests) checks that a replayed signature, a signature from the
 wrong key, a fabricated signature, a signature over a different message, and a nonce
 request from an unrecognised origin are all rejected — and that a legitimate
 signature succeeds.
@@ -157,59 +158,6 @@ Then set `VITE_FIREBASE_USE_EMULATORS=true` in `frontend/.env.local` and run
 `npm run dev` as usual. The app still opens at `http://localhost:5173`; only the
 backend changes. Emulator data starts empty and is discarded on shutdown, so you will
 re-onboard a test wallet each session unless you pass `--export-on-exit`.
-
-### Continuous deployment
-
-Pushing to `main` runs [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml):
-
-```
-test-backend  (Cloud Functions, 25) ──┐
-                                      ├──→ deploy-backend ──→ deploy-hosting
-test-rules    (Firestore rules, 78) ──┘                            ↑
-test-frontend (47) ────────────────────────────────────────────────┘
-```
-
-Backend deploys first and hosting waits for it, because `createProfile()` writes to
-`publicProfiles/{address}` and the catch-all rule denies that collection until
-`firestore.rules` declares it. A frontend released ahead of its rules breaks
-onboarding for every new user.
-
-The rules suite runs here **and** in `ci.yml`. That duplication is deliberate:
-`ci.yml` is a separate workflow and cannot stop `deploy-backend`, so only the copy in
-this workflow actually gates the deploy.
-
-The service account needs `Firebase Hosting Admin`, `Firebase Rules Admin`,
-`Cloud Functions Developer`, `Service Account User`, `Cloud Run Admin`,
-`Artifact Registry Writer` and `Cloud Build Editor`. A missing role surfaces as a
-`PERMISSION_DENIED` naming the exact permission — add it and re-run the job.
-
-<a id="preview-channels"></a>
-### Preview channels
-
-Deploy the current build to a temporary real URL without touching the live site:
-
-```bash
-npm run build --prefix ../frontend
-npx firebase hosting:channel:deploy my-test --expires 1d --project <project-id>
-```
-
-You get `https://<project>--my-test-<hash>.web.app`, served by real Firebase Hosting
-and talking to the **real deployed backend**. Sign-in works there: `getSiweNonce`
-accepts hosts matching the generated channel shape, so the unpredictable hash needs
-no configuration.
-
-Two things to know:
-
-- It writes to **production** Firestore. Onboarding on a preview creates real
-  `users/` and `publicProfiles/` documents. Use a throwaway wallet.
-- It previews the **frontend only**. Rules and functions are whatever is currently
-  deployed, so a local `firestore.rules` change is not reflected — test those against
-  the emulator instead.
-
-```bash
-npx firebase hosting:channel:list --project <project-id>
-npx firebase hosting:channel:delete my-test --project <project-id>
-```
 
 ### Deploy
 
