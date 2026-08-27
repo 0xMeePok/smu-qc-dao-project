@@ -2,7 +2,7 @@ import { doc, getDoc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { OnboardingError } from "./errors.js";
-import { validateOnboarding } from "./validation.js";
+import { validateOnboarding, validateProfile } from "./validation.js";
 import { initialStats } from "./stats.js";
 import { EXPECTED_CHAIN_ID } from "./chain.js";
 import { ROLE_USER } from "./roles.js";
@@ -29,6 +29,16 @@ function toPublicProfile(profile) {
     address: profile.address,
     fullName: profile.fullName,
     organisation: profile.organisation,
+    biography: profile.biography,
+    expertise: profile.expertise,
+  };
+}
+
+function withProfileDefaults(profile) {
+  return {
+    ...profile,
+    biography: profile.biography ?? "",
+    expertise: Array.isArray(profile.expertise) ? profile.expertise : [],
   };
 }
 
@@ -40,12 +50,12 @@ function toPublicProfile(profile) {
 export async function findProfileByAddress(address) {
   requireFirebase();
   const snapshot = await getDoc(profileRef(address));
-  return snapshot.exists() ? snapshot.data() : null;
+  return snapshot.exists() ? withProfileDefaults(snapshot.data()) : null;
 }
 export async function findPublicProfileByAddress(address) {
   requireFirebase();
   const snapshot = await getDoc(publicProfileRef(address));
-  return snapshot.exists() ? snapshot.data() : null;
+  return snapshot.exists() ? withProfileDefaults(snapshot.data()) : null;
 }
 
 export async function createProfile({ form, address }) {
@@ -58,10 +68,15 @@ export async function createProfile({ form, address }) {
   }
 
   const lower = address.toLowerCase();
+  const expertise = Array.isArray(form.expertise)
+    ? form.expertise.map((item) => item.trim()).filter(Boolean)
+    : [];
   const profile = {
     address: lower,
     fullName: form.fullName.trim(),
     organisation: form.organisation.trim(),
+    biography: (form.biography ?? "").trim(),
+    expertise,
     // Every account starts as a normal user. Nothing in the client can write 1
     // here or later: firebase/firestore.rules fixes this to 0 on create and makes
     // it immutable on every update, so becoming an administrator is only ever done
@@ -88,4 +103,35 @@ export async function createProfile({ form, address }) {
   await batch.commit();
 
   return profile;
+}
+
+export async function updateProfile({ form, address }) {
+  requireFirebase();
+
+  const errors = validateProfile(form, address);
+  const firstField = Object.keys(errors)[0];
+  if (firstField) {
+    throw new OnboardingError(errors[firstField], { field: firstField });
+  }
+
+  const lower = address.toLowerCase();
+  const updates = {
+    fullName: form.fullName.trim(),
+    organisation: form.organisation.trim(),
+    biography: form.biography.trim(),
+    expertise: form.expertise.map((item) => item.trim()).filter(Boolean),
+    updatedAt: serverTimestamp(),
+  };
+  const batch = writeBatch(db);
+  batch.update(profileRef(lower), updates);
+  batch.update(publicProfileRef(lower), {
+    fullName: updates.fullName,
+    organisation: updates.organisation,
+    biography: updates.biography,
+    expertise: updates.expertise,
+  });
+  await batch.commit();
+
+  const snapshot = await getDoc(profileRef(lower));
+  return snapshot.data();
 }

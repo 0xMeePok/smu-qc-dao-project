@@ -279,7 +279,7 @@ You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
 | Collection | Who can read | Contents |
 |---|---|---|
 | `users/{address}` | the owning wallet only (`get`, never `list`) | the full profile, including `role` |
-| `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation` — nothing else |
+| `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation`, `biography`, `expertise` — nothing else |
 | `siweNonces/{address}` | nobody; Admin SDK only | pending sign-in nonces |
 
 A profile is split across two documents because Firestore rules can only allow or
@@ -301,6 +301,8 @@ batch, so an account can never end up half-created.
 | `address` | string | lowercase `0x…`, must equal the document id |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
+| `biography` | string | optional; maximum 500 chars |
+| `expertise` | list | optional; maximum 12 entries |
 | `role` | number | `0` (user) or `1` (administrator). Fixed to `0` on create and immutable on every client update — the only way to grant `1` is by hand in the Firestore console (or via the Admin SDK), never through the app |
 | `chainId` | number | must be `421614` (Arbitrum Sepolia); immutable after creation |
 | `walletVerified` | bool | must be `true` at creation — only reachable after server-side verification |
@@ -319,6 +321,8 @@ field outside this list, so a client can't smuggle in something like a self-gran
 | `address` | string | lowercase `0x…`, must equal the document id |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
+| `biography` | string | optional; maximum 500 chars |
+| `expertise` | list | optional; maximum 12 entries |
 
 Locked with `hasOnly()` on both `create` and `update`, so `role`, `stats`,
 `walletVerified`, `chainId` and the timestamps cannot be written here even by the

@@ -8,6 +8,19 @@ function RoleBadge({ role }) {
   return <span className="role-chip">{ROLE_LABELS[role] || role}</span>;
 }
 
+function ProfileLink({ address, label, onNavigate }) {
+  if (!address) return null;
+  return (
+    <button
+      className="profile-link"
+      type="button"
+      onClick={() => onNavigate(`profile/${address}`)}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function MyProblems({ onNavigate }) {
   const { user } = useAuth();
   const [data, setData] = useState([]);
@@ -63,6 +76,9 @@ export function MyProblems({ onNavigate }) {
             <div className="table-row" key={item.id}>
               <div>
                 <strong>{item.title}</strong>
+                <small className="table-row-meta">
+                  Submitted by <ProfileLink address={item.researcherId} label="view profile" onNavigate={onNavigate} />
+                </small>
               </div>
             </div>
           ))
