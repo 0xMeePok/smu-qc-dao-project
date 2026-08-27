@@ -32,16 +32,23 @@ describe("canAccess", () => {
     assert.equal(canAccess("home", { isSignedIn: true, role: ROLE_USER }), true);
   });
 
-  it("keeps a signed-out visitor out of the admin route", () => {
+  it("[FUT-AAR-011] keeps a signed-out visitor out of the admin route", () => {
     assert.equal(canAccess("admin", { isSignedIn: false }), false);
   });
 
-  it("keeps a signed-in ordinary user out of the admin route", () => {
+  it("[FUT-AAR-012] keeps a signed-in ordinary user out of the admin route", () => {
     assert.equal(canAccess("admin", { isSignedIn: true, role: ROLE_USER }), false);
   });
 
-  it("lets a signed-in administrator into the admin route", () => {
+  it("[FUT-AAR-013] lets a signed-in administrator into the admin route", () => {
     assert.equal(canAccess("admin", { isSignedIn: true, role: ROLE_ADMIN }), true);
+  });
+
+  it("[FUT-AAR-014] keeps a suspended administrator out of the admin route", () => {
+    assert.equal(
+      canAccess("admin", { isSignedIn: true, role: ROLE_ADMIN, isSuspended: true }),
+      false,
+    );
   });
 
   it("does not treat a missing role as an admin", () => {
@@ -99,8 +106,12 @@ describe("canAccess", () => {
 });
 
 describe("post-login landing", () => {
-  it("sends an administrator to the admin screen", () => {
+  it("[FUT-AAR-015] sends an administrator to the admin screen", () => {
     assert.equal(landingFor(ROLE_ADMIN), "admin");
+  });
+
+  it("[FUT-AAR-016] sends a suspended administrator home rather than to the admin screen", () => {
+    assert.equal(landingFor(ROLE_ADMIN, true), "home");
   });
 
   it("sends an ordinary user home", () => {

@@ -12,6 +12,8 @@ const ADDRESS = `0x${"a".repeat(40)}`;
 const OTHER = `0x${"b".repeat(40)}`;
 let env;
 
+
+
 const ZERO_STATS = {
   comments: 0, businessProblems: 0, openFunding: 0,
   fundingRequests: 0, karma: 0, reputation: 0,
@@ -135,6 +137,16 @@ describe("users/{address} create", () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(
       setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { isAdmin: true })),
+    );
+  });
+
+  it("blocks setting suspended at signup", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { suspended: false })),
+    );
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { suspended: true })),
     );
   });
 });
@@ -429,6 +441,13 @@ describe("users/{address} update", () => {
     );
   });
 
+  it("blocks changing createdAt after creation", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      updateDoc(doc(db, "users", OTHER), { createdAt: serverTimestamp(), updatedAt: serverTimestamp() }),
+    );
+  });
+
   it("blocks rewriting the wallet address", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(
@@ -448,6 +467,47 @@ describe("users/{address} update", () => {
     await assertFails(
       updateDoc(doc(attacker, "users", OTHER), {
         fullName: "Attacker Controlled", role: 1, updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it("blocks updating profile when suspended is present on the document", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), "users", SUSPENDED_USER),
+        baseProfile(null, SUSPENDED_USER, { suspended: true }),
+      );
+    });
+
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(
+      updateDoc(doc(db, "users", SUSPENDED_USER), {
+        organisation: "Updated Org",
+        suspended: true,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it("blocks self-unsuspending or adding suspended during profile update", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    // Attempting to clear suspended or change to false
+    await assertFails(
+      updateDoc(doc(db, "users", SUSPENDED_USER), {
+        organisation: "Updated Org",
+        suspended: false,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+
+    // Attempting to add suspended: true to an existing un-suspended user
+    const dbOther = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      updateDoc(doc(dbOther, "users", OTHER), {
+        suspended: true,
+        updatedAt: serverTimestamp(),
       }),
     );
   });
@@ -493,6 +553,16 @@ describe("problems/{problemId}", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "p_good"), { ownerId: ADDRESS, title: "Valid Title" }));
     await assertFails(updateDoc(doc(db, "problems", "p_good"), { invalidExtraField: "bad" }));
   });
+
+  it("[QCDAO47] blocks access and reads for suspended problem owners", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "problems", "p_susp"), { ownerId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "problems", "p_susp")));
+  });
 });
 
 describe("proposals/{proposalId}", () => {
@@ -526,6 +596,16 @@ describe("proposals/{proposalId}", () => {
   it("[BIT-AAR-94] [QCDAO43] blocks unschemad fields on create and update", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "proposals", "prop_bad"), { researcherId: ADDRESS, injectedKey: "hack" }));
+  });
+
+  it("[QCDAO47] blocks access and reads for suspended researchers", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "proposals", "prop_susp"), { researcherId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "proposals", "prop_susp")));
   });
 });
 
@@ -561,6 +641,16 @@ describe("evaluations/{evaluationId}", () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "evaluations", "e_bad"), { evaluatorId: ADDRESS, injectedKey: "hack" }));
   });
+
+  it("[QCDAO47] blocks access and reads for suspended evaluators", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "evaluations", "e_susp"), { evaluatorId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "evaluations", "e_susp")));
+  });
 });
 
 describe("funding/{fundId}", () => {
@@ -595,6 +685,16 @@ describe("funding/{fundId}", () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "funding", "f_bad"), { funderId: ADDRESS, injectedKey: "hack" }));
   });
+
+  it("[QCDAO47] blocks access and reads for suspended funders", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "funding", "f_susp"), { funderId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "funding", "f_susp")));
+  });
 });
 
 describe("audits/{auditId}", () => {
@@ -615,6 +715,15 @@ describe("audits/{auditId}", () => {
 
   it("[BIT-AAR-89] [QCDAO43] blocks read for normal users (role == 0)", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(db, "audits", "a1")));
+  });
+
+  it("[BIT-AAR-99] [QCDAO47] blocks read for suspended administrators", async () => {
+    const SUSPENDED_ADMIN = `0x${"e".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_ADMIN), baseProfile(null, SUSPENDED_ADMIN, { role: 1, suspended: true }));
+    });
+    const db = env.authenticatedContext(SUSPENDED_ADMIN).firestore();
     await assertFails(getDoc(doc(db, "audits", "a1")));
   });
 

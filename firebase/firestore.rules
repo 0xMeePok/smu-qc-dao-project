@@ -20,6 +20,10 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == address;
     }
 
+    function isActiveUser(address) {
+      return isWallet(address) && (!exists(/databases/$(database)/documents/users/$(address)) || !get(/databases/$(database)/documents/users/$(address)).data.get('suspended', false));
+    }
+
     function isWalletAddress(value) {
       return value is string && value.matches('^0x[0-9a-f]{40}$');
     }
@@ -55,7 +59,8 @@ service cloud.firestore {
       function hasProfileSchema(data) {
         return data.keys().hasOnly([
           'address', 'fullName', 'organisation', 'role', 'chainId', 'stats',
-          'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt'
+          'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt',
+          'suspended'
         ]);
       }
 
@@ -84,7 +89,8 @@ service cloud.firestore {
         && isNonEmptyString(request.resource.data.termsVersion, 40)
         && request.resource.data.termsAcceptedAt == request.time
         && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
+        && request.resource.data.updatedAt == request.time
+        && !request.resource.data.keys().hasAny(['suspended']);
 
       // Only the wallet itself may edit its profile, on any device, because the uid
       // is derived from a signature rather than from a per-browser session.
@@ -94,16 +100,18 @@ service cloud.firestore {
       // signed-in user could ever change their own role, "administrator" would be
       // available to anyone with a browser console, not something granted.
       allow update: if isWallet(address)
+        && !resource.data.get('suspended', false)
         && resource != null
         && hasProfileSchema(request.resource.data)
         && request.resource.data.address == resource.data.address
         && request.resource.data.role == resource.data.role
-        && request.resource.data.stats == resource.data.stats
         && request.resource.data.chainId == resource.data.chainId
+        && request.resource.data.stats == resource.data.stats
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.termsAcceptedAt == resource.data.termsAcceptedAt
         && request.resource.data.termsVersion == resource.data.termsVersion
         && request.resource.data.walletVerified == resource.data.walletVerified
+        && request.resource.data.get('suspended', false) == resource.data.get('suspended', false)
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
         && request.resource.data.updatedAt == request.time;
@@ -148,7 +156,7 @@ service cloud.firestore {
         && existsAfter(/databases/$(database)/documents/users/$(address))
         && matchesPrivateProfile(request.resource.data);
 
-      allow update: if isWallet(address)
+      allow update: if isActiveUser(address)
         && resource != null
         && hasPublicSchema(request.resource.data)
         && request.resource.data.address == resource.data.address
@@ -201,12 +209,13 @@ service cloud.firestore {
     }
     
     match /problems/{problemId} {
-      allow read, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
-      allow create: if request.auth != null
+      allow read: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
+      allow delete: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
+      allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
         && hasProblemSchema(request.resource.data);
-      allow update: if request.auth != null
+      allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
@@ -214,12 +223,13 @@ service cloud.firestore {
     }
     
     match /proposals/{proposalId} {
-      allow read, delete: if request.auth != null && resource.data.researcherId == request.auth.uid;
-      allow create: if request.auth != null
+      allow read: if isActiveUser(request.auth.uid) && resource.data.researcherId == request.auth.uid;
+      allow delete: if isActiveUser(request.auth.uid) && resource.data.researcherId == request.auth.uid;
+      allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.researcherId == request.auth.uid
         && hasProposalSchema(request.resource.data);
-      allow update: if request.auth != null
+      allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.researcherId == request.auth.uid
         && request.resource.data.researcherId == resource.data.researcherId
@@ -227,12 +237,13 @@ service cloud.firestore {
     }
     
     match /evaluations/{evaluationId} {
-      allow read, delete: if request.auth != null && resource.data.evaluatorId == request.auth.uid;
-      allow create: if request.auth != null
+      allow read: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
+      allow delete: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
+      allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.evaluatorId == request.auth.uid
         && hasEvaluationSchema(request.resource.data);
-      allow update: if request.auth != null
+      allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.evaluatorId == request.auth.uid
         && request.resource.data.evaluatorId == resource.data.evaluatorId
@@ -240,12 +251,13 @@ service cloud.firestore {
     }
     
     match /funding/{fundId} {
-      allow read, delete: if request.auth != null && resource.data.funderId == request.auth.uid;
-      allow create: if request.auth != null
+      allow read: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
+      allow delete: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
+      allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.funderId == request.auth.uid
         && hasFundingSchema(request.resource.data);
-      allow update: if request.auth != null
+      allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.funderId == request.auth.uid
         && request.resource.data.funderId == resource.data.funderId
@@ -253,7 +265,9 @@ service cloud.firestore {
     }
     
     match /audits/{auditId} {
-      allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 1;
+      allow read: if request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 1
+        && !get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('suspended', false);
     }
 
     // Deny everything not matched above.
