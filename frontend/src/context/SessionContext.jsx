@@ -2,9 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAccount, useDisconnect, useSignMessage } from "wagmi";
 import { getConnection, switchChain } from "wagmi/actions";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { auth, isFirebaseConfigured } from "../lib/firebase.js";
+import { onSnapshot, doc } from "firebase/firestore";
+import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
 import { exchangeSignatureForSession, requestSignInMessage } from "../lib/authFlow.js";
-import { createProfile, findProfileByAddress } from "../lib/profile.js";
+import { createProfile } from "../lib/profile.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
 import { wagmiConfig } from "../lib/wagmi.js";
@@ -125,7 +126,7 @@ export function SessionProvider({ children }) {
             : messageForFirebaseError(caught);
         setError(failureMessage);
         setStatus("signed-out");
-        await disconnectAsync().catch(() => {});
+        await disconnectAsync().catch(() => { });
         // The message is returned, not just set into context state, because a caller
         // that awaits signIn() and immediately reads `error` off useSession() (as
         // ConnectWalletModal used to) gets a STALE value: `error` was destructured
@@ -149,23 +150,33 @@ export function SessionProvider({ children }) {
     const token = (lookupToken.current += 1);
     setStatus("checking");
 
-    (async () => {
-      try {
-        const found = await findProfileByAddress(verifiedAddress);
+    let hasRoutedToAdmin = false;
+
+    const unsubscribe = onSnapshot(
+      doc(db, "users", verifiedAddress.toLowerCase()),
+      (snapshot) => {
         if (token !== lookupToken.current) return;
+        const found = snapshot.exists() ? snapshot.data() : null;
         setProfile(found);
         setStatus(found ? "signed-in" : "needs-onboarding");
+
         // Fires once per session establishment (this effect only re-runs when
         // verifiedAddress changes - a fresh sign-in or a restored session on page
         // load), not on every render, so navigating elsewhere afterward doesn't
         // keep yanking an admin back here.
-        if (found && isAdmin(found.role)) go("admin");
-      } catch (caught) {
+        if (found && isAdmin(found.role) && !found.suspended && !hasRoutedToAdmin) {
+          hasRoutedToAdmin = true;
+          go("admin");
+        }
+      },
+      (caught) => {
         if (token !== lookupToken.current) return;
         setError(messageForFirebaseError(caught));
         setStatus("signed-out");
       }
-    })();
+    );
+
+    return () => unsubscribe();
   }, [verifiedAddress, reset]);
 
   // If the wallet switches to a DIFFERENT account, the Firebase session belongs to
@@ -182,7 +193,7 @@ export function SessionProvider({ children }) {
     if (!verifiedAddress) return;
     const switchedToADifferentAccount = address && address.toLowerCase() !== verifiedAddress;
     if (!switchedToADifferentAccount) return;
-    if (isFirebaseConfigured && auth.currentUser) signOut(auth).catch(() => {});
+    if (isFirebaseConfigured && auth.currentUser) signOut(auth).catch(() => { });
     clearActivity();
     reset();
   }, [address, verifiedAddress, reset]);
@@ -200,9 +211,9 @@ export function SessionProvider({ children }) {
   const endSession = useCallback(
     async ({ reason = null } = {}) => {
       if (isFirebaseConfigured && auth.currentUser) {
-        await signOut(auth).catch(() => {});
+        await signOut(auth).catch(() => { });
       }
-      await disconnectAsync().catch(() => {});
+      await disconnectAsync().catch(() => { });
       clearActivity();
       reset();
       setError(
@@ -267,6 +278,7 @@ export function SessionProvider({ children }) {
       error,
       address: verifiedAddress,
       isSignedIn: status === "signed-in",
+      isSuspended: Boolean(profile?.suspended),
       needsOnboarding: status === "needs-onboarding",
       isVerifying: status === "verifying",
       isChecking: status === "checking",
