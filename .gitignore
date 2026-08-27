@@ -88,3 +88,6 @@ coverage/
 ehthumbs.db
 Thumbs.db
 [Dd]esktop.ini
+
+# Vite build output (see frontend/vite.config.js outDir)
+firebase/public/
