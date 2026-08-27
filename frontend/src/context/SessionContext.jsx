@@ -4,7 +4,7 @@ import { getConnection, switchChain } from "wagmi/actions";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "../lib/firebase.js";
 import { exchangeSignatureForSession, requestSignInMessage } from "../lib/authFlow.js";
-import { createProfile, findProfileByAddress } from "../lib/profile.js";
+import { createProfile, findProfileByAddress, updateProfile } from "../lib/profile.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
 import { wagmiConfig } from "../lib/wagmi.js";
@@ -197,6 +197,15 @@ export function SessionProvider({ children }) {
     [verifiedAddress],
   );
 
+  const saveProfile = useCallback(
+    async (form) => {
+      const updated = await updateProfile({ form, address: verifiedAddress });
+      setProfile(updated);
+      return updated;
+    },
+    [verifiedAddress],
+  );
+
   const endSession = useCallback(
     async ({ reason = null } = {}) => {
       if (isFirebaseConfigured && auth.currentUser) {
@@ -273,10 +282,11 @@ export function SessionProvider({ children }) {
       isBusy: status === "verifying" || status === "checking",
       signIn,
       completeOnboarding,
+      saveProfile,
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
     }),
-    [status, profile, error, verifiedAddress, signIn, completeOnboarding, signOutOfSession],
+    [status, profile, error, verifiedAddress, signIn, completeOnboarding, saveProfile, signOutOfSession],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

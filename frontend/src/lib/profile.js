@@ -2,7 +2,7 @@ import { doc, getDoc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { OnboardingError } from "./errors.js";
-import { validateOnboarding } from "./validation.js";
+import { validateOnboarding, validateProfile } from "./validation.js";
 import { initialStats } from "./stats.js";
 import { EXPECTED_CHAIN_ID } from "./chain.js";
 import { ROLE_USER } from "./roles.js";
@@ -95,4 +95,35 @@ export async function createProfile({ form, address }) {
   await batch.commit();
 
   return profile;
+}
+
+export async function updateProfile({ form, address }) {
+  requireFirebase();
+
+  const errors = validateProfile(form, address);
+  const firstField = Object.keys(errors)[0];
+  if (firstField) {
+    throw new OnboardingError(errors[firstField], { field: firstField });
+  }
+
+  const lower = address.toLowerCase();
+  const updates = {
+    fullName: form.fullName.trim(),
+    organisation: form.organisation.trim(),
+    biography: form.biography.trim(),
+    expertise: form.expertise.map((item) => item.trim()).filter(Boolean),
+    updatedAt: serverTimestamp(),
+  };
+  const batch = writeBatch(db);
+  batch.update(profileRef(lower), updates);
+  batch.update(publicProfileRef(lower), {
+    fullName: updates.fullName,
+    organisation: updates.organisation,
+    biography: updates.biography,
+    expertise: updates.expertise,
+  });
+  await batch.commit();
+
+  const snapshot = await getDoc(profileRef(lower));
+  return snapshot.data();
 }

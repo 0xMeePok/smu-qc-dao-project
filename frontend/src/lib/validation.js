@@ -14,6 +14,24 @@ export function validateOrganisation(value = "") {
   return null;
 }
 
+export function validateBiography(value = "") {
+  if (typeof value !== "string") return "Your biography must be text.";
+  if (value.length > 500) return "Your biography cannot be longer than 500 characters.";
+  return null;
+}
+
+export function validateExpertise(value = []) {
+  if (!Array.isArray(value)) return "Areas of expertise must be a list.";
+  if (value.length > 12) return "Choose no more than 12 areas of expertise.";
+  if (value.some((item) => typeof item !== "string" || item.trim().length < 2)) {
+    return "Each area of expertise needs at least 2 characters.";
+  }
+  if (value.some((item) => item.trim().length > 80)) {
+    return "Each area of expertise cannot be longer than 80 characters.";
+  }
+  return null;
+}
+
 export function validateTerms(accepted) {
   if (!accepted) return "You need to accept the platform terms to continue.";
   return null;
@@ -41,6 +59,21 @@ export function validateOnboarding(form, address) {
     fullName: validateFullName(form.fullName),
     organisation: validateOrganisation(form.organisation),
     acceptedTerms: validateTerms(form.acceptedTerms),
+    wallet: validateWallet(address),
+  };
+
+  for (const key of Object.keys(errors)) {
+    if (errors[key] === null) delete errors[key];
+  }
+  return errors;
+}
+
+export function validateProfile(form, address) {
+  const errors = {
+    fullName: validateFullName(form.fullName),
+    organisation: validateOrganisation(form.organisation),
+    biography: validateBiography(form.biography),
+    expertise: validateExpertise(form.expertise),
     wallet: validateWallet(address),
   };
 

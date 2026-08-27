@@ -553,6 +553,8 @@ main { display: block; min-height: calc(100vh - var(--header-height) - 140px); }
 }
 
 .profile-card-heading { margin-bottom: 16px; }
+.profile-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.profile-edit-button { flex: 0 0 auto; }
 .profile-card-heading h2, .profile-bio-card h2 { margin-top: 5px; }
 .profile-details { margin: 0; }
 .profile-details div { padding: 13px 0; border-top: 1px solid var(--line); }
@@ -565,6 +567,8 @@ main { display: block; min-height: calc(100vh - var(--header-height) - 140px); }
 .profile-readonly-field p { max-width: 70ch; margin: 6px 0 0; color: var(--ink-soft); }
 .profile-expertise-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .profile-expertise-list span { padding: 5px 10px; border: 1px solid var(--brand-line); border-radius: var(--radius-pill); background: var(--brand-soft); color: var(--brand-strong); font-size: 13px; font-weight: 600; }
+.profile-form { display: grid; gap: 16px; }
+.profile-form-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 
 /* INPUTS & FORM CONTROLS */
 label { color: var(--ink-soft); font-size: 13px; font-weight: 600; }
