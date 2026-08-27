@@ -46,13 +46,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefix firebase/functions
 
-      # Firestore rules tests deliberately live in ci.yml only, to avoid running the
-      # same suite twice on one push. The Cloud Functions suite runs HERE and nowhere
-      # else - ci.yml does not cover it.
-      #
-      # Consequence worth knowing: ci.yml is a separate workflow, so a red rules suite
-      # there does NOT block deploy-backend below. Rules now deploy gated only by the
-      # functions tests.
+      # The Cloud Functions suite runs HERE and nowhere else - ci.yml does not cover
+      # it. The Firestore rules suite has its own job below.
       - name: Cloud Functions tests
         run: npm test --prefix firebase/functions
 
@@ -80,10 +75,39 @@ jobs:
         working-directory: frontend
         run: node --test test/validation.test.js test/routeAccess.test.js test/idleTimeout.test.js
 
+  # ------------------------------------------------------------------ rules gate
+  test-rules:
+    name: Test Firestore rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: firebase/package-lock.json
+
+      # Java is required by the Firestore rules emulator. Preinstalled on
+      # ubuntu-latest, so this asserts the assumption rather than installing it.
+      - name: Verify Java is available for the Firestore emulator
+        run: java -version
+
+      - name: Install dependencies
+        run: npm ci --prefix firebase
+
+      # This suite also runs in ci.yml. The duplication is deliberate: ci.yml is a
+      # SEPARATE workflow, so a red rules suite there cannot stop deploy-backend
+      # here. Ownership and schema rules govern who can read and write every user
+      # record, and deploying them untested is a worse outcome than spending two
+      # minutes of CI running the same tests twice.
+      - name: Firestore rules tests
+        run: npm test --prefix firebase
+
   # ------------------------------------------------------- backend deploy (first)
   deploy-backend:
     name: Deploy rules and functions
-    needs: test-backend
+    needs: [test-backend, test-rules]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
