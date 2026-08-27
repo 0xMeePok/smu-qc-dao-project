@@ -33,7 +33,7 @@ const FUNCTIONS_MESSAGES = {
   "functions/unavailable":
     "The sign-in server is unreachable. Check your connection, then confirm the Cloud Functions are deployed.",
   "functions/permission-denied":
-    "Your account has been suspended, contact an administrator.",
+    "You do not have permission to perform this action. Administrator privileges may be required.",
   "functions/unauthenticated":
     "The sign-in server rejected the request as unauthenticated. Confirm the functions allow unauthenticated invocation.",
   "functions/failed-precondition":

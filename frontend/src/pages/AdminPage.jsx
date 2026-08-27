@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "../context/SessionContext.jsx";
 import { isAdmin } from "../lib/roles.js";
 import { shortenAddress } from "../lib/chain.js";
@@ -25,9 +25,19 @@ export default function AdminPage() {
   const [error, setError] = useState(null);
   const [successBanner, setSuccessBanner] = useState(null);
 
+  const bannerTimerRef = useRef(null);
+
   // Modals state
   const [roleChangeTarget, setRoleChangeTarget] = useState(null);
   const [suspendTarget, setSuspendTarget] = useState(null);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
 
   const loadUsers = useCallback(async () => {
     if (!isSignedIn || !isAdmin(profile?.role) || profile?.suspended) return;
@@ -63,7 +73,8 @@ export default function AdminPage() {
       )}. Audit entry logged.`,
     );
     loadUsers();
-    setTimeout(() => setSuccessBanner(null), 6000);
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    bannerTimerRef.current = setTimeout(() => setSuccessBanner(null), 6000);
   };
 
   const handleSuspendSuccess = ({ address: updatedAddress, suspended }) => {
@@ -73,7 +84,8 @@ export default function AdminPage() {
       }. Audit entry logged.`,
     );
     loadUsers();
-    setTimeout(() => setSuccessBanner(null), 6000);
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    bannerTimerRef.current = setTimeout(() => setSuccessBanner(null), 6000);
   };
 
   if (isChecking) {

@@ -358,7 +358,12 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
     orgFilter = "",
   } = request.data ?? {};
 
-  const snapshot = await db.collection("users").get();
+  let usersQuery = db.collection("users");
+  if (typeof roleFilter === "number" && (roleFilter === 0 || roleFilter === 1)) {
+    usersQuery = usersQuery.where("role", "==", roleFilter);
+  }
+
+  const snapshot = await usersQuery.get();
   let users = snapshot.docs.map((docSnap) => {
     const data = docSnap.data();
     return {
@@ -371,10 +376,6 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
       updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : null,
     };
   });
-
-  if (typeof roleFilter === "number" && (roleFilter === 0 || roleFilter === 1)) {
-    users = users.filter((u) => u.role === roleFilter);
-  }
   if (typeof orgFilter === "string" && orgFilter.trim().length > 0) {
     const orgLower = orgFilter.trim().toLowerCase();
     users = users.filter((u) => u.organisation.toLowerCase().includes(orgLower));
@@ -505,6 +506,16 @@ export const adminSetSuspended = onCall({ region: REGION }, async (request) => {
     suspended,
     updatedAt: Timestamp.now(),
   });
+
+  if (suspended) {
+    try {
+      await getAuth().revokeRefreshTokens(targetAddress);
+    } catch (err) {
+      if (err?.code !== "auth/user-not-found") {
+        console.error(`Failed to revoke refresh tokens for ${targetAddress}:`, err);
+      }
+    }
+  }
 
   const auditEntry = {
     type: "suspension_change",

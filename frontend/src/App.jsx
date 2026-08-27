@@ -18,7 +18,6 @@ import {
   ResearcherProposals,
   EvaluatorQueue,
   FundingPortfolio,
-  AdminAudit,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import {
   assertFails,
   assertSucceeds,
@@ -441,6 +441,13 @@ describe("users/{address} update", () => {
     );
   });
 
+  it("blocks changing createdAt after creation", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      updateDoc(doc(db, "users", OTHER), { createdAt: serverTimestamp(), updatedAt: serverTimestamp() }),
+    );
+  });
+
   it("blocks rewriting the wallet address", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(
@@ -546,6 +553,16 @@ describe("problems/{problemId}", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "p_good"), { ownerId: ADDRESS, title: "Valid Title" }));
     await assertFails(updateDoc(doc(db, "problems", "p_good"), { invalidExtraField: "bad" }));
   });
+
+  it("[QCDAO47] blocks access and reads for suspended problem owners", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "problems", "p_susp"), { ownerId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "problems", "p_susp")));
+  });
 });
 
 describe("proposals/{proposalId}", () => {
@@ -579,6 +596,16 @@ describe("proposals/{proposalId}", () => {
   it("[BIT-AAR-94] [QCDAO43] blocks unschemad fields on create and update", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "proposals", "prop_bad"), { researcherId: ADDRESS, injectedKey: "hack" }));
+  });
+
+  it("[QCDAO47] blocks access and reads for suspended researchers", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "proposals", "prop_susp"), { researcherId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "proposals", "prop_susp")));
   });
 });
 
@@ -614,6 +641,16 @@ describe("evaluations/{evaluationId}", () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "evaluations", "e_bad"), { evaluatorId: ADDRESS, injectedKey: "hack" }));
   });
+
+  it("[QCDAO47] blocks access and reads for suspended evaluators", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "evaluations", "e_susp"), { evaluatorId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "evaluations", "e_susp")));
+  });
 });
 
 describe("funding/{fundId}", () => {
@@ -647,6 +684,16 @@ describe("funding/{fundId}", () => {
   it("[BIT-AAR-98] [QCDAO43] blocks unschemad fields on create and update", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "funding", "f_bad"), { funderId: ADDRESS, injectedKey: "hack" }));
+  });
+
+  it("[QCDAO47] blocks access and reads for suspended funders", async () => {
+    const SUSPENDED_USER = `0x${"f".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED_USER), baseProfile(null, SUSPENDED_USER, { suspended: true }));
+      await setDoc(doc(ctx.firestore(), "funding", "f_susp"), { funderId: SUSPENDED_USER });
+    });
+    const db = env.authenticatedContext(SUSPENDED_USER).firestore();
+    await assertFails(getDoc(doc(db, "funding", "f_susp")));
   });
 });
 

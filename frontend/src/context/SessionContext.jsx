@@ -5,7 +5,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
 import { exchangeSignatureForSession, requestSignInMessage } from "../lib/authFlow.js";
-import { createProfile, findProfileByAddress } from "../lib/profile.js";
+import { createProfile } from "../lib/profile.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
 import { wagmiConfig } from "../lib/wagmi.js";

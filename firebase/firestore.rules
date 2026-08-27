@@ -107,6 +107,7 @@ service cloud.firestore {
         && request.resource.data.role == resource.data.role
         && request.resource.data.chainId == resource.data.chainId
         && request.resource.data.stats == resource.data.stats
+        && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.termsAcceptedAt == resource.data.termsAcceptedAt
         && request.resource.data.termsVersion == resource.data.termsVersion
         && request.resource.data.walletVerified == resource.data.walletVerified
@@ -208,7 +209,7 @@ service cloud.firestore {
     }
     
     match /problems/{problemId} {
-      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow read: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
       allow delete: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
@@ -222,7 +223,7 @@ service cloud.firestore {
     }
     
     match /proposals/{proposalId} {
-      allow read: if request.auth != null && resource.data.researcherId == request.auth.uid;
+      allow read: if isActiveUser(request.auth.uid) && resource.data.researcherId == request.auth.uid;
       allow delete: if isActiveUser(request.auth.uid) && resource.data.researcherId == request.auth.uid;
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
@@ -236,7 +237,7 @@ service cloud.firestore {
     }
     
     match /evaluations/{evaluationId} {
-      allow read: if request.auth != null && resource.data.evaluatorId == request.auth.uid;
+      allow read: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
       allow delete: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
@@ -250,7 +251,7 @@ service cloud.firestore {
     }
     
     match /funding/{fundId} {
-      allow read: if request.auth != null && resource.data.funderId == request.auth.uid;
+      allow read: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
       allow delete: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
