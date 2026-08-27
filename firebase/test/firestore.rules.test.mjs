@@ -406,16 +406,24 @@ describe("users/{address} update", () => {
   before(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER));
+      await setDoc(doc(ctx.firestore(), "publicProfiles", OTHER), {
+        address: OTHER,
+        fullName: "Ashley Chung",
+        organisation: "Singapore Management University",
+      });
     });
   });
 
   it("allows editing name and organisation", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
-    await assertSucceeds(
-      updateDoc(doc(db, "users", OTHER), {
-        organisation: "New Employer Pte Ltd", updatedAt: serverTimestamp(),
-      }),
-    );
+    const batch = writeBatch(db);
+    batch.update(doc(db, "users", OTHER), {
+      organisation: "New Employer Pte Ltd", updatedAt: serverTimestamp(),
+    });
+    batch.update(doc(db, "publicProfiles", OTHER), {
+      organisation: "New Employer Pte Ltd",
+    });
+    await assertSucceeds(batch.commit());
   });
 
   it("blocks a signed-in user promoting their own role to admin", async () => {
