@@ -569,6 +569,9 @@ main { display: block; min-height: calc(100vh - var(--header-height) - 140px); }
 .profile-expertise-list span { padding: 5px 10px; border: 1px solid var(--brand-line); border-radius: var(--radius-pill); background: var(--brand-soft); color: var(--brand-strong); font-size: 13px; font-weight: 600; }
 .profile-form { display: grid; gap: 16px; }
 .profile-form-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.profile-link { padding: 0; border: 0; background: transparent; color: var(--brand); font-size: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.profile-link:hover { color: var(--brand-strong); }
+.table-row-meta { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 
 /* INPUTS & FORM CONTROLS */
 label { color: var(--ink-soft); font-size: 13px; font-weight: 600; }
