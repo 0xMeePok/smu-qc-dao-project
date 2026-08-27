@@ -112,24 +112,33 @@ function allowedHosts() {
 
 // Firebase Hosting preview channels get a generated URL of the form
 // <project>--<channel>-<hash>.web.app, so continuous deployment produces a host name
-// nobody can predict or configure in advance. Matching the prefix instead of a fixed
-// string means every preview this project deploys is trusted automatically, with no
-// redeploy of these functions.
+// nobody can predict or configure in advance. Matching the shape means every preview
+// this project deploys is trusted automatically, with no redeploy of these functions.
 //
-// This is not a wildcard on someone else's namespace: only a principal that can
-// deploy to THIS project can create a host beginning `<project>--`. An attacker
-// cannot register qcdao-a0c7a--evil.web.app any more than they could take
-// qcdao-a0c7a.web.app itself. Note the check is anchored on the project id and
-// requires one of the two Firebase suffixes, so `qcdao-a0c7a--evil.attacker.com`
-// does not match.
+// An earlier version matched only a prefix and a suffix, justified by the claim that
+// "only a principal who can deploy to THIS project can create a host beginning
+// <project>--". That claim was never verified and is not safe to rely on: Firebase
+// site ids are globally unique hostname labels and may contain hyphens, so if
+// `qcdao-a0c7a--evil` is registrable by anyone, its live site
+// qcdao-a0c7a--evil.web.app satisfied both halves and could mint production tokens.
+// Prefix plus suffix is not proof of ownership.
+//
+// This is still pattern matching, not an ownership check. A host that matches the
+// full generated shape AND is registrable as a site id would pass. Closing that
+// properly needs a Hosting API lookup per sign-in, or dropping preview support.
 function isOwnHostingPreview(host) {
   const projectId = (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "")
     .trim()
     .toLowerCase();
   if (!projectId) return false;
 
-  return host.startsWith(`${projectId}--`)
-    && (host.endsWith(".web.app") || host.endsWith(".firebaseapp.com"));
+  // Real channel URLs look like qcdao-a0c7a--test-cd-wm5z6dh8.web.app: the project
+  // id, then a channel id, then a Firebase-generated 8-character hash. Requiring
+  // that trailing hash is what a squatted site id cannot trivially satisfy.
+  const escaped = projectId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^${escaped}--[a-z0-9]([a-z0-9-]*[a-z0-9])?-[a-z0-9]{8}\\.(web\\.app|firebaseapp\\.com)$`,
+  ).test(host);
 }
 
 function resolveDomain(request) {

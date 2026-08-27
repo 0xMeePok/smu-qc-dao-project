@@ -333,6 +333,23 @@ describe("hosting origins, including CD preview channels", () => {
     );
   });
 
+  it("refuses a foreign live site whose id merely begins with the project prefix", async () => {
+    // The exact gap a prefix+suffix check left open. Firebase site ids are globally
+    // unique hostname labels and may contain hyphens, so `qc-dao-demo--evil` could be
+    // registrable by anyone - and qc-dao-demo--evil.web.app is then a REAL Firebase
+    // host, passing both a startsWith and an endsWith test. Only the trailing
+    // generated hash distinguishes a genuine preview channel.
+    for (const host of [
+      `${PROJECT}--evil.web.app`,
+      `${PROJECT}--login-abc.web.app`,
+      `${PROJECT}--evil.firebaseapp.com`,
+    ]) {
+      const fresh = privateKeyToAccount(generatePrivateKey());
+      const res = await call("getSiweNonce", { address: fresh.address }, { origin: `https://${host}` });
+      assert.equal(res.error?.status, "PERMISSION_DENIED", `${host} must be refused`);
+    }
+  });
+
   it("refuses a preview-shaped host belonging to a DIFFERENT project", async () => {
     // The prefix is anchored on this project id, so another project's previews are
     // not ours to trust.
