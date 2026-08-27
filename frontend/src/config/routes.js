@@ -121,6 +121,7 @@ export function getPermittedNavRoutes(roles) {
     if (!route.showInNav) return false;
     if (!route.authRequired) return true;
     if (roleList.length === 0 || (roleList.length === 1 && roleList[0] === ROLES.GUEST)) return false;
+    if (route.allowedRoles === null) return true;
     return route.allowedRoles?.some((allowed) => roleList.includes(allowed));
   });
 }
