@@ -29,6 +29,8 @@ function toPublicProfile(profile) {
     address: profile.address,
     fullName: profile.fullName,
     organisation: profile.organisation,
+    biography: profile.biography,
+    expertise: profile.expertise,
   };
 }
 
@@ -58,10 +60,15 @@ export async function createProfile({ form, address }) {
   }
 
   const lower = address.toLowerCase();
+  const expertise = Array.isArray(form.expertise)
+    ? form.expertise.map((item) => item.trim()).filter(Boolean)
+    : [];
   const profile = {
     address: lower,
     fullName: form.fullName.trim(),
     organisation: form.organisation.trim(),
+    biography: (form.biography ?? "").trim(),
+    expertise,
     // Every account starts as a normal user. Nothing in the client can write 1
     // here or later: firebase/firestore.rules fixes this to 0 on create and makes
     // it immutable on every update, so becoming an administrator is only ever done
