@@ -67,6 +67,19 @@ service cloud.firestore {
                    || (data.expertise is list && data.expertise.size() <= 12));
       }
 
+      function publicFieldsMatch(data) {
+        let publicProfile = getAfter(/databases/$(database)/documents/publicProfiles/$(address)).data;
+        return publicProfile.address == data.address
+               && publicProfile.fullName == data.fullName
+               && publicProfile.organisation == data.organisation
+               && publicProfile.keys().hasAny(['biography']) == data.keys().hasAny(['biography'])
+               && (!data.keys().hasAny(['biography'])
+                   || publicProfile.biography == data.biography)
+               && publicProfile.keys().hasAny(['expertise']) == data.keys().hasAny(['expertise'])
+               && (!data.keys().hasAny(['expertise'])
+                   || publicProfile.expertise == data.expertise);
+      }
+
       // PRIVATE. Only the wallet that owns this document may read it.
       // Note there is no `list` here at all, only `get`.
       allow get: if isWallet(address);
@@ -116,6 +129,8 @@ service cloud.firestore {
         && request.resource.data.walletVerified == resource.data.walletVerified
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
+        && existsAfter(/databases/$(database)/documents/publicProfiles/$(address))
+        && publicFieldsMatch(request.resource.data)
         && request.resource.data.updatedAt == request.time;
 
       allow delete: if false;
