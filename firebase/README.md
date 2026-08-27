@@ -43,8 +43,18 @@ because one of these functions verified a real signature first:
 1. Ask Ashley for the six `VITE_FIREBASE_*` values.
 2. Put them in `frontend/.env.local` (copy `frontend/.env.example` as a starting
    point).
-3. `npm install && npm run dev` in `frontend/` — sign-in talks straight to the live
-   backend.
+3. Install from the **repo root**, then run the frontend:
+
+```bash
+cd ..   # repo root, if you are in firebase/
+npm install --prefix firebase
+npm install --prefix firebase/functions
+npm install --prefix frontend
+cd frontend && npm run dev
+```
+
+Sign-in talks straight to the live backend. The root [README](../README.md#getting-started)
+has the full local (emulator) flow.
 
 Verify the backend itself is reachable, independent of the frontend:
 
@@ -67,10 +77,14 @@ Everything below is only relevant if you're editing `firestore.rules` or
 
 ### Install
 
+Do this **before** `emulators:start` or `npm test`. `cd firebase && npm install` is
+not enough — `firebase-functions` lives in `functions/`:
+
 ```bash
-cd firebase
-npm install
-npm --prefix functions install
+# from the repo root
+npm install --prefix firebase
+npm install --prefix firebase/functions
+npm install --prefix frontend
 ```
 
 ### Link this checkout to the project
@@ -84,13 +98,19 @@ Edit `.firebaserc` and put the real project id in place of
 
 ### Run against local emulators instead of the live backend
 
+Install first (section above), then:
+
 ```bash
-npx firebase emulators:start --only functions,firestore,auth --project qc-dao-demo
+npx firebase emulators:start --only functions,firestore,auth --project qcdao-a0c7a
 ```
 
 Point the frontend at it with `VITE_FIREBASE_USE_EMULATORS=true` in
-`frontend/.env.local`. The emulator UI is at `http://127.0.0.1:4000`. Useful for
-trying out a rules or functions change without touching the shared backend.
+`frontend/.env.local` (project id there must match `--project`). The emulator UI is
+at `http://127.0.0.1:4000`. Useful for trying out a rules or functions change without
+touching the shared backend.
+
+If functions fail to load with `Cannot find module 'firebase-functions'`, you skipped
+`npm install --prefix firebase/functions`.
 
 ### Tests
 
@@ -147,16 +167,31 @@ signable message again. Use the emulator instead — see below.
 
 Because deployed functions refuse `localhost`, a local frontend pointed at the live
 backend will fail sign-in with *"The sign-in server refused the request."* Run the
-emulator instead, where dev origins are allowed automatically:
+emulator instead, where dev origins are allowed automatically.
+
+From the **repo root**, install first, then two terminals:
 
 ```bash
-npx firebase emulators:start --only functions,firestore,auth --project qc-dao-demo
+npm install --prefix firebase
+npm install --prefix firebase/functions
+npm install --prefix frontend
 ```
 
-Then set `VITE_FIREBASE_USE_EMULATORS=true` in `frontend/.env.local` and run
-`npm run dev` as usual. The app still opens at `http://localhost:5173`; only the
-backend changes. Emulator data starts empty and is discarded on shutdown, so you will
-re-onboard a test wallet each session unless you pass `--export-on-exit`.
+```bash
+# terminal 1
+cd firebase
+npx firebase emulators:start --only functions,firestore,auth --project qcdao-a0c7a
+
+# terminal 2
+cd frontend
+npm run dev
+```
+
+Then set `VITE_FIREBASE_USE_EMULATORS=true` in `frontend/.env.local` (and keep
+`VITE_FIREBASE_PROJECT_ID=qcdao-a0c7a` in sync with `--project`). The app still opens
+at `http://localhost:5173`; only the backend changes. Emulator data starts empty and
+is discarded on shutdown, so you will re-onboard a test wallet each session unless
+you pass `--export-on-exit`.
 
 ### Continuous deployment
 
@@ -166,7 +201,7 @@ Pushing to `main` runs [`.github/workflows/deploy.yml`](../.github/workflows/dep
 test-backend  (Cloud Functions, 25) ──┐
                                       ├──→ deploy-backend ──→ deploy-hosting
 test-rules    (Firestore rules, 78) ──┘                            ↑
-test-frontend (47) ────────────────────────────────────────────────┘
+test-frontend (47) ─────────────────────────────────────────────────┘
 ```
 
 Backend deploys first and hosting waits for it, because `createProfile()` writes to

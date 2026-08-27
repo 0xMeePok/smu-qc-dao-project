@@ -43,6 +43,13 @@ jobs:
             firebase/package-lock.json
             firebase/functions/package-lock.json
 
+      # NEW: Firestore emulator (started by npm test) needs Java.
+      - name: Set up Java
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - name: Install dependencies
         run: npm ci --prefix firebase/functions
 
