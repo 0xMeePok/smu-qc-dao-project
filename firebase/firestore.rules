@@ -168,23 +168,88 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------------
-    // ACTIVE COLLECTIONS (Document-based authorization)
+    // ACTIVE COLLECTIONS (Document-based authorization & schema validation)
     // ------------------------------------------------------------------------
+
+    function hasProblemSchema(data) {
+      return data.keys().hasOnly([
+        'ownerId', 'title', 'summary', 'outcomes', 'amount', 'deadline',
+        'benefits', 'deliverables', 'status', 'type', 'opportunityType',
+        'createdAt', 'updatedAt'
+      ]);
+    }
+
+    function hasProposalSchema(data) {
+      return data.keys().hasOnly([
+        'researcherId', 'problemId', 'title', 'summary', 'outcomes', 'amount',
+        'status', 'deliverables', 'createdAt', 'updatedAt'
+      ]);
+    }
+
+    function hasEvaluationSchema(data) {
+      return data.keys().hasOnly([
+        'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
+        'createdAt', 'updatedAt'
+      ]);
+    }
+
+    function hasFundingSchema(data) {
+      return data.keys().hasOnly([
+        'funderId', 'proposalId', 'problemId', 'title', 'amount', 'status',
+        'tranches', 'createdAt', 'updatedAt'
+      ]);
+    }
     
     match /problems/{problemId} {
-      allow read, write: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow read, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow create: if request.auth != null
+        && isWalletAddress(request.auth.uid)
+        && request.resource.data.ownerId == request.auth.uid
+        && hasProblemSchema(request.resource.data);
+      allow update: if request.auth != null
+        && resource != null
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && hasProblemSchema(request.resource.data);
     }
     
     match /proposals/{proposalId} {
-      allow read, write: if request.auth != null && resource.data.researcherId == request.auth.uid;
+      allow read, delete: if request.auth != null && resource.data.researcherId == request.auth.uid;
+      allow create: if request.auth != null
+        && isWalletAddress(request.auth.uid)
+        && request.resource.data.researcherId == request.auth.uid
+        && hasProposalSchema(request.resource.data);
+      allow update: if request.auth != null
+        && resource != null
+        && resource.data.researcherId == request.auth.uid
+        && request.resource.data.researcherId == resource.data.researcherId
+        && hasProposalSchema(request.resource.data);
     }
     
     match /evaluations/{evaluationId} {
-      allow read, write: if request.auth != null && resource.data.evaluatorId == request.auth.uid;
+      allow read, delete: if request.auth != null && resource.data.evaluatorId == request.auth.uid;
+      allow create: if request.auth != null
+        && isWalletAddress(request.auth.uid)
+        && request.resource.data.evaluatorId == request.auth.uid
+        && hasEvaluationSchema(request.resource.data);
+      allow update: if request.auth != null
+        && resource != null
+        && resource.data.evaluatorId == request.auth.uid
+        && request.resource.data.evaluatorId == resource.data.evaluatorId
+        && hasEvaluationSchema(request.resource.data);
     }
     
     match /funding/{fundId} {
-      allow read, write: if request.auth != null && resource.data.funderId == request.auth.uid;
+      allow read, delete: if request.auth != null && resource.data.funderId == request.auth.uid;
+      allow create: if request.auth != null
+        && isWalletAddress(request.auth.uid)
+        && request.resource.data.funderId == request.auth.uid
+        && hasFundingSchema(request.resource.data);
+      allow update: if request.auth != null
+        && resource != null
+        && resource.data.funderId == request.auth.uid
+        && request.resource.data.funderId == resource.data.funderId
+        && hasFundingSchema(request.resource.data);
     }
     
     match /audits/{auditId} {

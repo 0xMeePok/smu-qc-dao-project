@@ -90,6 +90,3 @@ Authentication is strictly enforced via Web3 Sign-In with Ethereum (SIWE) throug
    - **Platform Participant**: User profiles (`role == 0` in Firestore) receive the full participant capability set: `[owner, researcher, evaluator, funder]`.
    - **DAO Administrator**: Dedicated admin profiles (`role == 1` in Firestore, assigned out-of-band/admin SDK) receive the isolated `[admin]` capability set.
    - **Unauthenticated Visitor**: Resolves to `[guest]`.
-
-### 6.2 Decommissioned Demo Mode
-Temporary client-side role switching and demo query parameters (`?demo=true`, `FEATURES.DEMO_ROLE_SWITCHER`) have been permanently decommissioned. Access control strictly follows authenticated user session profiles.

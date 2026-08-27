@@ -40,7 +40,7 @@ export function AuthProvider({ children }) {
   const hasRole = (targetRole) => roles.includes(targetRole);
 
   const hasAnyRole = (targetRoles) => {
-    if (!targetRoles || targetRoles.length === 0) return true;
+    if (!targetRoles || targetRoles.length === 0) return false;
     return targetRoles.some((r) => roles.includes(r));
   };
 

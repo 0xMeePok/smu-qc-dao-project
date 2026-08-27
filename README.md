@@ -150,7 +150,6 @@ npm run dev
 The web application will start at `http://localhost:5173/`.
 
 - **Standard Mode**: `http://localhost:5173/` (production layout, standard wallet login).
-- **Demo Mode**: `http://localhost:5173/?demo=true` (enables the bottom demo role-switcher toolbar and one-click persona selector for grading demonstrations).
 
 ### 4. (Optional) Deploy the QFT token
 
@@ -188,7 +187,7 @@ need to redeploy, or want to run everything against local emulators instead, see
 
 ## Documentation Reference
 
-- [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions, opportunity creation rules, and demo mode specifications.
+- [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions and opportunity creation rules.
 
 ## Smart Contracts
 
