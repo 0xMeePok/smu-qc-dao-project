@@ -284,59 +284,162 @@ export function AdminAudit() {
   const [data, setData] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [filterType, setFilterType] = useState("all");
+
+  const fetchAudits = async () => {
+    if (!user?.id || !db) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const querySnapshot = await getDocs(collection(db, "audits"));
+      const items = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      // Sort by timestamp descending if available
+      items.sort((a, b) => {
+        const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        return tB - tA;
+      });
+      setData(items);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function fetchData() {
-      if (!user?.id || !db) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const querySnapshot = await getDocs(collection(db, "audits"));
-        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (err) {
-        setError(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
+    fetchAudits();
   }, [user?.id]);
 
+  const filteredData = data.filter((item) => {
+    if (filterType === "all") return true;
+    if (filterType === "role_change") return item.type === "role_change" || item.action === "ROLE_CHANGE";
+    if (filterType === "suspension") return item.type === "suspension_change" || item.action?.includes("SUSPEND");
+    return true;
+  });
+
   return (
-    <section className="page dashboard-page">
-      <div className="page-heading">
-        <div className="eyebrow-row">
-          <RoleBadge role="admin" />
-          <span>System Governance</span>
+    <div className="card-table">
+      <div className="table-header">
+        <div>
+          <h3>System Audit Trail & Governance Events</h3>
+          <p className="table-subtitle">Immutable log of role transitions, account suspensions, and platform state updates.</p>
         </div>
-        <h1>DAO Platform Administration & Audit Trail</h1>
-        <p>Monitor platform state transitions, inspect Arbitrum Sepolia audit event hashes, and enforce RBAC integrity.</p>
+        <div className="audit-header-actions">
+          <select
+            className="audit-filter-select"
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            aria-label="Filter audit log entries"
+          >
+            <option value="all">All Events ({data.length})</option>
+            <option value="role_change">Role Changes</option>
+            <option value="suspension">Suspensions & Reinstatements</option>
+          </select>
+          <button className="secondary small" type="button" onClick={fetchAudits} title="Refresh Audit Log">
+            ↻ Refresh
+          </button>
+        </div>
       </div>
 
-      <div className="card-table">
-        <div className="table-header">
-          <h3>Recent System Audit Events</h3>
+      {loading ? (
+        <div style={{ padding: "2rem", textAlign: "center" }}>Loading audit records...</div>
+      ) : error ? (
+        <div className="error-banner" style={{ padding: "1.5rem", margin: "1rem" }}>
+          <strong>Error loading audit log:</strong> {error.message}
         </div>
-        
-        {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
-        ) : error ? (
-          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
-             <strong>Error:</strong> {error.message}
-          </div>
-        ) : data.length === 0 ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No audit events found.</div>
-        ) : (
-          data.map(item => (
-            <div className="table-row" key={item.id}>
-              <div>
-                <strong>{item.title}</strong>
+      ) : filteredData.length === 0 ? (
+        <div style={{ padding: "2.5rem", textAlign: "center", color: "#888" }}>
+          No audit events found for the selected filter.
+        </div>
+      ) : (
+        <div className="audit-list">
+          {filteredData.map((item) => {
+            const isRoleChange = item.type === "role_change" || item.action === "ROLE_CHANGE";
+            const isSuspension = item.type === "suspension_change" || item.action?.includes("SUSPEND");
+            const dateStr = item.timestamp?.toDate
+              ? item.timestamp.toDate().toLocaleString()
+              : item.createdAt?.toDate
+              ? item.createdAt.toDate().toLocaleString()
+              : "Recent";
+
+            return (
+              <div className="audit-item-card" key={item.id}>
+                <div className="audit-card-top">
+                  <div className="audit-tag-row">
+                    <span
+                      className={`audit-type-badge ${
+                        isRoleChange
+                          ? "badge-role-change"
+                          : isSuspension
+                          ? "badge-suspension"
+                          : "badge-system"
+                      }`}
+                    >
+                      {isRoleChange
+                        ? "ROLE TRANSITION"
+                        : isSuspension
+                        ? item.newState
+                          ? "ACCOUNT SUSPENDED"
+                          : "ACCOUNT REINSTATED"
+                        : item.action || "SYSTEM EVENT"}
+                    </span>
+                    <span className="audit-timestamp">{dateStr}</span>
+                  </div>
+                </div>
+
+                <div className="audit-card-body">
+                  {isRoleChange && (
+                    <div className="audit-details">
+                      <p className="audit-statement">
+                        Admin <strong>{item.actorName || item.actor}</strong> modified role assignment for{" "}
+                        <strong>{item.targetName || item.targetAddress}</strong>:
+                      </p>
+                      <div className="audit-transition-pill">
+                        <span>{item.previousRole === 1 ? "Administrator (1)" : "User (0)"}</span>
+                        <span className="arrow">→</span>
+                        <strong>{item.newRole === 1 ? "Administrator (1)" : "User (0)"}</strong>
+                      </div>
+                    </div>
+                  )}
+
+                  {isSuspension && (
+                    <div className="audit-details">
+                      <p className="audit-statement">
+                        Admin <strong>{item.actorName || item.actor}</strong> {item.newState ? "suspended" : "reinstated"}{" "}
+                        account <strong>{item.targetName || item.targetAddress}</strong>.
+                      </p>
+                    </div>
+                  )}
+
+                  {!isRoleChange && !isSuspension && (
+                    <div className="audit-details">
+                      <strong>{item.title || item.action || "Audit Record"}</strong>
+                    </div>
+                  )}
+
+                  {item.reason && (
+                    <div className="audit-reason-box">
+                      <span className="reason-label">Written Reason:</span>
+                      <span className="reason-text">"{item.reason}"</span>
+                    </div>
+                  )}
+
+                  <div className="audit-meta-row">
+                    <small>Actor: <code>{item.actor}</code></small>
+                    {item.targetAddress && (
+                      <small>Target: <code>{item.targetAddress}</code></small>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

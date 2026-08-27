@@ -14,13 +14,14 @@ import { OnboardingModal } from "./components/OnboardingModal.jsx";
 import { NetworkBanner } from "./components/NetworkBanner.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import PublicProfilePage from "./pages/PublicProfilePage.jsx";
+import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import {
   MyProblems,
   ResearcherProposals,
   EvaluatorQueue,
   FundingPortfolio,
-  AdminAudit,
 } from "./components/RoleViews.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 
 function parseHash() {
   if (typeof window !== "undefined") {
@@ -823,7 +824,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <AdminAudit onNavigate={go} />
+        <AdminPage />
       </RouteGuard>
     );
   } else if (section === "access-denied") {
@@ -833,6 +834,7 @@ function AppContent() {
   return (
     <>
       <NetworkBanner />
+      <SuspensionBanner />
       <Shell route={section}>{pageComponent}</Shell>
       <OnboardingModal />
     </>

@@ -13,9 +13,11 @@ import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
+const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT || (process.env.FUNCTIONS_BASE_URL?.split("/")[3]) || "qcdao-a0c7a";
+
 const BASE =
   process.env.FUNCTIONS_BASE_URL ??
-  "http://127.0.0.1:5001/qc-dao-demo/asia-southeast1";
+  `http://127.0.0.1:5001/${PROJECT_ID}/asia-southeast1`;
 
 // `origin` is overridable (and omittable, via null) so the SIWE domain-binding tests
 // below can pose as a browser on some other site.
