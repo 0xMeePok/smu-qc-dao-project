@@ -19,7 +19,16 @@ permissions:
 jobs:
   review:
     name: Review changed code for security findings
-    if: github.event.pull_request.draft == false
+    # Keep paid model usage limited to the current project contributors. GitHub
+    # login comparisons are case-insensitive in workflow expressions.
+    if: >-
+      github.event.pull_request.draft == false &&
+      (
+        github.event.pull_request.user.login == '0xMeePok' ||
+        github.event.pull_request.user.login == 'whale93' ||
+        github.event.pull_request.user.login == 'Darveloper1' ||
+        github.event.pull_request.user.login == '0xjunwei'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
