@@ -5,7 +5,7 @@ import { configVariable, defineConfig } from "hardhat/config";
 import "dotenv/config";
 
 const compiler = {
-  version: "0.8.29",
+  version: "0.8.28",
   settings: {
     optimizer: {
       enabled: true,
