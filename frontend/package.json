@@ -7,9 +7,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test \"test/**/*.test.js\"",
-    "test:unit": "node --test \"test/unit/**/*.test.js\"",
-    "test:integration": "node --test \"test/integration/**/*.test.js\""
+    "test": "node --test test/*.test.js test/unit/*.test.js test/integration/*.test.js && vitest run",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.2",
@@ -20,6 +20,11 @@
     "viem": "^2.55.19",
     "vite": "6.4.3",
     "wagmi": "^3.7.6"
+  },
+  "devDependencies": {
+    "@testing-library/react": "16.3.0",
+    "jsdom": "26.1.0",
+    "vitest": "3.2.4"
   },
   "engines": {
     "node": ">=20.19.0"

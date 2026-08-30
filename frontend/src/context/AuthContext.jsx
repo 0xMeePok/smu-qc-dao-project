@@ -56,8 +56,9 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     if (session?.signOut) {
-      session.signOut();
+      return session.signOut();
     }
+    return Promise.resolve({ ok: true });
   };
 
   const value = {

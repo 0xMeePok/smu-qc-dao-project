@@ -38,6 +38,61 @@ function baseProfile(_uid, address = ADDRESS, overrides = {}) {
   };
 }
 
+function baseProblem(overrides = {}) {
+  return {
+    ownerId: ADDRESS,
+    title: "Fault-tolerant scheduling",
+    summary: "Research a verifiable scheduler for noisy devices.",
+    amount: 1000,
+    status: "draft",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+function baseProposal(overrides = {}) {
+  return {
+    researcherId: ADDRESS,
+    problemId: "p1",
+    title: "Scheduler research proposal",
+    summary: "A staged research and validation plan.",
+    amount: 800,
+    status: "draft",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+function baseEvaluation(overrides = {}) {
+  return {
+    evaluatorId: ADDRESS,
+    proposalId: "prop1",
+    title: "Technical evaluation",
+    score: 80,
+    feedback: "The validation plan is technically sound.",
+    status: "draft",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
+function baseFunding(overrides = {}) {
+  return {
+    funderId: ADDRESS,
+    proposalId: "prop1",
+    problemId: "p1",
+    title: "Research grant",
+    amount: 800,
+    status: "pledged",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...overrides,
+  };
+}
+
 before(async () => {
   env = await initializeTestEnvironment({
     projectId: "qc-dao-rules-test",
@@ -554,7 +609,7 @@ describe("users/{address} update", () => {
 describe("problems/{problemId}", () => {
   it("[BIT-AAR-76] [QCDAO43] allows access to the owner", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "problems", "p1"), { ownerId: ADDRESS }));
+    await assertSucceeds(setDoc(doc(db, "problems", "p1"), baseProblem()));
     await assertSucceeds(getDoc(doc(db, "problems", "p1")));
   });
 
@@ -583,8 +638,24 @@ describe("problems/{problemId}", () => {
   it("[BIT-AAR-92] [QCDAO43] blocks unschemad fields on create and update", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "p_bad"), { ownerId: ADDRESS, invalidExtraField: "bad" }));
-    await assertSucceeds(setDoc(doc(db, "problems", "p_good"), { ownerId: ADDRESS, title: "Valid Title" }));
+    await assertSucceeds(setDoc(doc(db, "problems", "p_good"), baseProblem()));
     await assertFails(updateDoc(doc(db, "problems", "p_good"), { invalidExtraField: "bad" }));
+  });
+
+  it("[QCDAO-127] enforces required fields, values, timestamps and transitions", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "missing"), { ownerId: ADDRESS }));
+    await assertFails(setDoc(doc(db, "problems", "negative"), baseProblem({ amount: -1 })));
+    await assertFails(setDoc(doc(db, "problems", "bad-status"), baseProblem({ status: "hacked" })));
+    await assertFails(setDoc(doc(db, "problems", "forged-time"), baseProblem({ createdAt: new Date(0) })));
+    await assertFails(updateDoc(doc(db, "problems", "p1"), {
+      status: "completed",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "p1"), {
+      status: "open",
+      updatedAt: serverTimestamp(),
+    }));
   });
 
   it("[QCDAO47] blocks access and reads for suspended problem owners", async () => {
@@ -596,12 +667,26 @@ describe("problems/{problemId}", () => {
     const db = env.authenticatedContext(SUSPENDED_USER).firestore();
     await assertFails(getDoc(doc(db, "problems", "p_susp")));
   });
+
+  it("[QCDAO-129] blocks ID tokens issued before the server revocation marker", async () => {
+    const REVOKED = `0x${"9".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", REVOKED), baseProfile(null, REVOKED, {
+        sessionsValidAfterEpoch: 101,
+      }));
+      await setDoc(doc(ctx.firestore(), "problems", "p_revoked"), {
+        ownerId: REVOKED,
+      });
+    });
+    const db = env.authenticatedContext(REVOKED, { auth_time: 100 }).firestore();
+    await assertFails(getDoc(doc(db, "problems", "p_revoked")));
+  });
 });
 
 describe("proposals/{proposalId}", () => {
   it("[BIT-AAR-79] [QCDAO43] allows access to the researcher", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "proposals", "prop1"), { researcherId: ADDRESS }));
+    await assertSucceeds(setDoc(doc(db, "proposals", "prop1"), baseProposal()));
     await assertSucceeds(getDoc(doc(db, "proposals", "prop1")));
   });
 
@@ -631,6 +716,26 @@ describe("proposals/{proposalId}", () => {
     await assertFails(setDoc(doc(db, "proposals", "prop_bad"), { researcherId: ADDRESS, injectedKey: "hack" }));
   });
 
+  it("[QCDAO-127] rejects malformed proposals and nonexistent relationships", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "proposals", "bad-amount"), baseProposal({ amount: "800" })));
+    await assertFails(setDoc(doc(db, "proposals", "missing-problem"), baseProposal({ problemId: "absent" })));
+    await assertFails(setDoc(doc(db, "proposals", "forged-time"), baseProposal({ updatedAt: new Date(0) })));
+  });
+
+  it("[QCDAO-127] enforces proposal status transitions", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "proposals", "prop_tr"), baseProposal()));
+    await assertFails(updateDoc(doc(db, "proposals", "prop_tr"), {
+      status: "accepted",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "proposals", "prop_tr"), {
+      status: "submitted",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
   it("[QCDAO47] blocks access and reads for suspended researchers", async () => {
     const SUSPENDED_USER = `0x${"f".repeat(40)}`;
     await env.withSecurityRulesDisabled(async (ctx) => {
@@ -645,7 +750,7 @@ describe("proposals/{proposalId}", () => {
 describe("evaluations/{evaluationId}", () => {
   it("[BIT-AAR-82] [QCDAO43] allows access to the evaluator", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "evaluations", "e1"), { evaluatorId: ADDRESS }));
+    await assertSucceeds(setDoc(doc(db, "evaluations", "e1"), baseEvaluation()));
     await assertSucceeds(getDoc(doc(db, "evaluations", "e1")));
   });
 
@@ -675,6 +780,27 @@ describe("evaluations/{evaluationId}", () => {
     await assertFails(setDoc(doc(db, "evaluations", "e_bad"), { evaluatorId: ADDRESS, injectedKey: "hack" }));
   });
 
+  it("[QCDAO-127] validates score, status, timestamps and proposal references", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "evaluations", "bad-score"), baseEvaluation({ score: 101 })));
+    await assertFails(setDoc(doc(db, "evaluations", "bad-status"), baseEvaluation({ status: "approved" })));
+    await assertFails(setDoc(doc(db, "evaluations", "missing-proposal"), baseEvaluation({ proposalId: "absent" })));
+    await assertFails(setDoc(doc(db, "evaluations", "forged-time"), baseEvaluation({ createdAt: new Date(0) })));
+  });
+
+  it("[QCDAO-127] enforces evaluation status transitions", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "evaluations", "e_tr"), baseEvaluation()));
+    await assertFails(updateDoc(doc(db, "evaluations", "e_tr"), {
+      status: "accepted",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "evaluations", "e_tr"), {
+      status: "submitted",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
   it("[QCDAO47] blocks access and reads for suspended evaluators", async () => {
     const SUSPENDED_USER = `0x${"f".repeat(40)}`;
     await env.withSecurityRulesDisabled(async (ctx) => {
@@ -689,7 +815,7 @@ describe("evaluations/{evaluationId}", () => {
 describe("funding/{fundId}", () => {
   it("[BIT-AAR-85] [QCDAO43] allows access to the funder", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "funding", "f1"), { funderId: ADDRESS }));
+    await assertSucceeds(setDoc(doc(db, "funding", "f1"), baseFunding()));
     await assertSucceeds(getDoc(doc(db, "funding", "f1")));
   });
 
@@ -717,6 +843,29 @@ describe("funding/{fundId}", () => {
   it("[BIT-AAR-98] [QCDAO43] blocks unschemad fields on create and update", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "funding", "f_bad"), { funderId: ADDRESS, injectedKey: "hack" }));
+  });
+
+  it("[QCDAO-127] rejects malformed funding and inconsistent relationships", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "funding", "negative"), baseFunding({ amount: -1 })));
+    await assertFails(setDoc(doc(db, "funding", "bad-tranche"), baseFunding({
+      tranches: [{ amount: -10, status: "released" }],
+    })));
+    await assertFails(setDoc(doc(db, "funding", "bad-problem"), baseFunding({ problemId: "absent" })));
+    await assertFails(setDoc(doc(db, "funding", "forged-time"), baseFunding({ updatedAt: new Date(0) })));
+  });
+
+  it("[QCDAO-127] enforces funding status transitions", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "funding", "f_tr"), baseFunding()));
+    await assertFails(updateDoc(doc(db, "funding", "f_tr"), {
+      status: "completed",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "funding", "f_tr"), {
+      status: "approved",
+      updatedAt: serverTimestamp(),
+    }));
   });
 
   it("[QCDAO47] blocks access and reads for suspended funders", async () => {
@@ -777,5 +926,61 @@ describe("collections outside the schema", () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(getDoc(doc(db, "siweNonces", ADDRESS)));
     await assertFails(setDoc(doc(db, "siweNonces", ADDRESS), { consumed: false }));
+  });
+
+  it("hides session revocation cutoffs from every client", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(getDoc(doc(db, "sessionRevocations", ADDRESS)));
+    await assertFails(setDoc(doc(db, "sessionRevocations", ADDRESS), {
+      sessionsValidAfterEpoch: 1,
+    }));
+  });
+});
+
+describe("session revocation", () => {
+  it("[QCDAO-129] blocks reading a private profile after session revocation", async () => {
+    const REVOKED = `0x${"8".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", REVOKED), baseProfile(null, REVOKED));
+      await setDoc(doc(ctx.firestore(), "sessionRevocations", REVOKED), {
+        sessionsValidAfterEpoch: 101,
+      });
+    });
+    const db = env.authenticatedContext(REVOKED, { auth_time: 100 }).firestore();
+    await assertFails(getDoc(doc(db, "users", REVOKED)));
+  });
+
+  it("[QCDAO-129] blocks creating a profile with a revoked pre-onboarding token", async () => {
+    const FRESH = `0x${"7".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "sessionRevocations", FRESH), {
+        sessionsValidAfterEpoch: 101,
+      });
+    });
+    const db = env.authenticatedContext(FRESH, { auth_time: 100 }).firestore();
+    await assertFails(setDoc(doc(db, "users", FRESH), baseProfile(null, FRESH)));
+    await assertFails(setDoc(doc(db, "publicProfiles", FRESH), {
+      address: FRESH,
+      fullName: "Ashley Chung",
+      organisation: "Singapore Management University",
+    }));
+  });
+
+  it("[QCDAO-129] allows creating a profile after a new sign-in past the cutoff", async () => {
+    const FRESH = `0x${"6".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "sessionRevocations", FRESH), {
+        sessionsValidAfterEpoch: 101,
+      });
+    });
+    const db = env.authenticatedContext(FRESH, { auth_time: 200 }).firestore();
+    const batch = writeBatch(db);
+    batch.set(doc(db, "users", FRESH), baseProfile(null, FRESH));
+    batch.set(doc(db, "publicProfiles", FRESH), {
+      address: FRESH,
+      fullName: "Ashley Chung",
+      organisation: "Singapore Management University",
+    });
+    await assertSucceeds(batch.commit());
   });
 });

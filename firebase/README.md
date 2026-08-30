@@ -1,8 +1,8 @@
 # Firebase backend
 
 Firestore security rules, Cloud Functions, and their tests for QC DAO's wallet
-sign-in. **The backend is already deployed** — Firestore, Authentication, and both
-Cloud Functions are live. Most collaborators only need the
+sign-in. **The backend is already deployed** — Firestore, Authentication, and its
+callable functions are live. Most collaborators only need the
 [Connect](#connect-to-the-shared-backend) section below; the rest of this file is
 for anyone editing `firestore.rules` or `functions/index.js` and redeploying.
 
@@ -16,12 +16,12 @@ firebase/
 ├── firebase.json                # Emulator ports, hosting config, functions source path
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
 ├── test/
-│   └── firestore.rules.test.mjs # 78 tests against firestore.rules, via the emulator
+│   └── firestore.rules.test.mjs # Rules tests via the Firestore emulator
 └── functions/
     ├── index.js                 # getSiweNonce + verifySiweSignature (see below)
     ├── package.json
     └── test/
-        └── siwe.test.mjs        # 25 adversarial tests: replay, forged signature, spoofed origin, etc.
+        └── siwe.test.mjs        # Adversarial replay, signature, origin, and quota tests
 ```
 
 ### What the two Cloud Functions do
@@ -37,6 +37,12 @@ because one of these functions verified a real signature first:
    verifies the signature (`viem.verifyMessage`, which also covers EIP-1271 smart
    contract wallets), burns the nonce, and mints a Firebase custom token whose uid is
    the address.
+3. **`revokeOwnSessions`** — records an immediate Firestore session cutoff and
+   revokes Firebase refresh tokens before the browser removes its persisted login.
+
+Administrative role and suspension changes are also callable functions. They update
+the user and matching audit record transactionally; suspension additionally records
+and retries Firebase credential revocation.
 
 ## Connect to the shared backend
 
@@ -123,12 +129,12 @@ npm --prefix functions test
 FUNCTIONS_BASE_URL=https://asia-southeast1-<project-id>.cloudfunctions.net npm --prefix functions test
 ```
 
-The rules suite (78 tests) checks things like: a wallet can only create its own
+The rules suite checks things like: a wallet can only create its own
 profile and can only read its own, `stats` can never be written non-zero at signup,
 the user base cannot be enumerated, `role` never leaks through `publicProfiles`, and
 `siweNonces` is unreachable from any client.
 
-The functions suite (25 tests) checks that a replayed signature, a signature from the
+The functions suite checks that a replayed signature, a signature from the
 wrong key, a fabricated signature, a signature over a different message, and a nonce
 request from an unrecognised origin are all rejected — and that a legitimate
 signature succeeds.
@@ -155,9 +161,34 @@ SIWE_DOMAIN=qcdao.example.edu
 SIWE_ALLOWED_HOSTS=qcdao.example.edu,www.qcdao.example.edu
 ```
 
-`SIWE_DOMAIN` is the canonical name used when a request has no `Origin` header at all
-(a server, curl, the test suite). `SIWE_ALLOWED_HOSTS` is a comma-separated list of
-additional browser origins allowed to request a message.
+Preview channels are not inferred from their hostname shape. Add the complete
+generated preview host to `SIWE_ALLOWED_HOSTS` before testing sign-in on it, then
+remove it when the channel expires.
+
+Production nonce calls also require Firebase App Check with a reCAPTCHA v3 app.
+Set `VITE_FIREBASE_APP_CHECK_SITE_KEY` in the frontend build environment. The nonce
+endpoint consumes limited-use App Check tokens, applies a 100-request-per-source and
+1,000-request-global one-minute quota, and relies on the deployed Firestore TTL field
+configuration to delete expired nonce and quota documents.
+
+`SIWE_DOMAIN` is the canonical deployment name used by the emulator. Production
+requests without an `Origin` are rejected; there is no unauthenticated server-flow
+exception. `SIWE_ALLOWED_HOSTS` is a comma-separated list of additional browser
+origins allowed to request a message.
+
+### Session invalidation policy
+
+Signing out (including an idle-timeout sign-out) revokes **all devices** for that
+wallet. The server always writes `sessionRevocations/{address}` (even if the wallet
+has not created a profile yet) and, when a `users/{address}` document exists, also
+stores `sessionsValidAfterEpoch` there. Firestore rules refuse reads and writes for
+ID tokens whose `auth_time` is older than that cutoff, then Firebase refresh tokens
+are revoked so those sessions cannot renew. The browser clears its persistent
+Firebase session only after both server revocation and local `signOut` succeed. A
+failure remains visible and retryable instead of presenting a false signed-out
+state. Switching the connected wallet on this device also requires Firebase
+`signOut` to succeed before the UI clears; a persistence failure is shown and the
+previous session stays visible.
 
 Do **not** add `localhost` to `SIWE_ALLOWED_HOSTS` on a deployed project to make local
 development work. It would let anyone forge `Origin: localhost:5173` and obtain a
@@ -198,10 +229,10 @@ you pass `--export-on-exit`.
 Pushing to `main` runs [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml):
 
 ```
-test-backend  (Cloud Functions, 25) ──┐
-                                      ├──→ deploy-backend ──→ deploy-hosting
-test-rules    (Firestore rules, 78) ──┘                            ↑
-test-frontend (47) ─────────────────────────────────────────────────┘
+test-backend  (Cloud Functions) ──┐
+                                  ├──→ deploy-backend ──→ deploy-hosting
+test-rules    (Firestore rules) ──┘                            ↑
+test-frontend ─────────────────────────────────────────────────┘
 ```
 
 Backend deploys first and hosting waits for it, because `createProfile()` writes to
@@ -229,9 +260,9 @@ npx firebase hosting:channel:deploy my-test --expires 1d --project <project-id>
 ```
 
 You get `https://<project>--my-test-<hash>.web.app`, served by real Firebase Hosting
-and talking to the **real deployed backend**. Sign-in works there: `getSiweNonce`
-accepts hosts matching the generated channel shape, so the unpredictable hash needs
-no configuration.
+and talking to the **real deployed backend**. Add that exact host to
+`SIWE_ALLOWED_HOSTS` and redeploy the functions before testing sign-in. Hostname
+shape alone is not proof that a Firebase site belongs to this project.
 
 Two things to know:
 

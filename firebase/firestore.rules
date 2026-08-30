@@ -20,8 +20,26 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == address;
     }
 
+    // Cutoff for already-issued ID tokens. Written by Cloud Functions on logout and
+    // suspension, including when the wallet has not created a /users profile yet.
+    function hasRevokedSession(address) {
+      return (exists(/databases/$(database)/documents/sessionRevocations/$(address))
+          && request.auth.token.auth_time
+            < get(/databases/$(database)/documents/sessionRevocations/$(address)).data.sessionsValidAfterEpoch)
+        || (exists(/databases/$(database)/documents/users/$(address))
+          && get(/databases/$(database)/documents/users/$(address)).data.keys().hasAny(['sessionsValidAfterEpoch'])
+          && request.auth.token.auth_time
+            < get(/databases/$(database)/documents/users/$(address)).data.sessionsValidAfterEpoch);
+    }
+
+    function isUnrevokedWallet(address) {
+      return isWallet(address) && !hasRevokedSession(address);
+    }
+
     function isActiveUser(address) {
-      return isWallet(address) && (!exists(/databases/$(database)/documents/users/$(address)) || !get(/databases/$(database)/documents/users/$(address)).data.get('suspended', false));
+      return isUnrevokedWallet(address)
+        && (!exists(/databases/$(database)/documents/users/$(address))
+          || !get(/databases/$(database)/documents/users/$(address)).data.get('suspended', false));
     }
 
     function isWalletAddress(value) {
@@ -88,7 +106,8 @@ service cloud.firestore {
         return data.keys().hasOnly([
           'address', 'fullName', 'organisation', 'biography', 'expertise',
           'role', 'chainId', 'stats',
-          'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt', 'suspended'
+          'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt',
+          'suspended', 'sessionsValidAfterEpoch', 'tokenRevocationStatus', 'tokenRevokedAt'
         ]);
       }
 
@@ -107,9 +126,9 @@ service cloud.firestore {
 
       // PRIVATE. Only the wallet that owns this document may read it.
       // Note there is no `list` here at all, only `get`.
-      allow get: if isWallet(address);
+      allow get: if isUnrevokedWallet(address);
 
-      allow create: if isWallet(address)
+      allow create: if isUnrevokedWallet(address)
         && isWalletAddress(address)
         && hasProfileSchema(request.resource.data)
         && hasOptionalProfileFields(request.resource.data)
@@ -141,7 +160,7 @@ service cloud.firestore {
       // via the Admin SDK; `role` moves only by hand in the Firestore console - if a
       // signed-in user could ever change their own role, "administrator" would be
       // available to anyone with a browser console, not something granted.
-      allow update: if isWallet(address)
+      allow update: if isActiveUser(address)
         && !resource.data.get('suspended', false)
         && resource != null
         && hasProfileSchema(request.resource.data)
@@ -155,6 +174,9 @@ service cloud.firestore {
         && request.resource.data.termsVersion == resource.data.termsVersion
         && request.resource.data.walletVerified == resource.data.walletVerified
         && request.resource.data.get('suspended', false) == resource.data.get('suspended', false)
+        && request.resource.data.get('sessionsValidAfterEpoch', 0) == resource.data.get('sessionsValidAfterEpoch', 0)
+        && request.resource.data.get('tokenRevocationStatus', '') == resource.data.get('tokenRevocationStatus', '')
+        && request.resource.data.get('tokenRevokedAt', null) == resource.data.get('tokenRevokedAt', null)
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
         && existsAfter(/databases/$(database)/documents/publicProfiles/$(address))
@@ -200,7 +222,7 @@ service cloud.firestore {
                  && profile.expertise == data.expertise));
       }
 
-      allow create: if isWallet(address)
+      allow create: if isUnrevokedWallet(address)
         && isWalletAddress(address)
         && hasPublicSchema(request.resource.data)
         && (!request.resource.data.keys().hasAny(['biography'])
@@ -236,6 +258,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /sessionRevocations/{address} {
+      allow read, write: if false;
+    }
+
     // ------------------------------------------------------------------------
     // ACTIVE COLLECTIONS (Document-based authorization & schema validation)
     // ------------------------------------------------------------------------
@@ -245,6 +271,8 @@ service cloud.firestore {
         'ownerId', 'title', 'summary', 'outcomes', 'amount', 'deadline',
         'benefits', 'deliverables', 'status', 'type', 'opportunityType',
         'createdAt', 'updatedAt'
+      ]) && data.keys().hasAll([
+        'ownerId', 'title', 'summary', 'amount', 'status', 'createdAt', 'updatedAt'
       ]);
     }
 
@@ -252,11 +280,17 @@ service cloud.firestore {
       return data.keys().hasOnly([
         'researcherId', 'problemId', 'title', 'summary', 'outcomes', 'amount',
         'status', 'deliverables', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasAll([
+        'researcherId', 'problemId', 'title', 'summary', 'amount', 'status',
+        'createdAt', 'updatedAt'
       ]);
     }
 
     function hasEvaluationSchema(data) {
       return data.keys().hasOnly([
+        'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
+        'createdAt', 'updatedAt'
+      ]) && data.keys().hasAll([
         'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
         'createdAt', 'updatedAt'
       ]);
@@ -266,21 +300,168 @@ service cloud.firestore {
       return data.keys().hasOnly([
         'funderId', 'proposalId', 'problemId', 'title', 'amount', 'status',
         'tranches', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasAll([
+        'funderId', 'proposalId', 'problemId', 'title', 'amount', 'status',
+        'createdAt', 'updatedAt'
       ]);
     }
-    
+
+    function optionalString(data, field, maxLength) {
+      return !data.keys().hasAny([field])
+        || (data[field] is string && data[field].size() <= maxLength);
+    }
+
+    function stringListItemIsValid(items, index) {
+      return items.size() <= index
+        || (items[index] is string && items[index].size() > 0 && items[index].size() <= 500);
+    }
+
+    function stringListIsValid(items) {
+      return items is list && items.size() <= 8
+        && stringListItemIsValid(items, 0)
+        && stringListItemIsValid(items, 1)
+        && stringListItemIsValid(items, 2)
+        && stringListItemIsValid(items, 3)
+        && stringListItemIsValid(items, 4)
+        && stringListItemIsValid(items, 5)
+        && stringListItemIsValid(items, 6)
+        && stringListItemIsValid(items, 7);
+    }
+
+    function validAmount(value) {
+      return value is number && value >= 0 && value <= 1000000000;
+    }
+
+    function validProblemStatus(status) {
+      return status in ['draft', 'open', 'in_review', 'matched', 'funded', 'completed', 'cancelled'];
+    }
+
+    function validProblemTransition(before, after) {
+      return before == after
+        || (before == 'draft' && after in ['open', 'cancelled'])
+        || (before == 'open' && after in ['in_review', 'matched', 'cancelled'])
+        || (before == 'in_review' && after in ['open', 'matched', 'cancelled'])
+        || (before == 'matched' && after in ['funded', 'completed', 'cancelled'])
+        || (before == 'funded' && after in ['completed', 'cancelled']);
+    }
+
+    function validProblem(data) {
+      return hasProblemSchema(data)
+        && isWalletAddress(data.ownerId)
+        && isNonEmptyString(data.title, 160)
+        && isNonEmptyString(data.summary, 4000)
+        && validAmount(data.amount)
+        && validProblemStatus(data.status)
+        && optionalString(data, 'benefits', 4000)
+        && optionalString(data, 'deliverables', 4000)
+        && optionalString(data, 'type', 80)
+        && optionalString(data, 'opportunityType', 80)
+        && (!data.keys().hasAny(['deadline']) || data.deadline is timestamp)
+        && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
+    }
+
+    function validProposalStatus(status) {
+      return status in ['draft', 'submitted', 'under_review', 'accepted', 'rejected', 'withdrawn'];
+    }
+
+    function validProposalTransition(before, after) {
+      return before == after
+        || (before == 'draft' && after in ['submitted', 'withdrawn'])
+        || (before == 'submitted' && after in ['under_review', 'withdrawn'])
+        || (before == 'under_review' && after in ['accepted', 'rejected', 'withdrawn']);
+    }
+
+    function validProposal(data) {
+      return hasProposalSchema(data)
+        && isWalletAddress(data.researcherId)
+        && isNonEmptyString(data.problemId, 128)
+        && isNonEmptyString(data.title, 160)
+        && isNonEmptyString(data.summary, 4000)
+        && validAmount(data.amount)
+        && validProposalStatus(data.status)
+        && optionalString(data, 'deliverables', 4000)
+        && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
+    }
+
+    function validEvaluationStatus(status) {
+      return status in ['draft', 'submitted', 'accepted'];
+    }
+
+    function validEvaluationTransition(before, after) {
+      return before == after
+        || (before == 'draft' && after == 'submitted')
+        || (before == 'submitted' && after == 'accepted');
+    }
+
+    function validEvaluation(data) {
+      return hasEvaluationSchema(data)
+        && isWalletAddress(data.evaluatorId)
+        && isNonEmptyString(data.proposalId, 128)
+        && isNonEmptyString(data.title, 160)
+        && data.score is number && data.score >= 0 && data.score <= 100
+        && data.feedback is string && data.feedback.size() <= 4000
+        && validEvaluationStatus(data.status);
+    }
+
+    function validFundingStatus(status) {
+      return status in ['pledged', 'approved', 'disbursing', 'completed', 'cancelled'];
+    }
+
+    function validFundingTransition(before, after) {
+      return before == after
+        || (before == 'pledged' && after in ['approved', 'cancelled'])
+        || (before == 'approved' && after in ['disbursing', 'cancelled'])
+        || (before == 'disbursing' && after in ['completed', 'cancelled']);
+    }
+
+    function trancheIsValid(tranches, index) {
+      return tranches.size() <= index
+        || (tranches[index] is map
+          && tranches[index].keys().hasOnly(['amount', 'status', 'dueAt'])
+          && tranches[index].keys().hasAll(['amount', 'status'])
+          && validAmount(tranches[index].amount)
+          && tranches[index].status in ['pending', 'released', 'cancelled']
+          && (!tranches[index].keys().hasAny(['dueAt']) || tranches[index].dueAt is timestamp));
+    }
+
+    function validTranches(tranches) {
+      return tranches is list && tranches.size() <= 5
+        && trancheIsValid(tranches, 0)
+        && trancheIsValid(tranches, 1)
+        && trancheIsValid(tranches, 2)
+        && trancheIsValid(tranches, 3)
+        && trancheIsValid(tranches, 4);
+    }
+
+    function validFunding(data) {
+      return hasFundingSchema(data)
+        && isWalletAddress(data.funderId)
+        && isNonEmptyString(data.proposalId, 128)
+        && isNonEmptyString(data.problemId, 128)
+        && isNonEmptyString(data.title, 160)
+        && validAmount(data.amount)
+        && validFundingStatus(data.status)
+        && (!data.keys().hasAny(['tranches']) || validTranches(data.tranches));
+    }
+
     match /problems/{problemId} {
       allow read: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
       allow delete: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
-        && hasProblemSchema(request.resource.data);
+        && validProblem(request.resource.data)
+        && request.resource.data.status == 'draft'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
-        && hasProblemSchema(request.resource.data);
+        && validProblem(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && validProblemTransition(resource.data.status, request.resource.data.status);
     }
     
     match /proposals/{proposalId} {
@@ -289,12 +470,21 @@ service cloud.firestore {
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.researcherId == request.auth.uid
-        && hasProposalSchema(request.resource.data);
+        && validProposal(request.resource.data)
+        && request.resource.data.status == 'draft'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId));
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.researcherId == request.auth.uid
         && request.resource.data.researcherId == resource.data.researcherId
-        && hasProposalSchema(request.resource.data);
+        && request.resource.data.problemId == resource.data.problemId
+        && validProposal(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && validProposalTransition(resource.data.status, request.resource.data.status)
+        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId));
     }
     
     match /evaluations/{evaluationId} {
@@ -303,12 +493,21 @@ service cloud.firestore {
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.evaluatorId == request.auth.uid
-        && hasEvaluationSchema(request.resource.data);
+        && validEvaluation(request.resource.data)
+        && request.resource.data.status == 'draft'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId));
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.evaluatorId == request.auth.uid
         && request.resource.data.evaluatorId == resource.data.evaluatorId
-        && hasEvaluationSchema(request.resource.data);
+        && request.resource.data.proposalId == resource.data.proposalId
+        && validEvaluation(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && validEvaluationTransition(resource.data.status, request.resource.data.status)
+        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId));
     }
     
     match /funding/{fundId} {
@@ -317,16 +516,31 @@ service cloud.firestore {
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.funderId == request.auth.uid
-        && hasFundingSchema(request.resource.data);
+        && validFunding(request.resource.data)
+        && request.resource.data.status == 'pledged'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
+        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
+        && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.funderId == request.auth.uid
         && request.resource.data.funderId == resource.data.funderId
-        && hasFundingSchema(request.resource.data);
+        && request.resource.data.proposalId == resource.data.proposalId
+        && request.resource.data.problemId == resource.data.problemId
+        && validFunding(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && validFundingTransition(resource.data.status, request.resource.data.status)
+        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
+        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
+        && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
     }
     
     match /audits/{auditId} {
       allow read: if request.auth != null
+        && isUnrevokedWallet(request.auth.uid)
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 1
         && !get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('suspended', false);
     }
