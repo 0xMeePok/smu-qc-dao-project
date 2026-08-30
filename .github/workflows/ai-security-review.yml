@@ -52,8 +52,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SECURITY_REVIEW_PROVIDER: ${{ vars.SECURITY_REVIEW_PROVIDER }}
           SECURITY_REVIEW_MODEL: ${{ vars.SECURITY_REVIEW_MODEL }}
-          # Maximum size of each model request, not of the complete PR diff.
+          # Maximum UTF-8 bytes of diff data in each request. The trusted prompt
+          # and JSON schema add a small amount of request overhead.
           SECURITY_REVIEW_CHUNK_BYTES: ${{ vars.SECURITY_REVIEW_CHUNK_BYTES }}
+          # Cost/timeout guard; the script fails rather than returning a partial review.
+          SECURITY_REVIEW_MAX_CHUNKS: ${{ vars.SECURITY_REVIEW_MAX_CHUNKS }}
           # Backward-compatible fallback for repositories using the old variable.
           SECURITY_REVIEW_MAX_DIFF_BYTES: ${{ vars.SECURITY_REVIEW_MAX_DIFF_BYTES }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}

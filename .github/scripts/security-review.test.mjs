@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   COMMENT_MARKER,
   FIREWORKS_MODEL,
+  assertReviewChunkLimit,
   buildReviewPrompt,
   chunkPullRequestDiff,
   mergeChunkReviews,
@@ -62,6 +63,14 @@ test("chunking reviews the complete diff without exceeding the per-request byte 
   for (const marker of markers) {
     assert.ok(chunks.some((chunk) => chunk.includes(marker)), `${marker} was not reviewed`);
   }
+});
+
+test("chunk-count guard fails instead of returning a partial review", () => {
+  assert.doesNotThrow(() => assertReviewChunkLimit(20, 20));
+  assert.throws(
+    () => assertReviewChunkLimit(21, 20),
+    /requires 21 review chunks, exceeding the configured limit of 20/,
+  );
 });
 
 test("normalization drops malformed findings, de-duplicates, and sorts by severity", () => {
@@ -142,4 +151,14 @@ test("failure comments do not publish provider error details", () => {
 
   assert.doesNotMatch(body, /secret-value-123/);
   assert.match(body, /workflow logs/);
+});
+
+test("chunk-limit failures provide safe maintainer guidance", () => {
+  const body = renderFailureComment(
+    new Error("The pull request diff requires 21 review chunks, exceeding the configured limit of 20."),
+    { headSha: "1234567890abcdef" },
+  );
+
+  assert.match(body, /raise the chunk limit or split the pull request/);
+  assert.doesNotMatch(body, /requires 21/);
 });

@@ -4,8 +4,12 @@ import { pathToFileURL } from "node:url";
 export const COMMENT_MARKER = "<!-- qcdao-ai-security-review -->";
 export const FIREWORKS_MODEL = "accounts/fireworks/models/glm-5p3";
 export const DEFAULT_DIFF_CHUNK_BYTES = 80_000;
+export const DEFAULT_MAX_REVIEW_CHUNKS = 20;
+export const MAX_REVIEW_CHUNKS = 100;
 
 const GITHUB_API_VERSION = "2022-11-28";
+const MAX_FINDINGS_PER_REVIEW = 10;
+const MAX_FINDING_CANDIDATES = MAX_REVIEW_CHUNKS * MAX_FINDINGS_PER_REVIEW;
 const ALLOWED_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 const ALLOWED_CONFIDENCE = new Set(["high", "medium"]);
 
@@ -19,7 +23,7 @@ export const REVIEW_SCHEMA = {
     },
     findings: {
       type: "array",
-      maxItems: 10,
+      maxItems: MAX_FINDINGS_PER_REVIEW,
       items: {
         type: "object",
         additionalProperties: false,
@@ -212,6 +216,14 @@ export function chunkPullRequestDiff(diff, maxBytes = DEFAULT_DIFF_CHUNK_BYTES) 
 
   if (current) chunks.push(current);
   return chunks;
+}
+
+export function assertReviewChunkLimit(chunkCount, maxChunks) {
+  if (chunkCount > maxChunks) {
+    throw new Error(
+      `The pull request diff requires ${chunkCount} review chunks, exceeding the configured limit of ${maxChunks}. Increase SECURITY_REVIEW_MAX_CHUNKS or split the pull request.`,
+    );
+  }
 }
 
 function githubHeaders(token, accept = "application/vnd.github+json") {
@@ -414,7 +426,7 @@ export function normalizeReview(value) {
   const findings = [];
   const seen = new Set();
 
-  for (const candidate of value.findings) {
+  for (const candidate of value.findings.slice(0, MAX_FINDING_CANDIDATES)) {
     if (!candidate || typeof candidate !== "object") continue;
 
     const severity = cleanValue(candidate.severity, 10).toLowerCase();
@@ -539,6 +551,8 @@ export function renderFailureComment(error, metadata) {
     status = "Provider authentication or GitHub permissions rejected the request.";
   } else if (/HTTP (402|429)/.test(error.message || "")) {
     status = "The model provider's credit, quota, or rate limit prevented this review.";
+  } else if (/requires \d+ review chunks|configured limit/i.test(error.message || "")) {
+    status = "The pull request exceeds the configured model-request safety limit. A maintainer must raise the chunk limit or split the pull request.";
   } else if (/invalid JSON|expected review shape|no review content|completion token limit/i.test(error.message || "")) {
     status = "The model response could not be validated safely.";
   }
@@ -625,6 +639,12 @@ export async function loadContext(env = process.env) {
       10_000,
       250_000,
     ),
+    maxReviewChunks: boundedInteger(
+      env.SECURITY_REVIEW_MAX_CHUNKS,
+      DEFAULT_MAX_REVIEW_CHUNKS,
+      1,
+      MAX_REVIEW_CHUNKS,
+    ),
   };
 }
 
@@ -638,6 +658,7 @@ export async function runSecurityReview(env = process.env) {
     if (!diffResult.text.trim()) throw new Error("GitHub returned an empty pull request diff");
 
     const chunks = chunkPullRequestDiff(diffResult.text, context.diffChunkBytes);
+    assertReviewChunkLimit(chunks.length, context.maxReviewChunks);
     const chunkReviews = [];
     for (const [index, chunk] of chunks.entries()) {
       console.log(
