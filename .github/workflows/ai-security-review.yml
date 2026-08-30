@@ -30,7 +30,7 @@ jobs:
         github.event.pull_request.user.login == '0xjunwei'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - name: Check out reviewer from the trusted default branch
@@ -52,6 +52,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SECURITY_REVIEW_PROVIDER: ${{ vars.SECURITY_REVIEW_PROVIDER }}
           SECURITY_REVIEW_MODEL: ${{ vars.SECURITY_REVIEW_MODEL }}
+          # Maximum UTF-8 bytes of diff data in each request (default: 250,000).
+          # The trusted prompt and JSON schema add a small amount of overhead.
+          SECURITY_REVIEW_CHUNK_BYTES: ${{ vars.SECURITY_REVIEW_CHUNK_BYTES }}
+          # Cost/timeout guard; the script fails rather than returning a partial review.
+          SECURITY_REVIEW_MAX_CHUNKS: ${{ vars.SECURITY_REVIEW_MAX_CHUNKS }}
+          # Backward-compatible fallback for repositories using the old variable.
           SECURITY_REVIEW_MAX_DIFF_BYTES: ${{ vars.SECURITY_REVIEW_MAX_DIFF_BYTES }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
