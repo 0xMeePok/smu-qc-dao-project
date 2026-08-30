@@ -1,0 +1,58 @@
+name: AI Security Review
+
+# This workflow needs a repository secret and permission to comment on PRs,
+# including PRs from forks. pull_request_target provides that trusted context.
+# SECURITY INVARIANT: only check out the repository's trusted default branch. The
+# PR diff is fetched as inert data and is never written to disk or executed.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ai-security-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Review changed code for security findings
+    # Keep paid model usage limited to the current project contributors. GitHub
+    # login comparisons are case-insensitive in workflow expressions.
+    if: >-
+      github.event.pull_request.draft == false &&
+      (
+        github.event.pull_request.user.login == '0xMeePok' ||
+        github.event.pull_request.user.login == 'whale93' ||
+        github.event.pull_request.user.login == 'Darveloper1' ||
+        github.event.pull_request.user.login == '0xjunwei'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out reviewer from the trusted default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Test the reviewer
+        run: node --test .github/scripts/security-review.test.mjs
+
+      - name: Run AI security review and update the PR comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SECURITY_REVIEW_PROVIDER: ${{ vars.SECURITY_REVIEW_PROVIDER }}
+          SECURITY_REVIEW_MODEL: ${{ vars.SECURITY_REVIEW_MODEL }}
+          SECURITY_REVIEW_MAX_DIFF_BYTES: ${{ vars.SECURITY_REVIEW_MAX_DIFF_BYTES }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node .github/scripts/security-review.mjs

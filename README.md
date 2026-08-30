@@ -289,6 +289,16 @@ npm run build --prefix frontend && (cd firebase && npx firebase deploy --only ho
 To try a change on a real URL without touching the live site, deploy a preview
 channel — see [`firebase/README.md`](firebase/README.md#preview-channels).
 
+## Pull request security review
+
+Every non-draft pull request is reviewed by Fireworks AI's GLM-5.3 model. The
+workflow scans only the changed diff and creates or updates a single PR comment with
+concrete, actionable security findings. Repository maintainers must add the
+`FIREWORKS_API_KEY` Actions secret once before the workflow can run.
+
+See [`docs/AI_SECURITY_REVIEW.md`](docs/AI_SECURITY_REVIEW.md) for setup, security
+boundaries, cost controls, and the later switch from Fireworks AI to OpenAI.
+
 ## Current implementation status
 
 Implemented: wallet sign-in with server-verified signatures, onboarding (name +
