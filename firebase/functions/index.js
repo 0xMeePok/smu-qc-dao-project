@@ -154,7 +154,9 @@ export const getSiweNonce = onCall(
     region: REGION,
     maxInstances: NONCE_MAX_INSTANCES,
     enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
-    consumeAppCheckToken: process.env.FUNCTIONS_EMULATOR !== "true",
+    // Diagnostic: isolate whether limited-use consumption is the 401. App Check
+    // is still required; tokens are no longer treated as single-use.
+    consumeAppCheckToken: false,
   },
   async (request) => {
     const address = normaliseAddress(request.data?.address);

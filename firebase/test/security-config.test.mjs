@@ -28,9 +28,9 @@ describe("security deployment configuration", () => {
     assert.equal(policy.includes("wss://*.googleapis.com"), false);
   });
 
-  it("[QCDAO-123] enforces and consumes App Check tokens for production nonce calls", () => {
+  it("[QCDAO-123] enforces App Check for production nonce calls", () => {
     assert.match(functionsSource, /enforceAppCheck:\s*process\.env\.FUNCTIONS_EMULATOR !== "true"/);
-    assert.match(functionsSource, /consumeAppCheckToken:\s*process\.env\.FUNCTIONS_EMULATOR !== "true"/);
+    assert.match(functionsSource, /consumeAppCheckToken:\s*false/);
   });
 
   it("enables TTL cleanup for nonce and rate-limit documents", () => {
