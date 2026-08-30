@@ -225,7 +225,13 @@ async function requestFireworksReview(config, prompt) {
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: prompt },
     ],
-    response_format: { type: "json_object" },
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "security_review",
+        schema: REVIEW_SCHEMA,
+      },
+    },
     max_completion_tokens: 6_000,
     temperature: 0.1,
   };
@@ -243,9 +249,18 @@ async function requestFireworksReview(config, prompt) {
     "Fireworks security review",
   );
 
-  const content = result?.choices?.[0]?.message?.content;
+  const choice = result?.choices?.[0];
+  const content = choice?.message?.content;
+  if (choice?.finish_reason === "length") {
+    const completionTokens = result?.usage?.completion_tokens ?? "unknown";
+    throw new Error(
+      `Fireworks exceeded the completion token limit (${completionTokens} tokens)`,
+    );
+  }
   if (typeof content !== "string" || !content.trim()) {
-    throw new Error("Fireworks returned no review content");
+    throw new Error(
+      `Fireworks returned no review content (finish_reason=${choice?.finish_reason ?? "unknown"})`,
+    );
   }
   return content;
 }
@@ -433,7 +448,7 @@ export function renderFailureComment(error, metadata) {
     status = "Provider authentication or GitHub permissions rejected the request.";
   } else if (/HTTP (402|429)/.test(error.message || "")) {
     status = "The model provider's credit, quota, or rate limit prevented this review.";
-  } else if (/invalid JSON|expected review shape|no review content/i.test(error.message || "")) {
+  } else if (/invalid JSON|expected review shape|no review content|completion token limit/i.test(error.message || "")) {
     status = "The model response could not be validated safely.";
   }
 
