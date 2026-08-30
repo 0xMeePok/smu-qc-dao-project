@@ -606,7 +606,15 @@ describe("AuditRegistry", function () {
 
         await expect(tx)
           .to.emit(registry, "ProposalCommitted")
-          .withArgs(proposalId, opportunityId, researcher.address, proposalHash, solutionHash);
+          .withArgs(
+            proposalId,
+            opportunityId,
+            researcher.address,
+            proposalHash,
+            solutionHash,
+            0,
+            ctx.opportunityHash
+          );
         await expect(tx)
           .to.emit(registry, "EventAnchored")
           .withArgs(
@@ -635,6 +643,8 @@ describe("AuditRegistry", function () {
         const revision = await registry.revisionAt(proposalId, 0);
         expect(revision.proposalHash).to.equal(proposalHash);
         expect(revision.solutionHash).to.equal(solutionHash);
+        expect(revision.opportunityRevisionIndex).to.equal(0n);
+        expect(revision.opportunityRevisionDigest).to.equal(ctx.opportunityHash);
         expect(revision.createdAt).to.equal(timestamp);
         expect(await registry.anchorCount(proposalId)).to.equal(1n);
       });
@@ -693,6 +703,9 @@ describe("AuditRegistry", function () {
         const later = await registry.getProposal(laterId);
         expect(later.opportunityRevisionIndex).to.equal(1n);
         expect(later.opportunityRevisionDigest).to.equal(nextHash);
+        const laterRevision = await registry.revisionAt(laterId, 0);
+        expect(laterRevision.opportunityRevisionIndex).to.equal(1n);
+        expect(laterRevision.opportunityRevisionDigest).to.equal(nextHash);
       });
 
       it("allows the same value for the proposal hash and the solution hash", async function () {
@@ -858,7 +871,9 @@ describe("AuditRegistry", function () {
             opportunityId,
             researcher.address,
             nextProposalHash,
-            nextSolutionHash
+            nextSolutionHash,
+            0,
+            ctx.opportunityHash
           );
         await expect(tx)
           .to.emit(registry, "EventAnchored")
@@ -880,9 +895,13 @@ describe("AuditRegistry", function () {
         const previous = await registry.revisionAt(proposalId, 0);
         expect(previous.proposalHash).to.equal(proposalHash);
         expect(previous.solutionHash).to.equal(solutionHash);
+        expect(previous.opportunityRevisionIndex).to.equal(0n);
+        expect(previous.opportunityRevisionDigest).to.equal(ctx.opportunityHash);
         const latest = await registry.revisionAt(proposalId, 1);
         expect(latest.proposalHash).to.equal(nextProposalHash);
         expect(latest.solutionHash).to.equal(nextSolutionHash);
+        expect(latest.opportunityRevisionIndex).to.equal(0n);
+        expect(latest.opportunityRevisionDigest).to.equal(ctx.opportunityHash);
 
         await registry
           .connect(researcher)
@@ -908,6 +927,13 @@ describe("AuditRegistry", function () {
         const afterEdit = await registry.getProposal(proposalId);
         expect(afterEdit.opportunityRevisionIndex).to.equal(1n);
         expect(afterEdit.opportunityRevisionDigest).to.equal(nextHash);
+
+        const firstRevision = await registry.revisionAt(proposalId, 0);
+        expect(firstRevision.opportunityRevisionIndex).to.equal(0n);
+        expect(firstRevision.opportunityRevisionDigest).to.equal(opportunityHash);
+        const secondRevision = await registry.revisionAt(proposalId, 1);
+        expect(secondRevision.opportunityRevisionIndex).to.equal(1n);
+        expect(secondRevision.opportunityRevisionDigest).to.equal(nextHash);
       });
     });
 
@@ -1129,6 +1155,55 @@ describe("AuditRegistry", function () {
         await expect(
           registry.recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"), 0, ethers.id("none"))
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
+      });
+
+      it("rejects an evaluator reviewing their own proposal", async function () {
+        const ctx = await deployFixture();
+        const { ethers, registry, owner, evaluator, other, opportunityId } = ctx;
+        await registry
+          .connect(owner)
+          .commitOpportunity(
+            opportunityId,
+            OpportunityKind.BusinessProblem,
+            ctx.opportunityHash,
+            ctx.expiresAt,
+            [evaluator.address]
+          );
+        await registry
+          .connect(evaluator)
+          .commitProposal(
+            ctx.proposalId,
+            opportunityId,
+            ctx.proposalHash,
+            ctx.solutionHash
+          );
+
+        await expect(
+          recordCurrentEvaluation(
+            registry,
+            evaluator,
+            ethers,
+            ctx.proposalId,
+            ethers.id("self-evaluation")
+          )
+        ).to.be.revertedWithCustomError(registry, "AccessDenied");
+
+        await registry
+          .connect(other)
+          .commitProposal(
+            ethers.id("other-proposal"),
+            opportunityId,
+            ethers.id("other-p"),
+            ethers.id("other-s")
+          );
+        await recordCurrentEvaluation(
+          registry,
+          evaluator,
+          ethers,
+          ethers.id("other-proposal"),
+          ethers.id("peer-evaluation")
+        );
+        expect(await registry.evaluationCount(ethers.id("other-proposal"))).to.equal(1n);
       });
 
       it("rejects a wallet that was not named as an evaluator", async function () {

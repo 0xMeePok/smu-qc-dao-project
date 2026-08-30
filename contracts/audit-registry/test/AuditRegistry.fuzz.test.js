@@ -62,6 +62,8 @@ describe("AuditRegistry fuzz", function () {
       const first = await registry.revisionAt(proposalId, 0);
       expect(first.proposalHash).to.equal(proposalHash);
       expect(first.solutionHash).to.equal(solutionHash);
+      expect(first.opportunityRevisionIndex).to.equal(proposal.opportunityRevisionIndex);
+      expect(first.opportunityRevisionDigest).to.equal(proposal.opportunityRevisionDigest);
     }
   });
 
@@ -98,6 +100,7 @@ describe("AuditRegistry fuzz", function () {
       const revision = await registry.revisionAt(proposalId, i);
       expect(revision.proposalHash).to.equal(pairs[i].proposalHash);
       expect(revision.solutionHash).to.equal(pairs[i].solutionHash);
+      expect(revision.opportunityRevisionIndex).to.equal(0n);
     }
   });
 

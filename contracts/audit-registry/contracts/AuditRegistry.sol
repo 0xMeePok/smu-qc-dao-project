@@ -63,6 +63,8 @@ contract AuditRegistry {
     struct Revision {
         bytes32 proposalHash;
         bytes32 solutionHash;
+        uint32 opportunityRevisionIndex;
+        bytes32 opportunityRevisionDigest;
         uint64 createdAt;
     }
 
@@ -124,14 +126,18 @@ contract AuditRegistry {
         bytes32 indexed opportunityId,
         address indexed researcher,
         bytes32 proposalHash,
-        bytes32 solutionHash
+        bytes32 solutionHash,
+        uint32 opportunityRevisionIndex,
+        bytes32 opportunityRevisionDigest
     );
     event HashesUpdated(
         bytes32 indexed proposalId,
         bytes32 indexed opportunityId,
         address indexed researcher,
         bytes32 proposalHash,
-        bytes32 solutionHash
+        bytes32 solutionHash,
+        uint32 opportunityRevisionIndex,
+        bytes32 opportunityRevisionDigest
     );
     event ProposalWithdrawn(
         bytes32 indexed proposalId,
@@ -288,7 +294,14 @@ contract AuditRegistry {
             exists: true
         });
 
-        _appendRevision(proposalId, proposalHash, solutionHash, timestamp);
+        _appendRevision(
+            proposalId,
+            proposalHash,
+            solutionHash,
+            opportunityRevisionIndex,
+            opportunityRevisionDigest,
+            timestamp
+        );
         _anchor(
             proposalId,
             EntityType.Proposal,
@@ -304,7 +317,9 @@ contract AuditRegistry {
             opportunityId,
             msg.sender,
             proposalHash,
-            solutionHash
+            solutionHash,
+            opportunityRevisionIndex,
+            opportunityRevisionDigest
         );
     }
 
@@ -332,7 +347,14 @@ contract AuditRegistry {
         item.opportunityRevisionDigest = opportunityRevisionDigest;
         item.updatedAt = timestamp;
 
-        _appendRevision(proposalId, proposalHash, solutionHash, timestamp);
+        _appendRevision(
+            proposalId,
+            proposalHash,
+            solutionHash,
+            opportunityRevisionIndex,
+            opportunityRevisionDigest,
+            timestamp
+        );
         _anchor(
             proposalId,
             EntityType.Proposal,
@@ -348,7 +370,9 @@ contract AuditRegistry {
             item.opportunityId,
             msg.sender,
             proposalHash,
-            solutionHash
+            solutionHash,
+            opportunityRevisionIndex,
+            opportunityRevisionDigest
         );
     }
 
@@ -386,7 +410,9 @@ contract AuditRegistry {
         Proposal storage item = _proposal(proposalId);
         Opportunity storage parent = _opportunity(item.opportunityId);
         if (item.withdrawn || parent.withdrawn) revert InvalidState();
-        if (!isEvaluator[item.opportunityId][msg.sender]) revert AccessDenied();
+        if (!isEvaluator[item.opportunityId][msg.sender] || msg.sender == item.researcher) {
+            revert AccessDenied();
+        }
         if (evaluationHash == bytes32(0)) revert InvalidInput();
 
         (uint32 revisionIndex, bytes32 revisionDigest) = _currentProposalRevision(proposalId);
@@ -549,6 +575,8 @@ contract AuditRegistry {
         bytes32 proposalId,
         bytes32 proposalHash,
         bytes32 solutionHash,
+        uint32 opportunityRevisionIndex,
+        bytes32 opportunityRevisionDigest,
         uint64 timestamp
     ) private {
         if (
@@ -560,7 +588,15 @@ contract AuditRegistry {
 
         _usedHashes[proposalId][proposalHash] = true;
         _usedHashes[proposalId][solutionHash] = true;
-        _revisions[proposalId].push(Revision(proposalHash, solutionHash, timestamp));
+        _revisions[proposalId].push(
+            Revision(
+                proposalHash,
+                solutionHash,
+                opportunityRevisionIndex,
+                opportunityRevisionDigest,
+                timestamp
+            )
+        );
     }
 
     function _anchor(
