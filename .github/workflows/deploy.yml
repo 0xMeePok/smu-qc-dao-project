@@ -53,8 +53,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefix firebase/functions
 
-      # The Cloud Functions suite runs HERE and nowhere else - ci.yml does not cover
-      # it. The Firestore rules suite has its own job below.
+      # Also runs in ci.yml on pull requests. Kept here so a red functions suite
+      # still blocks deploy-backend even if the two workflows drift.
       - name: Cloud Functions tests
         run: npm test --prefix firebase/functions
 
@@ -74,13 +74,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefix frontend
 
-      # Files are named explicitly rather than using `npm test`, whose
-      # `test/**/*.test.js` glob also sweeps in test/unit/ and test/integration/ -
-      # a separate workstream's suite, already run by ci.yml on this same push.
-      # ADD NEW TEST FILES HERE, or they will not gate the deploy.
-      - name: Frontend unit tests
-        working-directory: frontend
-        run: node --test test/validation.test.js test/routeAccess.test.js test/idleTimeout.test.js test/session.test.js
+      - name: Frontend unit and session integration tests
+        run: npm test --prefix frontend
 
   # ------------------------------------------------------------------ rules gate
   test-rules:
@@ -172,11 +167,20 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
+      - name: Verify App Check is configured
+        env:
+          APP_CHECK_SITE_KEY: ${{ secrets.VITE_FIREBASE_APP_CHECK_SITE_KEY }}
+        run: |
+          if [ -z "$APP_CHECK_SITE_KEY" ]; then
+            echo "::error::VITE_FIREBASE_APP_CHECK_SITE_KEY is required because production nonce calls enforce App Check."
+            exit 1
+          fi
       - name: Build
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_APP_CHECK_SITE_KEY: ${{ secrets.VITE_FIREBASE_APP_CHECK_SITE_KEY }}
           VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
           VITE_FIREBASE_USE_EMULATORS: "false"
         run: npm run build --prefix frontend
@@ -203,3 +207,6 @@ jobs:
           # where Vite builds to (see frontend/vite.config.js). firebase-tools refuses
           # a public path outside the directory holding firebase.json.
           entryPoint: ./firebase
+
+      - name: Verify effective production CSP
+        run: node firebase/scripts/check-csp.mjs "https://${FIREBASE_PROJECT_ID}.web.app"
