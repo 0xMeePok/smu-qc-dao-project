@@ -182,7 +182,7 @@ Signing out (including an idle-timeout sign-out) revokes **all devices** for tha
 wallet. The server always writes `sessionRevocations/{address}` (even if the wallet
 has not created a profile yet) and, when a `users/{address}` document exists, also
 stores `sessionsValidAfterEpoch` there. Firestore rules refuse reads and writes for
-ID tokens whose `auth_time` is older than that cutoff, then Firebase refresh tokens
+ID tokens whose `auth_time` is older than or equal to that cutoff, then Firebase refresh tokens
 are revoked so those sessions cannot renew. The browser clears its persistent
 Firebase session only after both server revocation and local `signOut` succeed. A
 failure remains visible and retryable instead of presenting a false signed-out

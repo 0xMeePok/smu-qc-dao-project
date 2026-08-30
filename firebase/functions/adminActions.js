@@ -2,6 +2,11 @@ import { HttpsError } from "firebase-functions/v2/https";
 
 export const SESSION_REVOCATIONS_COLLECTION = "sessionRevocations";
 
+export function isAuthTimeRevoked(authTime, ...cutoffs) {
+  const values = cutoffs.filter((value) => typeof value === "number");
+  return values.length > 0 && authTime <= Math.max(...values);
+}
+
 export function writeSessionCutoff(tx, revocationRef, epoch, timestamp) {
   tx.set(revocationRef, {
     sessionsValidAfterEpoch: epoch,

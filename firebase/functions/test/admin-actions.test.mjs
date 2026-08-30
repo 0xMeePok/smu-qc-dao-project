@@ -4,6 +4,7 @@ import { HttpsError } from "firebase-functions/v2/https";
 import {
   applyRoleChangeTransaction,
   finalizeSuspensionRevocation,
+  isAuthTimeRevoked,
 } from "../adminActions.js";
 
 function memoryStore(entries = []) {
@@ -102,5 +103,24 @@ describe("QCDAO-129 credential revocation failures", () => {
     assert.equal(store.get("users/0xabc").tokenRevocationStatus, "failed");
     assert.equal(store.get("users/0xabc").suspended, true);
     assert.equal(store.get("audits/a1").revocationStatus, "failed");
+  });
+});
+
+describe("QCDAO-129 auth_time cutoff", () => {
+  it("treats an ID token issued in the same second as revoked", () => {
+    assert.equal(isAuthTimeRevoked(101, 101), true);
+    assert.equal(isAuthTimeRevoked(101, null, 101), true);
+  });
+
+  it("treats an ID token older than the cutoff as revoked", () => {
+    assert.equal(isAuthTimeRevoked(100, 101), true);
+  });
+
+  it("treats an ID token newer than the cutoff as valid", () => {
+    assert.equal(isAuthTimeRevoked(102, 101), false);
+  });
+
+  it("does not revoke when no cutoff has been written", () => {
+    assert.equal(isAuthTimeRevoked(101, undefined, null), false);
   });
 });

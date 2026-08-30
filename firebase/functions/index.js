@@ -12,6 +12,7 @@ import {
   applyRoleChangeTransaction,
   applySuspensionChangeTransaction,
   finalizeSuspensionRevocation,
+  isAuthTimeRevoked,
   writeSessionCutoff,
 } from "./adminActions.js";
 
@@ -425,8 +426,7 @@ async function requireAdmin(request) {
   const validAfter = userDoc.data()?.sessionsValidAfterEpoch;
   const revocation = await db.collection(SESSION_REVOCATIONS_COLLECTION).doc(uid).get();
   const revocationAfter = revocation.exists ? revocation.data()?.sessionsValidAfterEpoch : null;
-  const cutoff = [validAfter, revocationAfter].filter((value) => typeof value === "number");
-  if (cutoff.length > 0 && authTime < Math.max(...cutoff)) {
+  if (isAuthTimeRevoked(authTime, validAfter, revocationAfter)) {
     throw new HttpsError("unauthenticated", "This session was revoked. Sign in again.");
   }
   return { uid, adminUser: userDoc.data() };

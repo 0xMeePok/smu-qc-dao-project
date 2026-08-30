@@ -681,6 +681,20 @@ describe("problems/{problemId}", () => {
     const db = env.authenticatedContext(REVOKED, { auth_time: 100 }).firestore();
     await assertFails(getDoc(doc(db, "problems", "p_revoked")));
   });
+
+  it("[QCDAO-129] blocks ID tokens issued in the same second as the cutoff", async () => {
+    const REVOKED = `0x${"3".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", REVOKED), baseProfile(null, REVOKED, {
+        sessionsValidAfterEpoch: 101,
+      }));
+      await setDoc(doc(ctx.firestore(), "problems", "p_same_second"), {
+        ownerId: REVOKED,
+      });
+    });
+    const db = env.authenticatedContext(REVOKED, { auth_time: 101 }).firestore();
+    await assertFails(getDoc(doc(db, "problems", "p_same_second")));
+  });
 });
 
 describe("proposals/{proposalId}", () => {
@@ -947,6 +961,18 @@ describe("session revocation", () => {
       });
     });
     const db = env.authenticatedContext(REVOKED, { auth_time: 100 }).firestore();
+    await assertFails(getDoc(doc(db, "users", REVOKED)));
+  });
+
+  it("[QCDAO-129] blocks a token whose auth_time equals the revocation cutoff", async () => {
+    const REVOKED = `0x${"2".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", REVOKED), baseProfile(null, REVOKED));
+      await setDoc(doc(ctx.firestore(), "sessionRevocations", REVOKED), {
+        sessionsValidAfterEpoch: 101,
+      });
+    });
+    const db = env.authenticatedContext(REVOKED, { auth_time: 101 }).firestore();
     await assertFails(getDoc(doc(db, "users", REVOKED)));
   });
 

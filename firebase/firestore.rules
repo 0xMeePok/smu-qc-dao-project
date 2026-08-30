@@ -22,14 +22,16 @@ service cloud.firestore {
 
     // Cutoff for already-issued ID tokens. Written by Cloud Functions on logout and
     // suspension, including when the wallet has not created a /users profile yet.
+    // Inclusive: auth_time and the cutoff are whole seconds, so sign-in then logout
+    // in the same second must still invalidate that ID token.
     function hasRevokedSession(address) {
       return (exists(/databases/$(database)/documents/sessionRevocations/$(address))
           && request.auth.token.auth_time
-            < get(/databases/$(database)/documents/sessionRevocations/$(address)).data.sessionsValidAfterEpoch)
+            <= get(/databases/$(database)/documents/sessionRevocations/$(address)).data.sessionsValidAfterEpoch)
         || (exists(/databases/$(database)/documents/users/$(address))
           && get(/databases/$(database)/documents/users/$(address)).data.keys().hasAny(['sessionsValidAfterEpoch'])
           && request.auth.token.auth_time
-            < get(/databases/$(database)/documents/users/$(address)).data.sessionsValidAfterEpoch);
+            <= get(/databases/$(database)/documents/users/$(address)).data.sessionsValidAfterEpoch);
     }
 
     function isUnrevokedWallet(address) {
