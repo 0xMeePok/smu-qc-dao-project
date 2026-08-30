@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from "firebase/app";
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import {
   browserLocalPersistence,
   connectAuthEmulator,
@@ -45,13 +45,14 @@ const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY;
 export const isAppCheckConfigured = Boolean(appCheckSiteKey);
 
 // Production nonce issuance enforces App Check and consumes a limited-use token.
-// Local emulators deliberately skip attestation so automated/local testing remains
-// possible without weakening the deployed function.
+// Firebase App Check now registers web apps only with reCAPTCHA Enterprise
+// (score-based key). The same site key must be saved in the Firebase console
+// and in VITE_FIREBASE_APP_CHECK_SITE_KEY. Local emulators skip attestation.
 export const appCheck = app
   && import.meta.env.VITE_FIREBASE_USE_EMULATORS !== "true"
   && appCheckSiteKey
   ? initializeAppCheck(app, {
-    provider: new ReCaptchaV3Provider(appCheckSiteKey),
+    provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
     isTokenAutoRefreshEnabled: true,
   })
   : null;

@@ -165,8 +165,11 @@ Preview channels are not inferred from their hostname shape. Add the complete
 generated preview host to `SIWE_ALLOWED_HOSTS` before testing sign-in on it, then
 remove it when the channel expires.
 
-Production nonce calls also require Firebase App Check with a reCAPTCHA v3 app.
-Set `VITE_FIREBASE_APP_CHECK_SITE_KEY` in the frontend build environment. The nonce
+Production nonce calls also require Firebase App Check with a reCAPTCHA Enterprise
+score-based key (the Firebase console no longer accepts the legacy v3 provider).
+Create the key in Google Cloud (Fraud Defense / reCAPTCHA, type Website • score),
+register that same key on the web app in Firebase App Check, and set
+`VITE_FIREBASE_APP_CHECK_SITE_KEY` in the frontend build environment. The nonce
 endpoint consumes limited-use App Check tokens, applies a 100-request-per-source and
 1,000-request-global one-minute quota, and relies on the deployed Firestore TTL field
 configuration to delete expired nonce and quota documents.
