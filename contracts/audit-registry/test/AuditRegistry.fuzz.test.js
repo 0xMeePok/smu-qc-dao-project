@@ -51,6 +51,8 @@ describe("AuditRegistry fuzz", function () {
       const proposal = await registry.getProposal(proposalId);
       expect(proposal.researcher).to.equal(researcher.address);
       expect(proposal.opportunityId).to.equal(opportunityId);
+      expect(proposal.opportunityRevisionIndex).to.equal(0n);
+      expect(proposal.opportunityRevisionDigest).to.not.equal(ZERO);
       expect(proposal.proposalHash).to.equal(proposalHash);
       expect(proposal.solutionHash).to.equal(solutionHash);
       expect(proposal.withdrawn).to.equal(false);
@@ -205,7 +207,7 @@ describe("AuditRegistry fuzz", function () {
 
     for (let i = 3; i < wallets.length; i += 1) {
       await expect(
-        registry.connect(wallets[i]).recordEvaluation(proposalId, randHash(ethers))
+        registry.connect(wallets[i]).recordEvaluation(proposalId, randHash(ethers), 0, randHash(ethers))
       ).to.be.revertedWithCustomError(registry, "AccessDenied");
     }
     expect(await registry.evaluationCount(proposalId)).to.equal(0n);
@@ -232,7 +234,7 @@ describe("AuditRegistry fuzz", function () {
         registry.connect(researcher).updateHashes(proposalId, randHash(ethers), randHash(ethers))
       ).to.be.revertedWithCustomError(registry, "InvalidState");
       await expect(
-        registry.connect(evaluator).recordEvaluation(proposalId, randHash(ethers))
+        registry.connect(evaluator).recordEvaluation(proposalId, randHash(ethers), 0, randHash(ethers))
       ).to.be.revertedWithCustomError(registry, "InvalidState");
     }
 

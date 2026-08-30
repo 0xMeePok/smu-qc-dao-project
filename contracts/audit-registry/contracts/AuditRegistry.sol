@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// @title AuditRegistry
-/// @notice Anchors opportunity, proposal, and evaluation hashes with an append-only trail.
 contract AuditRegistry {
     error AccessDenied();
     error InvalidInput();
@@ -48,11 +46,11 @@ contract AuditRegistry {
         bool exists;
     }
 
-    // Latest view of a submission. Who filed it, which posting it sits on,
-    // and the current proposal + solution hashes. Older pairs live in `_revisions`.
     struct Proposal {
         address researcher;
         bytes32 opportunityId;
+        uint32 opportunityRevisionIndex;
+        bytes32 opportunityRevisionDigest;
         bytes32 proposalHash;
         bytes32 solutionHash;
         uint64 createdAt;
@@ -82,8 +80,6 @@ contract AuditRegistry {
         uint64 timestamp;
     }
 
-    // Official review from a named evaluator, tied to the revision they saw.
-    // The hash is the off-chain write-up (score, comments, etc.).
     struct EvaluationRecord {
         address evaluator;
         bytes32 contentHash;
@@ -160,6 +156,7 @@ contract AuditRegistry {
         uint64 timestamp
     );
 
+    // Post an opportunity and name the evaluators for that posting.
     function commitOpportunity(
         bytes32 opportunityId,
         OpportunityKind kind,
@@ -203,6 +200,7 @@ contract AuditRegistry {
         emit OpportunityCommitted(opportunityId, kind, msg.sender, contentHash, expiresAt);
     }
 
+    // Replace the opportunity hash and expiry while the posting is still live.
     function updateOpportunity(
         bytes32 opportunityId,
         bytes32 contentHash,
@@ -232,6 +230,7 @@ contract AuditRegistry {
         emit OpportunityUpdated(opportunityId, msg.sender, contentHash, expiresAt);
     }
 
+    // Withdraw an opportunity so new proposals cannot be filed.
     function withdrawOpportunity(bytes32 opportunityId, bytes32 evidenceHash) external {
         Opportunity storage item = _opportunity(opportunityId);
         if (msg.sender != item.owner) revert AccessDenied();
@@ -255,6 +254,7 @@ contract AuditRegistry {
         emit OpportunityWithdrawn(opportunityId, msg.sender, evidenceHash);
     }
 
+    // File a proposal against a live opportunity.
     function commitProposal(
         bytes32 proposalId,
         bytes32 opportunityId,
@@ -272,9 +272,13 @@ contract AuditRegistry {
         if (!_submissionOpen(opportunityId)) revert InvalidState();
 
         uint64 timestamp = uint64(block.timestamp);
+        (uint32 opportunityRevisionIndex, bytes32 opportunityRevisionDigest) =
+            _currentOpportunityRevision(opportunityId);
         _proposals[proposalId] = Proposal({
             researcher: msg.sender,
             opportunityId: opportunityId,
+            opportunityRevisionIndex: opportunityRevisionIndex,
+            opportunityRevisionDigest: opportunityRevisionDigest,
             proposalHash: proposalHash,
             solutionHash: solutionHash,
             createdAt: timestamp,
@@ -304,6 +308,7 @@ contract AuditRegistry {
         );
     }
 
+    // Replace the current proposal and solution hashes before evaluation starts.
     function updateHashes(
         bytes32 proposalId,
         bytes32 proposalHash,
@@ -319,8 +324,12 @@ contract AuditRegistry {
         }
 
         uint64 timestamp = uint64(block.timestamp);
+        (uint32 opportunityRevisionIndex, bytes32 opportunityRevisionDigest) =
+            _currentOpportunityRevision(item.opportunityId);
         item.proposalHash = proposalHash;
         item.solutionHash = solutionHash;
+        item.opportunityRevisionIndex = opportunityRevisionIndex;
+        item.opportunityRevisionDigest = opportunityRevisionDigest;
         item.updatedAt = timestamp;
 
         _appendRevision(proposalId, proposalHash, solutionHash, timestamp);
@@ -343,9 +352,7 @@ contract AuditRegistry {
         );
     }
 
-    // Withdraw is still allowed after a review. A named evaluator may say the
-    // solution is not feasible; the researcher can then close the submission.
-    // Hash edits stay locked. The evaluation records stay on the trail.
+    // Withdraw a proposal. Allowed after evaluation.
     function withdrawProposal(bytes32 proposalId, bytes32 evidenceHash) external {
         Proposal storage item = _proposal(proposalId);
         if (msg.sender != item.researcher) revert AccessDenied();
@@ -369,15 +376,26 @@ contract AuditRegistry {
         emit ProposalWithdrawn(proposalId, msg.sender, evidenceHash);
     }
 
-    function recordEvaluation(bytes32 proposalId, bytes32 evaluationHash) external {
+    // Record a named evaluator's review against a specific proposal revision.
+    function recordEvaluation(
+        bytes32 proposalId,
+        bytes32 evaluationHash,
+        uint32 expectedRevisionIndex,
+        bytes32 expectedRevisionDigest
+    ) external {
         Proposal storage item = _proposal(proposalId);
         Opportunity storage parent = _opportunity(item.opportunityId);
         if (item.withdrawn || parent.withdrawn) revert InvalidState();
         if (!isEvaluator[item.opportunityId][msg.sender]) revert AccessDenied();
         if (evaluationHash == bytes32(0)) revert InvalidInput();
 
-        uint256 revisionIndex = _revisions[proposalId].length - 1;
-        bytes32 revisionDigest = keccak256(abi.encode(item.proposalHash, item.solutionHash));
+        (uint32 revisionIndex, bytes32 revisionDigest) = _currentProposalRevision(proposalId);
+        if (
+            expectedRevisionIndex != revisionIndex
+                || expectedRevisionDigest != revisionDigest
+        ) {
+            revert InvalidState();
+        }
         uint64 timestamp = uint64(block.timestamp);
 
         item.evaluationLocked = true;
@@ -386,7 +404,7 @@ contract AuditRegistry {
             EvaluationRecord(
                 msg.sender,
                 evaluationHash,
-                uint32(revisionIndex),
+                revisionIndex,
                 revisionDigest,
                 timestamp
             )
@@ -404,7 +422,7 @@ contract AuditRegistry {
             proposalId,
             msg.sender,
             evaluationHash,
-            uint32(revisionIndex),
+            revisionIndex,
             revisionDigest
         );
     }
@@ -495,6 +513,26 @@ contract AuditRegistry {
             _evaluators[opportunityId].push(evaluator);
             emit EvaluatorAdded(opportunityId, evaluator);
         }
+    }
+
+    function _currentOpportunityRevision(bytes32 opportunityId)
+        private
+        view
+        returns (uint32 index, bytes32 digest)
+    {
+        HashRevision[] storage revisions = _opportunityRevisions[opportunityId];
+        index = uint32(revisions.length - 1);
+        digest = revisions[index].contentHash;
+    }
+
+    function _currentProposalRevision(bytes32 proposalId)
+        private
+        view
+        returns (uint32 index, bytes32 digest)
+    {
+        Proposal storage item = _proposals[proposalId];
+        index = uint32(_revisions[proposalId].length - 1);
+        digest = keccak256(abi.encode(item.proposalHash, item.solutionHash));
     }
 
     function _appendOpportunityRevision(

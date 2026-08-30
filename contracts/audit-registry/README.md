@@ -6,7 +6,7 @@ Writers call from their own wallet:
 
 - Problem owners, funders, and researchers `commitOpportunity` / `updateOpportunity` / `withdrawOpportunity`
 - Researchers `commitProposal` / `updateHashes` / `withdrawProposal` against a live opportunity
-- Named evaluators (set when the posting is created; can be none, one, or several) `recordEvaluation` with a hash of their review write-up. Public comments stay off-chain for now.
+- Named evaluators (set when the posting is created; can be none, one, or several) `recordEvaluation` with a hash of their review write-up and the proposal revision they reviewed. Public comments stay off-chain for now.
 
 Install dependencies:
 

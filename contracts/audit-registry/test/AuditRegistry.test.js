@@ -27,6 +27,20 @@ function combinedHash(ethers, proposalHash, solutionHash) {
   );
 }
 
+async function currentProposalRevision(registry, ethers, proposalId) {
+  const proposal = await registry.getProposal(proposalId);
+  const index = (await registry.revisionCount(proposalId)) - 1n;
+  return {
+    index,
+    digest: combinedHash(ethers, proposal.proposalHash, proposal.solutionHash),
+  };
+}
+
+async function recordCurrentEvaluation(registry, evaluator, ethers, proposalId, evaluationHash) {
+  const { index, digest } = await currentProposalRevision(registry, ethers, proposalId);
+  return registry.connect(evaluator).recordEvaluation(proposalId, evaluationHash, index, digest);
+}
+
 describe("AuditRegistry", function () {
   async function deployFixture() {
     const { ethers } = await network.create();
@@ -209,6 +223,58 @@ describe("AuditRegistry", function () {
           .connect(owner)
           .commitOpportunity(noneId, OpportunityKind.OpenFunding, ethers.id("none-hash"), 0, []);
         expect(await registry.evaluatorCount(noneId)).to.equal(0n);
+      });
+
+      it("lets the same wallet hold different roles on different postings", async function () {
+        const ctx = await deployFixture();
+        const { ethers, registry, owner, researcher, evaluator, other } = ctx;
+
+        const ownedByEvaluator = ethers.id("owned-by-evaluator");
+        await registry
+          .connect(evaluator)
+          .commitOpportunity(
+            ownedByEvaluator,
+            OpportunityKind.BusinessProblem,
+            ethers.id("owned-hash"),
+            0,
+            [owner.address]
+          );
+
+        const evaluatedByOwner = ethers.id("evaluated-by-owner");
+        await registry
+          .connect(researcher)
+          .commitOpportunity(
+            evaluatedByOwner,
+            OpportunityKind.FundingRequest,
+            ethers.id("eval-hash"),
+            0,
+            [owner.address, evaluator.address]
+          );
+        const proposalOnB = ethers.id("proposal-on-b");
+        await registry
+          .connect(other)
+          .commitProposal(proposalOnB, evaluatedByOwner, ethers.id("p-b"), ethers.id("s-b"));
+
+        expect(await registry.isEvaluator(ownedByEvaluator, evaluator.address)).to.equal(false);
+        expect(await registry.isEvaluator(evaluatedByOwner, evaluator.address)).to.equal(true);
+        expect(await registry.isEvaluator(evaluatedByOwner, owner.address)).to.equal(true);
+        expect((await registry.getOpportunity(ownedByEvaluator)).owner).to.equal(evaluator.address);
+
+        await recordCurrentEvaluation(
+          registry,
+          owner,
+          ethers,
+          proposalOnB,
+          ethers.id("owner-as-evaluator")
+        );
+        await recordCurrentEvaluation(
+          registry,
+          evaluator,
+          ethers,
+          proposalOnB,
+          ethers.id("evaluator-also-reviews")
+        );
+        expect(await registry.evaluationCount(proposalOnB)).to.equal(2n);
       });
 
       it("allows the same content hash on two different opportunities", async function () {
@@ -556,6 +622,8 @@ describe("AuditRegistry", function () {
         const proposal = await registry.getProposal(proposalId);
         expect(proposal.researcher).to.equal(researcher.address);
         expect(proposal.opportunityId).to.equal(opportunityId);
+        expect(proposal.opportunityRevisionIndex).to.equal(0n);
+        expect(proposal.opportunityRevisionDigest).to.equal(ctx.opportunityHash);
         expect(proposal.proposalHash).to.equal(proposalHash);
         expect(proposal.solutionHash).to.equal(solutionHash);
         expect(proposal.createdAt).to.equal(timestamp);
@@ -608,6 +676,23 @@ describe("AuditRegistry", function () {
         expect((await registry.getProposal(ethers.id("proposal-b"))).researcher).to.equal(
           other.address
         );
+      });
+
+      it("binds the proposal to the posting revision that was live at submit time", async function () {
+        const ctx = await deployFixture();
+        const { ethers, registry, owner, researcher, opportunityId, expiresAt } = ctx;
+        await commitFirstOpportunity(ctx);
+        const nextHash = ethers.id("opportunity-hash-v2");
+        await registry.connect(owner).updateOpportunity(opportunityId, nextHash, expiresAt);
+
+        const laterId = ethers.id("proposal-after-update");
+        await registry
+          .connect(researcher)
+          .commitProposal(laterId, opportunityId, ethers.id("p-after"), ethers.id("s-after"));
+
+        const later = await registry.getProposal(laterId);
+        expect(later.opportunityRevisionIndex).to.equal(1n);
+        expect(later.opportunityRevisionDigest).to.equal(nextHash);
       });
 
       it("allows the same value for the proposal hash and the solution hash", async function () {
@@ -804,6 +889,26 @@ describe("AuditRegistry", function () {
           .updateHashes(proposalId, ethers.id("proposal-hash-v3"), ethers.id("solution-hash-v3"));
         expect(await registry.revisionCount(proposalId)).to.equal(3n);
       });
+
+      it("keeps the original posting snapshot until the researcher edits again", async function () {
+        const ctx = await deployFixture();
+        const { ethers, registry, owner, researcher, opportunityId, proposalId, opportunityHash, expiresAt } =
+          ctx;
+        await commitFirstProposal(ctx);
+        const nextHash = ethers.id("opportunity-hash-v2");
+        await registry.connect(owner).updateOpportunity(opportunityId, nextHash, expiresAt);
+
+        const beforeEdit = await registry.getProposal(proposalId);
+        expect(beforeEdit.opportunityRevisionIndex).to.equal(0n);
+        expect(beforeEdit.opportunityRevisionDigest).to.equal(opportunityHash);
+
+        await registry
+          .connect(researcher)
+          .updateHashes(proposalId, ethers.id("proposal-hash-v2"), ethers.id("solution-hash-v2"));
+        const afterEdit = await registry.getProposal(proposalId);
+        expect(afterEdit.opportunityRevisionIndex).to.equal(1n);
+        expect(afterEdit.opportunityRevisionDigest).to.equal(nextHash);
+      });
     });
 
     describe("negative", function () {
@@ -967,7 +1072,13 @@ describe("AuditRegistry", function () {
             .updateHashes(proposalId, ethers.id("proposal-hash-v2"), ethers.id("solution-hash-v2"))
         ).to.be.revertedWithCustomError(registry, "InvalidState");
         await expect(
-          registry.connect(evaluator).recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"))
+          recordCurrentEvaluation(
+            registry,
+            evaluator,
+            ethers,
+            proposalId,
+            ethers.id("evaluation-hash-v1")
+          )
         ).to.be.revertedWithCustomError(registry, "InvalidState");
       });
     });
@@ -982,7 +1093,7 @@ describe("AuditRegistry", function () {
 
         const firstHash = ethers.id("evaluation-hash-v1");
         const digest = combinedHash(ethers, proposalHash, solutionHash);
-        const firstTx = await registry.connect(evaluator).recordEvaluation(proposalId, firstHash);
+        const firstTx = await recordCurrentEvaluation(registry, evaluator, ethers, proposalId, firstHash);
         const firstTimestamp = await timestampOf(ethers, firstTx);
 
         await expect(firstTx)
@@ -1000,7 +1111,7 @@ describe("AuditRegistry", function () {
             firstTimestamp
           );
 
-        await registry.connect(other).recordEvaluation(proposalId, ethers.id("evaluation-hash-v2"));
+        await recordCurrentEvaluation(registry, other, ethers, proposalId, ethers.id("evaluation-hash-v2"));
 
         expect(await registry.evaluationCount(proposalId)).to.equal(2n);
         const recorded = await registry.evaluationAt(proposalId, 0);
@@ -1016,7 +1127,7 @@ describe("AuditRegistry", function () {
       it("rejects an unknown proposal", async function () {
         const { ethers, registry, proposalId } = await deployFixture();
         await expect(
-          registry.recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"))
+          registry.recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"), 0, ethers.id("none"))
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
       });
 
@@ -1025,7 +1136,7 @@ describe("AuditRegistry", function () {
         const { ethers, registry, evaluator, other, proposalId } = ctx;
         await commitFirstProposal(ctx, [evaluator.address]);
         await expect(
-          registry.connect(other).recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"))
+          recordCurrentEvaluation(registry, other, ethers, proposalId, ethers.id("evaluation-hash-v1"))
         ).to.be.revertedWithCustomError(registry, "AccessDenied");
       });
 
@@ -1034,16 +1145,22 @@ describe("AuditRegistry", function () {
         const { ethers, registry, evaluator, proposalId } = ctx;
         await commitFirstProposal(ctx);
         await expect(
-          registry.connect(evaluator).recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"))
+          recordCurrentEvaluation(
+            registry,
+            evaluator,
+            ethers,
+            proposalId,
+            ethers.id("evaluation-hash-v1")
+          )
         ).to.be.revertedWithCustomError(registry, "AccessDenied");
       });
 
       it("rejects a zero evaluation hash", async function () {
         const ctx = await deployFixture();
-        const { registry, evaluator, proposalId } = ctx;
+        const { ethers, registry, evaluator, proposalId } = ctx;
         await commitFirstProposal(ctx, [evaluator.address]);
         await expect(
-          registry.connect(evaluator).recordEvaluation(proposalId, ZERO_BYTES32)
+          recordCurrentEvaluation(registry, evaluator, ethers, proposalId, ZERO_BYTES32)
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
       });
 
@@ -1051,12 +1168,46 @@ describe("AuditRegistry", function () {
         const ctx = await deployFixture();
         const { ethers, registry, researcher, evaluator, proposalId } = ctx;
         await commitFirstProposal(ctx, [evaluator.address]);
-        await registry.connect(evaluator).recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"));
+        await recordCurrentEvaluation(
+          registry,
+          evaluator,
+          ethers,
+          proposalId,
+          ethers.id("evaluation-hash-v1")
+        );
         await expect(
           registry
             .connect(researcher)
             .updateHashes(proposalId, ethers.id("proposal-hash-v2"), ethers.id("solution-hash-v2"))
         ).to.be.revertedWithCustomError(registry, "InvalidState");
+      });
+
+      it("rejects a review that names a revision that is no longer current", async function () {
+        const ctx = await deployFixture();
+        const { ethers, registry, researcher, evaluator, proposalId, proposalHash, solutionHash } = ctx;
+        await commitFirstProposal(ctx, [evaluator.address]);
+        const staleDigest = combinedHash(ethers, proposalHash, solutionHash);
+
+        await registry
+          .connect(researcher)
+          .updateHashes(proposalId, ethers.id("proposal-hash-v2"), ethers.id("solution-hash-v2"));
+
+        await expect(
+          registry
+            .connect(evaluator)
+            .recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"), 0, staleDigest)
+        ).to.be.revertedWithCustomError(registry, "InvalidState");
+        await expect(
+          registry
+            .connect(evaluator)
+            .recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"), 1, staleDigest)
+        ).to.be.revertedWithCustomError(registry, "InvalidState");
+
+        const current = await currentProposalRevision(registry, ethers, proposalId);
+        await registry
+          .connect(evaluator)
+          .recordEvaluation(proposalId, ethers.id("evaluation-hash-v1"), current.index, current.digest);
+        expect((await registry.evaluationAt(proposalId, 0)).revisionIndex).to.equal(1n);
       });
     });
   });
