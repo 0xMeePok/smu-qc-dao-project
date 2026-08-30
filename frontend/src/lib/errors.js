@@ -79,6 +79,10 @@ export function messageForFirebaseError(error) {
   if (error?.message && typeof error.message === "string" && error.message.toLowerCase().includes("suspended")) {
     return "Your account has been suspended, contact an administrator.";
   }
+  if (error?.message && typeof error.message === "string"
+    && /revocation|invalidate this session|retry sign out/i.test(error.message)) {
+    return error.message;
+  }
 
   if (FIREBASE_AUTH_MESSAGES[code]) return FIREBASE_AUTH_MESSAGES[code];
   if (FUNCTIONS_MESSAGES[code]) return FUNCTIONS_MESSAGES[code];

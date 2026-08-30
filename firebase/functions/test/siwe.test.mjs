@@ -11,7 +11,11 @@
  */
 import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
+import { createHash } from "node:crypto";
+import { initializeApp, getApps } from "firebase-admin/app";
+import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { parseSiweMessage } from "viem/siwe";
 
 const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT || (process.env.FUNCTIONS_BASE_URL?.split("/")[3]) || "qcdao-a0c7a";
 
@@ -21,9 +25,10 @@ const BASE =
 
 // `origin` is overridable (and omittable, via null) so the SIWE domain-binding tests
 // below can pose as a browser on some other site.
-async function call(fn, data, { origin = "http://localhost:5173" } = {}) {
+async function call(fn, data, { origin = "http://localhost:5173", testSource = null } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (origin !== null) headers.Origin = origin;
+  if (testSource) headers["X-Emulator-Test-Source"] = testSource;
 
   const res = await fetch(`${BASE}/${fn}`, {
     method: "POST",
@@ -39,6 +44,9 @@ async function call(fn, data, { origin = "http://localhost:5173" } = {}) {
 // either, so this is also the more faithful model.
 const attacker = privateKeyToAccount(generatePrivateKey());
 
+if (getApps().length === 0) initializeApp({ projectId: PROJECT_ID });
+const db = getFirestore();
+
 before(async () => {
   const probe = await call("getSiweNonce", { address: privateKeyToAccount(generatePrivateKey()).address });
   assert.ok(
@@ -51,8 +59,9 @@ describe("honest sign-in", () => {
   it("issues a message, verifies the signature and mints a token for that address", async () => {
     const victim = privateKeyToAccount(generatePrivateKey());
     const { result: nonce } = await call("getSiweNonce", { address: victim.address });
-    assert.ok(nonce.message.includes(victim.address.toLowerCase()));
+    assert.equal(parseSiweMessage(nonce.message).address?.toLowerCase(), victim.address.toLowerCase());
     assert.ok(nonce.message.includes(`Nonce: ${nonce.nonce}`));
+    assert.equal(parseSiweMessage(nonce.message).statement?.includes("\n"), false);
 
     const signature = await victim.signMessage({ message: nonce.message });
     const { result } = await call("verifySiweSignature", {
@@ -176,6 +185,14 @@ describe("SIWE domain binding", () => {
     );
   });
 
+  it("rejects malformed and insecure non-development origins", async () => {
+    for (const origin of ["not a URL", "http://qc-dao-demo.web.app"]) {
+      const fresh = privateKeyToAccount(generatePrivateKey());
+      const res = await call("getSiweNonce", { address: fresh.address }, { origin });
+      assert.equal(res.error?.status, "PERMISSION_DENIED");
+    }
+  });
+
   it("serves an allow-listed development origin normally", async () => {
     const fresh = privateKeyToAccount(generatePrivateKey());
     const res = await call("getSiweNonce", { address: fresh.address });
@@ -187,10 +204,7 @@ describe("SIWE domain binding", () => {
     );
   });
 
-  it("falls back to this deployment's own domain when there is no Origin at all", async () => {
-    // A request with no Origin cannot be a browser, so there is nothing to spoof and
-    // nothing to validate - it should still produce a usable message rather than an
-    // error, and that message must name this deployment.
+  it("allows missing Origin only in the emulator's narrowly scoped test flow", async () => {
     const fresh = privateKeyToAccount(generatePrivateKey());
     const res = await call("getSiweNonce", { address: fresh.address }, { origin: null });
 
@@ -318,9 +332,7 @@ describe("hosting origins, including CD preview channels", () => {
     }
   });
 
-  it("accepts a generated preview-channel URL without any configuration", async () => {
-    // hosting:channel:deploy mints an unpredictable hash, so a preview host cannot
-    // be allow-listed ahead of time. Without this, sign-in fails on every preview.
+  it("accepts a preview-channel URL only when its full host is explicitly configured", async () => {
     const fresh = privateKeyToAccount(generatePrivateKey());
     const res = await call(
       "getSiweNonce",
@@ -344,6 +356,7 @@ describe("hosting origins, including CD preview channels", () => {
     for (const host of [
       `${PROJECT}--evil.web.app`,
       `${PROJECT}--login-abc.web.app`,
+      `${PROJECT}--login-abcdefgh.web.app`,
       `${PROJECT}--evil.firebaseapp.com`,
     ]) {
       const fresh = privateKeyToAccount(generatePrivateKey());
@@ -384,5 +397,43 @@ describe("hosting origins, including CD preview channels", () => {
       { origin: "https://attacker.web.app" },
     );
     assert.equal(res.error?.status, "PERMISSION_DENIED");
+  });
+
+  it("returns resource-exhausted after the per-source quota is reached", async () => {
+    const testSource = "rate-limit-test-source";
+    const sourceHash = createHash("sha256").update(testSource).digest("hex");
+    const ref = db.collection("siweRateLimits").doc(`source_${sourceHash}`);
+    await ref.set({
+      count: 100,
+      windowStartedAt: Timestamp.now(),
+      expiresAt: Timestamp.fromMillis(Date.now() + 120_000),
+    });
+
+    try {
+      const fresh = privateKeyToAccount(generatePrivateKey());
+      const res = await call("getSiweNonce", { address: fresh.address }, { testSource });
+      assert.equal(res.error?.status, "RESOURCE_EXHAUSTED");
+      assert.equal(res.result?.message, undefined);
+    } finally {
+      await ref.delete();
+    }
+  });
+
+  it("[QCDAO-123] returns resource-exhausted after the global quota is reached", async () => {
+    const ref = db.collection("siweRateLimits").doc("global");
+    await ref.set({
+      count: 1000,
+      windowStartedAt: Timestamp.now(),
+      expiresAt: Timestamp.fromMillis(Date.now() + 120_000),
+    });
+
+    try {
+      const fresh = privateKeyToAccount(generatePrivateKey());
+      const res = await call("getSiweNonce", { address: fresh.address });
+      assert.equal(res.error?.status, "RESOURCE_EXHAUSTED");
+      assert.equal(res.result?.message, undefined);
+    } finally {
+      await ref.delete();
+    }
   });
 });

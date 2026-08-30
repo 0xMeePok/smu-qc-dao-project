@@ -4,13 +4,27 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { createPublicClient, http, verifyMessage } from "viem";
 import { arbitrumSepolia } from "viem/chains";
-import { randomBytes } from "node:crypto";
+import { createSiweMessage, parseSiweMessage, validateSiweMessage } from "viem/siwe";
+import { createHash, randomBytes } from "node:crypto";
+import { resolveDomain } from "./siweOrigin.js";
+import {
+  SESSION_REVOCATIONS_COLLECTION,
+  applyRoleChangeTransaction,
+  applySuspensionChangeTransaction,
+  finalizeSuspensionRevocation,
+  isAuthTimeRevoked,
+  writeSessionCutoff,
+} from "./adminActions.js";
 
 initializeApp();
 
 const db = getFirestore();
 const NONCE_COLLECTION = "siweNonces";
 const NONCE_TTL_MS = 5 * 60 * 1000;
+const RATE_LIMIT_COLLECTION = "siweRateLimits";
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_PER_SOURCE = 100;
+const RATE_LIMIT_GLOBAL = 1000;
 
 // There is deliberately no per-address cooldown any more. It was an attempt to limit
 // how often a pending nonce could be overwritten; getSiweNonce now never overwrites
@@ -57,116 +71,77 @@ function normaliseAddress(value) {
  * that signature somewhere it means much more.
  */
 function buildMessage({ address, nonce, issuedAt, domain }) {
-  return [
-    `${domain} wants you to sign in with your Ethereum account:`,
+  const scheme = domain.startsWith("localhost:") || domain.startsWith("127.0.0.1:")
+    ? "http"
+    : "https";
+  return createSiweMessage({
     address,
-    "",
-    "Sign in to SMU QC DAO. This proves you control this wallet.",
-    "It authorises no transaction, moves no funds and costs no gas.",
-    "",
-    `URI: https://${domain}`,
-    "Version: 1",
-    `Chain ID: ${arbitrumSepolia.id}`,
-    `Nonce: ${nonce}`,
-    `Issued At: ${issuedAt}`,
-  ].join("\n");
+    chainId: arbitrumSepolia.id,
+    domain,
+    issuedAt: new Date(issuedAt),
+    nonce,
+    scheme,
+    statement: "Sign in to SMU QC DAO. This proves wallet control and authorises no transaction.",
+    uri: `${scheme}://${domain}`,
+    version: "1",
+  });
 }
 
-// The SIWE `domain` field binds a signature to ONE site. Its whole purpose is to
-// make a signature collected on one origin useless on another.
-// Now the domain is server-controlled: an Origin is only honoured when it appears on
-// an allow-list this deployment owns, and anything else is refused outright.
-const SIWE_DOMAIN_FALLBACK = "smu-qc-dao";
-
-// Cloud Functions sets GCLOUD_PROJECT; Firebase Hosting always provisions
-// <project>.web.app and <project>.firebaseapp.com. Deriving them means the common
-// deployment needs no configuration and still keeps the message accurate for real
-// users, instead of a hardcoded guess that rots the moment the project is renamed.
-function defaultAllowedHosts() {
-  const projectId = (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "").trim();
-  return projectId ? [`${projectId}.web.app`, `${projectId}.firebaseapp.com`] : [];
-}
-
-// Dev origins are allowed ONLY under the emulator. Allow-listing localhost in
-// production would reopen the hole: an attacker would forge `Origin:
-// localhost:5173` and be handed a signable message again.
-const DEV_HOSTS = ["localhost:5173", "127.0.0.1:5173"];
-
-function canonicalDomain() {
-  return (process.env.SIWE_DOMAIN || "").trim().toLowerCase()
-    || defaultAllowedHosts()[0]
-    || SIWE_DOMAIN_FALLBACK;
-}
-
-function allowedHosts() {
-  const configured = (process.env.SIWE_ALLOWED_HOSTS || "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-
-  const hosts = [canonicalDomain(), ...defaultAllowedHosts(), ...configured];
-  if (process.env.FUNCTIONS_EMULATOR === "true") hosts.push(...DEV_HOSTS);
-
-  return new Set(hosts.filter(Boolean));
-}
-
-// Firebase Hosting preview channels get a generated URL of the form
-// <project>--<channel>-<hash>.web.app, so continuous deployment produces a host name
-// nobody can predict or configure in advance. Matching the shape means every preview
-// this project deploys is trusted automatically, with no redeploy of these functions.
-//
-// An earlier version matched only a prefix and a suffix, justified by the claim that
-// "only a principal who can deploy to THIS project can create a host beginning
-// <project>--". That claim was never verified and is not safe to rely on: Firebase
-// site ids are globally unique hostname labels and may contain hyphens, so if
-// `qcdao-a0c7a--evil` is registrable by anyone, its live site
-// qcdao-a0c7a--evil.web.app satisfied both halves and could mint production tokens.
-// Prefix plus suffix is not proof of ownership.
-//
-// This is still pattern matching, not an ownership check. A host that matches the
-// full generated shape AND is registrable as a site id would pass. Closing that
-// properly needs a Hosting API lookup per sign-in, or dropping preview support.
-function isOwnHostingPreview(host) {
-  const projectId = (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "")
-    .trim()
-    .toLowerCase();
-  if (!projectId) return false;
-
-  // Real channel URLs look like qcdao-a0c7a--test-cd-wm5z6dh8.web.app: the project
-  // id, then a channel id, then a Firebase-generated 8-character hash. Requiring
-  // that trailing hash is what a squatted site id cannot trivially satisfy.
-  const escaped = projectId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(
-    `^${escaped}--[a-z0-9]([a-z0-9-]*[a-z0-9])?-[a-z0-9]{8}\\.(web\\.app|firebaseapp\\.com)$`,
-  ).test(host);
-}
-
-function resolveDomain(request) {
-  const origin = request.rawRequest?.headers?.origin;
-
-  // No Origin at all means this cannot be a browser (curl, a server, the test
-  // suite). There is nothing to validate, so the message names this deployment -
-  // which is the truthful answer and the one a phishing victim most needs to see.
-  if (!origin) return canonicalDomain();
-
-  let host;
-  try {
-    host = new URL(origin).host.toLowerCase();
-  } catch {
-    throw new HttpsError("permission-denied", "Sign-in is not available from this origin.");
+function quotaCounter(snapshot, nowMs) {
+  if (!snapshot.exists) return { count: 0, windowStartedAtMs: nowMs };
+  const data = snapshot.data() ?? {};
+  const started = typeof data.windowStartedAt?.toMillis === "function"
+    ? data.windowStartedAt.toMillis()
+    : 0;
+  if (started <= 0 || nowMs - started >= RATE_LIMIT_WINDOW_MS) {
+    return { count: 0, windowStartedAtMs: nowMs };
   }
+  return {
+    count: Number.isInteger(data.count) && data.count >= 0 ? data.count : 0,
+    windowStartedAtMs: started,
+  };
+}
 
-  // Fails CLOSED. An unrecognised Origin is a positive signal that a browser on a
-  // site we do not serve is asking for a signable message, so it is refused rather
-  // than quietly downgraded. Note this is deliberately NOT the shape of a check
-  // that skips itself when the env var is unset - a security control that does
-  // nothing until someone remembers to configure it is one that will be forgotten
-  // exactly once, in production.
-  if (!allowedHosts().has(host) && !isOwnHostingPreview(host)) {
-    throw new HttpsError("permission-denied", "Sign-in is not available from this origin.");
-  }
+async function enforceNonceQuota(request) {
+  const emulatorTestSource = process.env.FUNCTIONS_EMULATOR === "true"
+    ? request.rawRequest?.headers?.["x-emulator-test-source"]
+    : null;
+  const source = emulatorTestSource
+    || request.rawRequest?.ip
+    || request.rawRequest?.socket?.remoteAddress
+    || "unknown";
+  const sourceHash = createHash("sha256").update(source).digest("hex");
+  const globalRef = db.collection(RATE_LIMIT_COLLECTION).doc("global");
+  const sourceRef = db.collection(RATE_LIMIT_COLLECTION).doc(`source_${sourceHash}`);
+  const nowMs = Date.now();
 
-  return host;
+  await db.runTransaction(async (tx) => {
+    const [globalSnapshot, sourceSnapshot] = await Promise.all([
+      tx.get(globalRef),
+      tx.get(sourceRef),
+    ]);
+    const global = quotaCounter(globalSnapshot, nowMs);
+    const perSource = quotaCounter(sourceSnapshot, nowMs);
+
+    if (global.count >= RATE_LIMIT_GLOBAL || perSource.count >= RATE_LIMIT_PER_SOURCE) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "Too many sign-in requests. Wait one minute and try again.",
+      );
+    }
+
+    const expiresAt = Timestamp.fromMillis(nowMs + RATE_LIMIT_WINDOW_MS * 2);
+    tx.set(globalRef, {
+      count: global.count + 1,
+      windowStartedAt: Timestamp.fromMillis(global.windowStartedAtMs),
+      expiresAt,
+    });
+    tx.set(sourceRef, {
+      count: perSource.count + 1,
+      windowStartedAt: Timestamp.fromMillis(perSource.windowStartedAtMs),
+      expiresAt,
+    });
+  });
 }
 
 /**
@@ -175,12 +150,18 @@ function resolveDomain(request) {
  * browser: firestore.rules denies the whole collection.
  */
 export const getSiweNonce = onCall(
-  { region: REGION, maxInstances: NONCE_MAX_INSTANCES },
+  {
+    region: REGION,
+    maxInstances: NONCE_MAX_INSTANCES,
+    enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
+    consumeAppCheckToken: process.env.FUNCTIONS_EMULATOR !== "true",
+  },
   async (request) => {
     const address = normaliseAddress(request.data?.address);
     const ref = db.collection(NONCE_COLLECTION).doc(address);
 
     const domain = resolveDomain(request);
+    await enforceNonceQuota(request);
 
     // IDEMPOTENT while a nonce is pending: an unexpired, unconsumed nonce is
     // returned as-is rather than replaced.
@@ -304,6 +285,27 @@ export const verifySiweSignature = onCall({ region: REGION }, async (request) =>
     domain: record.domain,
   });
 
+  const parsedMessage = parseSiweMessage(message);
+  const expectedScheme = record.domain.startsWith("localhost:")
+    || record.domain.startsWith("127.0.0.1:")
+    ? "http"
+    : "https";
+  const conformsToSiwe = validateSiweMessage({
+    address,
+    domain: record.domain,
+    message: parsedMessage,
+    nonce: record.nonce,
+    scheme: expectedScheme,
+  })
+    && parsedMessage.chainId === arbitrumSepolia.id
+    && parsedMessage.version === "1"
+    && parsedMessage.uri === `${expectedScheme}://${record.domain}`
+    && parsedMessage.issuedAt?.toISOString() === record.issuedAt;
+
+  if (!conformsToSiwe) {
+    throw new HttpsError("failed-precondition", "That sign-in request is malformed. Start again.");
+  }
+
   let valid = false;
   try {
     valid = await verifyMessage({ address, message, signature, client: publicClient });
@@ -358,21 +360,76 @@ export const verifySiweSignature = onCall({ region: REGION }, async (request) =>
 });
 
 /**
+ * Invalidates every refresh token for the current wallet before the browser clears
+ * its local Firebase persistence. The Firestore marker blocks already-issued ID
+ * tokens immediately; Firebase revocation blocks those sessions from refreshing.
+ */
+export const revokeOwnSessions = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid?.toLowerCase();
+  if (!uid) throw new HttpsError("unauthenticated", "Authentication required.");
+
+  const revokedAfterEpoch = Math.floor(Date.now() / 1000);
+  const userRef = db.collection("users").doc(uid);
+  const revocationRef = db.collection(SESSION_REVOCATIONS_COLLECTION).doc(uid);
+  const auditRef = db.collection("audits").doc();
+  await db.runTransaction(async (tx) => {
+    const user = await tx.get(userRef);
+    const changedAt = Timestamp.now();
+    writeSessionCutoff(tx, revocationRef, revokedAfterEpoch, changedAt);
+    if (user.exists) {
+      tx.update(userRef, {
+        sessionsValidAfterEpoch: revokedAfterEpoch,
+        updatedAt: changedAt,
+      });
+    }
+    tx.set(auditRef, {
+      type: "session_revocation",
+      action: "SESSIONS_REVOKED_BY_USER",
+      actor: uid,
+      targetAddress: uid,
+      revokedAfterEpoch,
+      timestamp: changedAt,
+      createdAt: changedAt,
+    });
+  });
+
+  try {
+    await getAuth().revokeRefreshTokens(uid);
+  } catch (error) {
+    if (error?.code !== "auth/user-not-found") {
+      throw new HttpsError(
+        "unavailable",
+        "Server credential revocation is pending. Retry sign out.",
+      );
+    }
+  }
+
+  return { success: true, scope: "all-devices", revokedAfterEpoch };
+});
+
+/**
  * Validates that the caller is an authenticated administrator (role == 1) and not suspended.
  */
 async function requireAdmin(request) {
-  const uid = request.auth?.uid;
+  const uid = request.auth?.uid?.toLowerCase();
   if (!uid) {
     throw new HttpsError("unauthenticated", "Authentication required.");
   }
-  const userDoc = await db.collection("users").doc(uid.toLowerCase()).get();
+  const userDoc = await db.collection("users").doc(uid).get();
   if (!userDoc.exists || userDoc.data()?.role !== 1) {
     throw new HttpsError("permission-denied", "Administrator privilege required.");
   }
   if (userDoc.data()?.suspended) {
     throw new HttpsError("permission-denied", "This administrator account is suspended.");
   }
-  return { uid: uid.toLowerCase(), adminUser: userDoc.data() };
+  const authTime = request.auth?.token?.auth_time ?? 0;
+  const validAfter = userDoc.data()?.sessionsValidAfterEpoch;
+  const revocation = await db.collection(SESSION_REVOCATIONS_COLLECTION).doc(uid).get();
+  const revocationAfter = revocation.exists ? revocation.data()?.sessionsValidAfterEpoch : null;
+  if (isAuthTimeRevoked(authTime, validAfter, revocationAfter)) {
+    throw new HttpsError("unauthenticated", "This session was revoked. Sign in again.");
+  }
+  return { uid, adminUser: userDoc.data() };
 }
 
 /**
@@ -458,36 +515,20 @@ export const adminChangeRole = onCall({ region: REGION }, async (request) => {
   }
 
   const targetRef = db.collection("users").doc(targetAddress);
-  const targetSnap = await targetRef.get();
-  if (!targetSnap.exists) {
-    throw new HttpsError("not-found", "Target user profile not found.");
-  }
-
-  const targetData = targetSnap.data();
-  const previousRole = typeof targetData.role === "number" ? targetData.role : 0;
-  if (previousRole === newRole) {
-    throw new HttpsError("failed-precondition", "Target user already possesses this role assignment.");
-  }
-
-  await targetRef.update({
-    role: newRole,
-    updatedAt: Timestamp.now(),
+  const auditRef = db.collection("audits").doc();
+  let previousRole;
+  await db.runTransaction(async (tx) => {
+    previousRole = await applyRoleChangeTransaction(tx, {
+      targetRef,
+      auditRef,
+      actorUid,
+      adminUser,
+      targetAddress,
+      newRole,
+      reason,
+      timestamp: Timestamp.now(),
+    });
   });
-
-  const auditEntry = {
-    type: "role_change",
-    action: "ROLE_CHANGE",
-    actor: actorUid,
-    actorName: adminUser.fullName || actorUid,
-    targetAddress,
-    targetName: targetData.fullName || targetAddress,
-    previousRole,
-    newRole,
-    reason: reason.trim(),
-    timestamp: Timestamp.now(),
-    createdAt: Timestamp.now(),
-  };
-  await db.collection("audits").add(auditEntry);
 
   return {
     success: true,
@@ -519,55 +560,39 @@ export const adminSetSuspended = onCall({ region: REGION }, async (request) => {
   }
 
   const targetRef = db.collection("users").doc(targetAddress);
-  const targetSnap = await targetRef.get();
-  if (!targetSnap.exists) {
-    throw new HttpsError("not-found", "Target user profile not found.");
-  }
-
-  const targetData = targetSnap.data();
-  const currentSuspended = Boolean(targetData.suspended);
-  if (currentSuspended === suspended) {
-    throw new HttpsError(
-      "failed-precondition",
-      suspended ? "User account is already suspended." : "User account is not currently suspended.",
-    );
-  }
-
-  await targetRef.update({
-    suspended,
-    updatedAt: Timestamp.now(),
+  const revocationRef = db.collection(SESSION_REVOCATIONS_COLLECTION).doc(targetAddress);
+  const auditRef = db.collection("audits").doc();
+  await db.runTransaction(async (tx) => {
+    await applySuspensionChangeTransaction(tx, {
+      targetRef,
+      auditRef,
+      revocationRef,
+      actorUid,
+      adminUser,
+      targetAddress,
+      suspended,
+      reason,
+      timestamp: Timestamp.now(),
+      revokedAfterEpoch: Math.floor(Date.now() / 1000),
+    });
   });
 
   if (suspended) {
-    try {
-      await getAuth().revokeRefreshTokens(targetAddress);
-    } catch (err) {
-      if (err?.code !== "auth/user-not-found") {
-        console.error(`Failed to revoke refresh tokens for ${targetAddress}:`, err);
-      }
-    }
+    await finalizeSuspensionRevocation({
+      db,
+      Timestamp,
+      targetRef,
+      auditRef,
+      targetAddress,
+      revokeRefreshTokens: (uid) => getAuth().revokeRefreshTokens(uid),
+    });
   }
-
-  const auditEntry = {
-    type: "suspension_change",
-    action: suspended ? "USER_SUSPENDED" : "USER_REINSTATED",
-    actor: actorUid,
-    actorName: adminUser.fullName || actorUid,
-    targetAddress,
-    targetName: targetData.fullName || targetAddress,
-    previousState: currentSuspended,
-    newState: suspended,
-    reason: reason.trim(),
-    timestamp: Timestamp.now(),
-    createdAt: Timestamp.now(),
-  };
-  await db.collection("audits").add(auditEntry);
 
   return {
     success: true,
     targetAddress,
     suspended,
+    revocationStatus: suspended ? "succeeded" : "not-required",
     updatedAt: new Date().toISOString(),
   };
 });
-

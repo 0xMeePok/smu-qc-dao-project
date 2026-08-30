@@ -225,6 +225,25 @@ describe("adminChangeRole", () => {
     );
     assert.equal(res.error?.status, "FAILED_PRECONDITION");
   });
+
+  it("[QCDAO-128] serializes concurrent role changes with one matching audit", async () => {
+    await db.collection("users").doc(user2Address).update({ role: 0 });
+    const reason = "Concurrent promotion atomicity test";
+    const outcomes = await Promise.all([
+      call("adminChangeRole", { targetAddress: user2Address, newRole: 1, reason }, { token: adminToken }),
+      call("adminChangeRole", { targetAddress: user2Address, newRole: 1, reason }, { token: adminToken }),
+    ]);
+
+    assert.equal(outcomes.filter((outcome) => outcome.result?.success).length, 1);
+    assert.equal(outcomes.filter((outcome) => outcome.error?.status === "FAILED_PRECONDITION").length, 1);
+    const matchingAudits = await db.collection("audits")
+      .where("reason", "==", reason)
+      .get();
+    assert.equal(matchingAudits.size, 1);
+    assert.equal(matchingAudits.docs[0].data().previousRole, 0);
+    assert.equal(matchingAudits.docs[0].data().newRole, 1);
+    await db.collection("users").doc(user2Address).update({ role: 0 });
+  });
 });
 
 describe("adminSetSuspended", () => {
@@ -243,6 +262,7 @@ describe("adminSetSuspended", () => {
 
     const userDoc = await db.collection("users").doc(user2Address).get();
     assert.equal(userDoc.data()?.suspended, true);
+    assert.equal(userDoc.data()?.tokenRevocationStatus, "succeeded");
 
     const auditsSnap = await db
       .collection("audits")
@@ -253,6 +273,7 @@ describe("adminSetSuspended", () => {
     const audit = auditsSnap.docs[0].data();
     assert.equal(audit.newState, true);
     assert.equal(audit.action, "USER_SUSPENDED");
+    assert.equal(audit.revocationStatus, "succeeded");
   });
 
   it("[BIT-AAR-013] reinstates a user and writes an audit entry", async () => {
@@ -343,5 +364,36 @@ describe("adminSetSuspended", () => {
       { token: admin2Token },
     );
     assert.equal(suspendRes.error?.status, "PERMISSION_DENIED");
+  });
+});
+
+describe("revokeOwnSessions", () => {
+  it("[QCDAO-129] records immediate invalidation and revokes all refresh tokens", async () => {
+    const token = await getIdTokenForAccount(user2Account);
+    const res = await call("revokeOwnSessions", {}, { token });
+    assert.equal(res.result?.success, true);
+    assert.equal(res.result?.scope, "all-devices");
+
+    const user = await db.collection("users").doc(user2Address).get();
+    assert.equal(typeof user.data()?.sessionsValidAfterEpoch, "number");
+    const audits = await db.collection("audits")
+      .where("action", "==", "SESSIONS_REVOKED_BY_USER")
+      .where("targetAddress", "==", user2Address)
+      .get();
+    assert.equal(audits.empty, false);
+  });
+
+  it("[QCDAO-129] writes a revocation cutoff even when no profile exists", async () => {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const token = await getIdTokenForAccount(account);
+    const address = account.address.toLowerCase();
+    const user = await db.collection("users").doc(address).get();
+    assert.equal(user.exists, false);
+
+    const res = await call("revokeOwnSessions", {}, { token });
+    assert.equal(res.result?.success, true);
+
+    const cutoff = await db.collection("sessionRevocations").doc(address).get();
+    assert.equal(typeof cutoff.data()?.sessionsValidAfterEpoch, "number");
   });
 });

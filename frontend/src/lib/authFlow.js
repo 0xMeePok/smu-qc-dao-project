@@ -26,12 +26,24 @@ export function requireFirebase() {
 
 export async function requestSignInMessage(address) {
   requireFirebase();
-  const getSiweNonce = httpsCallable(functions, "getSiweNonce");
+  const getSiweNonce = httpsCallable(functions, "getSiweNonce", {
+    limitedUseAppCheckTokens: true,
+  });
   const { data } = await getSiweNonce({ address });
   if (!data?.message) {
     throw new OnboardingError("The server did not return a message to sign. Try again.");
   }
   return data.message;
+}
+
+export async function revokeOwnSessions() {
+  requireFirebase();
+  const revoke = httpsCallable(functions, "revokeOwnSessions");
+  const { data } = await revoke();
+  if (!data?.success) {
+    throw new OnboardingError("The server could not invalidate this session. Retry sign out.");
+  }
+  return data;
 }
 
 export async function exchangeSignatureForSession({ address, signature }) {

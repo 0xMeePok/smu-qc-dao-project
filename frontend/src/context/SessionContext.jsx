@@ -4,7 +4,7 @@ import { getConnection, switchChain } from "wagmi/actions";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
-import { exchangeSignatureForSession, requestSignInMessage } from "../lib/authFlow.js";
+import { exchangeSignatureForSession, requestSignInMessage, revokeOwnSessions } from "../lib/authFlow.js";
 import { createProfile, findProfileByAddress, updateProfile } from "../lib/profile.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
@@ -204,12 +204,28 @@ export function SessionProvider({ children }) {
   // signature at sign-in time, so a momentary "disconnected" reading from wagmi is
   // not itself a reason to end it.
   useEffect(() => {
-    if (!verifiedAddress) return;
+    if (!verifiedAddress) return undefined;
     const switchedToADifferentAccount = address && address.toLowerCase() !== verifiedAddress;
-    if (!switchedToADifferentAccount) return;
-    if (isFirebaseConfigured && auth.currentUser) signOut(auth).catch(() => { });
-    clearActivity();
-    reset();
+    if (!switchedToADifferentAccount) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        if (isFirebaseConfigured && auth.currentUser) {
+          await signOut(auth);
+        }
+        if (cancelled) return;
+        clearActivity();
+        reset();
+      } catch (caught) {
+        if (cancelled) return;
+        setError(messageForFirebaseError(caught));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [address, verifiedAddress, reset]);
 
   const completeOnboarding = useCallback(
@@ -233,9 +249,20 @@ export function SessionProvider({ children }) {
 
   const endSession = useCallback(
     async ({ reason = null, redirectToLogin = false } = {}) => {
-      if (isFirebaseConfigured && auth.currentUser) {
-        await signOut(auth).catch(() => { });
+      setError(null);
+      try {
+        if (isFirebaseConfigured && auth.currentUser) {
+          // Invalidate server credentials first. Only after both server revocation
+          // and Firebase persistence removal succeed may the UI claim logout.
+          await revokeOwnSessions();
+          await signOut(auth);
+        }
+      } catch (caught) {
+        const message = messageForFirebaseError(caught);
+        setError(message);
+        return { ok: false, message };
       }
+
       await disconnectAsync().catch(() => { });
       clearActivity();
       reset();
@@ -245,6 +272,7 @@ export function SessionProvider({ children }) {
           : null,
       );
       if (redirectToLogin) go("login");
+      return { ok: true };
     },
     [disconnectAsync, reset],
   );

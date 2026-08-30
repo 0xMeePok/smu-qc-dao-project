@@ -3,6 +3,13 @@ import { describe, it } from "node:test";
 import { messageForFirebaseError, fieldForFirebaseError, OnboardingError } from "../../src/lib/errors.js";
 
 describe("Unit Tests: Error Messages & Mapping", () => {
+  it("surfaces retryable session revocation failures without a misleading success", () => {
+    const message = messageForFirebaseError({
+      code: "functions/unavailable",
+      message: "Server credential revocation is pending. Retry sign out.",
+    });
+    assert.equal(message, "Server credential revocation is pending. Retry sign out.");
+  });
   it("should map suspension error correctly when message contains 'suspended'", () => {
     const error = {
       code: "functions/permission-denied",
