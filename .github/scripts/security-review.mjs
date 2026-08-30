@@ -3,13 +3,14 @@ import { pathToFileURL } from "node:url";
 
 export const COMMENT_MARKER = "<!-- qcdao-ai-security-review -->";
 export const FIREWORKS_MODEL = "accounts/fireworks/models/glm-5p3";
-export const DEFAULT_DIFF_CHUNK_BYTES = 80_000;
+export const DEFAULT_DIFF_CHUNK_BYTES = 250_000;
+export const MAX_REVIEW_FINDINGS = 20;
+export const MAX_REVIEW_OUTPUT_TOKENS = 24_000;
 export const DEFAULT_MAX_REVIEW_CHUNKS = 20;
 export const MAX_REVIEW_CHUNKS = 100;
 
 const GITHUB_API_VERSION = "2022-11-28";
-const MAX_FINDINGS_PER_REVIEW = 10;
-const MAX_FINDING_CANDIDATES = MAX_REVIEW_CHUNKS * MAX_FINDINGS_PER_REVIEW;
+const MAX_FINDING_CANDIDATES = MAX_REVIEW_CHUNKS * MAX_REVIEW_FINDINGS;
 const ALLOWED_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 const ALLOWED_CONFIDENCE = new Set(["high", "medium"]);
 
@@ -23,7 +24,7 @@ export const REVIEW_SCHEMA = {
     },
     findings: {
       type: "array",
-      maxItems: MAX_FINDINGS_PER_REVIEW,
+      maxItems: MAX_REVIEW_FINDINGS,
       items: {
         type: "object",
         additionalProperties: false,
@@ -320,7 +321,7 @@ async function requestFireworksReview(config, prompt) {
         schema: REVIEW_SCHEMA,
       },
     },
-    max_completion_tokens: 6_000,
+    max_completion_tokens: MAX_REVIEW_OUTPUT_TOKENS,
     temperature: 0.1,
   };
 
@@ -370,7 +371,7 @@ async function requestOpenAIReview(config, prompt) {
     model: config.model,
     instructions: SYSTEM_PROMPT,
     input: prompt,
-    max_output_tokens: 6_000,
+    max_output_tokens: MAX_REVIEW_OUTPUT_TOKENS,
     store: false,
     text: {
       format: {
@@ -463,7 +464,7 @@ export function normalizeReview(value) {
 
   const severityRank = { critical: 0, high: 1, medium: 2, low: 3 };
   findings.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]);
-  const limitedFindings = findings.slice(0, 10);
+  const limitedFindings = findings.slice(0, MAX_REVIEW_FINDINGS);
 
   return {
     summary: cleanValue(value.summary, 1_000) ||
@@ -484,10 +485,12 @@ export function mergeChunkReviews(reviews) {
   return merged;
 }
 
-function safeMarkdown(value) {
-  return cleanValue(value, 2_000)
+function safeMarkdown(value, maxLength = 2_000) {
+  return cleanValue(value, maxLength * 2)
     .replace(/@/g, "@\u200b")
-    .replace(/([\\`*_{}\[\]()#+.!|<>])/g, "\\$1");
+    .replace(/([\\`*_{}\[\]()#+.!|<>])/g, "\\$1")
+    .slice(0, maxLength)
+    .replace(/\\$/, "");
 }
 
 function safeCode(value) {
@@ -503,7 +506,7 @@ export function renderReviewComment(review, metadata) {
     COMMENT_MARKER,
     "## AI security review",
     "",
-    safeMarkdown(review.summary),
+    safeMarkdown(review.summary, 800),
     "",
   ];
 
@@ -514,18 +517,18 @@ export function renderReviewComment(review, metadata) {
     review.findings.forEach((finding, index) => {
       const location = finding.line ? `${finding.file}:${finding.line}` : finding.file;
       lines.push(
-        `### ${index + 1}. [${finding.severity.toUpperCase()}] ${safeMarkdown(finding.title)}`,
+        `### ${index + 1}. [${finding.severity.toUpperCase()}] ${safeMarkdown(finding.title, 160)}`,
         "",
         `**Location:** \`${safeCode(location)}\`  `,
         `**Confidence:** ${finding.confidence}`,
         "",
-        `**Why this matters:** ${safeMarkdown(finding.description)}`,
+        `**Why this matters:** ${safeMarkdown(finding.description, 650)}`,
         "",
-        `**Impact:** ${safeMarkdown(finding.impact)}`,
+        `**Impact:** ${safeMarkdown(finding.impact, 400)}`,
         "",
-        `**Suggested remediation:** ${safeMarkdown(finding.recommendation)}`,
+        `**Suggested remediation:** ${safeMarkdown(finding.recommendation, 650)}`,
       );
-      if (finding.evidence) lines.push("", `**Evidence:** ${safeMarkdown(finding.evidence)}`);
+      if (finding.evidence) lines.push("", `**Evidence:** ${safeMarkdown(finding.evidence, 200)}`);
       lines.push("");
     });
   }

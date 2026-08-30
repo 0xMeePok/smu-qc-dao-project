@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   COMMENT_MARKER,
+  DEFAULT_DIFF_CHUNK_BYTES,
   FIREWORKS_MODEL,
+  MAX_REVIEW_FINDINGS,
+  MAX_REVIEW_OUTPUT_TOKENS,
   assertReviewChunkLimit,
   buildReviewPrompt,
   chunkPullRequestDiff,
@@ -18,6 +21,9 @@ test("Fireworks is the default provider and GLM-5.3 is the default model", () =>
   const config = resolveProviderConfig({ FIREWORKS_API_KEY: "test-key" });
   assert.equal(config.provider, "fireworks");
   assert.equal(config.model, FIREWORKS_MODEL);
+  assert.equal(DEFAULT_DIFF_CHUNK_BYTES, 250_000);
+  assert.equal(MAX_REVIEW_FINDINGS, 20);
+  assert.equal(MAX_REVIEW_OUTPUT_TOKENS, 24_000);
 });
 
 test("OpenAI requires an explicit model so migration is deliberate", () => {
@@ -96,6 +102,34 @@ test("normalization drops malformed findings, de-duplicates, and sorts by severi
   assert.deepEqual(review.findings.map((finding) => finding.severity), ["critical", "medium"]);
 });
 
+test("review keeps 20 globally prioritized findings", () => {
+  const base = {
+    confidence: "high",
+    file: "src/auth.js",
+    description: "Authorization is skipped for this route.",
+    impact: "An unauthenticated caller can read private records.",
+    recommendation: "Verify the authenticated principal before reading.",
+    evidence: "The handler reads records before checking the caller.",
+  };
+  const findings = Array.from({ length: 20 }, (_, index) => ({
+    ...base,
+    title: `Low issue ${index + 1}`,
+    severity: "low",
+    line: index + 1,
+  }));
+  findings.push({
+    ...base,
+    title: "Critical issue",
+    severity: "critical",
+    line: 100,
+  });
+
+  const review = normalizeReview({ summary: "Many findings", findings });
+  assert.equal(review.findings.length, 20);
+  assert.equal(review.findings[0].severity, "critical");
+  assert.equal(review.findings.filter((finding) => finding.severity === "low").length, 19);
+});
+
 test("chunk reviews are merged, de-duplicated, and globally prioritized", () => {
   const base = {
     confidence: "high",
@@ -141,6 +175,33 @@ test("rendered comments neutralize mentions and model-controlled markdown", () =
   assert.doesNotMatch(body, /@maintainer/);
   assert.doesNotMatch(body, /!\[pixel\]\(/);
   assert.match(body, /No concrete, actionable security findings/);
+});
+
+test("rendered comment fits all 20 detailed findings without truncating the footer", () => {
+  const findings = Array.from({ length: 20 }, (_, index) => ({
+    title: `Issue ${index + 1} ${"*".repeat(160)}`,
+    severity: "high",
+    confidence: "high",
+    file: `src/contract-${index + 1}.sol`,
+    line: index + 1,
+    description: "*".repeat(1_200),
+    impact: "*".repeat(800),
+    recommendation: "*".repeat(1_200),
+    evidence: "*".repeat(400),
+  }));
+  const review = normalizeReview({ summary: "*".repeat(1_000), findings });
+  const body = renderReviewComment(review, {
+    headSha: "1234567890abcdef",
+    provider: "fireworks",
+    model: FIREWORKS_MODEL,
+    diffBytes: 250_000,
+    chunkCount: 1,
+  });
+
+  assert.equal(review.findings.length, 20);
+  assert.match(body, /### 20\./);
+  assert.ok(body.length < 60_000);
+  assert.match(body, /AI-assisted review can miss vulnerabilities/);
 });
 
 test("failure comments do not publish provider error details", () => {
