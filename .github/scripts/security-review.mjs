@@ -2,12 +2,13 @@ import fs from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 export const COMMENT_MARKER = "<!-- qcdao-ai-security-review -->";
-export const FIREWORKS_MODEL = "accounts/fireworks/models/glm-5p3";
+export const FIREWORKS_MODEL = "accounts/fireworks/models/glm-5p3-flash";
 export const DEFAULT_DIFF_CHUNK_BYTES = 250_000;
 export const MAX_REVIEW_FINDINGS = 20;
 export const MAX_REVIEW_OUTPUT_TOKENS = 24_000;
 export const DEFAULT_MAX_REVIEW_CHUNKS = 20;
 export const MAX_REVIEW_CHUNKS = 100;
+export const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS = 600_000;
 
 const GITHUB_API_VERSION = "2022-11-28";
 const MAX_FINDING_CANDIDATES = MAX_REVIEW_CHUNKS * MAX_REVIEW_FINDINGS;
@@ -86,6 +87,12 @@ export function resolveProviderConfig(env = process.env) {
       provider,
       apiKey: env.FIREWORKS_API_KEY,
       model: (env.SECURITY_REVIEW_MODEL || FIREWORKS_MODEL).trim(),
+      requestTimeoutMs: boundedInteger(
+        env.SECURITY_REVIEW_PROVIDER_TIMEOUT_MS,
+        DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+        60_000,
+        900_000,
+      ),
     };
   }
 
@@ -100,6 +107,12 @@ export function resolveProviderConfig(env = process.env) {
       provider,
       apiKey: env.OPENAI_API_KEY,
       model: env.SECURITY_REVIEW_MODEL.trim(),
+      requestTimeoutMs: boundedInteger(
+        env.SECURITY_REVIEW_PROVIDER_TIMEOUT_MS,
+        DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+        60_000,
+        900_000,
+      ),
     };
   }
 
@@ -250,23 +263,55 @@ async function checkedFetch(url, options, label) {
   return response;
 }
 
-async function retryingJsonRequest(url, options, label) {
+export async function retryingJsonRequest(
+  url,
+  options,
+  label,
+  {
+    fetchImpl = fetch,
+    timeoutMs = DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+    sleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+    logger = console,
+  } = {},
+) {
   let lastError;
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const startedAt = Date.now();
+    const signal = AbortSignal.timeout(timeoutMs);
+    logger.log(
+      `${label}: starting attempt ${attempt}/3 (timeout ${Math.ceil(timeoutMs / 1_000)} seconds).`,
+    );
+
     let response;
     try {
-      response = await fetch(url, {
+      response = await fetchImpl(url, {
         ...options,
-        signal: AbortSignal.timeout(180_000),
+        signal,
       });
     } catch (error) {
-      lastError = error;
-      if (attempt === 3) throw error;
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
+      const elapsedSeconds = Math.max(1, Math.ceil((Date.now() - startedAt) / 1_000));
+      if (signal.aborted) {
+        throw new Error(
+          `${label} did not complete within ${elapsedSeconds} seconds. ` +
+          "The timed-out generation was not retried to avoid duplicate billed inference.",
+        );
+      }
+
+      lastError = new Error(`${label} failed because the provider connection ended unexpectedly`);
+      if (attempt === 3) throw lastError;
+      logger.warn(
+        `${label}: attempt ${attempt}/3 had a transient connection failure after ` +
+        `${elapsedSeconds} seconds; retrying.`,
+      );
+      await sleep(attempt * 1_000);
       continue;
     }
 
+    const elapsedSeconds = Math.max(1, Math.ceil((Date.now() - startedAt) / 1_000));
+    logger.log(
+      `${label}: attempt ${attempt}/3 returned HTTP ${response.status} after ${elapsedSeconds} seconds.`,
+    );
     if (response.ok) return response.json();
 
     const responseText = (await response.text()).slice(0, 2_000);
@@ -286,7 +331,8 @@ async function retryingJsonRequest(url, options, label) {
     lastError = error;
 
     if (attempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
+      logger.warn(`${label}: HTTP ${response.status} is retryable; waiting before retrying.`);
+      await sleep(attempt * 1_000);
     }
   }
 
@@ -336,6 +382,7 @@ async function requestFireworksReview(config, prompt) {
       body: JSON.stringify(payload),
     },
     "Fireworks security review",
+    { timeoutMs: config.requestTimeoutMs },
   );
 
   const choice = result?.choices?.[0];
@@ -394,6 +441,7 @@ async function requestOpenAIReview(config, prompt) {
       body: JSON.stringify(payload),
     },
     "OpenAI security review",
+    { timeoutMs: config.requestTimeoutMs },
   );
 
   const content = extractOpenAIText(result);
