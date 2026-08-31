@@ -12,11 +12,14 @@ for anyone editing `firestore.rules` or `functions/index.js` and redeploying.
 firebase/
 ├── deploy.sh                    # One-shot production setup - see "Deploy" below
 ├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, siweNonces/
+├── storage.rules                # Authorisation for posting attachments (QCDAO-58)
+├── storage.cors.json            # Bucket CORS allow-list - see "Posting attachments"
 ├── firestore.indexes.json       # No composite indexes needed yet
 ├── firebase.json                # Emulator ports, hosting config, functions source path
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
 ├── test/
-│   └── firestore.rules.test.mjs # Rules tests via the Firestore emulator
+│   ├── firestore.rules.test.mjs # Rules tests via the Firestore emulator
+│   └── storage.rules.test.mjs   # Attachment rules tests via the Storage emulator
 └── functions/
     ├── index.js                 # getSiweNonce + verifySiweSignature (see below)
     ├── package.json
@@ -61,6 +64,12 @@ cd frontend && npm run dev
 
 Sign-in talks straight to the live backend. The root [README](../README.md#getting-started)
 has the full local (emulator) flow.
+
+**Posting attachments are the one exception.** They need the Storage emulator even if
+everything else points at the live backend, because the production bucket does not
+accept localhost origins — see [Posting attachments](#posting-attachments-qcdao-58).
+Set `VITE_FIREBASE_USE_EMULATORS=true` in `frontend/.env.local` before working on
+them; the app will tell you if you forget.
 
 Verify the backend itself is reachable, independent of the frontend:
 
@@ -107,7 +116,7 @@ Edit `.firebaserc` and put the real project id in place of
 Install first (section above), then:
 
 ```bash
-npx firebase emulators:start --only functions,firestore,auth --project qcdao-a0c7a
+npx firebase emulators:start --only functions,firestore,auth,storage --project qcdao-a0c7a
 ```
 
 Point the frontend at it with `VITE_FIREBASE_USE_EMULATORS=true` in
@@ -214,7 +223,7 @@ npm install --prefix frontend
 ```bash
 # terminal 1
 cd firebase
-npx firebase emulators:start --only functions,firestore,auth --project qcdao-a0c7a
+npx firebase emulators:start --only functions,firestore,auth,storage --project qcdao-a0c7a
 
 # terminal 2
 cd frontend
@@ -316,6 +325,9 @@ You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
 | `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation`, `biography`, `expertise` — nothing else |
 | `siweNonces/{address}` | nobody; Admin SDK only | pending sign-in nonces |
 
+Postings live in `problems/{problemId}`, readable only by the owning wallet. Their
+PDF attachments live in Cloud Storage — see below.
+
 A profile is split across two documents because Firestore rules can only allow or
 deny a whole document — there is no way to publish some fields and hide others
 within one. `role` therefore lives only in `users`, so nothing can reveal which
@@ -347,6 +359,93 @@ batch, so an account can never end up half-created.
 No other fields are allowed — `create` and `update` both reject a document with any
 field outside this list, so a client can't smuggle in something like a self-granted
 `isAdmin` for later code to trust by accident.
+
+## Posting attachments (QCDAO-58)
+
+Supporting PDFs for a posting live in Cloud Storage, not Firestore. The object path
+carries the authorisation:
+
+```
+problems/{ownerId}/{problemId}/{attachmentId}.pdf
+```
+
+`ownerId` is a wallet address, and `request.auth.uid` **is** the lowercase wallet
+address, so `storage.rules` proves ownership straight from the path with no
+document lookup. That is also what makes upload-then-cancel work before the posting
+exists: there is no `problems/{problemId}` document to consult while the form is
+still a draft, but the path is still provably the caller's own.
+
+| Rule | Enforced in |
+|---|---|
+| PDF content type **and** `.pdf` object name | `storage.rules` |
+| 10 MB per file | `storage.rules` |
+| Max 5 attachments per posting | `firestore.rules` |
+| Only the posting owner may upload, read or delete | `storage.rules` |
+| Suspended / revoked sessions blocked | `storage.rules`, via cross-service reads of `users/` |
+| Recorded `path` must match owner + posting | `firestore.rules` |
+
+Read access deliberately mirrors the `problems/{problemId}` read rule exactly —
+owner only. **If postings later become readable by a wider audience, both rules
+must change together**, or an attachment becomes readable by people who cannot read
+the posting it belongs to.
+
+Downloads use the SDK's `getBlob()`, not `getDownloadURL()`. That is a security
+decision: `getDownloadURL()` mints a URL carrying a permanent token that works for
+anyone who has the link, with no sign-in and no rules evaluation, which would
+quietly defeat the access control above. `getBlob()` sends the user's ID token and
+is evaluated against `storage.rules` on every request.
+
+Stored attachments are **immutable**. There is no overwrite: a create is refused if
+anything already exists at that path, so the bytes behind a reference cannot change
+after a reviewer has read them. Replacing a file is delete-then-upload, which shows
+up as a change to the posting record. Note that omitting an `update` rule is *not*
+what achieves this — Storage treats an overwrite as a `create`, so the rule tests
+`resource == null` explicitly.
+
+### One-time bucket setup
+
+Create the bucket in **production mode**, not test mode. Test mode is
+`allow read, write: if true` for 30 days — a world-writable bucket on a project that
+already holds real user data. The first deploy replaces the rules either way, but
+production mode fails safe if that deploy is delayed.
+
+Then, **once per project**, from `firebase/`:
+
+```bash
+# 1. CORS. getBlob() and resumable uploads are cross-origin XHRs.
+gcloud storage buckets update gs://qcdao-a0c7a.firebasestorage.app --cors-file=storage.cors.json
+
+# 2. Abort incomplete resumable uploads after a day, so cancelled uploads
+#    cannot accumulate billable partial objects.
+gcloud storage buckets update gs://qcdao-a0c7a.firebasestorage.app --lifecycle-file=storage.lifecycle.json
+```
+
+3. **Enable App Check enforcement for Cloud Storage** in the Firebase console. The
+   SDK already sends App Check tokens on Storage calls (`initializeAppCheck` runs on
+   the same app instance); only enforcement is off. This is the main defence against
+   someone scripting bulk uploads with a valid ID token — see the residual-risk note
+   at the top of `storage.rules`.
+4. Set a **budget alert** on the project.
+
+`storage.cors.json` lists the two deployed origins and nothing else — no `*`, and
+deliberately **no `localhost`**. A developer machine is not an origin the production
+bucket should answer to, and leaving it in means any page served from
+`localhost:5173` on someone's laptop is a permitted reader of production objects.
+
+The consequence is that **attachment work must use the Storage emulator**. Sign-in,
+Firestore and functions all still work fine against the live backend from localhost,
+so only attachments are affected — which is exactly why it would be confusing. The
+app detects that combination up front (`storageNeedsEmulator` in
+`frontend/src/lib/firebase.js`) and refuses with a message naming the fix, instead of
+letting the browser report a bare CORS error that explains nothing.
+
+Hosting **preview channels get generated subdomains** (`qcdao-a0c7a--<channel>.web.app`)
+and are not covered. GCS CORS matches origins exactly and has no subdomain wildcard,
+so testing attachments on a preview channel means adding that exact origin to this
+file and re-running the command, then removing it when the channel expires.
+
+Without the CORS step, uploads and downloads fail in the browser with an opaque CORS
+error while the rules themselves are perfectly fine.
 
 ## The `publicProfiles/{address}` schema
 

@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -99,10 +100,36 @@ if (auth) {
 export const db = app ? getFirestore(app) : null;
 export const functions = app ? getFunctions(app, FUNCTIONS_REGION) : null;
 
-if (app && import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true") {
+// Posting attachments (QCDAO-58). storageBucket is optional for the rest of the
+// app, so this is null when it is absent rather than throwing at import time -
+// frontend/src/lib/attachments.js reports that as a configuration error the user
+// can act on, instead of the whole module failing to load.
+export const isStorageConfigured = Boolean(app && config.storageBucket);
+export const storage = isStorageConfigured ? getStorage(app) : null;
+
+const usingEmulators = import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true";
+
+if (app && usingEmulators) {
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+  if (storage) connectStorageEmulator(storage, "127.0.0.1", 9199);
 }
+
+// True when the page is served from localhost but Storage is pointed at the REAL
+// bucket, because VITE_FIREBASE_USE_EMULATORS is not "true".
+//
+// That combination cannot work: the production bucket's CORS allow-list
+// (firebase/storage.cors.json) deliberately does not include localhost, so every
+// upload and download fails with a bare "CORS error" that says nothing about the
+// cause. Everything ELSE in the app - sign-in, Firestore, functions - works fine
+// against the live backend from localhost, which is exactly what makes this
+// confusing: only the attachment features break.
+//
+// Detected here rather than left to fail, so the message names the fix.
+export const storageNeedsEmulator = Boolean(storage)
+  && !usingEmulators
+  && typeof window !== "undefined"
+  && ["localhost", "127.0.0.1", "[::1]", "::1"].includes(window.location.hostname);
 
 export default app;

@@ -244,7 +244,7 @@ Works on Spark, no billing, no deploy:
 
 ```bash
 # terminal 1
-cd firebase && npx firebase emulators:start --only functions,firestore,auth --project qc-dao-demo
+cd firebase && npx firebase emulators:start --only functions,firestore,auth,storage --project qc-dao-demo
 
 # terminal 2
 npm run dev --prefix frontend
@@ -270,7 +270,7 @@ npm test --prefix frontend      # 17 validation tests, no emulator needed
 npm test --prefix firebase      # 18 Firestore rules tests (boots the emulator, needs Java)
 
 # Adversarial signature tests, with the functions emulator running:
-cd firebase && npx firebase emulators:start --only functions,firestore,auth --project qc-dao-demo
+cd firebase && npx firebase emulators:start --only functions,firestore,auth,storage --project qc-dao-demo
 cd firebase/functions && npm test    # 7 attack tests
 ```
 

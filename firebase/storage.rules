@@ -1,0 +1,177 @@
+rules_version = '2';
+
+// QCDAO-58 - supporting files attached to a posting.
+//
+// The object path IS the authorisation record:
+//
+//     problems/{ownerId}/{problemId}/{fileName}
+//
+// `ownerId` is a wallet address, and request.auth.uid IS the lowercase wallet
+// address (firebase/functions/index.js only mints a token after verifying a
+// signature over a server-issued nonce - see the header of firestore.rules). So
+// `request.auth.uid == ownerId` is a real ownership proof taken straight from the
+// path, with no Firestore lookup on the hot path.
+//
+// Putting the owner in the path rather than reading problems/{problemId}.ownerId
+// is what makes "remove-before-publish" work: attachments are uploaded while the
+// posting is still an unsaved draft, so there is no posting document to consult
+// yet. Ownership is still provable, because it is in the path being written to.
+//
+// Read access deliberately mirrors the problems/{problemId} read rule in
+// firestore.rules exactly - owner only. When postings gain wider visibility
+// (published problems readable by evaluators/funders), extend BOTH rules
+// together, or the attachment will be readable by an audience that cannot read
+// the posting it belongs to.
+//
+// KNOWN RESIDUAL RISK - unbounded object COUNT.
+// firestore.rules caps a posting's attachment list at 5, but that governs the
+// posting record, not the bucket. Storage rules cannot count objects or read a
+// running total, so a signed-in wallet can write an unlimited number of 10 MB
+// objects under paths the app will never reference. Each one is billable and
+// permanent. Every per-request property is already constrained here (owner, type,
+// name, size, metadata); what remains is a volume problem no rule can express.
+//
+// Mitigations that DO work, none of which live in this file:
+//   1. App Check enforcement on Cloud Storage (Firebase console). The SDK already
+//      attaches App Check tokens to Storage calls because initializeAppCheck runs
+//      on the same app instance - only enforcement is off. This is the big one: it
+//      requires a genuine attested app instance rather than a bare ID token.
+//   2. storage.lifecycle.json aborts incomplete resumable uploads after a day, so
+//      the cancel path in the UI cannot accumulate billable partial objects.
+//   3. A budget alert, so abuse shows up as a notification rather than an invoice.
+//   4. Follow-up work: a scheduled function that lists this prefix and deletes
+//      objects no posting references. Deliberately NOT an age-based lifecycle rule,
+//      which cannot tell an orphan from a legitimately old attachment.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Per-file cap. Mirrored in frontend/src/lib/attachments.js as MAX_FILE_BYTES;
+    // the client copy is a courtesy so the user gets an instant error, this copy is
+    // the one that is actually enforced.
+    function maxBytes() {
+      return 10 * 1024 * 1024;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isWallet(address) {
+      return isSignedIn() && request.auth.uid == address;
+    }
+
+    // Cross-service read of the same suspension/revocation state Firestore
+    // enforces. Without this a suspended user, or one whose sessions were revoked
+    // on logout, would keep full access to Storage using an ID token that
+    // Firestore has already stopped honouring.
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userExists() {
+      return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function isSuspended() {
+      return userExists() && userDoc().get('suspended', false);
+    }
+
+    // Inclusive comparison, matching hasRevokedSession() in firestore.rules: sign
+    // in and log out inside the same whole second must still invalidate the token.
+    function hasRevokedSession() {
+      return (firestore.exists(/databases/(default)/documents/sessionRevocations/$(request.auth.uid))
+          && request.auth.token.auth_time
+            <= firestore.get(/databases/(default)/documents/sessionRevocations/$(request.auth.uid)).data.sessionsValidAfterEpoch)
+        || (userExists()
+          && userDoc().keys().hasAny(['sessionsValidAfterEpoch'])
+          && request.auth.token.auth_time <= userDoc().sessionsValidAfterEpoch);
+    }
+
+    function isActiveWallet(address) {
+      return isWallet(address) && !isSuspended() && !hasRevokedSession();
+    }
+
+    // PDF only, per the story. Two independent checks because they can disagree:
+    // contentType is metadata the client supplies, and the object name is the path
+    // it writes to. Requiring both closes the case where a caller uploads
+    // `payload.html` while declaring `application/pdf`, which would otherwise be
+    // served back from a Firebase Storage download URL with an HTML content type.
+    //
+    // NOTE: neither check inspects the bytes. A determined uploader can still put
+    // arbitrary content inside a correctly-named, correctly-typed object; the
+    // client checks the %PDF- magic number to catch honest mistakes, but real
+    // content inspection means scanning server-side, which QCDAO-58 puts out of
+    // scope. Downloads are same-origin and never rendered inline, so the blast
+    // radius today is limited to the uploader's own postings.
+    //
+    // fileName and problemId are PARAMETERS, not free variables. Path captures are
+    // bound inside their own match block, so a helper declared out here that reads
+    // `fileName` directly does not see the path segment - it silently evaluates to
+    // nothing and the rule denies everything, including legitimate uploads. Passing
+    // them in is what keeps these usable from the match block below.
+    function isPdf(fileName) {
+      return request.resource.contentType == 'application/pdf'
+        && fileName.matches('^[A-Za-z0-9._-]{1,120}[.]pdf$');
+    }
+
+    function withinSizeCap() {
+      return request.resource.size > 0 && request.resource.size <= maxBytes();
+    }
+
+    // Lock the custom metadata the app relies on so a caller cannot write an
+    // object whose recorded uploader disagrees with the path it sits in.
+    function metadataIsHonest(problemId) {
+      return request.resource.metadata != null
+        && request.resource.metadata.uploadedBy == request.auth.uid
+        && request.resource.metadata.problemId == problemId;
+    }
+
+    // The posting id is a Firestore document id, so bound it to that shape. The
+    // match block already guarantees a single path segment, but nothing otherwise
+    // stopped a caller from using a 300-character segment as a scratch namespace.
+    function isPostingId(problemId) {
+      return problemId.matches('^[A-Za-z0-9_-]{1,64}$');
+    }
+
+    match /problems/{ownerId}/{problemId}/{fileName} {
+      // Same audience as the posting itself: firestore.rules allows a problem to
+      // be read only by its owner, so an attachment is too.
+      allow read: if isActiveWallet(ownerId);
+
+      // CREATE ONLY - a stored attachment is immutable for its whole life.
+      //
+      // With overwrites allowed, an owner could replace an object in place after
+      // the posting had been shared: an evaluator reads version 1, the owner
+      // silently swaps in version 2 at the same path, and nothing in Firestore or
+      // Storage records that the document under review ever changed. Attachments
+      // exist to give reviewers technical context, so "the bytes behind this
+      // reference never change" is a property worth having.
+      //
+      // Nothing legitimate is lost: uploadAttachment() mints a fresh id for every
+      // transfer, so the client never writes the same path twice. Replacing a file
+      // is delete-then-upload, which leaves the posting record visibly changed.
+      //
+      // `resource == null` is doing the real work here, NOT the absence of an
+      // `update` rule. Storage classifies an overwrite of an existing object as a
+      // `create`, so omitting `update` does not stop one - verified against the
+      // emulator, where the swap still succeeded until this clause was added.
+      // `resource` is the object already at this path, so requiring it to be null
+      // is what actually makes the write create-only.
+      allow create: if resource == null
+        && isActiveWallet(ownerId)
+        && isPostingId(problemId)
+        && isPdf(fileName)
+        && withinSizeCap()
+        && metadataIsHonest(problemId);
+
+      // Remove-before-publish, and removal after the fact. Restricted to the
+      // owner for the same reason writes are.
+      allow delete: if isActiveWallet(ownerId);
+    }
+
+    // Deny everything not matched above, including any legacy path.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

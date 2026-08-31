@@ -136,11 +136,14 @@ jobs:
       # function that relies on it cannot land seconds apart. The Firebase CLI
       # skips functions whose source is unchanged, so pushing a frontend-only
       # commit costs little here.
-      - name: Deploy Firestore rules, indexes and Cloud Functions
+      # storage:rules rides along for the same reason: QCDAO-58 attachments are
+      # authorised by storage.rules, and hosting must never go live with an
+      # uploader whose bucket rules are still the previous revision.
+      - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase
         run: |
           npx firebase deploy \
-            --only firestore:rules,firestore:indexes,functions \
+            --only firestore:rules,firestore:indexes,storage,functions \
             --project "$FIREBASE_PROJECT_ID" \
             --non-interactive
 
@@ -181,6 +184,9 @@ jobs:
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
           VITE_FIREBASE_APP_CHECK_SITE_KEY: ${{ secrets.VITE_FIREBASE_APP_CHECK_SITE_KEY }}
+          # QCDAO-58. Absent, the bundle builds fine and the attachment UI reports
+          # "Storage is not configured" at runtime instead of uploading.
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
           VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
           VITE_FIREBASE_USE_EMULATORS: "false"
         run: npm run build --prefix frontend

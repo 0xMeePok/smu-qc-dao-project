@@ -697,6 +697,139 @@ describe("problems/{problemId}", () => {
   });
 });
 
+// QCDAO-58. The bytes live in Cloud Storage under firebase/storage.rules; this
+// block covers only the reference list stored on the posting itself.
+describe("problems/{problemId} attachments", () => {
+  function attachment(overrides = {}) {
+    const id = overrides.id ?? "abc123xy";
+    const problemId = overrides.problemId ?? "att1";
+    const ownerId = overrides.ownerId ?? ADDRESS;
+    return {
+      id,
+      name: "spec.pdf",
+      size: 2048,
+      contentType: "application/pdf",
+      path: `problems/${ownerId}/${problemId}/${id}.pdf`,
+      ...overrides.fields,
+    };
+  }
+
+  it("[BIT-ATT-050] accepts a posting carrying a well-formed attachment", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "att1"), baseProblem({
+      attachments: [attachment()],
+    })));
+  });
+
+  it("[BIT-ATT-051] accepts a posting with no attachments at all", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "att_none"), baseProblem()));
+    await assertSucceeds(setDoc(doc(db, "problems", "att_empty"), baseProblem({ attachments: [] })));
+  });
+
+  it("[BIT-ATT-052] rejects a path pointing into another wallet's storage folder", async () => {
+    // The core check. Without it a user could record, on their OWN posting, a
+    // reference to a file belonging to someone else - and any later screen that
+    // renders the list would be handing out a pointer to a document the viewer
+    // was never allowed to know about.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_foreign"), baseProblem({
+      attachments: [attachment({ ownerId: OTHER, problemId: "att_foreign" })],
+    })));
+  });
+
+  it("[BIT-ATT-053] rejects a path pointing at a different posting", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_wrong_posting"), baseProblem({
+      attachments: [attachment({ problemId: "someOtherPosting" })],
+    })));
+  });
+
+  it("[BIT-ATT-054] rejects an attachment that is not a .pdf path", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_html"), baseProblem({
+      attachments: [attachment({
+        problemId: "att_html",
+        fields: { path: `problems/${ADDRESS}/att_html/abc123xy.html` },
+      })],
+    })));
+  });
+
+  it("[BIT-ATT-055] rejects a recorded size above the 10 MB cap", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_big"), baseProblem({
+      attachments: [attachment({ problemId: "att_big", fields: { size: 10 * 1024 * 1024 + 1 } })],
+    })));
+  });
+
+  it("[BIT-ATT-056] rejects a declared content type other than PDF", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_type"), baseProblem({
+      attachments: [attachment({ problemId: "att_type", fields: { contentType: "text/html" } })],
+    })));
+  });
+
+  it("[BIT-ATT-057] rejects unknown fields smuggled into an attachment record", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_extra"), baseProblem({
+      attachments: [attachment({ problemId: "att_extra", fields: { isPublic: true } })],
+    })));
+  });
+
+  it("[BIT-ATT-062] rejects a client-supplied uploadedAt timestamp", async () => {
+    // Rules cannot pin a per-item timestamp to request.time inside a list, so the
+    // field is not in the schema at all rather than being accepted unvalidated and
+    // later displayed as though the server had vouched for it.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_time"), baseProblem({
+      attachments: [attachment({
+        problemId: "att_time",
+        fields: { uploadedAt: new Date("2001-01-01") },
+      })],
+    })));
+  });
+
+  it("[BIT-ATT-058] rejects more attachments than a posting may carry", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const six = Array.from({ length: 6 }, (_, index) => attachment({
+      id: `attach${index}0000`,
+      problemId: "att_many",
+    }));
+    await assertFails(setDoc(doc(db, "problems", "att_many"), baseProblem({ attachments: six })));
+  });
+
+  it("[BIT-ATT-059] rejects an attachment list that is not a list", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "att_shape"), baseProblem({
+      attachments: { id: "abc123xy" },
+    })));
+  });
+
+  it("[BIT-ATT-060] lets the owner add and then remove an attachment on update", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "att_edit"), baseProblem()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "att_edit"), {
+      attachments: [attachment({ problemId: "att_edit" })],
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "att_edit"), {
+      attachments: [],
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-ATT-061] blocks another wallet from attaching to someone else's posting", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "att_other"), baseProblem());
+    });
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(updateDoc(doc(db, "problems", "att_other"), {
+      attachments: [attachment({ ownerId: OTHER, problemId: "att_other" })],
+      updatedAt: serverTimestamp(),
+    }));
+  });
+});
+
 describe("proposals/{proposalId}", () => {
   it("[BIT-AAR-79] [QCDAO43] allows access to the researcher", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
