@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   COMMENT_MARKER,
   DEFAULT_DIFF_CHUNK_BYTES,
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
   FIREWORKS_MODEL,
   MAX_REVIEW_FINDINGS,
   MAX_REVIEW_OUTPUT_TOKENS,
@@ -15,15 +16,59 @@ import {
   renderFailureComment,
   renderReviewComment,
   resolveProviderConfig,
+  retryingJsonRequest,
 } from "./security-review.mjs";
 
-test("Fireworks is the default provider and GLM-5.3 is the default model", () => {
+test("Fireworks is the default provider and GLM-5.3 Flash is the default model", () => {
   const config = resolveProviderConfig({ FIREWORKS_API_KEY: "test-key" });
   assert.equal(config.provider, "fireworks");
   assert.equal(config.model, FIREWORKS_MODEL);
   assert.equal(DEFAULT_DIFF_CHUNK_BYTES, 250_000);
   assert.equal(MAX_REVIEW_FINDINGS, 20);
   assert.equal(MAX_REVIEW_OUTPUT_TOKENS, 24_000);
+  assert.equal(config.requestTimeoutMs, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS);
+});
+
+test("a timed-out provider generation is not retried", async () => {
+  let requestCount = 0;
+  const fetchImpl = async (_url, { signal }) => {
+    requestCount += 1;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    signal.throwIfAborted();
+  };
+
+  await assert.rejects(
+    retryingJsonRequest("https://provider.invalid", {}, "Provider request", {
+      fetchImpl,
+      timeoutMs: 5,
+      sleep: async () => {},
+      logger: { log() {}, warn() {} },
+    }),
+    /not retried to avoid duplicate billed inference/,
+  );
+  assert.equal(requestCount, 1);
+});
+
+test("an immediate transient connection failure can still be retried", async () => {
+  let requestCount = 0;
+  const fetchImpl = async () => {
+    requestCount += 1;
+    if (requestCount === 1) throw new TypeError("connection reset");
+    return new Response(JSON.stringify({ content: "ok" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  const result = await retryingJsonRequest("https://provider.invalid", {}, "Provider request", {
+    fetchImpl,
+    timeoutMs: 1_000,
+    sleep: async () => {},
+    logger: { log() {}, warn() {} },
+  });
+
+  assert.deepEqual(result, { content: "ok" });
+  assert.equal(requestCount, 2);
 });
 
 test("OpenAI requires an explicit model so migration is deliberate", () => {

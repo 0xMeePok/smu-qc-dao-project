@@ -52,6 +52,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SECURITY_REVIEW_PROVIDER: ${{ vars.SECURITY_REVIEW_PROVIDER }}
           SECURITY_REVIEW_MODEL: ${{ vars.SECURITY_REVIEW_MODEL }}
+          # Give long generations time to finish. Timed-out requests are never retried,
+          # because the provider may still bill an abandoned inference (default: 600000).
+          SECURITY_REVIEW_PROVIDER_TIMEOUT_MS: ${{ vars.SECURITY_REVIEW_PROVIDER_TIMEOUT_MS }}
           # Maximum UTF-8 bytes of diff data in each request (default: 250,000).
           # The trusted prompt and JSON schema add a small amount of overhead.
           SECURITY_REVIEW_CHUNK_BYTES: ${{ vars.SECURITY_REVIEW_CHUNK_BYTES }}
