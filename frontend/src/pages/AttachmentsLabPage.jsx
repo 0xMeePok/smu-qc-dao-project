@@ -8,6 +8,7 @@ import {
   savePostingAttachments,
 } from "../lib/postings.js";
 import {
+  deleteAttachment,
   downloadAttachment,
   formatBytes,
   messageForStorageError,
@@ -96,11 +97,24 @@ export default function AttachmentsLabPage() {
     }
   };
 
-  const startOver = () => {
+  // Abandoning a draft must take its uploads with it. Clearing the list alone
+  // would leave the objects in the bucket with nothing referencing them - the
+  // orphans sweepAttachments exists to clean up, generated here by ordinary use
+  // rather than by anyone misbehaving.
+  //
+  // Only unpublished attachments are removed: once the posting is saved they
+  // belong to a real record, and starting a new draft must not delete them.
+  const startOver = async () => {
+    setError(null);
+    const abandoned = saved ? [] : attachments;
+
     setPostingId(newPostingId());
     setAttachments([]);
     setSaved(null);
-    setError(null);
+
+    // Best effort. A failure here is not worth blocking the user over, because
+    // the scheduled sweeper is the backstop for exactly this case.
+    await Promise.allSettled(abandoned.map((attachment) => deleteAttachment(attachment)));
   };
 
   const downloadFromDetail = async (attachment) => {

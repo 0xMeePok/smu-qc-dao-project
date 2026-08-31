@@ -23,25 +23,26 @@ rules_version = '2';
 // together, or the attachment will be readable by an audience that cannot read
 // the posting it belongs to.
 //
-// KNOWN RESIDUAL RISK - unbounded object COUNT.
+// ON OBJECT COUNT - what these rules can and cannot do.
 // firestore.rules caps a posting's attachment list at 5, but that governs the
 // posting record, not the bucket. Storage rules cannot count objects or read a
-// running total, so a signed-in wallet can write an unlimited number of 10 MB
-// objects under paths the app will never reference. Each one is billable and
-// permanent. Every per-request property is already constrained here (owner, type,
-// name, size, metadata); what remains is a volume problem no rule can express.
+// running total, so nothing here bounds how many objects one wallet writes. Every
+// per-REQUEST property is constrained (owner, type, name, size, metadata); volume
+// is not expressible as a rule and is handled outside this file:
 //
-// Mitigations that DO work, none of which live in this file:
-//   1. App Check enforcement on Cloud Storage (Firebase console). The SDK already
-//      attaches App Check tokens to Storage calls because initializeAppCheck runs
-//      on the same app instance - only enforcement is off. This is the big one: it
-//      requires a genuine attested app instance rather than a bare ID token.
-//   2. storage.lifecycle.json aborts incomplete resumable uploads after a day, so
-//      the cancel path in the UI cannot accumulate billable partial objects.
-//   3. A budget alert, so abuse shows up as a notification rather than an invoice.
-//   4. Follow-up work: a scheduled function that lists this prefix and deletes
-//      objects no posting references. Deliberately NOT an age-based lifecycle rule,
-//      which cannot tell an orphan from a legitimately old attachment.
+//   1. App Check enforcement on Cloud Storage - ENABLED. Uploads now require a
+//      token from an attested instance of the real app, so a script holding a
+//      valid ID token is no longer sufficient. This is what closes the abuse
+//      vector; the SDK already attached the tokens, only enforcement was missing.
+//   2. sweepAttachments (functions/attachmentSweeper.js) deletes objects under
+//      this prefix that no posting references. Still needed WITH App Check on,
+//      because most orphans are not abuse: a user who uploads and then abandons
+//      the form, or closes the tab before publishing, leaves a real file behind
+//      through entirely ordinary use. The client deletes what it can on abandon,
+//      but it cannot clean up after a closed tab - that is this job's work.
+//   3. storage.lifecycle.json aborts incomplete resumable uploads after a day.
+//      Covers partial transfers only; completed orphans are (2)'s problem.
+//   4. A budget alert, so anything unexpected surfaces as a notification.
 service firebase.storage {
   match /b/{bucket}/o {
 

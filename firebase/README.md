@@ -426,6 +426,45 @@ gcloud storage buckets update gs://qcdao-a0c7a.firebasestorage.app --lifecycle-f
    someone scripting bulk uploads with a valid ID token — see the residual-risk note
    at the top of `storage.rules`.
 4. Set a **budget alert** on the project.
+5. Turn on the orphan sweeper once you have read a dry run — see below.
+
+### The orphan sweeper
+
+`sweepAttachments` runs daily at 03:00 SGT and deletes objects under `problems/`
+that no posting references.
+
+It is still needed with App Check enforcement on. App Check stops a script bulk
+uploading with a stolen ID token, but most orphans are not abuse — someone uploads
+a PDF and then abandons the form or closes the tab before publishing. The client
+deletes what it can when a draft is abandoned deliberately; a closed tab offers no
+reliable moment to run a delete, so the cleanup has to happen server-side. The
+lifecycle rule above only aborts *incomplete* uploads; this handles completed ones.
+
+**It is dry-run by default.** It is the only scheduled job here that destroys data,
+so it reports what it would delete and does nothing until you opt in. Deploy it,
+read one run's logs, confirm the counts look sane, then add to `functions/.env`
+(gitignored):
+
+```
+ATTACHMENT_SWEEP_ENABLED=true
+```
+
+Safety properties, all covered by tests in `functions/test/attachmentSweeper.test.mjs`:
+
+- An object younger than 24 hours is never a candidate, so a file uploaded onto a
+  form somebody is still filling in cannot be deleted under them.
+- An object referenced by any posting is never deleted, however old.
+- A path the parser does not recognise is skipped, never guessed at.
+- An object with an unreadable creation time is skipped, not treated as ancient.
+- No single run deletes more than 500 objects; hitting that cap is logged as a
+  warning, because it means something is wrong rather than busy.
+
+Deploying a scheduled function needs `cloudscheduler.googleapis.com` enabled on the
+project. Enable it before the first deploy, or that deploy fails:
+
+```bash
+gcloud services enable cloudscheduler.googleapis.com --project qcdao-a0c7a
+```
 
 `storage.cors.json` lists the two deployed origins and nothing else — no `*`, and
 deliberately **no `localhost`**. A developer machine is not an origin the production
