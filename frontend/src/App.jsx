@@ -22,6 +22,7 @@ import {
   FundingPortfolio,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import AttachmentsLabPage from "./pages/AttachmentsLabPage.jsx";
 
 function parseHash() {
   if (typeof window !== "undefined") {
@@ -825,6 +826,17 @@ function AppContent() {
         onNavigate={go}
       >
         <AdminPage />
+      </RouteGuard>
+    );
+  } else if (section === "attachments-lab") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <AttachmentsLabPage />
       </RouteGuard>
     );
   } else if (section === "access-denied") {
