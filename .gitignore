@@ -5,6 +5,7 @@ node_modules/
 /firebase/node_modules
 /firebase/functions/node_modules
 /contracts/qft-tokens/node_modules
+/contracts/audit-registry/node_modules
 /frontend/node_modules
 
 # Production & Build Outputs
@@ -29,6 +30,9 @@ contracts/qft-tokens/deployments/
 /contracts/stable-faucet/cache
 /contracts/stable-faucet/deployments
 /contracts/stable-faucet/site/dist
+/contracts/audit-registry/artifacts
+/contracts/audit-registry/cache
+/contracts/audit-registry/deployments
 
 # Environment Files & Secrets
 .env
@@ -38,6 +42,7 @@ contracts/qft-tokens/deployments/
 frontend/.env.local
 frontend/.env.*.local
 contracts/qft-tokens/.env
+contracts/audit-registry/.env
 firebase/functions/.env
 !**/.env.example
 
