@@ -23,58 +23,7 @@ stakeholders an independently verifiable audit trail for the events that matter.
 ## How sign-in works
 
 There is no registration form and no public sign-up URL. Connecting a wallet **is**
-the account:
-
-```
-"Sign in with Wallet"
-      |
-      v
-wagmi connector picker        (wallets discovered via EIP-6963 — no project id needed)
-      |
-      v
-getSiweNonce()   ---------->  Cloud Function issues a single-use nonce and
-      |                       returns the exact message to sign
-      v
-wallet signs that message
-      |
-      v
-verifySiweSignature()  --->   Cloud Function re-derives the message from its OWN
-      |                       stored nonce, verifies the signature, burns the nonce,
-      |                       and mints a Firebase custom token whose uid IS the
-      |                       wallet address
-      v
-signInWithCustomToken()
-      |
-      +-- users/{address} exists?  --> signed in
-      |
-      +-- not found?               --> onboarding popup (full name, organisation)
-                                        creates the profile as a normal user, writing
-                                        users/{address} and publicProfiles/{address}
-                                        in one batch
-```
-
-Profiles are stored across two collections. `users/{address}` holds the full record —
-including `role` — and is readable only by the wallet that owns it.
-`publicProfiles/{address}` holds just `address`, `fullName` and `organisation`, and is
-readable by anyone so published work can be attributed. Neither can be listed, so the
-user base cannot be enumerated and nothing reveals which wallets are administrators.
-
-`request.auth.uid` **is** the lowercase wallet address, and that uid can only exist
-because a Cloud Function verified a real signature first. That is what makes
-Firestore's rule `request.auth.uid == address` a genuine proof of wallet ownership
-rather than a claim the browser made about itself — verifying it in the browser
-alone would prove nothing, since a client can always call Firestore directly and
-skip that check.
-
-**This initial signature only happens once per session** (Firebase persists it
-across page reloads). The same signing step is what any future state-changing
-action — posting a comment, committing funding, submitting a proposal — will also
-require at the point of that action, once those features exist. Right now, only
-account creation is implemented; nothing else writes to Firestore yet.
-
-Every account is a normal user (`role: 0`). There is no self-service way to become an
-administrator (`role: 1`) — that is set by hand in the Firestore console, and an
-admin-only page appears in the app automatically once it is.
+the account. Ensure you have MetaMask or Rabby installed.
 
 ## Tech Stack
 
@@ -158,11 +107,12 @@ Fill in `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, and
 `VITE_FIREBASE_APP_ID` (ask Ashley, or copy from Firebase console — see
 [Connect to Firebase](#connect-to-firebase)).
 
-To talk to **local emulators** instead of production, also set:
+To talk to production instead of **local emulators**, else ignore:
 
 ```
-VITE_FIREBASE_USE_EMULATORS=true
+VITE_FIREBASE_USE_EMULATORS=false
 ```
+
 
 Use the same project id in `.env.local` as you pass to `--project` in step 4
 (the shared project is `qcdao-a0c7a`). Without the emulator flag, `npm run dev`
@@ -176,7 +126,7 @@ Two terminals. Start the emulators **before** the frontend.
 
 ```bash
 cd firebase
-npx firebase emulators:start --only functions,firestore,auth --project qcdao-a0c7a
+npx firebase emulators:start --only functions,firestore,auth,storage --project qcdao-a0c7a
 ```
 
 Wait until you see `All emulators ready` **and** the functions loaded
@@ -219,7 +169,7 @@ project's Firebase backend. You only need the client config:
 1. Ask Ashley for the six `VITE_FIREBASE_*` values (or get them yourself
    from the Firebase console: Project settings → General → Your apps → Web app).
 2. Follow [Getting Started](#getting-started) steps 2–4. For production (no
-   emulators), skip `VITE_FIREBASE_USE_EMULATORS` and only run the frontend.
+   emulators), `VITE_FIREBASE_USE_EMULATORS` will need to be changed to false and only run the frontend.
 
 That's it — sign-in talks straight to the shared backend unless emulators are on.
 

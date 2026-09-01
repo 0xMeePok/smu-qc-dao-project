@@ -272,7 +272,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
         'ownerId', 'title', 'summary', 'outcomes', 'amount', 'deadline',
         'benefits', 'deliverables', 'status', 'type', 'opportunityType',
-        'createdAt', 'updatedAt'
+        'attachments', 'createdAt', 'updatedAt'
       ]) && data.keys().hasAll([
         'ownerId', 'title', 'summary', 'amount', 'status', 'createdAt', 'updatedAt'
       ]);
@@ -332,6 +332,48 @@ service cloud.firestore {
 
     function validAmount(value) {
       return value is number && value >= 0 && value <= 1000000000;
+    }
+
+    // QCDAO-58 - the posting's record of the PDFs stored in Cloud Storage under
+    // problems/{ownerId}/{problemId}/. See firebase/storage.rules, which owns the
+    // rules for the bytes themselves; this only governs the reference list.
+    //
+    // The load-bearing check is `path`: it is rebuilt here from the owner and the
+    // problem id in the URL rather than trusted from the client. Without that, a
+    // user could write an attachment entry on their OWN posting whose path points
+    // into someone else's folder, and any later feature that renders the list
+    // would happily hand out a reference to a document they cannot read. Storage
+    // rules would still refuse the download, but the reference should never exist.
+    function attachmentIsValid(items, index, ownerId, problemId) {
+      return items.size() <= index
+        || (items[index] is map
+          // No 'uploadedAt'. An earlier draft allowed one, but nothing writes it and
+          // rules cannot pin it to request.time inside a list (existing entries keep
+          // their original value across later updates, so the comparison would fail
+          // every edit). That left a client-controlled timestamp any future feature
+          // might have displayed as fact. Add it back only with a server-side writer.
+          && items[index].keys().hasOnly(['id', 'name', 'size', 'contentType', 'path'])
+          && items[index].keys().hasAll(['id', 'name', 'size', 'path'])
+          && items[index].id is string
+          && items[index].id.matches('^[A-Za-z0-9_-]{8,64}$')
+          && items[index].name is string
+          && items[index].name.size() > 0 && items[index].name.size() <= 200
+          && items[index].size is number
+          && items[index].size > 0 && items[index].size <= 10485760
+          && items[index].path == 'problems/' + ownerId + '/' + problemId + '/' + items[index].id + '.pdf'
+          && (!items[index].keys().hasAny(['contentType'])
+            || items[index].contentType == 'application/pdf'));
+    }
+
+    function validAttachments(data, problemId) {
+      return !data.keys().hasAny(['attachments'])
+        || (data.attachments is list
+          && data.attachments.size() <= 5
+          && attachmentIsValid(data.attachments, 0, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 1, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 2, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 3, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 4, data.ownerId, problemId));
     }
 
     function validProblemStatus(status) {
@@ -453,6 +495,7 @@ service cloud.firestore {
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
         && validProblem(request.resource.data)
+        && validAttachments(request.resource.data, problemId)
         && request.resource.data.status == 'draft'
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
@@ -461,6 +504,7 @@ service cloud.firestore {
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
         && validProblem(request.resource.data)
+        && validAttachments(request.resource.data, problemId)
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validProblemTransition(resource.data.status, request.resource.data.status);
