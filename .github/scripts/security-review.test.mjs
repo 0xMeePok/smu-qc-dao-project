@@ -4,26 +4,168 @@ import test from "node:test";
 import {
   COMMENT_MARKER,
   DEFAULT_DIFF_CHUNK_BYTES,
+  DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
   FIREWORKS_MODEL,
+  FIREWORKS_REASONING_EFFORT,
+  MAX_DIFF_CHUNK_BYTES,
   MAX_REVIEW_FINDINGS,
   MAX_REVIEW_OUTPUT_TOKENS,
   assertReviewChunkLimit,
+  buildFireworksPayload,
   buildReviewPrompt,
   chunkPullRequestDiff,
   mergeChunkReviews,
   normalizeReview,
+  parseFireworksEventStream,
   renderFailureComment,
   renderReviewComment,
   resolveProviderConfig,
+  retryingJsonRequest,
 } from "./security-review.mjs";
 
-test("Fireworks is the default provider and GLM-5.3 is the default model", () => {
+test("Fireworks is the default provider and GLM-5.3 Flash is the default model", () => {
   const config = resolveProviderConfig({ FIREWORKS_API_KEY: "test-key" });
   assert.equal(config.provider, "fireworks");
   assert.equal(config.model, FIREWORKS_MODEL);
-  assert.equal(DEFAULT_DIFF_CHUNK_BYTES, 250_000);
+  assert.equal(DEFAULT_DIFF_CHUNK_BYTES, 75_000);
+  assert.equal(MAX_DIFF_CHUNK_BYTES, 100_000);
+  assert.equal(FIREWORKS_REASONING_EFFORT, "low");
   assert.equal(MAX_REVIEW_FINDINGS, 20);
   assert.equal(MAX_REVIEW_OUTPUT_TOKENS, 24_000);
+  assert.equal(config.requestTimeoutMs, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS);
+});
+
+test("Fireworks requests use low reasoning and streaming", () => {
+  const payload = buildFireworksPayload({ model: FIREWORKS_MODEL }, "review this diff");
+  assert.equal(payload.reasoning_effort, "low");
+  assert.equal(payload.stream, true);
+  assert.deepEqual(payload.stream_options, { include_usage: true });
+  assert.equal(payload.max_completion_tokens, MAX_REVIEW_OUTPUT_TOKENS);
+});
+
+test("Fireworks streaming reconstructs structured JSON across network chunks", async () => {
+  const wireData = [
+    'data: {"choices":[{"delta":{"content":"{\\"summary\\":\\"ok\\","}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"\\"findings\\":[]}"},"finish_reason":"stop"}]}\n\n',
+    'data: {"choices":[],"usage":{"completion_tokens":12}}\n\n',
+    "data: [DONE]\n\n",
+  ].join("");
+  const splitAt = [17, 83, 141, wireData.length];
+  async function* body() {
+    let start = 0;
+    for (const end of splitAt) {
+      yield Buffer.from(wireData.slice(start, end));
+      start = end;
+    }
+  }
+
+  const result = await parseFireworksEventStream(
+    { body: body() },
+    { log() {}, warn() {} },
+  );
+  assert.equal(result.choices[0].message.content, '{"summary":"ok","findings":[]}');
+  assert.equal(result.choices[0].finish_reason, "stop");
+  assert.equal(result.usage.completion_tokens, 12);
+});
+
+test("Fireworks streaming rejects a response without the completion marker", async () => {
+  async function* body() {
+    yield Buffer.from('data: {"choices":[{"delta":{"content":"{}"}}]}\n\n');
+  }
+
+  await assert.rejects(
+    parseFireworksEventStream({ body: body() }, { log() {}, warn() {} }),
+    /ended before its completion marker/,
+  );
+});
+
+test("a timed-out provider generation is not retried", async () => {
+  let requestCount = 0;
+  const fetchImpl = async (_url, { signal }) => {
+    requestCount += 1;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    signal.throwIfAborted();
+  };
+
+  await assert.rejects(
+    retryingJsonRequest("https://provider.invalid", {}, "Provider request", {
+      fetchImpl,
+      timeoutMs: 5,
+      sleep: async () => {},
+      logger: { log() {}, warn() {} },
+    }),
+    /not retried to avoid duplicate billed inference/,
+  );
+  assert.equal(requestCount, 1);
+});
+
+test("an immediate transient connection failure can still be retried", async () => {
+  let requestCount = 0;
+  const fetchImpl = async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      const error = new Error("connection refused");
+      error.code = "ECONNREFUSED";
+      throw error;
+    }
+    return new Response(JSON.stringify({ content: "ok" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  const result = await retryingJsonRequest("https://provider.invalid", {}, "Provider request", {
+    fetchImpl,
+    timeoutMs: 1_000,
+    sleep: async () => {},
+    logger: { log() {}, warn() {} },
+  });
+
+  assert.deepEqual(result, { content: "ok" });
+  assert.equal(requestCount, 2);
+});
+
+test("a response-header timeout is not retried", async () => {
+  let requestCount = 0;
+  const fetchImpl = async () => {
+    requestCount += 1;
+    const error = new TypeError("fetch failed");
+    error.cause = { code: "UND_ERR_HEADERS_TIMEOUT" };
+    throw error;
+  };
+
+  await assert.rejects(
+    retryingJsonRequest("https://provider.invalid", {}, "Provider request", {
+      fetchImpl,
+      timeoutMs: 1_000,
+      sleep: async () => {},
+      logger: { log() {}, warn() {} },
+    }),
+    /not retried because the provider may have already started a billed generation/,
+  );
+  assert.equal(requestCount, 1);
+});
+
+test("a provider 5xx response is not retried", async () => {
+  let requestCount = 0;
+  const fetchImpl = async () => {
+    requestCount += 1;
+    return new Response(JSON.stringify({ error: { code: "upstream_timeout" } }), {
+      status: 504,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  await assert.rejects(
+    retryingJsonRequest("https://provider.invalid", {}, "Provider request", {
+      fetchImpl,
+      timeoutMs: 1_000,
+      sleep: async () => {},
+      logger: { log() {}, warn() {} },
+    }),
+    /HTTP 504 \(upstream_timeout\)/,
+  );
+  assert.equal(requestCount, 1);
 });
 
 test("OpenAI requires an explicit model so migration is deliberate", () => {
