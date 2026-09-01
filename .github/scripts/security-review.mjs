@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
+import https from "node:https";
 import { pathToFileURL } from "node:url";
 
 export const COMMENT_MARKER = "<!-- qcdao-ai-security-review -->";
 export const FIREWORKS_MODEL = "accounts/fireworks/models/glm-5p3-flash";
-export const DEFAULT_DIFF_CHUNK_BYTES = 250_000;
+export const DEFAULT_DIFF_CHUNK_BYTES = 75_000;
+export const MAX_DIFF_CHUNK_BYTES = 100_000;
+export const FIREWORKS_REASONING_EFFORT = "low";
 export const MAX_REVIEW_FINDINGS = 20;
 export const MAX_REVIEW_OUTPUT_TOKENS = 24_000;
 export const DEFAULT_MAX_REVIEW_CHUNKS = 20;
@@ -11,6 +14,8 @@ export const MAX_REVIEW_CHUNKS = 100;
 export const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS = 600_000;
 
 const GITHUB_API_VERSION = "2022-11-28";
+const MAX_PROVIDER_RESPONSE_BYTES = 2_000_000;
+const SAFE_NETWORK_RETRY_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
 const MAX_FINDING_CANDIDATES = MAX_REVIEW_CHUNKS * MAX_REVIEW_FINDINGS;
 const ALLOWED_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 const ALLOWED_CONFIDENCE = new Set(["high", "medium"]);
@@ -263,13 +268,81 @@ async function checkedFetch(url, options, label) {
   return response;
 }
 
+// Node's built-in fetch uses an internal Undici header timeout of about 300 seconds.
+// Long model generations can hit that limit before our explicit request timeout, so
+// provider calls use node:https directly and let AbortSignal be the sole time limit.
+function providerFetch(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const body = options.body ?? null;
+    const headers = { ...(options.headers || {}) };
+    const hasContentLength = Object.keys(headers)
+      .some((name) => name.toLowerCase() === "content-length");
+    if (body !== null && !hasContentLength) {
+      headers["Content-Length"] = Buffer.byteLength(body);
+    }
+
+    const request = https.request(
+      url,
+      {
+        method: options.method || "GET",
+        headers,
+        signal: options.signal,
+      },
+      (response) => {
+        let bodyPromise;
+        const readBody = () => {
+          if (!bodyPromise) {
+            bodyPromise = (async () => {
+              const chunks = [];
+              let responseBytes = 0;
+              for await (const chunk of response) {
+                responseBytes += chunk.length;
+                if (responseBytes > MAX_PROVIDER_RESPONSE_BYTES) {
+                  response.destroy();
+                  throw new Error("Provider response exceeded the safe size limit");
+                }
+                chunks.push(chunk);
+              }
+              return Buffer.concat(chunks).toString("utf8");
+            })();
+          }
+          return bodyPromise;
+        };
+        const status = response.statusCode || 0;
+        resolve({
+          body: response,
+          ok: status >= 200 && status < 300,
+          status,
+          async json() {
+            return JSON.parse(await readBody());
+          },
+          async text() {
+            return readBody();
+          },
+        });
+      },
+    );
+
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
+function safeNetworkErrorCode(error) {
+  const candidate = error?.cause?.code || error?.code;
+  return typeof candidate === "string" && /^[A-Z0-9_]{1,80}$/.test(candidate)
+    ? candidate
+    : "NETWORK_ERROR";
+}
+
 export async function retryingJsonRequest(
   url,
   options,
   label,
   {
-    fetchImpl = fetch,
+    fetchImpl = providerFetch,
     timeoutMs = DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+    parseResponse = (response) => response.json(),
     sleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
     logger = console,
   } = {},
@@ -298,11 +371,20 @@ export async function retryingJsonRequest(
         );
       }
 
-      lastError = new Error(`${label} failed because the provider connection ended unexpectedly`);
+      const errorCode = safeNetworkErrorCode(error);
+      lastError = new Error(
+        `${label} failed because the provider connection ended unexpectedly (${errorCode})`,
+      );
+      if (!SAFE_NETWORK_RETRY_CODES.has(errorCode)) {
+        throw new Error(
+          `${lastError.message}. The request was not retried because the provider may have ` +
+          "already started a billed generation.",
+        );
+      }
       if (attempt === 3) throw lastError;
       logger.warn(
         `${label}: attempt ${attempt}/3 had a transient connection failure after ` +
-        `${elapsedSeconds} seconds; retrying.`,
+        `${elapsedSeconds} seconds (${errorCode}); retrying.`,
       );
       await sleep(attempt * 1_000);
       continue;
@@ -312,7 +394,19 @@ export async function retryingJsonRequest(
     logger.log(
       `${label}: attempt ${attempt}/3 returned HTTP ${response.status} after ${elapsedSeconds} seconds.`,
     );
-    if (response.ok) return response.json();
+    if (response.ok) {
+      try {
+        return await parseResponse(response);
+      } catch (error) {
+        if (signal.aborted) {
+          throw new Error(
+            `${label} did not complete within ${Math.ceil(timeoutMs / 1_000)} seconds. ` +
+            "The timed-out generation was not retried to avoid duplicate billed inference.",
+          );
+        }
+        throw error;
+      }
+    }
 
     const responseText = (await response.text()).slice(0, 2_000);
     let errorCode = "";
@@ -327,7 +421,9 @@ export async function retryingJsonRequest(
     }
 
     const error = new Error(`${label} failed with HTTP ${response.status}${errorCode}`);
-    if (response.status !== 429 && response.status < 500) throw error;
+    // A 5xx can be returned after inference has started, so only retry an
+    // explicit rate-limit rejection that should not represent billed work.
+    if (response.status !== 429) throw error;
     lastError = error;
 
     if (attempt < 3) {
@@ -353,8 +449,8 @@ async function fetchPullRequestDiff(context) {
   return { text, bytes: Buffer.byteLength(text, "utf8") };
 }
 
-async function requestFireworksReview(config, prompt) {
-  const payload = {
+export function buildFireworksPayload(config, prompt) {
+  return {
     model: config.model,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -367,9 +463,91 @@ async function requestFireworksReview(config, prompt) {
         schema: REVIEW_SCHEMA,
       },
     },
+    stream: true,
+    stream_options: { include_usage: true },
     max_completion_tokens: MAX_REVIEW_OUTPUT_TOKENS,
+    reasoning_effort: FIREWORKS_REASONING_EFFORT,
     temperature: 0.1,
   };
+}
+
+export async function parseFireworksEventStream(response, logger = console) {
+  if (!response.body || typeof response.body[Symbol.asyncIterator] !== "function") {
+    throw new Error("Fireworks returned no readable event stream");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let finishReason = null;
+  let usage;
+  let eventCount = 0;
+  let responseBytes = 0;
+  let sawDone = false;
+
+  const consumeEvent = (eventText) => {
+    const data = eventText
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    if (!data) return;
+    if (data === "[DONE]") {
+      sawDone = true;
+      return;
+    }
+
+    let event;
+    try {
+      event = JSON.parse(data);
+    } catch {
+      throw new Error("Fireworks returned an invalid JSON streaming event");
+    }
+    eventCount += 1;
+    if (eventCount === 1) logger.log("Fireworks security review: stream established.");
+    if (eventCount % 100 === 0) {
+      logger.log(`Fireworks security review: received ${eventCount} streaming events.`);
+    }
+
+    const choice = event?.choices?.[0];
+    if (typeof choice?.delta?.content === "string") content += choice.delta.content;
+    if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
+    if (event?.usage) usage = event.usage;
+  };
+
+  const drainEvents = () => {
+    buffer = buffer.replace(/\r\n/g, "\n");
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const eventText = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      consumeEvent(eventText);
+    }
+  };
+
+  for await (const chunk of response.body) {
+    responseBytes += Buffer.byteLength(chunk);
+    if (responseBytes > MAX_PROVIDER_RESPONSE_BYTES) {
+      response.body.destroy?.();
+      throw new Error("Fireworks stream exceeded the safe size limit");
+    }
+    buffer += decoder.decode(chunk, { stream: true });
+    drainEvents();
+  }
+  buffer += decoder.decode();
+  drainEvents();
+  if (buffer.trim()) consumeEvent(buffer.replace(/\r\n/g, "\n"));
+  if (!sawDone) throw new Error("Fireworks stream ended before its completion marker");
+
+  return {
+    choices: [{ message: { content }, finish_reason: finishReason }],
+    usage,
+  };
+}
+
+export async function requestFireworksReview(config, prompt) {
+  const payload = buildFireworksPayload(config, prompt);
 
   const result = await retryingJsonRequest(
     "https://api.fireworks.ai/inference/v1/chat/completions",
@@ -382,7 +560,10 @@ async function requestFireworksReview(config, prompt) {
       body: JSON.stringify(payload),
     },
     "Fireworks security review",
-    { timeoutMs: config.requestTimeoutMs },
+    {
+      timeoutMs: config.requestTimeoutMs,
+      parseResponse: (response) => parseFireworksEventStream(response),
+    },
   );
 
   const choice = result?.choices?.[0];
@@ -688,7 +869,7 @@ export async function loadContext(env = process.env) {
       env.SECURITY_REVIEW_CHUNK_BYTES || env.SECURITY_REVIEW_MAX_DIFF_BYTES,
       DEFAULT_DIFF_CHUNK_BYTES,
       10_000,
-      250_000,
+      MAX_DIFF_CHUNK_BYTES,
     ),
     maxReviewChunks: boundedInteger(
       env.SECURITY_REVIEW_MAX_CHUNKS,
