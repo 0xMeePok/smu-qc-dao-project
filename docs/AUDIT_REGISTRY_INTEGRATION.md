@@ -40,7 +40,12 @@ serialization changes.
 ## Contract calls
 
 - Opportunities: `commitOpportunity(entityId, kind, contentHash, expiresAt)`
-- Proposals: `commitProposal(entityId, opportunityId, proposalHash, solutionHash)`
+- Proposals: `commitProposal(entityId, opportunityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
+- Proposal updates: `updateHashes(entityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
+
+Every proposal version must carry the opportunity revision the researcher viewed.
+Submission and update calls revert if that revision is no longer current when
+the transaction executes.
 
 Evaluations are platform records and are not anchored by this contract.
 
@@ -55,8 +60,8 @@ for its receipt and is never rebroadcast. Transient receipt reads are capped at
 three attempts. Posting use is not blocked if anchoring fails.
 
 The current Arbitrum Sepolia deployment is
-`0xF5d66411eBFDc8f58e0224AB60eF4CdFD6D01B3d` (transaction
-`0x2bf29bdf436837a4086046c4612b27afa0ca4f898af2417fb98e1b98983b17a1`).
+`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD` (transaction
+`0x7df4e661d7dbd82b3bc0e00727d10d581a604614d23d1a7e16f4e571d242403b`).
 It is the checked-in frontend default. `VITE_AUDIT_REGISTRY_ADDRESS` may override
 it for a later deployment; an invalid override disables on-chain verification
 without blocking the Firestore workflow.

@@ -7,10 +7,10 @@ On-chain registry for opportunity and proposal hashes on Arbitrum Sepolia. Full 
 | Field | Value |
 |---|---|
 | Network | Arbitrum Sepolia (`421614`) |
-| Address | [`0xF5d66411eBFDc8f58e0224AB60eF4CdFD6D01B3d`](https://sepolia.arbiscan.io/address/0xF5d66411eBFDc8f58e0224AB60eF4CdFD6D01B3d#code) |
-| Deployment transaction | [`0x2bf29bdf436837a4086046c4612b27afa0ca4f898af2417fb98e1b98983b17a1`](https://sepolia.arbiscan.io/tx/0x2bf29bdf436837a4086046c4612b27afa0ca4f898af2417fb98e1b98983b17a1) |
-| Block | `304644898` |
-| Deployed | `2026-09-02T13:00:23Z` |
+| Address | [`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD`](https://sepolia.arbiscan.io/address/0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD#code) |
+| Deployment transaction | [`0x7df4e661d7dbd82b3bc0e00727d10d581a604614d23d1a7e16f4e571d242403b`](https://sepolia.arbiscan.io/tx/0x7df4e661d7dbd82b3bc0e00727d10d581a604614d23d1a7e16f4e571d242403b) |
+| Block | `304652016` |
+| Deployed | `2026-09-02T13:29:43Z` |
 | Source | Verified on Arbiscan |
 
 The frontend contract manifest is `frontend/src/config/auditRegistry.contract.json`.

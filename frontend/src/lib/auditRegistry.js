@@ -209,6 +209,7 @@ export function prepareProposalCommit({
   opportunityId,
   proposalPayload,
   solutionPayload,
+  expectedOpportunityRevisionIndex,
   hashScheme = AUDIT_HASH_SCHEME,
 }) {
   const entityId = proposalEntityId(recordId, { hashScheme });
@@ -227,6 +228,10 @@ export function prepareProposalCommit({
   );
   const proposalHash = keccak256(stringToHex(canonicalProposal));
   const solutionHash = keccak256(stringToHex(canonicalSolution));
+  const revisionIndex = Number(expectedOpportunityRevisionIndex);
+  if (!Number.isInteger(revisionIndex) || revisionIndex < 0 || revisionIndex > 4_294_967_295) {
+    throw new TypeError("Expected opportunity revision index must fit uint32.");
+  }
   return prepared({
     entityType: AUDIT_ENTITY_TYPE.PROPOSAL,
     entityId,
@@ -234,12 +239,33 @@ export function prepareProposalCommit({
     contentHash: proposalHash,
     proposalHash,
     solutionHash,
+    expectedOpportunityRevisionIndex: revisionIndex,
     anchorHash: proposalRevisionDigest(proposalHash, solutionHash),
     canonicalPayload: canonicalProposal,
     canonicalSolution,
     hashScheme,
     functionName: "commitProposal",
-    args: [entityId, parentId, proposalHash, solutionHash],
+    args: [
+      entityId,
+      parentId,
+      proposalHash,
+      solutionHash,
+      revisionIndex,
+    ],
+  });
+}
+
+export function prepareProposalUpdate(input) {
+  const proposal = prepareProposalCommit(input);
+  return prepared({
+    ...proposal,
+    functionName: "updateHashes",
+    args: [
+      proposal.entityId,
+      proposal.proposalHash,
+      proposal.solutionHash,
+      proposal.expectedOpportunityRevisionIndex,
+    ],
   });
 }
 
@@ -426,12 +452,33 @@ function asPrepared(input, prepare) {
   return input?.__auditPrepared ? input : prepare(input);
 }
 
+function preparedFor(input, prepare, functionName) {
+  const operation = asPrepared(input, prepare);
+  if (operation.functionName !== functionName) {
+    throw new TypeError(`Expected a prepared ${functionName} operation.`);
+  }
+  return operation;
+}
+
 export function commitOpportunityAudit(input, options) {
-  return executePreparedAudit(asPrepared(input, prepareOpportunityCommit), options);
+  return executePreparedAudit(
+    preparedFor(input, prepareOpportunityCommit, "commitOpportunity"),
+    options,
+  );
 }
 
 export function commitProposalAudit(input, options) {
-  return executePreparedAudit(asPrepared(input, prepareProposalCommit), options);
+  return executePreparedAudit(
+    preparedFor(input, prepareProposalCommit, "commitProposal"),
+    options,
+  );
+}
+
+export function updateProposalAudit(input, options) {
+  return executePreparedAudit(
+    preparedFor(input, prepareProposalUpdate, "updateHashes"),
+    options,
+  );
 }
 
 function tupleField(value, name, index) {
@@ -460,6 +507,15 @@ async function readWithRetries(functionName, args, options) {
     options.maxReadRetries ?? 2,
     options.onRetry,
   );
+}
+
+export async function readOpportunityRevisionIndex(opportunityId, options = {}) {
+  const entityId = assertBytes32(opportunityId, "Opportunity id");
+  const count = BigInt(await readWithRetries("opportunityRevisionCount", [entityId], options));
+  if (count === 0n || count > 4_294_967_296n) {
+    throw new Error("Opportunity has no supported revision.");
+  }
+  return Number(count - 1n);
 }
 
 async function findMatchingAnchor(entityId, expectedHash, options) {
@@ -519,6 +575,8 @@ export async function verifyProposalAudit(input, options = {}) {
   const mismatches = [];
   mismatch(mismatches, "opportunityId", expected.opportunityId,
     tupleField(actual, "opportunityId", 1), sameHex);
+  mismatch(mismatches, "opportunityRevisionIndex", expected.expectedOpportunityRevisionIndex,
+    Number(tupleField(actual, "opportunityRevisionIndex", 2)));
   mismatch(mismatches, "proposalHash", expected.proposalHash,
     tupleField(actual, "proposalHash", 4), sameHex);
   mismatch(mismatches, "solutionHash", expected.solutionHash,

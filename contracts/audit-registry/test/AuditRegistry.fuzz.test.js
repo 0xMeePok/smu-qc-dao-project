@@ -34,6 +34,43 @@ describe("AuditRegistry fuzz", function () {
     return opportunityId;
   }
 
+  async function commitProposalAtCurrentRevision(
+    registry,
+    researcher,
+    proposalId,
+    opportunityId,
+    proposalHash,
+    solutionHash
+  ) {
+    const count = await registry.opportunityRevisionCount(opportunityId);
+    const index = count - 1n;
+    return registry.connect(researcher).commitProposal(
+      proposalId,
+      opportunityId,
+      proposalHash,
+      solutionHash,
+      index
+    );
+  }
+
+  async function updateProposalAtCurrentRevision(
+    registry,
+    researcher,
+    proposalId,
+    proposalHash,
+    solutionHash
+  ) {
+    const proposal = await registry.getProposal(proposalId);
+    const count = await registry.opportunityRevisionCount(proposal.opportunityId);
+    const index = count - 1n;
+    return registry.connect(researcher).updateHashes(
+      proposalId,
+      proposalHash,
+      solutionHash,
+      index
+    );
+  }
+
   it("random proposals store the submitter and both hashes", async function () {
     const { ethers, wallets, registry } = await setup();
     const [owner, researcher] = wallets;
@@ -44,9 +81,9 @@ describe("AuditRegistry fuzz", function () {
       const proposalHash = randHash(ethers);
       const solutionHash = randHash(ethers);
 
-      await registry
-        .connect(researcher)
-        .commitProposal(proposalId, opportunityId, proposalHash, solutionHash);
+      await commitProposalAtCurrentRevision(
+        registry, researcher, proposalId, opportunityId, proposalHash, solutionHash
+      );
 
       const proposal = await registry.getProposal(proposalId);
       expect(proposal.researcher).to.equal(researcher.address);
@@ -74,18 +111,23 @@ describe("AuditRegistry fuzz", function () {
     const proposalId = randHash(ethers);
 
     const pairs = [{ proposalHash: randHash(ethers), solutionHash: randHash(ethers) }];
-    await registry
-      .connect(researcher)
-      .commitProposal(proposalId, opportunityId, pairs[0].proposalHash, pairs[0].solutionHash);
+    await commitProposalAtCurrentRevision(
+      registry,
+      researcher,
+      proposalId,
+      opportunityId,
+      pairs[0].proposalHash,
+      pairs[0].solutionHash
+    );
 
     const createdAt = (await registry.getProposal(proposalId)).createdAt;
 
     for (let i = 0; i < 8; i += 1) {
       const next = { proposalHash: randHash(ethers), solutionHash: randHash(ethers) };
       pairs.push(next);
-      await registry
-        .connect(researcher)
-        .updateHashes(proposalId, next.proposalHash, next.solutionHash);
+      await updateProposalAtCurrentRevision(
+        registry, researcher, proposalId, next.proposalHash, next.solutionHash
+      );
     }
 
     const proposal = await registry.getProposal(proposalId);
@@ -111,16 +153,21 @@ describe("AuditRegistry fuzz", function () {
     const proposalId = randHash(ethers);
     const original = { proposalHash: randHash(ethers), solutionHash: randHash(ethers) };
 
-    await registry
-      .connect(researcher)
-      .commitProposal(proposalId, opportunityId, original.proposalHash, original.solutionHash);
+    await commitProposalAtCurrentRevision(
+      registry,
+      researcher,
+      proposalId,
+      opportunityId,
+      original.proposalHash,
+      original.solutionHash
+    );
 
     for (let i = 2; i < wallets.length; i += 1) {
       const stranger = wallets[i];
       await expect(
-        registry
-          .connect(stranger)
-          .updateHashes(proposalId, randHash(ethers), randHash(ethers))
+        updateProposalAtCurrentRevision(
+          registry, stranger, proposalId, randHash(ethers), randHash(ethers)
+        )
       ).to.be.revertedWithCustomError(registry, "AccessDenied");
       await expect(
         registry.connect(stranger).withdrawProposal(proposalId, randHash(ethers))
@@ -141,21 +188,25 @@ describe("AuditRegistry fuzz", function () {
     const proposalHash = randHash(ethers);
     const solutionHash = randHash(ethers);
 
-    await registry
-      .connect(researcher)
-      .commitProposal(proposalId, opportunityId, proposalHash, solutionHash);
+    await commitProposalAtCurrentRevision(
+      registry, researcher, proposalId, opportunityId, proposalHash, solutionHash
+    );
 
     await expect(
-      registry.connect(researcher).updateHashes(proposalId, ZERO, randHash(ethers))
+      updateProposalAtCurrentRevision(registry, researcher, proposalId, ZERO, randHash(ethers))
     ).to.be.revertedWithCustomError(registry, "InvalidInput");
     await expect(
-      registry.connect(researcher).updateHashes(proposalId, randHash(ethers), ZERO)
+      updateProposalAtCurrentRevision(registry, researcher, proposalId, randHash(ethers), ZERO)
     ).to.be.revertedWithCustomError(registry, "InvalidInput");
     await expect(
-      registry.connect(researcher).updateHashes(proposalId, proposalHash, randHash(ethers))
+      updateProposalAtCurrentRevision(
+        registry, researcher, proposalId, proposalHash, randHash(ethers)
+      )
     ).to.be.revertedWithCustomError(registry, "InvalidInput");
     await expect(
-      registry.connect(researcher).updateHashes(proposalId, randHash(ethers), solutionHash)
+      updateProposalAtCurrentRevision(
+        registry, researcher, proposalId, randHash(ethers), solutionHash
+      )
     ).to.be.revertedWithCustomError(registry, "InvalidInput");
     await expect(
       registry.connect(researcher).withdrawProposal(proposalId, ZERO)
@@ -168,7 +219,7 @@ describe("AuditRegistry fuzz", function () {
         "InvalidInput"
       );
       await expect(
-        registry.updateHashes(missing, randHash(ethers), randHash(ethers))
+        registry.updateHashes(missing, randHash(ethers), randHash(ethers), 0)
       ).to.be.revertedWithCustomError(registry, "InvalidInput");
     }
   });
@@ -184,9 +235,9 @@ describe("AuditRegistry fuzz", function () {
       const proposalId = randHash(ethers);
       const proposalHash = randHash(ethers);
       const solutionHash = randHash(ethers);
-      await registry
-        .connect(researcher)
-        .commitProposal(proposalId, opportunityId, proposalHash, solutionHash);
+      await commitProposalAtCurrentRevision(
+        registry, researcher, proposalId, opportunityId, proposalHash, solutionHash
+      );
       filed.push({ researcher, proposalId, proposalHash, solutionHash });
     }
 
@@ -207,17 +258,21 @@ describe("AuditRegistry fuzz", function () {
     const proposalHash = randHash(ethers);
     const solutionHash = randHash(ethers);
 
-    await registry
-      .connect(researcher)
-      .commitProposal(proposalId, opportunityId, proposalHash, solutionHash);
-    await registry.connect(researcher).updateHashes(proposalId, randHash(ethers), randHash(ethers));
+    await commitProposalAtCurrentRevision(
+      registry, researcher, proposalId, opportunityId, proposalHash, solutionHash
+    );
+    await updateProposalAtCurrentRevision(
+      registry, researcher, proposalId, randHash(ethers), randHash(ethers)
+    );
     const before = await registry.getProposal(proposalId);
 
     await registry.connect(researcher).withdrawProposal(proposalId, randHash(ethers));
 
     for (let i = 0; i < 6; i += 1) {
       await expect(
-        registry.connect(researcher).updateHashes(proposalId, randHash(ethers), randHash(ethers))
+        updateProposalAtCurrentRevision(
+          registry, researcher, proposalId, randHash(ethers), randHash(ethers)
+        )
       ).to.be.revertedWithCustomError(registry, "InvalidState");
     }
 

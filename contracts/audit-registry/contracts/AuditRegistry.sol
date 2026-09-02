@@ -237,7 +237,8 @@ contract AuditRegistry {
         bytes32 proposalId,
         bytes32 opportunityId,
         bytes32 proposalHash,
-        bytes32 solutionHash
+        bytes32 solutionHash,
+        uint32 expectedOpportunityRevisionIndex
     ) external {
         if (
             proposalId == bytes32(0)
@@ -252,6 +253,9 @@ contract AuditRegistry {
         uint64 timestamp = uint64(block.timestamp);
         (uint32 opportunityRevisionIndex, bytes32 opportunityRevisionDigest) =
             _currentOpportunityRevision(opportunityId);
+        if (opportunityRevisionIndex != expectedOpportunityRevisionIndex) {
+            revert InvalidState();
+        }
         _proposals[proposalId] = Proposal({
             researcher: msg.sender,
             opportunityId: opportunityId,
@@ -298,7 +302,8 @@ contract AuditRegistry {
     function updateHashes(
         bytes32 proposalId,
         bytes32 proposalHash,
-        bytes32 solutionHash
+        bytes32 solutionHash,
+        uint32 expectedOpportunityRevisionIndex
     ) external {
         Proposal storage item = _proposal(proposalId);
         if (msg.sender != item.researcher) revert AccessDenied();
@@ -312,6 +317,9 @@ contract AuditRegistry {
         uint64 timestamp = uint64(block.timestamp);
         (uint32 opportunityRevisionIndex, bytes32 opportunityRevisionDigest) =
             _currentOpportunityRevision(item.opportunityId);
+        if (opportunityRevisionIndex != expectedOpportunityRevisionIndex) {
+            revert InvalidState();
+        }
         item.proposalHash = proposalHash;
         item.solutionHash = solutionHash;
         item.opportunityRevisionIndex = opportunityRevisionIndex;

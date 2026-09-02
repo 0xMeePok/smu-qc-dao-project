@@ -1,7 +1,7 @@
 {
   "contractName": "AuditRegistry",
   "chainId": 421614,
-  "address": "0xF5d66411eBFDc8f58e0224AB60eF4CdFD6D01B3d",
+  "address": "0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD",
   "abi": [
     {
       "inputs": [],
@@ -407,6 +407,11 @@
           "internalType": "bytes32",
           "name": "solutionHash",
           "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "expectedOpportunityRevisionIndex",
+          "type": "uint32"
         }
       ],
       "name": "commitProposal",
@@ -687,6 +692,11 @@
           "internalType": "bytes32",
           "name": "solutionHash",
           "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "expectedOpportunityRevisionIndex",
+          "type": "uint32"
         }
       ],
       "name": "updateHashes",

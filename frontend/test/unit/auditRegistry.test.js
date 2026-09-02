@@ -13,13 +13,18 @@ import {
   canonicalizeAuditPayload,
   classifyAuditError,
   commitOpportunityAudit,
+  commitProposalAudit,
   createAuditEntityId,
   hashAuditPayload,
   opportunityEntityId,
   prepareOpportunityCommit,
   prepareProposalCommit,
+  prepareProposalUpdate,
   proposalEntityId,
+  readOpportunityRevisionIndex,
+  updateProposalAudit,
   verifyOpportunityAudit,
+  verifyProposalAudit,
 } from "../../src/lib/auditRegistry.js";
 
 const CONTRACT = DEFAULT_AUDIT_REGISTRY_ADDRESS;
@@ -48,7 +53,11 @@ describe("AuditRegistry canonical hash scheme", () => {
     assert.equal(AUDIT_HASH_SCHEME, 1);
     assert.equal(writes.length, 2);
     assert.equal(writes.find((entry) => entry.name === "commitOpportunity").inputs.length, 4);
-    assert.equal(writes.find((entry) => entry.name === "commitProposal").inputs.length, 4);
+    assert.equal(writes.find((entry) => entry.name === "commitProposal").inputs.length, 5);
+    assert.equal(
+      AUDIT_REGISTRY_ABI.find((entry) => entry.name === "updateHashes").inputs.length,
+      4,
+    );
     assert.equal(AUDIT_REGISTRY_ABI.some((entry) =>
       ["recordEvaluation", "evaluationAt", "evaluationCount"].includes(entry.name)), false);
   });
@@ -123,15 +132,42 @@ describe("AuditRegistry argument preparation", () => {
       opportunityRecordId: "posting-123",
       proposalPayload: { title: "Proposal", amount: 12_000 },
       solutionPayload: { method: "Annealing" },
+      expectedOpportunityRevisionIndex: 3,
     });
     assert.equal(proposal.functionName, "commitProposal");
     assert.equal(proposal.args[0], proposal.entityId);
     assert.equal(proposal.args[1], opportunityEntityId("posting-123"));
     assert.equal(proposal.args[2], proposal.proposalHash);
     assert.equal(proposal.args[3], proposal.solutionHash);
-    assert.equal(proposal.args.length, 4);
+    assert.equal(proposal.args[4], 3);
+    assert.equal(proposal.args.length, 5);
     assert.notEqual(proposal.proposalHash, proposal.solutionHash);
+  });
 
+  it("requires the opportunity revision the researcher viewed", () => {
+    assert.throws(() => prepareProposalCommit({
+      recordId: "proposal-123",
+      opportunityRecordId: "posting-123",
+      proposalPayload: { title: "Proposal" },
+      solutionPayload: { method: "Annealing" },
+    }), /revision index/);
+  });
+
+  it("prepares proposal updates against the same viewed opportunity revision", () => {
+    const update = prepareProposalUpdate({
+      recordId: "proposal-123",
+      opportunityRecordId: "posting-123",
+      proposalPayload: { title: "Proposal v2" },
+      solutionPayload: { method: "Annealing v2" },
+      expectedOpportunityRevisionIndex: 3,
+    });
+    assert.equal(update.functionName, "updateHashes");
+    assert.deepEqual(update.args, [
+      update.entityId,
+      update.proposalHash,
+      update.solutionHash,
+      3,
+    ]);
   });
 });
 
@@ -218,9 +254,83 @@ describe("AuditRegistry transaction lifecycle", () => {
       /does not match the configured deployment/,
     );
   });
+
+  it("rejects a prepared proposal operation passed to the wrong writer", () => {
+    const input = {
+      recordId: "proposal-123",
+      opportunityRecordId: "posting-123",
+      proposalPayload: { title: "Proposal" },
+      solutionPayload: { method: "Annealing" },
+      expectedOpportunityRevisionIndex: 0,
+    };
+
+    assert.throws(
+      () => commitProposalAudit(prepareProposalUpdate(input)),
+      /Expected a prepared commitProposal operation/,
+    );
+    assert.throws(
+      () => updateProposalAudit(prepareProposalCommit(input)),
+      /Expected a prepared updateHashes operation/,
+    );
+  });
 });
 
 describe("AuditRegistry read-side verification", () => {
+  it("reads the opportunity revision index used to prepare a proposal", async () => {
+    const opportunityId = opportunityEntityId("posting-123");
+    const calls = [];
+    const adapters = {
+      writeContract: unused,
+      waitForTransactionReceipt: unused,
+      readContract: async ({ functionName, args }) => {
+        calls.push({ functionName, args });
+        if (functionName === "opportunityRevisionCount") return 4n;
+        return unused();
+      },
+    };
+    const index = await readOpportunityRevisionIndex(opportunityId, {
+      address: CONTRACT,
+      adapters,
+    });
+    assert.equal(index, 3);
+    assert.deepEqual(calls.map(({ functionName }) => functionName), [
+      "opportunityRevisionCount",
+    ]);
+  });
+
+  it("detects a proposal bound to a different opportunity revision", async () => {
+    const expected = prepareProposalCommit({
+      recordId: "proposal-123",
+      opportunityRecordId: "posting-123",
+      proposalPayload: { title: "Proposal" },
+      solutionPayload: { method: "Annealing" },
+      expectedOpportunityRevisionIndex: 3,
+    });
+    const adapters = {
+      writeContract: unused,
+      waitForTransactionReceipt: unused,
+      readContract: async ({ functionName }) => {
+        assert.equal(functionName, "getProposal");
+        return {
+          opportunityId: expected.opportunityId,
+          opportunityRevisionIndex: 4n,
+          opportunityRevisionDigest: `0x${"5".repeat(64)}`,
+          proposalHash: expected.proposalHash,
+          solutionHash: expected.solutionHash,
+        };
+      },
+    };
+    const result = await verifyProposalAudit(expected, {
+      address: CONTRACT,
+      adapters,
+      verifyAnchor: false,
+    });
+    assert.equal(result.verified, false);
+    assert.deepEqual(result.mismatches.map(({ field }) => field), [
+      "opportunityRevisionIndex",
+    ]);
+  });
+
   it("rejects an opportunity anchored by a different wallet", async () => {
     const expected = prepareOpportunityCommit({
       recordId: "posting-123",
