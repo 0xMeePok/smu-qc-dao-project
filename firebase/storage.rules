@@ -94,9 +94,10 @@ service firebase.storage {
 
     // Any signed-in wallet in good standing, whoever it belongs to. Used for
     // reading a published posting's attachments, where the caller is a member of
-    // the marketplace rather than the owner of the file.
+    // the marketplace rather than the owner of the file. userExists() is the
+    // membership gate: a SIWE token without a /users profile is not enough.
     function isActiveReader() {
-      return isSignedIn() && !isSuspended() && !hasRevokedSession();
+      return isSignedIn() && userExists() && !isSuspended() && !hasRevokedSession();
     }
 
     // Mirrors the problems/{problemId} read rule in firestore.rules, which since
@@ -164,15 +165,15 @@ service firebase.storage {
       // Same audience as the posting itself, which is what QCDAO-58 asks for:
       // "access controlled by the same role rules as the posting".
       //
-      // A signed-in member can download the documents on any published posting -
-      // otherwise a solution developer finds the posting on Discover, sees the
-      // attachment listed, clicks Download and is refused, which is the exact
-      // technical context the story exists to give them. A draft stays private to
-      // its owner. Both halves match firestore.rules, including the requirement
-      // for a session: these PDFs carry the sponsor's competitive detail and are
-      // not for the open internet.
-      allow read: if isActiveReader()
-        && (postingIsPublished(problemId, ownerId) || isWallet(ownerId));
+      // A signed-in member (completed /users profile) can download the documents
+      // on any published posting - otherwise a solution developer finds the
+      // posting on Discover, sees the attachment listed, clicks Download and is
+      // refused, which is the exact technical context the story exists to give
+      // them. A draft stays private to its owner. Both halves match
+      // firestore.rules: these PDFs carry the sponsor's competitive detail and
+      // are not for the open internet, nor for a wallet that has only signed SIWE.
+      allow read: if (isActiveReader() && postingIsPublished(problemId, ownerId))
+        || isActiveWallet(ownerId);
 
       // CREATE ONLY - a stored attachment is immutable for its whole life.
       //

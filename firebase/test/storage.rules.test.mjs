@@ -316,6 +316,12 @@ describe("storage rules: attachments follow the posting's visibility", () => {
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
+  it("[BIT-ATT-077] refuses a signed-in wallet with no profile from downloading", async () => {
+    const NO_PROFILE = `0x${"2".repeat(40)}`;
+    const storage = env.authenticatedContext(NO_PROFILE).storage();
+    await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+  });
+
   it("[BIT-ATT-070] lets another wallet download an attachment on a published posting", async () => {
     // The whole point of QCDAO-58: a solution developer in another organisation
     // reads the posting on Discover and needs its technical context to respond.

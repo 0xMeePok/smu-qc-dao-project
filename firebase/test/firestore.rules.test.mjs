@@ -93,13 +93,19 @@ function baseFunding(overrides = {}) {
   };
 }
 
+function firestoreEmulator() {
+  const raw = process.env.FIRESTORE_EMULATOR_HOST;
+  if (!raw) return { host: "127.0.0.1", port: 8080 };
+  const [host, port] = raw.split(":");
+  return { host, port: Number(port) };
+}
+
 before(async () => {
   env = await initializeTestEnvironment({
     projectId: "qc-dao-rules-test",
     firestore: {
       rules: fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"),
-      host: "127.0.0.1",
-      port: 8080,
+      ...firestoreEmulator(),
     },
   });
 });
@@ -1148,6 +1154,12 @@ describe("session revocation", () => {
 describe("problems/{problemId} funded posting", () => {
   const FUTURE = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
 
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ADDRESS), baseProfile(null, ADDRESS));
+    });
+  });
+
   function submitted(overrides = {}) {
     return {
       ownerId: ADDRESS,
@@ -1281,6 +1293,13 @@ describe("problems/{problemId} funded posting", () => {
       updatedAt: serverTimestamp(),
     }));
   });
+
+  it("[BIT-P48-21] rejects a sponsor organisation that is not the owner's profile", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q48_spoof_org"), submitted({
+      organisation: "A Trusted Institution We Do Not Belong To",
+    })));
+  });
 });
 
 // QCDAO-48 - who can see a published posting.
@@ -1291,6 +1310,10 @@ describe("problems/{problemId} marketplace visibility", () => {
   before(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore();
+      await setDoc(doc(db, "users", ADDRESS), baseProfile(null, ADDRESS));
+      await setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, {
+        organisation: "Another Lab",
+      }));
       await setDoc(doc(db, "problems", PUBLISHED), baseProblem({ status: "submitted" }));
       await setDoc(doc(db, "problems", DRAFT), baseProblem({ status: "draft" }));
     });
@@ -1335,5 +1358,11 @@ describe("problems/{problemId} marketplace visibility", () => {
       title: "Hijacked", updatedAt: serverTimestamp(),
     }));
     await assertFails(deleteDoc(doc(db, "problems", PUBLISHED)));
+  });
+
+  it("[BIT-P48-22] refuses a signed-in wallet with no profile from reading the marketplace", async () => {
+    const NO_PROFILE = `0x${"e".repeat(40)}`;
+    const db = env.authenticatedContext(NO_PROFILE).firestore();
+    await assertFails(getDoc(doc(db, "problems", PUBLISHED)));
   });
 });
