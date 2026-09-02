@@ -173,8 +173,9 @@ describe("planSweep", () => {
 });
 
 describe("sweepOrphanedAttachments", () => {
-  function harness({ files, postings }) {
+  function harness({ files, postings, afterSnapshot }) {
     const deleted = [];
+    const store = new Map((postings ?? []).map((posting) => [posting.id ?? "unknown", posting]));
     const bucket = {
       getFiles: async () => [files.map(({ path, createdAt }) => ({
         name: path,
@@ -184,10 +185,27 @@ describe("sweepOrphanedAttachments", () => {
     };
     const db = {
       collection: () => ({
-        get: async () => ({ docs: postings.map((data) => ({ data: () => data })) }),
+        get: async () => {
+          const docs = [...store.entries()].map(([id, data]) => ({
+            id,
+            data: () => data,
+          }));
+          afterSnapshot?.(store);
+          return { docs };
+        },
+        doc: (id) => ({
+          get: async () => {
+            const data = store.get(id);
+            return {
+              exists: data !== undefined,
+              id,
+              data: () => data,
+            };
+          },
+        }),
       }),
     };
-    return { db, bucket, deleted, logger: { info() {}, warn() {} } };
+    return { db, bucket, deleted, store, logger: { info() {}, warn() {} } };
   }
 
   it("deletes nothing in dry-run mode, but still reports what it would remove", async () => {
@@ -235,5 +253,22 @@ describe("sweepOrphanedAttachments", () => {
 
     assert.deepEqual(deleted, [second]);
     assert.equal(summary.deleted, 1);
+  });
+
+  it("does not delete a file published after the snapshot and before the delete", async () => {
+    const path = livePath("p1", "latepub01");
+    const { db, bucket, deleted, logger } = harness({
+      files: [objectAt(path)],
+      postings: [],
+      afterSnapshot(store) {
+        store.set("p1", { attachments: [{ path }] });
+      },
+    });
+
+    const summary = await sweepOrphanedAttachments({ db, bucket, dryRun: false, now: NOW, logger });
+
+    assert.deepEqual(deleted, []);
+    assert.equal(summary.orphans, 1);
+    assert.equal(summary.deleted, 0);
   });
 });

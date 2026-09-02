@@ -419,18 +419,36 @@ service cloud.firestore {
       return value in ['SGD', 'USD', 'EUR', 'GBP'];
     }
 
-    // The completeness contract for a SUBMITTED posting.
+    // Marketplace-visible postings. A submitted or open problem is readable by
+    // any active member, so both statuses carry the same completeness contract.
+    function isMarketplaceVisible(status) {
+      return status in ['submitted', 'open'];
+    }
+
+    // The completeness contract for a marketplace-visible posting.
     //
-    // Checked on the status rather than only on create, so a posting cannot be
-    // created complete and then have its structure stripped by a later update.
-    // Documents in any other state are untouched by this, which is what keeps
-    // pre-QCDAO-48 problems editable - they were never 'submitted'.
+    // Checked on the resulting status rather than only on create, so a posting
+    // cannot be created complete and then have its structure stripped by a later
+    // update into (or while remaining) submitted or open. Drafts are untouched
+    // by this, which is what keeps pre-QCDAO-48 problems editable until they
+    // try to become marketplace-visible.
+    //
+    // Category, currency and expiry *types* stay in validProblem: that already
+    // runs on every write, and duplicating those checks here blows the 1000
+    // expression cap. This helper owns key presence, non-empty text, amount
+    // and the organisation binding.
     function validFundedPosting(data) {
       return data.keys().hasAll([
           'organisation', 'businessContext', 'currentApproach', 'currentLimitations',
           'expectedOutcome', 'successCriteria', 'dataAvailability',
           'categories', 'currency', 'expiresAt'
         ])
+        && isNonEmptyString(data.businessContext, 4000)
+        && isNonEmptyString(data.currentApproach, 4000)
+        && isNonEmptyString(data.currentLimitations, 4000)
+        && isNonEmptyString(data.expectedOutcome, 4000)
+        && isNonEmptyString(data.successCriteria, 4000)
+        && isNonEmptyString(data.dataAvailability, 4000)
         // A funded problem statement with no funding attached is not one.
         && data.amount > 0
         // Sponsor identity is the owner's profile, not a free-text claim.
@@ -585,7 +603,7 @@ service cloud.firestore {
         // saves before it is complete. Nothing else may be created directly - a
         // posting cannot start life already open, matched or funded.
         && request.resource.data.status in ['draft', 'submitted']
-        && (request.resource.data.status != 'submitted'
+        && (!isMarketplaceVisible(request.resource.data.status)
           || (validFundedPosting(request.resource.data)
             // Expiry is the window solution developers respond within, so a
             // posting that arrives already expired is a mistake, not a state.
@@ -598,9 +616,10 @@ service cloud.firestore {
         && request.resource.data.ownerId == resource.data.ownerId
         && validProblem(request.resource.data)
         && validAttachments(request.resource.data, problemId)
-        // Structure cannot be stripped out of a posting after the fact. Not applied
-        // to other states, which is what leaves pre-QCDAO-48 documents editable.
-        && (request.resource.data.status != 'submitted'
+        // Structure cannot be stripped out of a marketplace-visible posting.
+        // Drafts without the funded schema stay editable; they cannot become
+        // submitted or open until they satisfy validFundedPosting.
+        && (!isMarketplaceVisible(request.resource.data.status)
           || validFundedPosting(request.resource.data))
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time

@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, serverTimestamp } from "firebase/firestore";
 
 const ADDRESS = `0x${"a".repeat(40)}`;
 const OTHER = `0x${"b".repeat(40)}`;
@@ -658,7 +658,8 @@ describe("problems/{problemId}", () => {
       status: "completed",
       updatedAt: serverTimestamp(),
     }));
-    await assertSucceeds(updateDoc(doc(db, "problems", "p1"), {
+    // A legacy draft cannot become marketplace-visible without the funded schema.
+    await assertFails(updateDoc(doc(db, "problems", "p1"), {
       status: "open",
       updatedAt: serverTimestamp(),
     }));
@@ -1277,6 +1278,48 @@ describe("problems/{problemId} funded posting", () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "q48_open"), submitted()));
     await assertSucceeds(updateDoc(doc(db, "problems", "q48_open"), {
+      status: "open",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-P48-14] refuses to strip structure while advancing a submitted posting to open", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q48_strip_open"), submitted()));
+    await assertFails(updateDoc(doc(db, "problems", "q48_strip_open"), {
+      status: "open",
+      categories: deleteField(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "q48_strip_open"), {
+      status: "open",
+      businessContext: "",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-P48-23] rejects a submitted posting whose mandatory text is blank", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const requiredText = [
+      "businessContext", "currentApproach", "currentLimitations",
+      "expectedOutcome", "successCriteria", "dataAvailability",
+    ];
+    for (const field of requiredText) {
+      await assertFails(
+        setDoc(doc(db, "problems", `q48_blank_${field}`), submitted({ [field]: "" })),
+        `${field} as empty string should be rejected`,
+      );
+      await assertFails(
+        setDoc(doc(db, "problems", `q48_short_${field}`), submitted({ [field]: "x" })),
+        `${field} of one character should be rejected`,
+      );
+    }
+  });
+
+  it("[BIT-P48-24] refuses a legacy draft advancing to open without the funded schema", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q48_draft_open"), baseProblem()));
+    await assertFails(updateDoc(doc(db, "problems", "q48_draft_open"), {
       status: "open",
       updatedAt: serverTimestamp(),
     }));

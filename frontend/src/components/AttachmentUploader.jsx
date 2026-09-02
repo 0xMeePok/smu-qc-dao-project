@@ -24,10 +24,13 @@ import {
  *     problemId={problemId}
  *     value={attachments}
  *     onChange={setAttachments}
+ *     onPendingChange={setPendingCount}
  *   />
  *
  * `value` is exactly what belongs in the posting's `attachments` field, so the
  * host form saves it with the rest of its state and nothing else has to change.
+ * `onPendingChange` reports how many transfers are still in flight so the host
+ * can refuse to submit until every upload has settled.
  *
  * The one contract that matters: `problemId` must be decided BEFORE the first
  * upload, because it is part of the storage path. Generate the document id up
@@ -39,6 +42,7 @@ export function AttachmentUploader({
   problemId,
   value = [],
   onChange,
+  onPendingChange,
   disabled = false,
 }) {
   // In-flight uploads, keyed by attachment id. Separate from `value` because a
@@ -64,6 +68,15 @@ export function AttachmentUploader({
     pendingRef.current = pending;
   }, [pending]);
 
+  const onPendingChangeRef = useRef(onPendingChange);
+  useEffect(() => {
+    onPendingChangeRef.current = onPendingChange;
+  }, [onPendingChange]);
+
+  useEffect(() => {
+    onPendingChangeRef.current?.(pending.length);
+  }, [pending.length]);
+
   // Cancels every in-flight upload if the component goes away mid-transfer,
   // rather than leaving orphaned objects in the bucket that nothing references.
   useEffect(() => () => {
@@ -74,6 +87,7 @@ export function AttachmentUploader({
         // Already settled - nothing to abort.
       }
     });
+    onPendingChangeRef.current?.(0);
   }, []);
 
   const commit = useCallback((updater) => {

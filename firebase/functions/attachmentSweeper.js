@@ -11,6 +11,11 @@
  * there is no reliable moment to run a delete in. So the bucket accumulates real
  * files nothing points at, and something server-side has to notice.
  *
+ * Deletion is re-checked against the posting immediately before each object is
+ * removed. A form left open past the grace period can still publish between the
+ * collection snapshot and the delete; without that re-get, the sweeper would
+ * destroy a file the new posting now references.
+ *
  * The lifecycle rule in storage.lifecycle.json only aborts INCOMPLETE resumable
  * uploads. A completed upload that no posting references is a different thing, and
  * this is what handles it.
@@ -123,6 +128,18 @@ export function planSweep({
 }
 
 /**
+ * Re-reads problems/{problemId} so a posting published after the collection
+ * snapshot cannot have its attachment deleted in this run.
+ */
+async function isReferencedByCurrentPosting(db, path) {
+  const parsed = parseAttachmentPath(path);
+  if (!parsed) return false;
+  const snap = await db.collection("problems").doc(parsed.problemId).get();
+  if (!snap.exists) return false;
+  return collectReferencedPaths([snap.data()]).has(path);
+}
+
+/**
  * Reads the bucket and the postings, plans the sweep, and (unless dryRun) deletes.
  *
  * Deliberately dry-run by default at the call site in index.js: this is the one
@@ -161,6 +178,10 @@ export async function sweepOrphanedAttachments({
   if (!dryRun) {
     for (const path of plan.deletions) {
       try {
+        if (await isReferencedByCurrentPosting(db, path)) {
+          logger.info(`[attachment-sweep] skip ${path}: newly-referenced`);
+          continue;
+        }
         await byPath.get(path).ref.delete();
         deleted += 1;
       } catch (error) {

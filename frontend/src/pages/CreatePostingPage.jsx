@@ -28,6 +28,10 @@ import { formatInstant } from "../lib/datetime.js";
  * thing that clears the form is a successful write, and by then the posting exists.
  */
 
+function abandonDraftAttachments(items) {
+  return Promise.allSettled(items.map((item) => deleteAttachment(item)));
+}
+
 const EMPTY_FORM = {
   title: "",
   businessContext: "",
@@ -82,11 +86,18 @@ export default function CreatePostingPage({ onNavigate }) {
   const [postingId, setPostingId] = useState(() => newPostingId());
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachments, setAttachments] = useState([]);
+  const [pendingCount, setPendingCount] = useState(0);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
   const formTop = useRef(null);
+  const pendingCountRef = useRef(0);
+
+  const updatePendingCount = (count) => {
+    pendingCountRef.current = count;
+    setPendingCount(count);
+  };
 
   const organisation = profile?.organisation ?? "";
 
@@ -131,6 +142,10 @@ export default function CreatePostingPage({ onNavigate }) {
     event.preventDefault();
     setSubmitError(null);
 
+    // Pending uploads are not in `attachments`. Submitting now would publish
+    // without them and unmount the uploader, which cancels the transfers.
+    if (pendingCountRef.current > 0) return;
+
     // Imported lazily so the validator and the rules stay the single source of
     // truth for the shape, rather than this component re-deriving it.
     const { validatePosting } = await import("../lib/validation.js");
@@ -145,6 +160,8 @@ export default function CreatePostingPage({ onNavigate }) {
       }
       return;
     }
+
+    if (pendingCountRef.current > 0) return;
 
     setSubmitting(true);
     try {
@@ -161,6 +178,13 @@ export default function CreatePostingPage({ onNavigate }) {
     }
   };
 
+  const cancel = async () => {
+    const abandoned = attachments;
+    setAttachments([]);
+    await abandonDraftAttachments(abandoned);
+    onNavigate("discover");
+  };
+
   const startAnother = async () => {
     const abandoned = published ? [] : attachments;
     setPostingId(newPostingId());
@@ -169,7 +193,7 @@ export default function CreatePostingPage({ onNavigate }) {
     setErrors({});
     setSubmitError(null);
     setPublished(null);
-    await Promise.allSettled(abandoned.map((item) => deleteAttachment(item)));
+    await abandonDraftAttachments(abandoned);
   };
 
   if (published) {
@@ -356,17 +380,18 @@ export default function CreatePostingPage({ onNavigate }) {
               problemId={postingId}
               value={attachments}
               onChange={setAttachments}
+              onPendingChange={updatePendingCount}
               disabled={submitting}
             />
           </Section>
 
           <div className="form-actions">
-            <button className="primary" type="submit" disabled={submitting}>
+            <button className="primary" type="submit" disabled={submitting || pendingCount > 0}>
               {submitting ? "Submitting…" : "Submit problem statement"}
             </button>
             <button
               className="secondary" type="button" disabled={submitting}
-              onClick={() => onNavigate("discover")}
+              onClick={cancel}
             >
               Cancel
             </button>
