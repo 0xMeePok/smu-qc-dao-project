@@ -44,6 +44,14 @@ service cloud.firestore {
           || !get(/databases/$(database)/documents/users/$(address)).data.get('suspended', false));
     }
 
+    // A completed onboarding record. SIWE mints a token before /users exists, and
+    // isActiveUser deliberately still treats that wallet as active so the owner can
+    // finish signup. Marketplace reads must not: a posting is competitive detail
+    // for registered participants, not for any wallet that completed a signature.
+    function hasCompletedProfile(address) {
+      return exists(/databases/$(database)/documents/users/$(address));
+    }
+
     function isWalletAddress(value) {
       return value is string && value.matches('^0x[0-9a-f]{40}$');
     }
@@ -270,9 +278,13 @@ service cloud.firestore {
 
     function hasProblemSchema(data) {
       return data.keys().hasOnly([
-        'ownerId', 'title', 'summary', 'outcomes', 'amount', 'deadline',
+        'ownerId', 'organisation', 'title', 'summary', 'outcomes', 'amount', 'deadline',
         'benefits', 'deliverables', 'status', 'type', 'opportunityType',
-        'createdAt', 'updatedAt'
+        // QCDAO-48 - the structured funded problem statement.
+        'businessContext', 'currentApproach', 'currentLimitations',
+        'expectedOutcome', 'successCriteria', 'dataAvailability',
+        'categories', 'currency', 'expiresAt',
+        'attachments', 'createdAt', 'updatedAt'
       ]) && data.keys().hasAll([
         'ownerId', 'title', 'summary', 'amount', 'status', 'createdAt', 'updatedAt'
       ]);
@@ -334,13 +346,124 @@ service cloud.firestore {
       return value is number && value >= 0 && value <= 1000000000;
     }
 
+    // QCDAO-58 - the posting's record of the PDFs stored in Cloud Storage under
+    // problems/{ownerId}/{problemId}/. See firebase/storage.rules, which owns the
+    // rules for the bytes themselves; this only governs the reference list.
+    //
+    // The load-bearing check is `path`: it is rebuilt here from the owner and the
+    // problem id in the URL rather than trusted from the client. Without that, a
+    // user could write an attachment entry on their OWN posting whose path points
+    // into someone else's folder, and any later feature that renders the list
+    // would happily hand out a reference to a document they cannot read. Storage
+    // rules would still refuse the download, but the reference should never exist.
+    function attachmentIsValid(items, index, ownerId, problemId) {
+      return items.size() <= index
+        || (items[index] is map
+          // No 'uploadedAt'. An earlier draft allowed one, but nothing writes it and
+          // rules cannot pin it to request.time inside a list (existing entries keep
+          // their original value across later updates, so the comparison would fail
+          // every edit). That left a client-controlled timestamp any future feature
+          // might have displayed as fact. Add it back only with a server-side writer.
+          && items[index].keys().hasOnly(['id', 'name', 'size', 'contentType', 'path'])
+          && items[index].keys().hasAll(['id', 'name', 'size', 'path'])
+          && items[index].id is string
+          && items[index].name is string
+          && items[index].name.size() <= 200
+          && items[index].size is number
+          && items[index].size > 0 && items[index].size <= 10485760
+          && items[index].path == 'problems/' + ownerId + '/' + problemId + '/' + items[index].id + '.pdf'
+          && (!items[index].keys().hasAny(['contentType'])
+            || items[index].contentType == 'application/pdf'));
+    }
+
+    function validAttachments(data, problemId) {
+      return !data.keys().hasAny(['attachments'])
+        || (data.attachments is list
+          && data.attachments.size() <= 5
+          && attachmentIsValid(data.attachments, 0, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 1, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 2, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 3, data.ownerId, problemId)
+          && attachmentIsValid(data.attachments, 4, data.ownerId, problemId));
+    }
+
+    // QCDAO-48 - the technology areas a posting can ask for help in.
+    //
+    // Domain level, not technique level: a problem owner knows their business
+    // problem, not which algorithm family solves it. 'quantum' covers gate-based,
+    // annealing and quantum-inspired approaches together, so the sponsor's
+    // 09/06/2026 point that non-gate-based work must not be excluded still holds.
+    //
+    // The set is closed so a posting cannot invent a category and quietly break
+    // discovery filters. Mirrored in frontend/src/config/postingCategories.js;
+    // frontend/test/unit/posting.test.js checks the two lists agree.
+    function allowedCategories() {
+      return [
+        'ai', 'quantum', 'web3', 'robotics', 'iot', 'data',
+        'security', 'cloud', 'simulation', 'optimisation',
+        'sustainability', 'other'
+      ];
+    }
+
+    function validCategories(categories) {
+      return categories is list
+        && categories.size() >= 1 && categories.size() <= 6
+        // toSet().hasOnly() checks membership for the whole list in one expression.
+        // Firestore caps a rule evaluation at 1000 expressions and this file is
+        // close to that ceiling, so unrolling six index comparisons here is a cost
+        // the budget cannot carry - and this says the same thing more clearly.
+        && categories.toSet().hasOnly(allowedCategories());
+    }
+
+    function validCurrency(value) {
+      return value in ['SGD', 'USD', 'EUR', 'GBP'];
+    }
+
+    // Marketplace-visible postings. A submitted or open problem is readable by
+    // any active member, so both statuses carry the same completeness contract.
+    function isMarketplaceVisible(status) {
+      return status in ['submitted', 'open'];
+    }
+
+    // The completeness contract for a marketplace-visible posting.
+    //
+    // Checked on the resulting status rather than only on create, so a posting
+    // cannot be created complete and then have its structure stripped by a later
+    // update into (or while remaining) submitted or open. Drafts are untouched
+    // by this, which is what keeps pre-QCDAO-48 problems editable until they
+    // try to become marketplace-visible.
+    //
+    // Category, currency and expiry *types* stay in validProblem: that already
+    // runs on every write, and duplicating those checks here blows the 1000
+    // expression cap. This helper owns key presence, non-empty text, amount
+    // and the organisation binding.
+    function validFundedPosting(data) {
+      return data.keys().hasAll([
+          'organisation', 'businessContext', 'currentApproach', 'currentLimitations',
+          'expectedOutcome', 'successCriteria', 'dataAvailability',
+          'categories', 'currency', 'expiresAt'
+        ])
+        && isNonEmptyString(data.businessContext, 4000)
+        && isNonEmptyString(data.currentApproach, 4000)
+        && isNonEmptyString(data.currentLimitations, 4000)
+        && isNonEmptyString(data.expectedOutcome, 4000)
+        && isNonEmptyString(data.successCriteria, 4000)
+        && isNonEmptyString(data.dataAvailability, 4000)
+        // A funded problem statement with no funding attached is not one.
+        && data.amount > 0
+        // Sponsor identity is the owner's profile, not a free-text claim.
+        && data.organisation
+          == get(/databases/$(database)/documents/users/$(data.ownerId)).data.organisation;
+    }
+
     function validProblemStatus(status) {
-      return status in ['draft', 'open', 'in_review', 'matched', 'funded', 'completed', 'cancelled'];
+      return status in ['draft', 'submitted', 'open', 'in_review', 'matched', 'funded', 'completed', 'cancelled'];
     }
 
     function validProblemTransition(before, after) {
       return before == after
-        || (before == 'draft' && after in ['open', 'cancelled'])
+        || (before == 'draft' && after in ['submitted', 'open', 'cancelled'])
+        || (before == 'submitted' && after in ['open', 'in_review', 'cancelled'])
         || (before == 'open' && after in ['in_review', 'matched', 'cancelled'])
         || (before == 'in_review' && after in ['open', 'matched', 'cancelled'])
         || (before == 'matched' && after in ['funded', 'completed', 'cancelled'])
@@ -358,6 +481,16 @@ service cloud.firestore {
         && optionalString(data, 'deliverables', 4000)
         && optionalString(data, 'type', 80)
         && optionalString(data, 'opportunityType', 80)
+        && optionalString(data, 'organisation', 120)
+        && optionalString(data, 'businessContext', 4000)
+        && optionalString(data, 'currentApproach', 4000)
+        && optionalString(data, 'currentLimitations', 4000)
+        && optionalString(data, 'expectedOutcome', 4000)
+        && optionalString(data, 'successCriteria', 4000)
+        && optionalString(data, 'dataAvailability', 4000)
+        && (!data.keys().hasAny(['categories']) || validCategories(data.categories))
+        && (!data.keys().hasAny(['currency']) || validCurrency(data.currency))
+        && (!data.keys().hasAny(['expiresAt']) || data.expiresAt is timestamp)
         && (!data.keys().hasAny(['deadline']) || data.deadline is timestamp)
         && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
     }
@@ -447,13 +580,34 @@ service cloud.firestore {
     }
 
     match /problems/{problemId} {
-      allow read: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
+      // The marketplace is open to MEMBERS, not to the open internet. A submitted
+      // or open posting is readable by any active wallet that has finished
+      // onboarding (a /users document); a draft stays private to its owner.
+      //
+      // Authenticated rather than public because a posting carries a sponsor's
+      // business context, their limitations and their budget. That is competitive
+      // information, and the platform's value is that it circulates among
+      // registered participants instead of by forwarded email. Requiring a session
+      // also matches the posting detail route, which has always required one.
+      allow read: if isActiveUser(request.auth.uid)
+        && (resource.data.ownerId == request.auth.uid
+          || (resource.data.status in ['submitted', 'open']
+            && hasCompletedProfile(request.auth.uid)));
       allow delete: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
         && validProblem(request.resource.data)
-        && request.resource.data.status == 'draft'
+        && validAttachments(request.resource.data, problemId)
+        // QCDAO-48 posts straight to 'submitted'; 'draft' stays for anything that
+        // saves before it is complete. Nothing else may be created directly - a
+        // posting cannot start life already open, matched or funded.
+        && request.resource.data.status in ['draft', 'submitted']
+        && (!isMarketplaceVisible(request.resource.data.status)
+          || (validFundedPosting(request.resource.data)
+            // Expiry is the window solution developers respond within, so a
+            // posting that arrives already expired is a mistake, not a state.
+            && request.resource.data.expiresAt > request.time))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
       allow update: if isActiveUser(request.auth.uid)
@@ -461,6 +615,12 @@ service cloud.firestore {
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
         && validProblem(request.resource.data)
+        && validAttachments(request.resource.data, problemId)
+        // Structure cannot be stripped out of a marketplace-visible posting.
+        // Drafts without the funded schema stay editable; they cannot become
+        // submitted or open until they satisfy validFundedPosting.
+        && (!isMarketplaceVisible(request.resource.data.status)
+          || validFundedPosting(request.resource.data))
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validProblemTransition(resource.data.status, request.resource.data.status);

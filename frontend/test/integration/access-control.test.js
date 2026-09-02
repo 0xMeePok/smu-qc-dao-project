@@ -362,7 +362,7 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
   describe("4. End-to-End Route Access Evaluations", () => {
     it("[FIT-AAR-001] should grant unauthenticated guests access to all public routes", () => {
       const guestAuth = deriveAuthState(guestSession);
-      const publicRoutes = ["home", "discover", "opportunity", "login", "access-denied"];
+      const publicRoutes = ["home", "discover", "posting", "login", "access-denied"];
 
       for (const route of publicRoutes) {
         const decision = evaluateRouteAccess(route, guestAuth.user);
