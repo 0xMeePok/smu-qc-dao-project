@@ -194,9 +194,9 @@ need to redeploy, or want more detail on local emulators, see
 ## Testing
 
 ```bash
-npm test --prefix frontend            # 73 tests — validation, roles, routing, idle session
-npm test --prefix firebase            # 78 tests — Firestore rules, via a local emulator (needs Java)
-npm test --prefix firebase/functions  # 25 tests — adversarial signature verification
+npm test --prefix frontend            # 196 tests — validation, roles, routing, postings, attachments
+npm test --prefix firebase            # 190 tests — Firestore and Storage rules, via local emulators (needs Java)
+npm test --prefix firebase/functions  # 75 tests — adversarial signature verification, attachment sweep
 ```
 
 Each suite boots and tears down whatever emulator it needs, so no manual setup is

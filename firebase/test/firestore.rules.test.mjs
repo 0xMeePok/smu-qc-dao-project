@@ -802,7 +802,6 @@ describe("problems/{problemId} attachments", () => {
       name: "spec.pdf",
       size: 2048,
       contentType: "application/pdf",
-      path: `problems/${ownerId}/${problemId}/${id}.pdf`,
       ...overrides.fields,
     };
   }
@@ -820,30 +819,43 @@ describe("problems/{problemId} attachments", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "att_empty"), baseProblem({ attachments: [] })));
   });
 
-  it("[BIT-OPD-144] rejects a path pointing into another wallet's storage folder", async () => {
-    // The core check. Without it a user could record, on their OWN posting, a
-    // reference to a file belonging to someone else - and any later screen that
-    // renders the list would be handing out a pointer to a document the viewer
-    // was never allowed to know about.
+  it("[BIT-OPD-144] cannot point an attachment at another wallet's file", async () => {
+    // Previously this rejected a forged `path`. There is no path to forge now: it
+    // is derived from the posting's ownerId and id, both pinned by the match rule,
+    // so a record can only ever address the owner's own folder. What remains
+    // testable is that a path cannot be reintroduced - see BIT-OPD-146b - and that
+    // the derived value matches storage.rules, covered in attachments.test.jsx.
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "att_foreign"), baseProblem({
+      ownerId: OTHER,
       attachments: [attachment({ ownerId: OTHER, problemId: "att_foreign" })],
     })));
   });
 
-  it("[BIT-OPD-145] rejects a path pointing at a different posting", async () => {
+
+
+  it("[BIT-OPD-146] rejects an attachment id that is not the generated shape", async () => {
+    // The record no longer stores a path - it is derived from this id, so the id
+    // is the thing that has to be constrained.
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertFails(setDoc(doc(db, "problems", "att_wrong_posting"), baseProblem({
-      attachments: [attachment({ problemId: "someOtherPosting" })],
-    })));
+    for (const id of ["short", "../escape", "has space", "x".repeat(65)]) {
+      await assertFails(
+        setDoc(doc(db, "problems", "att_id"), baseProblem({
+          attachments: [attachment({ id, problemId: "att_id" })],
+        })),
+        `id "${id}" should be rejected`,
+      );
+    }
   });
 
-  it("[BIT-OPD-146] rejects an attachment that is not a .pdf path", async () => {
+  it("[BIT-OPD-146b] rejects a path smuggled back onto the record", async () => {
+    // hasOnly is gone from attachmentEntry; keys().size() == 4 is what excludes
+    // extra fields, so this is the test that keeps that equivalence honest.
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertFails(setDoc(doc(db, "problems", "att_html"), baseProblem({
+    await assertFails(setDoc(doc(db, "problems", "att_path"), baseProblem({
       attachments: [attachment({
-        problemId: "att_html",
-        fields: { path: `problems/${ADDRESS}/att_html/abc123xy.html` },
+        problemId: "att_path",
+        fields: { path: `problems/${ADDRESS}/att_path/abc123xy.pdf` },
       })],
     })));
   });
@@ -1484,5 +1496,264 @@ describe("problems/{problemId} marketplace visibility", () => {
     const NO_PROFILE = `0x${"e".repeat(40)}`;
     const db = env.authenticatedContext(NO_PROFILE).firestore();
     await assertFails(getDoc(doc(db, "problems", PUBLISHED)));
+  });
+});
+
+// QCDAO-50 - save a posting as a draft and finish it later.
+describe("problems/{problemId} drafts", () => {
+  const FUTURE = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+
+  // The shape the form writes on "Save as draft" with nothing filled in.
+  function emptyDraft(overrides = {}) {
+    return {
+      ownerId: ADDRESS,
+      organisation: "Singapore Management University",
+      title: "",
+      summary: "",
+      businessContext: "",
+      currentApproach: "",
+      currentLimitations: "",
+      expectedOutcome: "",
+      successCriteria: "",
+      dataAvailability: "",
+      categories: [],
+      amount: 0,
+      currency: "SGD",
+      expiresAt: FUTURE,
+      status: "draft",
+      attachments: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...overrides,
+    };
+  }
+
+  function completeFields(overrides = {}) {
+    return {
+      title: "Cold-chain route optimisation",
+      summary: "Vehicle routing degrades badly under demand spikes.",
+      businessContext: "Perishable deliveries across a dense urban network.",
+      currentApproach: "A nightly heuristic solver.",
+      currentLimitations: "Runtime grows past the delivery window.",
+      expectedOutcome: "A schedule inside a thirty minute window.",
+      successCriteria: "Ten percent lower distance at equal service level.",
+      dataAvailability: "Two years of anonymised telemetry.",
+      categories: ["ai", "quantum"],
+      amount: 80000,
+      currency: "SGD",
+      expiresAt: FUTURE,
+      ...overrides,
+    };
+  }
+
+  it("[BIT-P50-01] saves a draft with every mandatory field empty", async () => {
+    // The point of the story: an unfinished form must persist. Before QCDAO-50
+    // validProblem required a non-empty title and summary of every problem.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_empty"), emptyDraft()));
+  });
+
+  it("[BIT-P50-02] saves a partially filled draft", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_partial"), emptyDraft({
+      title: "Half-written idea",
+      categories: ["robotics"],
+    })));
+  });
+
+  it("[BIT-P50-03] still rejects a draft whose fields are the wrong type or too long", async () => {
+    // Relaxed does not mean unvalidated.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "d50_type"), emptyDraft({ title: 42 })));
+    await assertFails(setDoc(doc(db, "problems", "d50_long"), emptyDraft({ title: "x".repeat(161) })));
+    await assertFails(setDoc(doc(db, "problems", "d50_cat"), emptyDraft({ categories: ["nonsense"] })));
+  });
+
+  it("[BIT-P50-04] keeps a draft private to its owner", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "d50_private"), { ownerId: ADDRESS, status: "draft" });
+    });
+    const other = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDoc(doc(other, "problems", "d50_private")));
+
+    const owner = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(getDoc(doc(owner, "problems", "d50_private")));
+  });
+
+  it("[BIT-P50-05] lets the owner keep editing a draft", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_edit"), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d50_edit"), {
+      title: "Now it has a title",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-P50-06] refuses another wallet editing someone else's draft", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "d50_theirs"), emptyDraft());
+    });
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(updateDoc(doc(db, "problems", "d50_theirs"), {
+      title: "Hijacked", updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-P50-07] publishes a completed draft", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_publish"), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d50_publish"), {
+      ...completeFields(),
+      status: "submitted",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-P50-08] refuses to publish a draft that is still incomplete", async () => {
+    // Full validation applies at the publish step, not before it.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_incomplete"), emptyDraft()));
+
+    for (const missing of ["title", "summary", "categories", "amount"]) {
+      const fields = completeFields();
+      if (missing === "categories") fields.categories = [];
+      else if (missing === "amount") fields.amount = 0;
+      else fields[missing] = "";
+
+      await assertFails(
+        updateDoc(doc(db, "problems", "d50_incomplete"), {
+          ...fields, status: "submitted", updatedAt: serverTimestamp(),
+        }),
+        `publishing with an empty ${missing} should be refused`,
+      );
+    }
+  });
+
+  it("[BIT-P50-09] refuses to publish a draft whose expiry has passed", async () => {
+    // A draft can sit for weeks; it must not reach the marketplace already closed.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_stale"), emptyDraft()));
+    await assertFails(updateDoc(doc(db, "problems", "d50_stale"), {
+      ...completeFields({ expiresAt: new Date(Date.now() - 1000) }),
+      status: "submitted",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-P50-10] lets the owner delete a draft, and nobody else", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "d50_delete"), emptyDraft());
+    });
+    await assertFails(deleteDoc(doc(env.authenticatedContext(OTHER).firestore(), "problems", "d50_delete")));
+    await assertSucceeds(deleteDoc(doc(env.authenticatedContext(ADDRESS).firestore(), "problems", "d50_delete")));
+  });
+
+  it("[BIT-P50-11] refuses to move createdAt on a later draft save", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_created"), emptyDraft()));
+    await assertFails(updateDoc(doc(db, "problems", "d50_created"), {
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[BIT-P50-13] denies a read of a posting that does not exist yet", async () => {
+    // Not cosmetic. The read rule dereferences resource.data, so a get on a
+    // missing document is DENIED rather than returning empty - which is why
+    // saveDraft must not check existence by reading first.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(getDoc(doc(db, "problems", "d50_never_written")));
+  });
+
+  it("[BIT-P50-14] accepts the create-then-update sequence saveDraft performs", async () => {
+    // First save is a create; every later save is an update that leaves
+    // createdAt alone. This is the exact call order the form makes.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_sequence"), emptyDraft()));
+
+    const { createdAt, ...withoutCreatedAt } = emptyDraft({ title: "Second save" });
+    await assertSucceeds(updateDoc(doc(db, "problems", "d50_sequence"), withoutCreatedAt));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d50_sequence"), {
+      ...withoutCreatedAt, title: "Third save",
+    }));
+  });
+
+  it("[BIT-P50-12] refuses an unauthenticated draft save", async () => {
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(setDoc(doc(db, "problems", "d50_anon"), emptyDraft()));
+  });
+});
+
+// The combination the app actually writes. No earlier test paired a complete
+// funded posting WITH attachments, which is how a ruleset that exceeded
+// Firestore's 1000-expression evaluation cap reached the browser: every submit
+// failed with permission-denied while the suite stayed green.
+describe("problems/{problemId} full client payload", () => {
+  const FUTURE = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+
+  function attachmentAt(problemId, index) {
+    const id = `${"abcd"[index]}aaeadc3-c06e-4f70-9406-e094ee68300${index}`;
+    return {
+      id, name: "design-spec.pdf", size: 759469, contentType: "application/pdf",
+    };
+  }
+
+  // Exactly the field set buildPostingDocument sends - attachments always present.
+  function clientPayload(problemId, count, overrides = {}) {
+    return {
+      ownerId: ADDRESS,
+      organisation: "Singapore Management University",
+      title: "Cold-chain route optimisation",
+      summary: "Vehicle routing degrades badly under demand spikes.",
+      businessContext: "Perishable deliveries across a dense urban network.",
+      currentApproach: "A nightly heuristic solver.",
+      currentLimitations: "Runtime grows past the delivery window.",
+      expectedOutcome: "A schedule inside a thirty minute window.",
+      successCriteria: "Ten percent lower distance at equal service level.",
+      dataAvailability: "Two years of anonymised telemetry.",
+      categories: ["ai", "quantum"],
+      amount: 80000,
+      currency: "SGD",
+      expiresAt: FUTURE,
+      status: "submitted",
+      attachments: Array.from({ length: count }, (_, i) => attachmentAt(problemId, i)),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...overrides,
+    };
+  }
+
+  it("[BIT-P50-15] accepts the full payload at every allowed attachment count", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    for (let count = 0; count <= 2; count += 1) {
+      const id = `full_${count}`;
+      await assertSucceeds(
+        setDoc(doc(db, "problems", id), clientPayload(id, count)),
+        `a complete posting with ${count} attachment(s) should be accepted`,
+      );
+    }
+  });
+
+  it("[BIT-P50-16] refuses more attachments than the cap", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "full_3"), clientPayload("full_3", 3)));
+  });
+
+  it("[BIT-P50-17] publishes a draft carrying attachments", async () => {
+    // The publishDraft path: draft first, then update to submitted with files.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "full_pub"), clientPayload("full_pub", 0, {
+      status: "draft", title: "", summary: "", categories: [], amount: 0,
+    })));
+
+    const { createdAt, ...update } = clientPayload("full_pub", 2);
+    await assertSucceeds(updateDoc(doc(db, "problems", "full_pub"), update));
+  });
+
+  it("[BIT-P50-18] still refuses an attachment path in another wallet's folder", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const payload = clientPayload("full_bad", 1);
+    payload.attachments[0].path = `problems/${OTHER}/full_bad/x.pdf`;
+    await assertFails(setDoc(doc(db, "problems", "full_bad"), payload));
   });
 });

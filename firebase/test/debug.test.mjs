@@ -13,7 +13,7 @@ before(async () => {
     firestore: {
       rules: fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"),
       host: "127.0.0.1",
-      port: 8080,
+      port: 8085,
     },
   });
 });

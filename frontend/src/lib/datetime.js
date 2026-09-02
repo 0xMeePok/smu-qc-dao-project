@@ -32,14 +32,6 @@ export function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-/** Drops sub-second precision, so a stored instant is exact to the second. */
-export function truncateToSecond(value) {
-  const date = toDate(value);
-  if (!date) return null;
-  const truncated = new Date(date);
-  truncated.setMilliseconds(0);
-  return truncated;
-}
 
 function pad(number, width = 2) {
   return String(number).padStart(width, "0");

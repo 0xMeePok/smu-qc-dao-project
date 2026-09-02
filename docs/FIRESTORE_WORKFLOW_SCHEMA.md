@@ -7,10 +7,15 @@ immutable. Amounts are numbers from 0 through 1,000,000,000.
 
 | Collection | Required fields | Optional fields | Initial status |
 | --- | --- | --- | --- |
-| `problems` | `ownerId`, `title`, `summary`, `amount`, `status`, `createdAt`, `updatedAt` | `outcomes`, `deadline`, `benefits`, `deliverables`, `type`, `opportunityType` | `draft` |
+| `problems` | `ownerId`, `title`, `summary`, `amount`, `status`, `createdAt`, `updatedAt` | `organisation`, `businessContext`, `currentApproach`, `currentLimitations`, `expectedOutcome`, `successCriteria`, `dataAvailability`, `categories`, `currency`, `expiresAt`, `attachments` | `draft` |
 | `proposals` | `researcherId`, `problemId`, `title`, `summary`, `amount`, `status`, `createdAt`, `updatedAt` | `outcomes`, `deliverables` | `draft` |
 | `evaluations` | `evaluatorId`, `proposalId`, `title`, `score`, `feedback`, `status`, `createdAt`, `updatedAt` | none | `draft` |
 | `funding` | `funderId`, `proposalId`, `problemId`, `title`, `amount`, `status`, `createdAt`, `updatedAt` | `tranches` | `pledged` |
+
+A `problems` document in `submitted` or `open` must additionally carry every
+optional field above, with non-empty text, at least one category, an amount above
+zero, a future expiry, and an `organisation` matching the owner's profile. Drafts
+are exempt, which is what lets an unfinished form save. At most two attachments.
 
 References must exist. A funding record's proposal must also refer to its stated
 problem. Evaluation scores are 0–100. Lists and text fields have bounded lengths;

@@ -182,9 +182,9 @@ describe("attachment naming and paths", () => {
   it("[FUT-OPD-118] narrows an attachment to the fields the posting record allows", () => {
     const record = toPostingRecord({
       id: "abc123xy", name: "a.pdf", size: 10, contentType: "application/pdf",
-      path: "problems/x/y/abc123xy.pdf", cancel: () => {}, secret: "leak",
+      cancel: () => {}, secret: "leak",
     });
-    expect(Object.keys(record).sort()).toEqual(["contentType", "id", "name", "path", "size"]);
+    expect(Object.keys(record).sort()).toEqual(["contentType", "id", "name", "size"]);
   });
 });
 
@@ -295,13 +295,15 @@ describe("AttachmentUploader", () => {
       name: "spec.pdf",
       size: 2048,
       contentType: "application/pdf",
-      path: `problems/${OWNER}/${POSTING}/abc123xy.pdf`,
     };
     render(<Harness initial={[attachment]} />);
 
     await act(async () => { fireEvent.click(screen.getByText("Remove")); });
 
-    await waitFor(() => expect(mocks.deleted).toEqual([attachment.path]));
+    // The path is derived now, so this also proves the derivation matches
+    // what storage.rules expects.
+    await waitFor(() => expect(mocks.deleted)
+      .toEqual([`problems/${OWNER}/${POSTING}/${attachment.id}.pdf`]));
     expect(screen.queryByText("spec.pdf")).toBeNull();
   });
 
@@ -312,7 +314,6 @@ describe("AttachmentUploader", () => {
       name: "spec.pdf",
       size: 2048,
       contentType: "application/pdf",
-      path: `problems/${OWNER}/${POSTING}/abc123xy.pdf`,
     };
     render(<Harness initial={[attachment]} />);
 

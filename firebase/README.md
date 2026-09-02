@@ -19,12 +19,16 @@ firebase/
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
 ├── test/
 │   ├── firestore.rules.test.mjs # Rules tests via the Firestore emulator
+│   ├── security-config.test.mjs # CSP, CORS and rules-file assertions
 │   └── storage.rules.test.mjs   # Attachment rules tests via the Storage emulator
 └── functions/
-    ├── index.js                 # getSiweNonce + verifySiweSignature (see below)
+    ├── index.js                 # Callable functions + the scheduled attachment sweep
+    ├── attachmentSweeper.js     # Deletes objects no posting references
+    ├── scripts/mock_data.mjs    # Seeds three sample postings - see below
     ├── package.json
     └── test/
-        └── siwe.test.mjs        # Adversarial replay, signature, origin, and quota tests
+        ├── siwe.test.mjs        # Adversarial replay, signature, origin, and quota tests
+        └── attachmentSweeper.test.mjs
 ```
 
 ### What the two Cloud Functions do
@@ -327,8 +331,9 @@ You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
 | `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation`, `biography`, `expertise` — nothing else |
 | `siweNonces/{address}` | nobody; Admin SDK only | pending sign-in nonces |
 
-Postings live in `problems/{problemId}`, readable only by the owning wallet. Their
-PDF attachments live in Cloud Storage — see below.
+Postings live in `problems/{problemId}`. A submitted or open posting is readable by
+any active member; a **draft is private to its owner**. Their PDF attachments live in
+Cloud Storage — see below.
 
 A profile is split across two documents because Firestore rules can only allow or
 deny a whole document — there is no way to publish some fields and hide others
@@ -381,7 +386,7 @@ still a draft, but the path is still provably the caller's own.
 |---|---|
 | PDF content type **and** `.pdf` object name | `storage.rules` |
 | 10 MB per file | `storage.rules` |
-| Max 5 attachments per posting | `firestore.rules` |
+| Max 2 attachments per posting | `firestore.rules` |
 | Only the posting owner may upload, read or delete | `storage.rules` |
 | Suspended / revoked sessions blocked | `storage.rules`, via cross-service reads of `users/` |
 | Recorded `path` must match owner + posting | `firestore.rules` |

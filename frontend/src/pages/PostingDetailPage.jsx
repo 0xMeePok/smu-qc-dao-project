@@ -61,7 +61,9 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const download = async (attachment) => {
     setError(null);
     try {
-      saveBlobAs(await downloadAttachment(attachment), attachment.name);
+      saveBlobAs(await downloadAttachment({
+        attachment, ownerId: posting.ownerId, problemId: posting.id,
+      }), attachment.name);
     } catch (downloadError) {
       setError(messageForStorageError(downloadError));
     }

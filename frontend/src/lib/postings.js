@@ -1,9 +1,11 @@
 import {
   Timestamp,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -12,7 +14,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
-import { toPostingRecord } from "./attachments.js";
+import { deleteAttachment, toPostingRecord } from "./attachments.js";
 import { expiryDateFrom } from "../config/postingCategories.js";
 
 /**
@@ -29,6 +31,7 @@ import { expiryDateFrom } from "../config/postingCategories.js";
  */
 
 export const POSTING_STATUS_SUBMITTED = "submitted";
+export const POSTING_STATUS_DRAFT = "draft";
 
 /** Reserves a posting id without writing anything. Call before the first upload. */
 export function newPostingId() {
@@ -75,7 +78,6 @@ export function postingAuditPayload(posting) {
         name: trimmed(item.name),
         size: Number(item.size),
         contentType: trimmed(item.contentType || "application/pdf"),
-        path: trimmed(item.path),
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
   };
@@ -89,7 +91,10 @@ export function postingAuditPayload(posting) {
  * identifies the sponsor behind the posting, and letting the form set it freely
  * would let anyone post under any organisation's name.
  */
-export function buildPostingDocument({ ownerId, organisation, form, attachments = [], audit = null, now = new Date() }) {
+export function buildPostingDocument({
+  ownerId, organisation, form, attachments = [], audit = null,
+  status = POSTING_STATUS_SUBMITTED, now = new Date(),
+}) {
   const document = {
     ownerId: String(ownerId).toLowerCase(),
     organisation: trimmed(organisation),
@@ -102,12 +107,12 @@ export function buildPostingDocument({ ownerId, organisation, form, attachments 
     successCriteria: trimmed(form.successCriteria),
     dataAvailability: trimmed(form.dataAvailability),
     categories: [...form.categories],
-    amount: Number(form.amount),
+    amount: Number(form.amount) || 0,
     currency: form.currency,
     // Stored as a concrete instant, not "90 days", so the expiry does not shift
     // meaning depending on when it is read.
     expiresAt: Timestamp.fromDate(expiryDateFrom(form.expiryDays, now)),
-    status: POSTING_STATUS_SUBMITTED,
+    status,
     attachments: attachments.map(toPostingRecord),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -141,26 +146,19 @@ export async function updatePostingAudit({ postingId, audit }) {
   });
 }
 
-/** Replaces the attachment list on an existing posting. */
-export async function savePostingAttachments({ postingId, attachments }) {
-  requireFirebase();
-  await updateDoc(postingRef(postingId), {
-    attachments: attachments.map(toPostingRecord),
-    updatedAt: serverTimestamp(),
-  });
+function normalisePosting(id, data) {
+  return {
+    id,
+    ...data,
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    attachments: Array.isArray(data.attachments) ? data.attachments : [],
+  };
 }
 
 export async function findPosting(postingId) {
   requireFirebase();
   const snapshot = await getDoc(postingRef(postingId));
-  if (!snapshot.exists()) return null;
-  const data = snapshot.data();
-  return {
-    id: snapshot.id,
-    ...data,
-    categories: Array.isArray(data.categories) ? data.categories : [],
-    attachments: Array.isArray(data.attachments) ? data.attachments : [],
-  };
+  return snapshot.exists() ? normalisePosting(snapshot.id, snapshot.data()) : null;
 }
 
 export async function listPublishedPostings() {
@@ -184,4 +182,66 @@ export async function listPublishedPostings() {
       || (typeof item.expiresAt.toDate === "function"
         ? item.expiresAt.toDate()
         : new Date(item.expiresAt)) > new Date());
+}
+
+/**
+ * QCDAO-50 - drafts.
+ *
+ * A draft is the same document in `status: draft`. firestore.rules exempts that
+ * status from the funded-posting schema, so an unfinished form still saves.
+ */
+
+/**
+ * Saves the form as a draft. `exists` says whether the record is already there;
+ * the caller knows, and reading first is not an option - the read rule
+ * dereferences resource.data, so a get on a posting that does not exist yet is
+ * denied rather than returning empty.
+ */
+export async function saveDraft({ postingId, ownerId, organisation, form, attachments = [], exists = false }) {
+  requireFirebase();
+  const record = buildPostingDocument({
+    ownerId, organisation, form, attachments, status: POSTING_STATUS_DRAFT,
+  });
+
+  if (exists) {
+    // createdAt must equal request.time on create and never move afterwards.
+    const { createdAt, ...rest } = record;
+    await updateDoc(postingRef(postingId), rest);
+  } else {
+    await setDoc(postingRef(postingId), record);
+  }
+
+  return findPosting(postingId);
+}
+
+/** Promotes a draft to submitted. Full validation applies at this point. */
+export async function publishDraft({ postingId, ownerId, organisation, form, attachments = [] }) {
+  requireFirebase();
+  const { createdAt, ...record } = buildPostingDocument({
+    ownerId, organisation, form, attachments, status: POSTING_STATUS_SUBMITTED,
+  });
+  await updateDoc(postingRef(postingId), record);
+  return findPosting(postingId);
+}
+
+/** Every posting this wallet owns, drafts included, newest first. */
+export async function listOwnPostings(ownerId) {
+  requireFirebase();
+  const snapshot = await getDocs(query(
+    collection(db, "problems"),
+    where("ownerId", "==", String(ownerId).toLowerCase()),
+    orderBy("updatedAt", "desc"),
+  ));
+  return snapshot.docs.map((item) => normalisePosting(item.id, item.data()));
+}
+
+/** Deletes a posting and the stored files it referenced. */
+export async function deletePosting(posting) {
+  requireFirebase();
+  // Files first: once the record is gone its attachment paths are unrecoverable
+  // and the objects would be orphaned until the sweeper runs.
+  await Promise.allSettled((posting.attachments ?? []).map((attachment) => deleteAttachment({
+    attachment, ownerId: posting.ownerId, problemId: posting.id,
+  })));
+  await deleteDoc(postingRef(posting.id));
 }

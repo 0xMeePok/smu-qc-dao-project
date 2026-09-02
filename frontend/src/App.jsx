@@ -598,7 +598,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <CreatePostingPage onNavigate={go} />
+        <CreatePostingPage postingId={id} onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "my-problems") {

@@ -44,7 +44,7 @@ vi.mock("../../src/lib/postings.js", () => ({
 }));
 
 vi.mock("../../src/lib/attachments.js", () => ({
-  deleteAttachment: async (item) => {
+  deleteAttachment: async ({ attachment: item }) => {
     mocks.deleted.push(item);
   },
 }));
@@ -121,7 +121,6 @@ const DRAFT_ATTACHMENT = {
   name: "spec.pdf",
   size: 1024,
   contentType: "application/pdf",
-  path: `problems/0x${"a".repeat(40)}/posting123/att1.pdf`,
 };
 
 beforeEach(() => {
@@ -241,6 +240,8 @@ describe("cancel abandons completed draft attachments", () => {
     await act(async () => { mocks.uploader.onChange([DRAFT_ATTACHMENT]); });
 
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    // QCDAO-50: an attachment makes the form dirty, so leaving now asks first.
+    fireEvent.click(screen.getByText(/discard and leave/i));
 
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("discover"));
     expect(mocks.deleted).toEqual([DRAFT_ATTACHMENT]);

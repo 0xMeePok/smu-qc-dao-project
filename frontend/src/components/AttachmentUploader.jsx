@@ -176,7 +176,7 @@ export function AttachmentUploader({
     // while it is still in the bucket.
     commit((current) => current.filter((item) => item.id !== attachment.id));
     try {
-      await deleteAttachment(attachment);
+      await deleteAttachment({ attachment, ownerId, problemId });
     } catch (deleteError) {
       commit((current) => (
         current.some((item) => item.id === attachment.id) ? current : [...current, attachment]
@@ -188,7 +188,7 @@ export function AttachmentUploader({
   const download = async (attachment) => {
     setError(null);
     try {
-      const blob = await downloadAttachment(attachment);
+      const blob = await downloadAttachment({ attachment, ownerId, problemId });
       saveBlobAs(blob, attachment.name);
     } catch (downloadError) {
       setError(messageForStorageError(downloadError));
