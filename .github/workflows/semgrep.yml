@@ -29,7 +29,8 @@ jobs:
           persist-credentials: false
 
       # Community Edition rules only. Do not set SEMGREP_APP_TOKEN in this job.
+      # Solidity rules live under p/smart-contracts; p/solidity is not a registry pack.
       - name: Run Semgrep
         env:
-          SEMGREP_RULES: p/javascript p/typescript p/react p/nodejs p/solidity p/owasp-top-ten
-        run: semgrep ci --metrics=off
+          SEMGREP_RULES: p/javascript p/typescript p/react p/nodejs p/smart-contracts p/owasp-top-ten
+        run: semgrep ci --metrics=off --no-suppress-errors
