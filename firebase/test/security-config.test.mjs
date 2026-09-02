@@ -33,7 +33,7 @@ describe("security deployment configuration", () => {
     assert.match(functionsSource, /consumeAppCheckToken:\s*false/);
   });
 
-  it("[QCDAO-58] ships Storage rules and allows the Storage endpoint", () => {
+  it("[BUT-OPD-020] ships Storage rules and allows the Storage endpoint", () => {
     // The rules file has to be declared, or `firebase deploy --only storage` is a
     // no-op and the bucket keeps whatever rules it had - most likely none.
     assert.equal(firebaseConfig.storage.rules, "storage.rules");
@@ -46,7 +46,7 @@ describe("security deployment configuration", () => {
     assert.equal(policy.includes("https://*.googleapis.com"), false);
   });
 
-  it("[QCDAO-58] keeps localhost and wildcards out of the production bucket CORS", () => {
+  it("[BUT-OPD-021] keeps localhost and wildcards out of the production bucket CORS", () => {
     const cors = JSON.parse(
       fs.readFileSync(new URL("../storage.cors.json", import.meta.url), "utf8"),
     );
@@ -64,7 +64,7 @@ describe("security deployment configuration", () => {
     }
   });
 
-  it("[QCDAO-58] keeps attachments PDF-only and capped in the deployed rules", () => {
+  it("[BUT-OPD-022] keeps attachments PDF-only and capped in the deployed rules", () => {
     const storageRules = fs.readFileSync(new URL("../storage.rules", import.meta.url), "utf8");
     assert.match(storageRules, /request\.resource\.contentType == 'application\/pdf'/);
     assert.match(storageRules, /return 10 \* 1024 \* 1024;/);

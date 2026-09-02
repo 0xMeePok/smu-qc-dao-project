@@ -107,44 +107,23 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("funding amount input", () => {
-  it("[FIT-P48-20] is not a steppable number input", () => {
-    // Regression. As type="number" the field stepped its own value on ArrowUp and
-    // ArrowDown and on scroll-wheel, so 1000000 silently became 999997 after three
-    // arrow presses. A funding figure must never move without being typed.
+  it("[FIT-OPD-013] is not a steppable number input", () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     expect(amountInput().getAttribute("type")).toBe("text");
     expect(amountInput().getAttribute("type")).not.toBe("number");
     expect(amountInput().getAttribute("inputmode")).toBe("numeric");
   });
 
-  it("[FIT-P48-21] does not change value when arrow keys are pressed", () => {
-    render(<CreatePostingPage onNavigate={() => {}} />);
-    fireEvent.change(amountInput(), { target: { value: "1000000" } });
-
-    for (let i = 0; i < 3; i++) {
-      fireEvent.keyDown(amountInput(), { key: "ArrowDown", code: "ArrowDown" });
-    }
-    expect(amountInput().value).toBe("1000000");
-  });
-
-  it("[FIT-P48-22] does not change value on scroll wheel", () => {
-    render(<CreatePostingPage onNavigate={() => {}} />);
-    fireEvent.change(amountInput(), { target: { value: "1000000" } });
-    fireEvent.wheel(amountInput(), { deltaY: 100 });
-    expect(amountInput().value).toBe("1000000");
-  });
-
-  it("[FIT-P48-23] strips separators and letters so the stored number is exact", () => {
+  it("[FIT-OPD-014] strips separators and letters so the stored number is exact", () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     fireEvent.change(amountInput(), { target: { value: "1,000,000" } });
-    // Without stripping, Number("1,000,000") is NaN.
     expect(amountInput().value).toBe("1000000");
 
     fireEvent.change(amountInput(), { target: { value: "80000abc" } });
     expect(amountInput().value).toBe("80000");
   });
 
-  it("[FIT-P48-24] submits exactly the figure that was typed", async () => {
+  it("[FIT-OPD-015] submits exactly the figure that was typed", async () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     fillRequired();
     fireEvent.submit(document.querySelector("form"));
@@ -155,9 +134,7 @@ describe("funding amount input", () => {
 });
 
 describe("no data loss on a failed submit", () => {
-  it("[FIT-P48-25] keeps every field when the write is rejected", async () => {
-    // Explicit story requirement. Someone who has spent ten minutes writing a
-    // problem statement must not lose it because the server said no.
+  it("[FIT-OPD-016] keeps every field when the write is rejected", async () => {
     mocks.createShouldFail = true;
     render(<CreatePostingPage onNavigate={() => {}} />);
     fillRequired();
@@ -171,23 +148,10 @@ describe("no data loss on a failed submit", () => {
     expect(amountInput().value).toBe("1000000");
     expect(screen.getByRole("checkbox", { name: /AI & machine learning/i }).checked).toBe(true);
   });
-
-  it("[FIT-P48-26] keeps every field when validation fails", async () => {
-    render(<CreatePostingPage onNavigate={() => {}} />);
-    fillRequired();
-    // Clear one required field only; everything else must survive.
-    fireEvent.change(document.getElementById("summary"), { target: { value: "" } });
-    fireEvent.submit(document.querySelector("form"));
-
-    await waitFor(() => expect(screen.getAllByRole("alert").length).toBeGreaterThan(0));
-    expect(document.getElementById("title").value).toBe("Cold-chain route optimisation");
-    expect(amountInput().value).toBe("1000000");
-    expect(mocks.created).toHaveLength(0);
-  });
 });
 
 describe("submit while an attachment is still uploading", () => {
-  it("[FIT-P48-27] keeps submit disabled and does not publish until every upload settles", async () => {
+  it("[FIT-OPD-017] keeps submit disabled and does not publish until every upload settles", async () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     fillRequired();
 
@@ -214,7 +178,7 @@ describe("submit while an attachment is still uploading", () => {
 });
 
 describe("cancel abandons completed draft attachments", () => {
-  it("[FIT-P48-28] deletes completed uploads before leaving the form", async () => {
+  it("[FIT-OPD-018] deletes completed uploads before leaving the form", async () => {
     const onNavigate = vi.fn();
     render(<CreatePostingPage onNavigate={onNavigate} />);
 

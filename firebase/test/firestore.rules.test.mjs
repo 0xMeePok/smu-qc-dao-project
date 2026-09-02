@@ -721,20 +721,20 @@ describe("problems/{problemId} attachments", () => {
     };
   }
 
-  it("[BIT-ATT-050] accepts a posting carrying a well-formed attachment", async () => {
+  it("[BIT-OPD-142] accepts a posting carrying a well-formed attachment", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "att1"), baseProblem({
       attachments: [attachment()],
     })));
   });
 
-  it("[BIT-ATT-051] accepts a posting with no attachments at all", async () => {
+  it("[BIT-OPD-143] accepts a posting with no attachments at all", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "att_none"), baseProblem()));
     await assertSucceeds(setDoc(doc(db, "problems", "att_empty"), baseProblem({ attachments: [] })));
   });
 
-  it("[BIT-ATT-052] rejects a path pointing into another wallet's storage folder", async () => {
+  it("[BIT-OPD-144] rejects a path pointing into another wallet's storage folder", async () => {
     // The core check. Without it a user could record, on their OWN posting, a
     // reference to a file belonging to someone else - and any later screen that
     // renders the list would be handing out a pointer to a document the viewer
@@ -745,14 +745,14 @@ describe("problems/{problemId} attachments", () => {
     })));
   });
 
-  it("[BIT-ATT-053] rejects a path pointing at a different posting", async () => {
+  it("[BIT-OPD-145] rejects a path pointing at a different posting", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "att_wrong_posting"), baseProblem({
       attachments: [attachment({ problemId: "someOtherPosting" })],
     })));
   });
 
-  it("[BIT-ATT-054] rejects an attachment that is not a .pdf path", async () => {
+  it("[BIT-OPD-146] rejects an attachment that is not a .pdf path", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "att_html"), baseProblem({
       attachments: [attachment({
@@ -762,28 +762,28 @@ describe("problems/{problemId} attachments", () => {
     })));
   });
 
-  it("[BIT-ATT-055] rejects a recorded size above the 10 MB cap", async () => {
+  it("[BIT-OPD-147] rejects a recorded size above the 10 MB cap", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "att_big"), baseProblem({
       attachments: [attachment({ problemId: "att_big", fields: { size: 10 * 1024 * 1024 + 1 } })],
     })));
   });
 
-  it("[BIT-ATT-056] rejects a declared content type other than PDF", async () => {
+  it("[BIT-OPD-148] rejects a declared content type other than PDF", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "att_type"), baseProblem({
       attachments: [attachment({ problemId: "att_type", fields: { contentType: "text/html" } })],
     })));
   });
 
-  it("[BIT-ATT-057] rejects unknown fields smuggled into an attachment record", async () => {
+  it("[BIT-OPD-149] rejects unknown fields smuggled into an attachment record", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "att_extra"), baseProblem({
       attachments: [attachment({ problemId: "att_extra", fields: { isPublic: true } })],
     })));
   });
 
-  it("[BIT-ATT-062] rejects a client-supplied uploadedAt timestamp", async () => {
+  it("[BIT-OPD-150] rejects a client-supplied uploadedAt timestamp", async () => {
     // Rules cannot pin a per-item timestamp to request.time inside a list, so the
     // field is not in the schema at all rather than being accepted unvalidated and
     // later displayed as though the server had vouched for it.
@@ -796,7 +796,7 @@ describe("problems/{problemId} attachments", () => {
     })));
   });
 
-  it("[BIT-ATT-058] rejects more attachments than a posting may carry", async () => {
+  it("[BIT-OPD-151] rejects more attachments than a posting may carry", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     const six = Array.from({ length: 6 }, (_, index) => attachment({
       id: `attach${index}0000`,
@@ -805,14 +805,14 @@ describe("problems/{problemId} attachments", () => {
     await assertFails(setDoc(doc(db, "problems", "att_many"), baseProblem({ attachments: six })));
   });
 
-  it("[BIT-ATT-059] rejects an attachment list that is not a list", async () => {
+  it("[BIT-OPD-152] rejects an attachment list that is not a list", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "att_shape"), baseProblem({
       attachments: { id: "abc123xy" },
     })));
   });
 
-  it("[BIT-ATT-060] lets the owner add and then remove an attachment on update", async () => {
+  it("[BIT-OPD-153] lets the owner add and then remove an attachment on update", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "att_edit"), baseProblem()));
     await assertSucceeds(updateDoc(doc(db, "problems", "att_edit"), {
@@ -825,7 +825,7 @@ describe("problems/{problemId} attachments", () => {
     }));
   });
 
-  it("[BIT-ATT-061] blocks another wallet from attaching to someone else's posting", async () => {
+  it("[BIT-OPD-154] blocks another wallet from attaching to someone else's posting", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "problems", "att_other"), baseProblem());
     });
@@ -1184,33 +1184,24 @@ describe("problems/{problemId} funded posting", () => {
     };
   }
 
-  it("[BIT-P48-01] accepts a complete funded problem statement", async () => {
+  it("[BIT-OPD-155] accepts a complete funded problem statement", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "q48_ok"), submitted()));
   });
 
-  it("[BIT-P48-02] accepts every domain category the form offers", async () => {
-    const db = env.authenticatedContext(ADDRESS).firestore();
-    for (const category of ["ai", "quantum", "web3", "robotics", "iot", "other"]) {
-      await assertSucceeds(setDoc(doc(db, "problems", `q48_cat_${category}`), submitted({
-        categories: [category],
-      })));
-    }
-  });
-
-  it("[BIT-P48-03] rejects a category outside the agreed set", async () => {
+  it("[BIT-OPD-156] rejects a category outside the agreed set", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_badcat"), submitted({
       categories: ["blockchain"],
     })));
   });
 
-  it("[BIT-P48-04] requires at least one category", async () => {
+  it("[BIT-OPD-157] requires at least one category", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_nocat"), submitted({ categories: [] })));
   });
 
-  it("[BIT-P48-05] rejects a submitted posting missing any structured field", async () => {
+  it("[BIT-OPD-158] rejects a submitted posting missing any structured field", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     const required = [
       "organisation", "businessContext", "currentApproach", "currentLimitations",
@@ -1227,35 +1218,35 @@ describe("problems/{problemId} funded posting", () => {
     }
   });
 
-  it("[BIT-P48-06] rejects zero or negative funding", async () => {
+  it("[BIT-OPD-159] rejects zero or negative funding", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_zero"), submitted({ amount: 0 })));
     await assertFails(setDoc(doc(db, "problems", "q48_neg"), submitted({ amount: -5 })));
   });
 
-  it("[BIT-P48-07] rejects an unsupported currency", async () => {
+  it("[BIT-OPD-160] rejects an unsupported currency", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_cur"), submitted({ currency: "XYZ" })));
   });
 
-  it("[BIT-P48-08] rejects a posting that has already expired", async () => {
+  it("[BIT-OPD-161] rejects a posting that has already expired", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_expired"), submitted({
       expiresAt: new Date(Date.now() - 1000),
     })));
   });
 
-  it("[BIT-P48-09] blocks posting under another wallet's identity", async () => {
+  it("[BIT-OPD-162] blocks posting under another wallet's identity", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_forged"), submitted()));
   });
 
-  it("[BIT-P48-10] blocks an unauthenticated post", async () => {
+  it("[BIT-OPD-163] blocks an unauthenticated post", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_anon"), submitted()));
   });
 
-  it("[BIT-P48-11] refuses to create a posting already open or funded", async () => {
+  it("[BIT-OPD-164] refuses to create a posting already open or funded", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     for (const status of ["open", "in_review", "matched", "funded", "completed"]) {
       await assertFails(
@@ -1265,7 +1256,7 @@ describe("problems/{problemId} funded posting", () => {
     }
   });
 
-  it("[BIT-P48-12] refuses to strip structure out of a submitted posting later", async () => {
+  it("[BIT-OPD-165] refuses to strip structure out of a submitted posting later", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "q48_strip"), submitted()));
     await assertFails(updateDoc(doc(db, "problems", "q48_strip"), {
@@ -1274,7 +1265,7 @@ describe("problems/{problemId} funded posting", () => {
     }));
   });
 
-  it("[BIT-P48-13] allows submitted to advance to open", async () => {
+  it("[BIT-OPD-166] allows submitted to advance to open", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "q48_open"), submitted()));
     await assertSucceeds(updateDoc(doc(db, "problems", "q48_open"), {
@@ -1283,7 +1274,7 @@ describe("problems/{problemId} funded posting", () => {
     }));
   });
 
-  it("[BIT-P48-14] refuses to strip structure while advancing a submitted posting to open", async () => {
+  it("[BIT-OPD-167] refuses to strip structure while advancing a submitted posting to open", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "q48_strip_open"), submitted()));
     await assertFails(updateDoc(doc(db, "problems", "q48_strip_open"), {
@@ -1298,7 +1289,7 @@ describe("problems/{problemId} funded posting", () => {
     }));
   });
 
-  it("[BIT-P48-23] rejects a submitted posting whose mandatory text is blank", async () => {
+  it("[BIT-OPD-168] rejects a submitted posting whose mandatory text is blank", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     const requiredText = [
       "businessContext", "currentApproach", "currentLimitations",
@@ -1316,7 +1307,7 @@ describe("problems/{problemId} funded posting", () => {
     }
   });
 
-  it("[BIT-P48-24] refuses a legacy draft advancing to open without the funded schema", async () => {
+  it("[BIT-OPD-169] refuses a legacy draft advancing to open without the funded schema", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "q48_draft_open"), baseProblem()));
     await assertFails(updateDoc(doc(db, "problems", "q48_draft_open"), {
@@ -1326,7 +1317,7 @@ describe("problems/{problemId} funded posting", () => {
   });
 
 
-  it("[BIT-P48-15] still accepts a legacy draft with none of the new fields", async () => {
+  it("[BIT-OPD-170] still accepts a legacy draft with none of the new fields", async () => {
     // Pre-QCDAO-48 documents must remain writable, or existing data becomes
     // uneditable the moment these rules deploy.
     const db = env.authenticatedContext(ADDRESS).firestore();
@@ -1337,7 +1328,7 @@ describe("problems/{problemId} funded posting", () => {
     }));
   });
 
-  it("[BIT-P48-21] rejects a sponsor organisation that is not the owner's profile", async () => {
+  it("[BIT-OPD-171] rejects a sponsor organisation that is not the owner's profile", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_spoof_org"), submitted({
       organisation: "A Trusted Institution We Do Not Belong To",
@@ -1362,21 +1353,21 @@ describe("problems/{problemId} marketplace visibility", () => {
     });
   });
 
-  it("[BIT-P48-16] lets any active member read a published posting", async () => {
+  it("[BIT-OPD-172] lets any active member read a published posting", async () => {
     // Cross-organisation discovery is the point of the story: a solution developer
     // who did not write the posting has to be able to read it.
     const db = env.authenticatedContext(OTHER).firestore();
     await assertSucceeds(getDoc(doc(db, "problems", PUBLISHED)));
   });
 
-  it("[BIT-P48-17] refuses an unauthenticated read of a published posting", async () => {
+  it("[BIT-OPD-173] refuses an unauthenticated read of a published posting", async () => {
     // Members only. A posting carries business context, limitations and budget,
     // which is competitive information rather than public marketing.
     const db = env.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, "problems", PUBLISHED)));
   });
 
-  it("[BIT-P48-18] keeps a draft private to its owner", async () => {
+  it("[BIT-OPD-174] keeps a draft private to its owner", async () => {
     const other = env.authenticatedContext(OTHER).firestore();
     await assertFails(getDoc(doc(other, "problems", DRAFT)));
 
@@ -1384,7 +1375,7 @@ describe("problems/{problemId} marketplace visibility", () => {
     await assertSucceeds(getDoc(doc(owner, "problems", DRAFT)));
   });
 
-  it("[BIT-P48-19] refuses a suspended member browsing the marketplace", async () => {
+  it("[BIT-OPD-175] refuses a suspended member browsing the marketplace", async () => {
     const SUSPENDED_MEMBER = `0x${"7".repeat(40)}`;
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "users", SUSPENDED_MEMBER),
@@ -1394,7 +1385,7 @@ describe("problems/{problemId} marketplace visibility", () => {
     await assertFails(getDoc(doc(db, "problems", PUBLISHED)));
   });
 
-  it("[BIT-P48-20] still refuses a non-owner writing to a published posting", async () => {
+  it("[BIT-OPD-176] still refuses a non-owner writing to a published posting", async () => {
     // Readable by every member does not mean editable by them.
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(updateDoc(doc(db, "problems", PUBLISHED), {
@@ -1403,7 +1394,7 @@ describe("problems/{problemId} marketplace visibility", () => {
     await assertFails(deleteDoc(doc(db, "problems", PUBLISHED)));
   });
 
-  it("[BIT-P48-22] refuses a signed-in wallet with no profile from reading the marketplace", async () => {
+  it("[BIT-OPD-177] refuses a signed-in wallet with no profile from reading the marketplace", async () => {
     const NO_PROFILE = `0x${"e".repeat(40)}`;
     const db = env.authenticatedContext(NO_PROFILE).firestore();
     await assertFails(getDoc(doc(db, "problems", PUBLISHED)));

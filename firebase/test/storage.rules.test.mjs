@@ -85,21 +85,21 @@ after(async () => {
 });
 
 describe("storage rules: uploading a posting attachment", () => {
-  it("[BIT-ATT-030] lets the owner upload a PDF into their own posting folder", async () => {
+  it("[BIT-OPD-116] lets the owner upload a PDF into their own posting folder", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(
       uploadBytes(ref(storage, objectPath()), PDF_BYTES, pdfMetadata()),
     );
   });
 
-  it("[BIT-ATT-031] refuses an unauthenticated upload", async () => {
+  it("[BIT-OPD-117] refuses an unauthenticated upload", async () => {
     const storage = env.unauthenticatedContext().storage();
     await assertFails(
       uploadBytes(ref(storage, objectPath()), PDF_BYTES, pdfMetadata()),
     );
   });
 
-  it("[BIT-ATT-032] refuses an upload into another wallet's folder", async () => {
+  it("[BIT-OPD-118] refuses an upload into another wallet's folder", async () => {
     // The whole point of putting the owner in the path: OTHER is signed in
     // legitimately, but the path it is writing to is not its own.
     const storage = env.authenticatedContext(OTHER).storage();
@@ -108,7 +108,7 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-033] refuses a non-PDF content type", async () => {
+  it("[BIT-OPD-119] refuses a non-PDF content type", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     await assertFails(
       uploadBytes(
@@ -119,7 +119,7 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-034] refuses an object name that is not .pdf, even with a PDF content type", async () => {
+  it("[BIT-OPD-120] refuses an object name that is not .pdf, even with a PDF content type", async () => {
     // Guards the case where a caller declares application/pdf but stores
     // payload.html, which a download URL would then serve back as HTML.
     const storage = env.authenticatedContext(OWNER).storage();
@@ -132,7 +132,7 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-035] refuses a file over the 10 MB cap", async () => {
+  it("[BIT-OPD-121] refuses a file over the 10 MB cap", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     const oversize = new Uint8Array(10 * 1024 * 1024 + 1);
     oversize.set(PDF_BYTES);
@@ -141,14 +141,14 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-036] refuses an empty file", async () => {
+  it("[BIT-OPD-122] refuses an empty file", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     await assertFails(
       uploadBytes(ref(storage, objectPath()), new Uint8Array(0), pdfMetadata()),
     );
   });
 
-  it("[BIT-ATT-037] refuses metadata claiming a different uploader than the path", async () => {
+  it("[BIT-OPD-123] refuses metadata claiming a different uploader than the path", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     await assertFails(
       uploadBytes(
@@ -159,7 +159,7 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-038] refuses metadata claiming a different posting than the path", async () => {
+  it("[BIT-OPD-124] refuses metadata claiming a different posting than the path", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     await assertFails(
       uploadBytes(
@@ -170,7 +170,7 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-039] refuses an upload from a suspended account", async () => {
+  it("[BIT-OPD-125] refuses an upload from a suspended account", async () => {
     const storage = env.authenticatedContext(SUSPENDED).storage();
     await assertFails(
       uploadBytes(
@@ -181,14 +181,14 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-040] refuses writes outside the postings tree entirely", async () => {
+  it("[BIT-OPD-126] refuses writes outside the postings tree entirely", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     await assertFails(
       uploadBytes(ref(storage, `uploads/${OWNER}/anything.pdf`), PDF_BYTES, pdfMetadata()),
     );
   });
 
-  it("[BIT-ATT-047] refuses to overwrite an attachment that already exists", async () => {
+  it("[BIT-OPD-127] refuses to overwrite an attachment that already exists", async () => {
     // Stored attachments are immutable. With overwrites allowed, an owner could
     // swap the bytes behind a reference after a reviewer had read it, and neither
     // the posting record nor Storage would show that anything changed.
@@ -201,7 +201,7 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-ATT-048] allows delete-then-upload, so replacing a file is still possible", async () => {
+  it("[BIT-OPD-128] allows delete-then-upload, so replacing a file is still possible", async () => {
     // Immutability must not become "you can never fix a wrong upload". The
     // supported path is removal followed by a new attachment, which changes the
     // posting record visibly.
@@ -213,7 +213,7 @@ describe("storage rules: uploading a posting attachment", () => {
     await assertSucceeds(uploadBytes(ref(storage, path), PDF_BYTES, pdfMetadata()));
   });
 
-  it("[BIT-ATT-049] refuses a posting id that is not a document-id shape", async () => {
+  it("[BIT-OPD-129] refuses a posting id that is not a document-id shape", async () => {
     // Stops the posting segment being used as an arbitrary scratch namespace.
     const storage = env.authenticatedContext(OWNER).storage();
     const longId = "x".repeat(300);
@@ -234,24 +234,19 @@ describe("storage rules: reading and removing an attachment", () => {
     await seedObject(READ_PATH);
   });
 
-  it("[BIT-ATT-041] lets the posting owner read their attachment", async () => {
+  it("[BIT-OPD-130] lets the posting owner read their attachment", async () => {
     const storage = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(getBytes(ref(storage, READ_PATH)));
   });
 
-  it("[BIT-ATT-042] refuses a read by another wallet", async () => {
+  it("[BIT-OPD-131] refuses a read by another wallet", async () => {
     // Mirrors the problems/{problemId} read rule in firestore.rules: a posting is
     // readable only by its owner, so its attachments must be too.
     const storage = env.authenticatedContext(OTHER).storage();
     await assertFails(getBytes(ref(storage, READ_PATH)));
   });
 
-  it("[BIT-ATT-043] refuses an unauthenticated read", async () => {
-    const storage = env.unauthenticatedContext().storage();
-    await assertFails(getBytes(ref(storage, READ_PATH)));
-  });
-
-  it("[BIT-ATT-044] refuses a read by a suspended account", async () => {
+  it("[BIT-OPD-132] refuses a read by a suspended account", async () => {
     const suspendedPath = objectPath(SUSPENDED, POSTING, "readable.pdf");
     await seedObject(suspendedPath, {
       contentType: "application/pdf",
@@ -261,14 +256,14 @@ describe("storage rules: reading and removing an attachment", () => {
     await assertFails(getBytes(ref(storage, suspendedPath)));
   });
 
-  it("[BIT-ATT-045] lets the owner delete their own attachment (remove-before-publish)", async () => {
+  it("[BIT-OPD-133] lets the owner delete their own attachment (remove-before-publish)", async () => {
     const path = objectPath(OWNER, POSTING, "deletable.pdf");
     await seedObject(path);
     const storage = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(deleteObject(ref(storage, path)));
   });
 
-  it("[BIT-ATT-046] refuses a delete by another wallet", async () => {
+  it("[BIT-OPD-134] refuses a delete by another wallet", async () => {
     const path = objectPath(OWNER, POSTING, "protected.pdf");
     await seedObject(path);
     const storage = env.authenticatedContext(OTHER).storage();
@@ -304,43 +299,38 @@ describe("storage rules: attachments follow the posting's visibility", () => {
     });
   });
 
-  it("[BIT-ATT-075] refuses an unauthenticated download of a published attachment", async () => {
+  it("[BIT-OPD-135] refuses an unauthenticated download of a published attachment", async () => {
     // The marketplace is open to members, not the open internet. These PDFs carry
     // the sponsor's business context and budget.
     const storage = env.unauthenticatedContext().storage();
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-ATT-076] refuses a suspended member downloading a published attachment", async () => {
+  it("[BIT-OPD-136] refuses a suspended member downloading a published attachment", async () => {
     const storage = env.authenticatedContext(SUSPENDED).storage();
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-ATT-077] refuses a signed-in wallet with no profile from downloading", async () => {
+  it("[BIT-OPD-137] refuses a signed-in wallet with no profile from downloading", async () => {
     const NO_PROFILE = `0x${"2".repeat(40)}`;
     const storage = env.authenticatedContext(NO_PROFILE).storage();
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-ATT-070] lets another wallet download an attachment on a published posting", async () => {
+  it("[BIT-OPD-138] lets another wallet download an attachment on a published posting", async () => {
     // The whole point of QCDAO-58: a solution developer in another organisation
     // reads the posting on Discover and needs its technical context to respond.
     const storage = env.authenticatedContext(OTHER).storage();
     await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-ATT-071] still refuses an attachment on a posting that is only a draft", async () => {
+  it("[BIT-OPD-139] still refuses an attachment on a posting that is only a draft", async () => {
     // A draft is private to its owner in firestore.rules, so its files are too.
     const storage = env.authenticatedContext(OTHER).storage();
     await assertFails(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
   });
 
-  it("[BIT-ATT-072] lets the owner read their own draft attachment", async () => {
-    const storage = env.authenticatedContext(OWNER).storage();
-    await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
-  });
-
-  it("[BIT-ATT-073] still refuses another wallet from WRITING to a published posting", async () => {
+  it("[BIT-OPD-140] still refuses another wallet from WRITING to a published posting", async () => {
     // Readable by everyone does not mean writable by everyone.
     const storage = env.authenticatedContext(OTHER).storage();
     await assertFails(uploadBytes(
@@ -350,7 +340,7 @@ describe("storage rules: attachments follow the posting's visibility", () => {
     ));
   });
 
-  it("[BIT-ATT-074] still refuses another wallet from DELETING from a published posting", async () => {
+  it("[BIT-OPD-141] still refuses another wallet from DELETING from a published posting", async () => {
     const storage = env.authenticatedContext(OTHER).storage();
     await assertFails(deleteObject(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });

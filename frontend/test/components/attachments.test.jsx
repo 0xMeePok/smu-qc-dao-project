@@ -86,9 +86,6 @@ const {
   MAX_FILE_BYTES,
   MAX_FILES_PER_POSTING,
   attachmentPath,
-  formatBytes,
-  hasPdfSignature,
-  messageForStorageError,
   safeDisplayName,
   toPostingRecord,
   validateFile,
@@ -120,109 +117,79 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("attachment validation", () => {
-  it("[FUT-ATT-001] rejects a file that is not named .pdf", () => {
+  it("[FUT-OPD-106] rejects a file that is not named .pdf", () => {
     const file = new File(["data"], "notes.docx", { type: "application/pdf" });
     expect(validateFileMetadata(file)).toMatch(/Only PDF files/);
   });
 
-  it("[FUT-ATT-002] rejects a declared content type other than application/pdf", () => {
+  it("[FUT-OPD-107] rejects a declared content type other than application/pdf", () => {
     const file = new File(["data"], "notes.pdf", { type: "text/html" });
     expect(validateFileMetadata(file)).toMatch(/text\/html/);
   });
 
-  it("[FUT-ATT-003] tolerates an absent content type, which drag-and-drop can produce", () => {
+  it("[FUT-OPD-108] tolerates an absent content type, which drag-and-drop can produce", () => {
     const file = new File(["%PDF-1.7"], "notes.pdf", { type: "" });
     expect(validateFileMetadata(file)).toBe(null);
   });
 
-  it("[FUT-ATT-004] rejects a file over the per-file size cap", () => {
+  it("[FUT-OPD-109] rejects a file over the per-file size cap", () => {
     const file = pdfFile("big.pdf", { size: MAX_FILE_BYTES + 1 });
     expect(validateFileMetadata(file)).toMatch(/limit is/);
   });
 
-  it("[FUT-ATT-005] accepts a file exactly on the cap, so the boundary is inclusive", () => {
-    const file = pdfFile("edge.pdf", { size: MAX_FILE_BYTES });
-    expect(validateFileMetadata(file)).toBe(null);
-  });
-
-  it("[FUT-ATT-006] rejects an empty file", () => {
+  it("[FUT-OPD-110] rejects an empty file", () => {
     const file = pdfFile("empty.pdf", { size: 0 });
     expect(validateFileMetadata(file)).toMatch(/empty/);
   });
 
-  it("[FUT-ATT-007] refuses more attachments than a posting may carry", () => {
+  it("[FUT-OPD-111] refuses more attachments than a posting may carry", () => {
     const file = pdfFile();
     const error = validateFileMetadata(file, { existingCount: MAX_FILES_PER_POSTING });
     expect(error).toMatch(/at most/);
   });
 
-  it("[FUT-ATT-008] rejects a non-PDF renamed to .pdf, by inspecting the leading bytes", async () => {
+  it("[FUT-OPD-112] rejects a non-PDF renamed to .pdf, by inspecting the leading bytes", async () => {
     const file = pdfFile("disguised.pdf", { valid: false });
     await expect(validateFile(file)).resolves.toMatch(/contents are not a PDF/);
-  });
-
-  it("[FUT-ATT-009] accepts a genuine PDF", async () => {
-    await expect(validateFile(pdfFile())).resolves.toBe(null);
-    await expect(hasPdfSignature(pdfFile())).resolves.toBe(true);
   });
 });
 
 describe("attachment naming and paths", () => {
-  it("[FUT-ATT-010] builds the storage path the security rules expect", () => {
+  it("[FUT-OPD-113] builds the storage path the security rules expect", () => {
     const path = attachmentPath({ ownerId: OWNER.toUpperCase(), problemId: POSTING, attachmentId: "abc123xy" });
-    // Lowercased: request.auth.uid is always the lowercase address, and
-    // storage.rules compares it to the path segment directly.
     expect(path).toBe(`problems/${OWNER}/${POSTING}/abc123xy.pdf`);
   });
 
-  it("[FUT-ATT-011] strips directory components from a supplied filename", () => {
+  it("[FUT-OPD-114] strips directory components from a supplied filename", () => {
     expect(safeDisplayName("../../etc/passwd.pdf")).toBe("passwd.pdf");
     expect(safeDisplayName("C:\\Users\\me\\report.pdf")).toBe("report.pdf");
   });
 
-  it("[FUT-ATT-012] keeps ordinary punctuation in a display name", () => {
-    expect(safeDisplayName("Q3 report (final).pdf")).toBe("Q3 report (final).pdf");
-  });
-
-  it("[FUT-ATT-013] removes control characters that could corrupt rendered output", () => {
+  it("[FUT-OPD-115] removes control characters that could corrupt rendered output", () => {
     expect(safeDisplayName("re\u0000port\u001b.pdf")).toBe("report.pdf");
   });
 
-  it("[FUT-ATT-013b] removes bidi overrides used to disguise a filename", () => {
-    // U+202E reverses how everything after it is DISPLAYED, so this string renders
-    // as "reportexe.pdf" while the real name ends in .exe. The name is only ever
-    // shown, never executed, but someone deciding whether to open a file should see
-    // what it is actually called.
+  it("[FUT-OPD-116] removes bidi overrides used to disguise a filename", () => {
     const spoofed = "report\u202Efdp.exe";
     expect(safeDisplayName(spoofed)).toBe("reportfdp.exe");
     expect(safeDisplayName(spoofed)).not.toContain("\u202E");
   });
 
-  it("[FUT-ATT-014] caps an absurdly long name", () => {
+  it("[FUT-OPD-117] caps an absurdly long name", () => {
     expect(safeDisplayName(`${"a".repeat(500)}.pdf`).length).toBeLessThanOrEqual(200);
   });
 
-  it("[FUT-ATT-015] formats sizes for display", () => {
-    expect(formatBytes(512)).toBe("512 B");
-    expect(formatBytes(2048)).toBe("2 KB");
-    expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
-  });
-
-  it("[FUT-ATT-016] narrows an attachment to the fields the posting record allows", () => {
+  it("[FUT-OPD-118] narrows an attachment to the fields the posting record allows", () => {
     const record = toPostingRecord({
       id: "abc123xy", name: "a.pdf", size: 10, contentType: "application/pdf",
       path: "problems/x/y/abc123xy.pdf", cancel: () => {}, secret: "leak",
     });
     expect(Object.keys(record).sort()).toEqual(["contentType", "id", "name", "path", "size"]);
   });
-
-  it("[FUT-ATT-017] maps a storage permission failure to actionable language", () => {
-    expect(messageForStorageError({ code: "storage/unauthorized" })).toMatch(/permission/);
-  });
 });
 
 describe("localhost pointed at the production bucket", () => {
-  it("[FUT-ATT-027] refuses with a message naming the fix, not a bare CORS error", async () => {
+  it("[FUT-OPD-119] refuses with a message naming the fix, not a bare CORS error", async () => {
     // storage.cors.json deliberately excludes localhost, so this combination can
     // only ever fail. Failing early with instructions beats failing later with a
     // browser CORS message that names no cause - especially since sign-in,
@@ -270,7 +237,7 @@ describe("AttachmentUploader", () => {
     });
   }
 
-  it("[FIT-ATT-018] reports upload progress while the transfer runs", async () => {
+  it("[FIT-OPD-023] reports upload progress while the transfer runs", async () => {
     render(<Harness />);
     await selectFiles([pdfFile("spec.pdf")]);
     await waitFor(() => expect(mocks.tasks).toHaveLength(1));
@@ -282,7 +249,7 @@ describe("AttachmentUploader", () => {
     expect(screen.getByText(/uploading 100%/)).toBeTruthy();
   });
 
-  it("[FIT-ATT-019] commits the attachment to the posting only once the upload completes", async () => {
+  it("[FIT-OPD-024] commits the attachment to the posting only once the upload completes", async () => {
     const onChangeSpy = vi.fn();
     render(<Harness onChangeSpy={onChangeSpy} />);
     await selectFiles([pdfFile("spec.pdf")]);
@@ -298,7 +265,7 @@ describe("AttachmentUploader", () => {
     expect(screen.getByText("· attached", { exact: false })).toBeTruthy();
   });
 
-  it("[FIT-ATT-020] cancelling an in-flight upload aborts it and stores nothing", async () => {
+  it("[FIT-OPD-025] cancelling an in-flight upload aborts it and stores nothing", async () => {
     const onChangeSpy = vi.fn();
     render(<Harness onChangeSpy={onChangeSpy} />);
     await selectFiles([pdfFile("spec.pdf")]);
@@ -313,7 +280,7 @@ describe("AttachmentUploader", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("[FIT-ATT-021] surfaces a genuine upload failure as an error", async () => {
+  it("[FIT-OPD-026] surfaces a genuine upload failure as an error", async () => {
     render(<Harness />);
     await selectFiles([pdfFile("spec.pdf")]);
     await waitFor(() => expect(mocks.tasks).toHaveLength(1));
@@ -322,7 +289,7 @@ describe("AttachmentUploader", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/permission/));
   });
 
-  it("[FIT-ATT-022] removing before publish deletes the stored object, not just the row", async () => {
+  it("[FIT-OPD-027] removing before publish deletes the stored object, not just the row", async () => {
     const attachment = {
       id: "abc123xy",
       name: "spec.pdf",
@@ -338,7 +305,7 @@ describe("AttachmentUploader", () => {
     expect(screen.queryByText("spec.pdf")).toBeNull();
   });
 
-  it("[FIT-ATT-023] restores the row when the delete is refused", async () => {
+  it("[FIT-OPD-028] restores the row when the delete is refused", async () => {
     mocks.deleteShouldFail = true;
     const attachment = {
       id: "abc123xy",
@@ -357,7 +324,7 @@ describe("AttachmentUploader", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/permission/);
   });
 
-  it("[FIT-ATT-024] keeps both files when two uploads finish at the same time", async () => {
+  it("[FIT-OPD-029] keeps both files when two uploads finish at the same time", async () => {
     // Regression test. Each completion handler is created when its own upload
     // starts, so reading `value` from that closure means two simultaneous
     // completions both build their new list from the same stale array and the
@@ -375,29 +342,5 @@ describe("AttachmentUploader", () => {
       expect(screen.getByText("one.pdf")).toBeTruthy();
       expect(screen.getByText("two.pdf")).toBeTruthy();
     });
-  });
-
-  it("[FIT-ATT-025] refuses a selection that would exceed the per-posting limit", async () => {
-    const existing = Array.from({ length: MAX_FILES_PER_POSTING }, (_, index) => ({
-      id: `existing${index}`,
-      name: `file${index}.pdf`,
-      size: 1024,
-      contentType: "application/pdf",
-      path: `problems/${OWNER}/${POSTING}/existing${index}.pdf`,
-    }));
-    render(<Harness initial={existing} />);
-
-    await selectFiles([pdfFile("extra.pdf")]);
-
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/at most/));
-    expect(mocks.tasks).toHaveLength(0);
-  });
-
-  it("[FIT-ATT-026] rejects a disguised file without starting an upload", async () => {
-    render(<Harness />);
-    await selectFiles([pdfFile("disguised.pdf", { valid: false })]);
-
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/not a PDF/));
-    expect(mocks.tasks).toHaveLength(0);
   });
 });

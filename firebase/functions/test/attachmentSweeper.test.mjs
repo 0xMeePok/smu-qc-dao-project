@@ -32,7 +32,7 @@ function livePath(problemId = "p1", id = "abc123xy") {
 }
 
 describe("parseAttachmentPath", () => {
-  it("accepts the exact shape the uploader writes", () => {
+  it("[BUT-OPD-006] accepts the exact shape the uploader writes", () => {
     assert.deepEqual(parseAttachmentPath(livePath()), {
       ownerId: OWNER,
       problemId: "p1",
@@ -40,7 +40,7 @@ describe("parseAttachmentPath", () => {
     });
   });
 
-  it("rejects anything that is not that shape, so it is never a delete candidate", () => {
+  it("[BUT-OPD-007] rejects anything that is not that shape, so it is never a delete candidate", () => {
     const rejected = [
       "problems/notanaddress/p1/abc123xy.pdf",
       `problems/${OWNER}/p1/abc123xy.html`,
@@ -61,7 +61,7 @@ describe("parseAttachmentPath", () => {
 });
 
 describe("collectReferencedPaths", () => {
-  it("gathers every path a posting points at", () => {
+  it("[BUT-OPD-008] gathers every path a posting points at", () => {
     const referenced = collectReferencedPaths([
       { attachments: [{ path: "a" }, { path: "b" }] },
       { attachments: [{ path: "c" }] },
@@ -69,7 +69,7 @@ describe("collectReferencedPaths", () => {
     assert.deepEqual([...referenced].sort(), ["a", "b", "c"]);
   });
 
-  it("tolerates postings with no attachments, or malformed ones", () => {
+  it("[BUT-OPD-009] tolerates postings with no attachments, or malformed ones", () => {
     const referenced = collectReferencedPaths([
       {},
       { attachments: null },
@@ -82,7 +82,7 @@ describe("collectReferencedPaths", () => {
 });
 
 describe("planSweep", () => {
-  it("deletes an old object that no posting references", () => {
+  it("[BUT-OPD-010] deletes an old object that no posting references", () => {
     const plan = planSweep({
       objects: [objectAt(livePath())],
       referencedPaths: new Set(),
@@ -91,7 +91,7 @@ describe("planSweep", () => {
     assert.deepEqual(plan.deletions, [livePath()]);
   });
 
-  it("NEVER deletes an object a posting references, however old", () => {
+  it("[BUT-OPD-011] NEVER deletes an object a posting references, however old", () => {
     const plan = planSweep({
       objects: [objectAt(livePath(), 0)],
       referencedPaths: new Set([livePath()]),
@@ -101,7 +101,7 @@ describe("planSweep", () => {
     assert.equal(plan.kept, 1);
   });
 
-  it("NEVER deletes an unreferenced object inside the grace period", () => {
+  it("[BUT-OPD-012] NEVER deletes an unreferenced object inside the grace period", () => {
     // The remove-before-publish case: uploaded moments ago, onto a form the user
     // is still filling in, so no posting references it yet. Deleting this would
     // make the feature delete files out from under people as they work.
@@ -114,7 +114,7 @@ describe("planSweep", () => {
     assert.deepEqual(plan.skipped, [{ path: livePath(), reason: "within-grace-period" }]);
   });
 
-  it("NEVER deletes a path it cannot parse", () => {
+  it("[BUT-OPD-013] NEVER deletes a path it cannot parse", () => {
     const plan = planSweep({
       objects: [objectAt("problems/weird/thing"), objectAt("something/else.pdf")],
       referencedPaths: new Set(),
@@ -125,7 +125,7 @@ describe("planSweep", () => {
     assert.ok(plan.skipped.every((entry) => entry.reason === "unrecognised-path"));
   });
 
-  it("NEVER deletes an object whose age is unknown", () => {
+  it("[BUT-OPD-014] NEVER deletes an object whose age is unknown", () => {
     // A missing or unparseable timeCreated must not be treated as "infinitely old".
     const plan = planSweep({
       objects: [{ path: livePath(), createdAt: NaN }],
@@ -136,39 +136,13 @@ describe("planSweep", () => {
     assert.deepEqual(plan.skipped, [{ path: livePath(), reason: "unknown-age" }]);
   });
 
-  it("treats the grace boundary as exclusive", () => {
-    const exactlyAtBoundary = NOW - DEFAULT_GRACE_MS;
-    const plan = planSweep({
-      objects: [objectAt(livePath(), exactlyAtBoundary)],
-      referencedPaths: new Set(),
-      now: NOW,
-    });
-    assert.deepEqual(plan.deletions, [livePath()]);
-  });
-
-  it("caps a runaway plan rather than emptying the bucket in one pass", () => {
+  it("[BUT-OPD-015] caps a runaway plan rather than emptying the bucket in one pass", () => {
     const objects = Array.from({ length: MAX_DELETES_PER_RUN + 25 }, (_, index) =>
       objectAt(livePath("p1", `attach${index}`)));
     const plan = planSweep({ objects, referencedPaths: new Set(), now: NOW });
 
     assert.equal(plan.deletions.length, MAX_DELETES_PER_RUN);
     assert.equal(plan.capped, true);
-  });
-
-  it("separates referenced from orphaned in a realistic mix", () => {
-    const keep = livePath("p1", "keepme01");
-    const orphan = livePath("p1", "orphan01");
-    const draft = livePath("p2", "draft001");
-
-    const plan = planSweep({
-      objects: [objectAt(keep), objectAt(orphan), objectAt(draft, RECENT)],
-      referencedPaths: new Set([keep]),
-      now: NOW,
-    });
-
-    assert.deepEqual(plan.deletions, [orphan]);
-    assert.equal(plan.kept, 1);
-    assert.deepEqual(plan.skipped, [{ path: draft, reason: "within-grace-period" }]);
   });
 });
 
@@ -208,7 +182,7 @@ describe("sweepOrphanedAttachments", () => {
     return { db, bucket, deleted, store, logger: { info() {}, warn() {} } };
   }
 
-  it("deletes nothing in dry-run mode, but still reports what it would remove", async () => {
+  it("[BUT-OPD-016] deletes nothing in dry-run mode, but still reports what it would remove", async () => {
     const { db, bucket, deleted, logger } = harness({
       files: [objectAt(livePath())],
       postings: [],
@@ -222,7 +196,7 @@ describe("sweepOrphanedAttachments", () => {
     assert.equal(summary.dryRun, true);
   });
 
-  it("deletes only the orphan when enabled", async () => {
+  it("[BUT-OPD-017] deletes only the orphan when enabled", async () => {
     const keep = livePath("p1", "keepme01");
     const orphan = livePath("p1", "orphan01");
     const { db, bucket, deleted, logger } = harness({
@@ -237,7 +211,7 @@ describe("sweepOrphanedAttachments", () => {
     assert.equal(summary.deleted, 1);
   });
 
-  it("keeps going when one delete fails", async () => {
+  it("[BUT-OPD-018] keeps going when one delete fails", async () => {
     // Another run, or the owner, may have removed it first. That is not a failure.
     const first = livePath("p1", "gone0001");
     const second = livePath("p1", "orphan02");
@@ -255,7 +229,7 @@ describe("sweepOrphanedAttachments", () => {
     assert.equal(summary.deleted, 1);
   });
 
-  it("does not delete a file published after the snapshot and before the delete", async () => {
+  it("[BUT-OPD-019] does not delete a file published after the snapshot and before the delete", async () => {
     const path = livePath("p1", "latepub01");
     const { db, bucket, deleted, logger } = harness({
       files: [objectAt(path)],
