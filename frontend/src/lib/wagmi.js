@@ -11,7 +11,7 @@ export const wagmiConfig = createConfig({
   chains: [arbitrumSepolia],
   transports: {
     [arbitrumSepolia.id]: http(
-      import.meta.env.VITE_ARBITRUM_SEPOLIA_RPC_URL?.trim() || undefined,
+      import.meta.env?.VITE_ARBITRUM_SEPOLIA_RPC_URL?.trim() || undefined,
     ),
   },
 });

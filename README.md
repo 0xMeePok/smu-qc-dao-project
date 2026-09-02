@@ -40,7 +40,9 @@ the account. Ensure you have MetaMask or Rabby installed.
 ```
 smu-qc-dao-project/
 ├── contracts/
-│   └── qft-tokens/          # QFT ERC-20 (fixed supply), Hardhat project, Arbitrum Sepolia
+│   ├── audit-registry/      # Workflow hash registry, Hardhat project, Arbitrum Sepolia
+│   ├── qft-tokens/          # QFT ERC-20 (fixed supply), Hardhat project, Arbitrum Sepolia
+│   └── stable-faucet/       # Test token faucet deployment
 ├── frontend/                # Vite + React app — wallet sign-in, marketplace pages, RBAC
 │   ├── src/
 │   │   ├── components/      # Modals, role views, RouteGuard, and UI components
@@ -180,11 +182,13 @@ need to redeploy, or want more detail on local emulators, see
 ## Documentation Reference
 
 - [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions and opportunity creation rules.
+- [Audit Registry Integration](docs/AUDIT_REGISTRY_INTEGRATION.md): Hash format, transaction states, frontend configuration, and contract replacement workflow.
 
 ## Smart Contracts
 
 | Contract | Address (Arbitrum Sepolia) | Purpose |
 |---|---|---|
+| [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD`](https://sepolia.arbiscan.io/address/0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD#code) | Anchors opportunity and proposal hashes. Deployed in block `304652016`. |
 | [`QFT.sol`](contracts/qft-tokens/contracts/QFT.sol) | Not yet deployed | Fixed-supply ERC-20 distributed for platform activity |
 
 ## Testing

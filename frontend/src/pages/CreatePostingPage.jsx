@@ -13,7 +13,13 @@ import { createPosting, newPostingId } from "../lib/postings.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
+import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { formatInstant } from "../lib/datetime.js";
+import {
+  anchorPostingAudit,
+  postingAuditReceipt,
+  readPostingAudit,
+} from "../lib/postingAudit.js";
 
 /**
  * QCDAO-48 - post a funded business problem statement.
@@ -91,6 +97,7 @@ export default function CreatePostingPage({ onNavigate }) {
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
+  const [auditBusy, setAuditBusy] = useState(false);
   const formTop = useRef(null);
   const pendingCountRef = useRef(0);
 
@@ -100,6 +107,20 @@ export default function CreatePostingPage({ onNavigate }) {
   };
 
   const organisation = profile?.organisation ?? "";
+
+  const startAudit = (posting) => {
+    if (!posting || auditBusy || Number(posting.audit?.attemptCount ?? 0) >= 3) return;
+    setAuditBusy(true);
+    void anchorPostingAudit(posting, {
+      account: address,
+      onChange: (audit) => {
+        setPublished((current) => current ? { ...current, audit } : current);
+      },
+    }).catch(() => {
+      // The Firestore posting is already live. The receipt stores the failure and
+      // exposes a safe retry; a testnet problem must not turn into form data loss.
+    }).finally(() => setAuditBusy(false));
+  };
 
   // Same UTC-to-the-second format the posting will be stored and displayed in, so
   // what the form promises and what the detail page shows cannot disagree.
@@ -169,6 +190,9 @@ export default function CreatePostingPage({ onNavigate }) {
         postingId, ownerId: address, organisation, form, attachments,
       });
       setPublished(posting);
+      // Do not await block confirmation. Publishing is authoritative off-chain;
+      // the AuditRegistry transaction advances independently on the receipt.
+      startAudit(posting);
     } catch (error) {
       // The form is untouched here on purpose: a rejected submit must never cost
       // someone the problem statement they just spent ten minutes writing.
@@ -224,6 +248,14 @@ export default function CreatePostingPage({ onNavigate }) {
             </div>
             <div><dt>Attachments</dt><dd>{published.attachments.length} PDF(s)</dd></div>
           </dl>
+          <AuditReceipt
+            audit={postingAuditReceipt(published)}
+            eventLabel="Funded problem statement submitted"
+            actorRole="Problem owner"
+            firebaseReference={`problems/${published.id}`}
+            onVerify={() => readPostingAudit(published)}
+            onRetry={() => startAudit(published)}
+          />
           <div className="form-actions">
             <button
               className="primary"

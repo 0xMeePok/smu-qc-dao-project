@@ -45,6 +45,43 @@ function trimmed(value) {
 }
 
 /**
+ * QCDAO-75 canonical opportunity payload v1.
+ *
+ * Only stable business fields are anchored. Firestore timestamps and the `audit`
+ * receipt are deliberately excluded: updatedAt changes while the receipt advances,
+ * and including the receipt in its own hash would be circular. Categories and
+ * attachments are set-like in the UI, so they are sorted before canonical JSON is
+ * produced by lib/auditRegistry.js.
+ */
+export function postingAuditPayload(posting) {
+  return {
+    ownerId: trimmed(posting.ownerId).toLowerCase(),
+    organisation: trimmed(posting.organisation),
+    title: trimmed(posting.title),
+    businessContext: trimmed(posting.businessContext),
+    summary: trimmed(posting.summary),
+    currentApproach: trimmed(posting.currentApproach),
+    currentLimitations: trimmed(posting.currentLimitations),
+    expectedOutcome: trimmed(posting.expectedOutcome),
+    successCriteria: trimmed(posting.successCriteria),
+    dataAvailability: trimmed(posting.dataAvailability),
+    categories: [...(posting.categories ?? [])].map(trimmed).sort(),
+    amount: Number(posting.amount),
+    currency: trimmed(posting.currency),
+    expiresAt: posting.expiresAt,
+    attachments: [...(posting.attachments ?? [])]
+      .map((item) => ({
+        id: trimmed(item.id),
+        name: trimmed(item.name),
+        size: Number(item.size),
+        contentType: trimmed(item.contentType || "application/pdf"),
+        path: trimmed(item.path),
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  };
+}
+
+/**
  * Builds the document from form state. Split out from the write so the exact shape
  * that will be sent can be asserted in tests without touching Firestore.
  *
@@ -52,8 +89,8 @@ function trimmed(value) {
  * identifies the sponsor behind the posting, and letting the form set it freely
  * would let anyone post under any organisation's name.
  */
-export function buildPostingDocument({ ownerId, organisation, form, attachments = [], now = new Date() }) {
-  return {
+export function buildPostingDocument({ ownerId, organisation, form, attachments = [], audit = null, now = new Date() }) {
+  const document = {
     ownerId: String(ownerId).toLowerCase(),
     organisation: trimmed(organisation),
     title: trimmed(form.title),
@@ -75,11 +112,16 @@ export function buildPostingDocument({ ownerId, organisation, form, attachments 
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+
+  // The posting is authoritative even while Arbitrum Sepolia is unavailable.
+  // Audit metadata is an optional resumable outbox/receipt, never the record itself.
+  if (audit) document.audit = { ...audit };
+  return document;
 }
 
-export async function createPosting({ postingId, ownerId, organisation, form, attachments = [] }) {
+export async function createPosting({ postingId, ownerId, organisation, form, attachments = [], audit = null }) {
   requireFirebase();
-  const record = buildPostingDocument({ ownerId, organisation, form, attachments });
+  const record = buildPostingDocument({ ownerId, organisation, form, attachments, audit });
   await setDoc(postingRef(postingId), record);
 
   // Read back rather than returning `record`. createdAt and updatedAt are
@@ -88,6 +130,15 @@ export async function createPosting({ postingId, ownerId, organisation, form, at
   // the instants Firestore actually recorded, which is what the posting is
   // timestamped with and what the countdown is measured against.
   return (await findPosting(postingId)) ?? { id: postingId, ...record };
+}
+
+/** Persists one transition of the queued -> submitted/pending -> confirmed/failed receipt. */
+export async function updatePostingAudit({ postingId, audit }) {
+  requireFirebase();
+  await updateDoc(postingRef(postingId), {
+    audit: { ...audit },
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /** Replaces the attachment list on an existing posting. */

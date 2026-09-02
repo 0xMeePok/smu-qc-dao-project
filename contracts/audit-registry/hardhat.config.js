@@ -5,6 +5,13 @@ import hardhatVerify from "@nomicfoundation/hardhat-verify";
 import { configVariable, defineConfig } from "hardhat/config";
 import "dotenv/config";
 
+// Accept the common bare 64-hex private-key form while keeping Hardhat's
+// configured account in its required 0x-prefixed representation.
+const configuredPrivateKey = process.env.DEPLOYER_PRIVATE_KEY?.trim();
+if (/^[0-9a-fA-F]{64}$/.test(configuredPrivateKey ?? "")) {
+  process.env.DEPLOYER_PRIVATE_KEY = `0x${configuredPrivateKey}`;
+}
+
 const compiler = {
   version: "0.8.28",
   settings: {

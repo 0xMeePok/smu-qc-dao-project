@@ -8,8 +8,7 @@ contract AuditRegistry {
 
     enum EntityType {
         Opportunity,
-        Proposal,
-        Evaluation
+        Proposal
     }
 
     enum EventType {
@@ -18,15 +17,13 @@ contract AuditRegistry {
         OpportunityWithdrawn,
         ProposalSubmitted,
         ProposalUpdated,
-        ProposalWithdrawn,
-        EvaluationCompleted
+        ProposalWithdrawn
     }
 
     enum ActorRole {
         ProblemOwner,
         Funder,
-        Researcher,
-        Evaluator
+        Researcher
     }
 
     enum OpportunityKind {
@@ -55,7 +52,6 @@ contract AuditRegistry {
         bytes32 solutionHash;
         uint64 createdAt;
         uint64 updatedAt;
-        bool evaluationLocked;
         bool withdrawn;
         bool exists;
     }
@@ -82,25 +78,12 @@ contract AuditRegistry {
         uint64 timestamp;
     }
 
-    struct EvaluationRecord {
-        address evaluator;
-        bytes32 contentHash;
-        uint32 revisionIndex;
-        bytes32 revisionDigest;
-        uint64 createdAt;
-    }
-
-    uint256 public constant MAX_EVALUATORS = 32;
-
     mapping(bytes32 opportunityId => Opportunity) private _opportunities;
     mapping(bytes32 opportunityId => HashRevision[]) private _opportunityRevisions;
     mapping(bytes32 opportunityId => mapping(bytes32 contentHash => bool)) private _usedOpportunityHashes;
-    mapping(bytes32 opportunityId => address[]) private _evaluators;
-    mapping(bytes32 opportunityId => mapping(address evaluator => bool)) public isEvaluator;
     mapping(bytes32 proposalId => Proposal) private _proposals;
     mapping(bytes32 proposalId => Revision[]) private _revisions;
     mapping(bytes32 proposalId => mapping(bytes32 contentHash => bool)) private _usedHashes;
-    mapping(bytes32 proposalId => EvaluationRecord[]) private _evaluations;
     mapping(bytes32 entityId => Anchor[]) private _anchors;
 
     event OpportunityCommitted(
@@ -144,14 +127,6 @@ contract AuditRegistry {
         address indexed researcher,
         bytes32 evidenceHash
     );
-    event EvaluatorAdded(bytes32 indexed opportunityId, address indexed evaluator);
-    event EvaluationRecorded(
-        bytes32 indexed proposalId,
-        address indexed evaluator,
-        bytes32 contentHash,
-        uint32 revisionIndex,
-        bytes32 revisionDigest
-    );
     event EventAnchored(
         bytes32 indexed entityId,
         EntityType entityType,
@@ -162,13 +137,12 @@ contract AuditRegistry {
         uint64 timestamp
     );
 
-    // Post an opportunity and name the evaluators for that posting.
+    // Post an opportunity.
     function commitOpportunity(
         bytes32 opportunityId,
         OpportunityKind kind,
         bytes32 contentHash,
-        uint64 expiresAt,
-        address[] calldata evaluators
+        uint64 expiresAt
     ) external {
         if (
             opportunityId == bytes32(0)
@@ -190,8 +164,6 @@ contract AuditRegistry {
             withdrawn: false,
             exists: true
         });
-        _registerEvaluators(opportunityId, evaluators);
-
         _appendOpportunityRevision(opportunityId, contentHash, timestamp);
         _anchor(
             opportunityId,
@@ -265,7 +237,8 @@ contract AuditRegistry {
         bytes32 proposalId,
         bytes32 opportunityId,
         bytes32 proposalHash,
-        bytes32 solutionHash
+        bytes32 solutionHash,
+        uint32 expectedOpportunityRevisionIndex
     ) external {
         if (
             proposalId == bytes32(0)
@@ -280,6 +253,9 @@ contract AuditRegistry {
         uint64 timestamp = uint64(block.timestamp);
         (uint32 opportunityRevisionIndex, bytes32 opportunityRevisionDigest) =
             _currentOpportunityRevision(opportunityId);
+        if (opportunityRevisionIndex != expectedOpportunityRevisionIndex) {
+            revert InvalidState();
+        }
         _proposals[proposalId] = Proposal({
             researcher: msg.sender,
             opportunityId: opportunityId,
@@ -289,7 +265,6 @@ contract AuditRegistry {
             solutionHash: solutionHash,
             createdAt: timestamp,
             updatedAt: timestamp,
-            evaluationLocked: false,
             withdrawn: false,
             exists: true
         });
@@ -323,15 +298,16 @@ contract AuditRegistry {
         );
     }
 
-    // Replace the current proposal and solution hashes before evaluation starts.
+    // Replace the current proposal and solution hashes while the proposal is live.
     function updateHashes(
         bytes32 proposalId,
         bytes32 proposalHash,
-        bytes32 solutionHash
+        bytes32 solutionHash,
+        uint32 expectedOpportunityRevisionIndex
     ) external {
         Proposal storage item = _proposal(proposalId);
         if (msg.sender != item.researcher) revert AccessDenied();
-        if (item.withdrawn || item.evaluationLocked || !_submissionOpen(item.opportunityId)) {
+        if (item.withdrawn || !_submissionOpen(item.opportunityId)) {
             revert InvalidState();
         }
         if (proposalHash == bytes32(0) || solutionHash == bytes32(0)) {
@@ -341,6 +317,9 @@ contract AuditRegistry {
         uint64 timestamp = uint64(block.timestamp);
         (uint32 opportunityRevisionIndex, bytes32 opportunityRevisionDigest) =
             _currentOpportunityRevision(item.opportunityId);
+        if (opportunityRevisionIndex != expectedOpportunityRevisionIndex) {
+            revert InvalidState();
+        }
         item.proposalHash = proposalHash;
         item.solutionHash = solutionHash;
         item.opportunityRevisionIndex = opportunityRevisionIndex;
@@ -376,7 +355,7 @@ contract AuditRegistry {
         );
     }
 
-    // Withdraw a proposal. Allowed after evaluation.
+    // Withdraw a proposal.
     function withdrawProposal(bytes32 proposalId, bytes32 evidenceHash) external {
         Proposal storage item = _proposal(proposalId);
         if (msg.sender != item.researcher) revert AccessDenied();
@@ -400,59 +379,6 @@ contract AuditRegistry {
         emit ProposalWithdrawn(proposalId, msg.sender, evidenceHash);
     }
 
-    // Record a named evaluator's review against a specific proposal revision.
-    function recordEvaluation(
-        bytes32 proposalId,
-        bytes32 evaluationHash,
-        uint32 expectedRevisionIndex,
-        bytes32 expectedRevisionDigest
-    ) external {
-        Proposal storage item = _proposal(proposalId);
-        Opportunity storage parent = _opportunity(item.opportunityId);
-        if (item.withdrawn || parent.withdrawn) revert InvalidState();
-        if (!isEvaluator[item.opportunityId][msg.sender] || msg.sender == item.researcher) {
-            revert AccessDenied();
-        }
-        if (evaluationHash == bytes32(0)) revert InvalidInput();
-
-        (uint32 revisionIndex, bytes32 revisionDigest) = _currentProposalRevision(proposalId);
-        if (
-            expectedRevisionIndex != revisionIndex
-                || expectedRevisionDigest != revisionDigest
-        ) {
-            revert InvalidState();
-        }
-        uint64 timestamp = uint64(block.timestamp);
-
-        item.evaluationLocked = true;
-        item.updatedAt = timestamp;
-        _evaluations[proposalId].push(
-            EvaluationRecord(
-                msg.sender,
-                evaluationHash,
-                revisionIndex,
-                revisionDigest,
-                timestamp
-            )
-        );
-        _anchor(
-            proposalId,
-            EntityType.Evaluation,
-            EventType.EvaluationCompleted,
-            evaluationHash,
-            ActorRole.Evaluator,
-            msg.sender,
-            timestamp
-        );
-        emit EvaluationRecorded(
-            proposalId,
-            msg.sender,
-            evaluationHash,
-            revisionIndex,
-            revisionDigest
-        );
-    }
-
     function getOpportunity(bytes32 opportunityId) external view returns (Opportunity memory) {
         return _opportunity(opportunityId);
     }
@@ -468,29 +394,6 @@ contract AuditRegistry {
     ) external view returns (HashRevision memory) {
         _opportunity(opportunityId);
         return _opportunityRevisions[opportunityId][index];
-    }
-
-    function evaluatorCount(bytes32 opportunityId) external view returns (uint256) {
-        _opportunity(opportunityId);
-        return _evaluators[opportunityId].length;
-    }
-
-    function evaluatorAt(bytes32 opportunityId, uint256 index) external view returns (address) {
-        _opportunity(opportunityId);
-        return _evaluators[opportunityId][index];
-    }
-
-    function evaluationCount(bytes32 proposalId) external view returns (uint256) {
-        _proposal(proposalId);
-        return _evaluations[proposalId].length;
-    }
-
-    function evaluationAt(
-        bytes32 proposalId,
-        uint256 index
-    ) external view returns (EvaluationRecord memory) {
-        _proposal(proposalId);
-        return _evaluations[proposalId][index];
     }
 
     function getProposal(bytes32 proposalId) external view returns (Proposal memory) {
@@ -523,24 +426,6 @@ contract AuditRegistry {
         return _anchors[entityId][index];
     }
 
-    function _registerEvaluators(bytes32 opportunityId, address[] calldata evaluators) private {
-        if (evaluators.length > MAX_EVALUATORS) revert InvalidInput();
-
-        for (uint256 index; index < evaluators.length; ++index) {
-            address evaluator = evaluators[index];
-            if (
-                evaluator == address(0)
-                    || evaluator == msg.sender
-                    || isEvaluator[opportunityId][evaluator]
-            ) {
-                revert InvalidInput();
-            }
-            isEvaluator[opportunityId][evaluator] = true;
-            _evaluators[opportunityId].push(evaluator);
-            emit EvaluatorAdded(opportunityId, evaluator);
-        }
-    }
-
     function _currentOpportunityRevision(bytes32 opportunityId)
         private
         view
@@ -549,16 +434,6 @@ contract AuditRegistry {
         HashRevision[] storage revisions = _opportunityRevisions[opportunityId];
         index = uint32(revisions.length - 1);
         digest = revisions[index].contentHash;
-    }
-
-    function _currentProposalRevision(bytes32 proposalId)
-        private
-        view
-        returns (uint32 index, bytes32 digest)
-    {
-        Proposal storage item = _proposals[proposalId];
-        index = uint32(_revisions[proposalId].length - 1);
-        digest = keccak256(abi.encode(item.proposalHash, item.solutionHash));
     }
 
     function _appendOpportunityRevision(
