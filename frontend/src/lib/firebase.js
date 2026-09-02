@@ -47,7 +47,8 @@ const usingEmulators = viteEnv.VITE_FIREBASE_USE_EMULATORS === "true";
 const appCheckSiteKey = viteEnv.VITE_FIREBASE_APP_CHECK_SITE_KEY;
 export const isAppCheckConfigured = Boolean(appCheckSiteKey);
 
-// Production nonce issuance enforces App Check and consumes a limited-use token.
+// Production nonce issuance enforces App Check. Replay protection is disabled, so
+// the SDK can reuse its cached App Check token instead of requesting a fresh one.
 // Firebase App Check now registers web apps only with reCAPTCHA Enterprise
 // (score-based key). The same site key must be saved in the Firebase console
 // and in VITE_FIREBASE_APP_CHECK_SITE_KEY. Local emulators skip attestation.

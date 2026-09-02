@@ -43,14 +43,8 @@ const RATE_LIMIT_GLOBAL = 1000;
 // concurrent sign-ins never gets close to it.
 const NONCE_MAX_INSTANCES = 10;
 
-// Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js. Must ALSO match the
-// Firestore database's own location (see `firebase firestore:databases:get
-// "(default)" --project <id>`, and firebase/README.md for how to set it on a fresh
-// project) - getSiweNonce does two sequential Firestore round trips per call (a read
-// then a write), and every one of them crosses regions if this doesn't match. That
-// was previously true here (functions in asia-southeast1, Firestore left on its
-// default nam5/US location) and measured out to ~400ms-1.3s per sign-in from cross-
-// Pacific latency alone, dwarfing everything else on the critical path. 
+// Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js and the Firestore
+// database location. Otherwise every sign-in crosses regions.
 const REGION = "asia-southeast1";
 
 const publicClient = createPublicClient({
@@ -105,7 +99,7 @@ function quotaCounter(snapshot, nowMs) {
   };
 }
 
-async function enforceNonceQuota(request) {
+async function issueNonce({ request, address, ref, domain }) {
   const emulatorTestSource = process.env.FUNCTIONS_EMULATOR === "true"
     ? request.rawRequest?.headers?.["x-emulator-test-source"]
     : null;
@@ -118,10 +112,11 @@ async function enforceNonceQuota(request) {
   const sourceRef = db.collection(RATE_LIMIT_COLLECTION).doc(`source_${sourceHash}`);
   const nowMs = Date.now();
 
-  await db.runTransaction(async (tx) => {
-    const [globalSnapshot, sourceSnapshot] = await Promise.all([
+  return db.runTransaction(async (tx) => {
+    const [globalSnapshot, sourceSnapshot, nonceSnapshot] = await Promise.all([
       tx.get(globalRef),
       tx.get(sourceRef),
+      tx.get(ref),
     ]);
     const global = quotaCounter(globalSnapshot, nowMs);
     const perSource = quotaCounter(sourceSnapshot, nowMs);
@@ -144,6 +139,38 @@ async function enforceNonceQuota(request) {
       windowStartedAt: Timestamp.fromMillis(perSource.windowStartedAtMs),
       expiresAt,
     });
+
+    if (nonceSnapshot.exists) {
+      const data = nonceSnapshot.data() ?? {};
+      const nonceExpiresAt = typeof data.expiresAt?.toMillis === "function"
+        ? data.expiresAt.toMillis()
+        : null;
+      const stillPending = data.consumed === false
+        && typeof data.nonce === "string"
+        && typeof data.issuedAt === "string"
+        && nonceExpiresAt !== null
+        && nonceExpiresAt > nowMs;
+
+      if (stillPending && data.domain === domain) {
+        return { nonce: data.nonce, issuedAt: data.issuedAt, domain: data.domain };
+      }
+    }
+
+    const fresh = {
+      nonce: randomBytes(16).toString("hex"),
+      issuedAt: new Date(nowMs).toISOString(),
+      domain,
+    };
+
+    tx.set(ref, {
+      ...fresh,
+      address,
+      consumed: false,
+      expiresAt: Timestamp.fromMillis(nowMs + NONCE_TTL_MS),
+      createdAt: Timestamp.fromMillis(nowMs),
+    });
+
+    return fresh;
   });
 }
 
@@ -164,69 +191,8 @@ export const getSiweNonce = onCall(
   async (request) => {
     const address = normaliseAddress(request.data?.address);
     const ref = db.collection(NONCE_COLLECTION).doc(address);
-
     const domain = resolveDomain(request);
-    await enforceNonceQuota(request);
-
-    // IDEMPOTENT while a nonce is pending: an unexpired, unconsumed nonce is
-    // returned as-is rather than replaced.
-    //
-    // The previous version overwrote any nonce older than a 3-second cooldown, which
-    // made login griefable by anyone who knew a wallet address (they are public).
-    // Requesting a nonce for a victim every few seconds replaced the message they
-    // were part-way through signing, so their signature no longer matched anything
-    // stored and sign-in failed - repeatably, for as long as the attacker kept
-    // polling. Simply refusing while one is pending would be worse still: a single
-    // attacker request would then lock that address out for the full 5-minute TTL.
-    //
-    // Returning the pending nonce removes the vector entirely, because nothing is
-    // ever invalidated. An attacker calling this for someone else's address learns
-    // only the message that address already had - which was always going to be shown
-    // to a user, and cannot be signed without their key.
-    //
-    // Wrapped in a transaction so two concurrent calls for one address cannot both
-    // decide the record is absent and write different nonces, which would have left
-    // whichever user signed the losing message unable to verify.
-    const issued = await db.runTransaction(async (tx) => {
-      const snapshot = await tx.get(ref);
-
-      if (snapshot.exists) {
-        const data = snapshot.data() ?? {};
-        // Timestamps are read defensively: a malformed record must be replaced, never
-        // treated as a pending nonce that can never expire and so blocks the address
-        // permanently.
-        const expiresAtMs = typeof data.expiresAt?.toMillis === "function"
-          ? data.expiresAt.toMillis()
-          : null;
-        const stillPending = data.consumed === false
-          && typeof data.nonce === "string"
-          && typeof data.issuedAt === "string"
-          && expiresAtMs !== null
-          && expiresAtMs > Date.now();
-
-        // Reissue when the pending nonce was minted for a different origin, so a
-        // message is never handed to one allowed origin bearing another's name.
-        if (stillPending && data.domain === domain) {
-          return { nonce: data.nonce, issuedAt: data.issuedAt, domain: data.domain };
-        }
-      }
-
-      const fresh = {
-        nonce: randomBytes(16).toString("hex"),
-        issuedAt: new Date().toISOString(),
-        domain,
-      };
-
-      tx.set(ref, {
-        ...fresh,
-        address,
-        consumed: false,
-        expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MS),
-        createdAt: Timestamp.now(),
-      });
-
-      return fresh;
-    });
+    const issued = await issueNonce({ request, address, ref, domain });
 
     return {
       message: buildMessage({ address, ...issued }),

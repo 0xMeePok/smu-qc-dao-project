@@ -179,9 +179,11 @@ score-based key (the Firebase console no longer accepts the legacy v3 provider).
 Create the key in Google Cloud (Fraud Defense / reCAPTCHA, type Website • score),
 register that same key on the web app in Firebase App Check, and set
 `VITE_FIREBASE_APP_CHECK_SITE_KEY` in the frontend build environment. The nonce
-endpoint consumes limited-use App Check tokens, applies a 100-request-per-source and
+endpoint uses cached App Check session tokens, applies a 100-request-per-source and
 1,000-request-global one-minute quota, and relies on the deployed Firestore TTL field
-configuration to delete expired nonce and quota documents.
+configuration to delete expired nonce and quota documents. App Check replay protection
+is disabled because the nonce is already single-use and enabling it adds another
+attestation round trip to every sign-in.
 
 `SIWE_DOMAIN` is the canonical deployment name used by the emulator. Production
 requests without an `Origin` are rejected; there is no unauthenticated server-flow

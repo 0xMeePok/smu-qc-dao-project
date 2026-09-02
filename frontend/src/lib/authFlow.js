@@ -26,9 +26,7 @@ export function requireFirebase() {
 
 export async function requestSignInMessage(address) {
   requireFirebase();
-  const getSiweNonce = httpsCallable(functions, "getSiweNonce", {
-    limitedUseAppCheckTokens: true,
-  });
+  const getSiweNonce = httpsCallable(functions, "getSiweNonce");
   const { data } = await getSiweNonce({ address });
   if (!data?.message) {
     throw new OnboardingError("The server did not return a message to sign. Try again.");
