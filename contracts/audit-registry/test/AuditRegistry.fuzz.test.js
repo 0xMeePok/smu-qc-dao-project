@@ -199,38 +199,9 @@ describe("AuditRegistry fuzz", function () {
     }
   });
 
-  it("any random wallet can record an evaluation authorized by the platform", async function () {
+  it("after the researcher withdraws, later edits fail but the last hashes stay", async function () {
     const { ethers, wallets, registry } = await setup();
     const [owner, researcher] = wallets;
-    const opportunityId = await openPosting(ethers, registry, owner);
-    const proposalId = randHash(ethers);
-    const proposalHash = randHash(ethers);
-    const solutionHash = randHash(ethers);
-    await registry
-      .connect(researcher)
-      .commitProposal(proposalId, opportunityId, proposalHash, solutionHash);
-
-    const revisionDigest = ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes32", "bytes32"],
-        [proposalHash, solutionHash]
-      )
-    );
-
-    for (let i = 3; i < wallets.length; i += 1) {
-      await registry.connect(wallets[i]).recordEvaluation(
-        proposalId,
-        randHash(ethers),
-        0,
-        revisionDigest
-      );
-    }
-    expect(await registry.evaluationCount(proposalId)).to.equal(BigInt(wallets.length - 3));
-  });
-
-  it("after the researcher withdraws, later edits and evaluations fail but the last hashes stay", async function () {
-    const { ethers, wallets, registry } = await setup();
-    const [owner, researcher, evaluator] = wallets;
     const opportunityId = await openPosting(ethers, registry, owner);
     const proposalId = randHash(ethers);
     const proposalHash = randHash(ethers);
@@ -247,9 +218,6 @@ describe("AuditRegistry fuzz", function () {
     for (let i = 0; i < 6; i += 1) {
       await expect(
         registry.connect(researcher).updateHashes(proposalId, randHash(ethers), randHash(ethers))
-      ).to.be.revertedWithCustomError(registry, "InvalidState");
-      await expect(
-        registry.connect(evaluator).recordEvaluation(proposalId, randHash(ethers), 0, randHash(ethers))
       ).to.be.revertedWithCustomError(registry, "InvalidState");
     }
 

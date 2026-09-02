@@ -12,8 +12,11 @@ import { categoryLabel } from "../config/postingCategories.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { formatInstant, isExpired } from "../lib/datetime.js";
-import { verifyOpportunityAudit } from "../lib/auditRegistry.js";
-import { anchorPostingAudit, preparePostingAudit } from "../lib/postingAudit.js";
+import {
+  anchorPostingAudit,
+  postingAuditReceipt,
+  readPostingAudit,
+} from "../lib/postingAudit.js";
 
 /**
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
@@ -77,11 +80,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   };
 
   const verifyAudit = async () => {
-    const setup = preparePostingAudit(posting, posting.audit?.contractAddress);
-    if (!setup) throw new Error("AuditRegistry is not configured for this record.");
-    return verifyOpportunityAudit(setup.prepared, {
-      address: posting.audit.contractAddress,
-    });
+    return readPostingAudit(posting);
   };
 
   if (loading) {
@@ -126,6 +125,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   }
 
   const expired = isExpired(posting.expiresAt);
+  const audit = postingAuditReceipt(posting);
 
   return (
     <section className="page detail-page">
@@ -172,12 +172,11 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
           )}
 
           <AuditReceipt
-            audit={posting.audit}
+            audit={audit}
             eventLabel="Funded problem statement submitted"
-            timestamp={posting.createdAt}
             actorRole="Problem owner"
             firebaseReference={`problems/${posting.id}`}
-            onVerify={posting.audit?.status === "confirmed" ? verifyAudit : undefined}
+            onVerify={verifyAudit}
             onRetry={auditBusy ? undefined : retryAudit}
           />
 

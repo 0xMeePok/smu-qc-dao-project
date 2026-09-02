@@ -67,8 +67,12 @@
   font-weight: 700;
 }
 
-.audit-state-confirmed { background: #d9f2e3; color: #17653b; }
+.audit-state-confirmed,
+.audit-state-verified { background: #d9f2e3; color: #17653b; }
 .audit-state-failed { background: #fde2df; color: #8b271f; }
+.audit-state-mismatch { background: #fde2df; color: #8b271f; }
+.audit-state-unavailable { background: #ece9df; color: #4f4b42; }
+.audit-state-checking,
 .audit-state-pending,
 .audit-state-submitted,
 .audit-state-queued { background: #fff0c9; color: #6f4c00; }

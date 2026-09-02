@@ -15,7 +15,11 @@ import { messageForFirebaseError } from "../lib/errors.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { formatInstant } from "../lib/datetime.js";
-import { anchorPostingAudit } from "../lib/postingAudit.js";
+import {
+  anchorPostingAudit,
+  postingAuditReceipt,
+  readPostingAudit,
+} from "../lib/postingAudit.js";
 
 /**
  * QCDAO-48 - post a funded business problem statement.
@@ -245,11 +249,11 @@ export default function CreatePostingPage({ onNavigate }) {
             <div><dt>Attachments</dt><dd>{published.attachments.length} PDF(s)</dd></div>
           </dl>
           <AuditReceipt
-            audit={published.audit}
+            audit={postingAuditReceipt(published)}
             eventLabel="Funded problem statement submitted"
-            timestamp={published.createdAt}
             actorRole="Problem owner"
             firebaseReference={`problems/${published.id}`}
+            onVerify={() => readPostingAudit(published)}
             onRetry={() => startAudit(published)}
           />
           <div className="form-actions">

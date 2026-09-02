@@ -16,7 +16,6 @@ import { wagmiConfig } from "./wagmi.js";
 export const AUDIT_ENTITY_TYPE = Object.freeze({
   OPPORTUNITY: "opportunity",
   PROPOSAL: "proposal",
-  EVALUATION: "evaluation",
 });
 
 export const MAX_AUDIT_RETRIES = 3;
@@ -131,8 +130,6 @@ export const opportunityEntityId = (recordId, options) =>
   createAuditEntityId(AUDIT_ENTITY_TYPE.OPPORTUNITY, recordId, options);
 export const proposalEntityId = (recordId, options) =>
   createAuditEntityId(AUDIT_ENTITY_TYPE.PROPOSAL, recordId, options);
-export const evaluationEntityId = (recordId, options) =>
-  createAuditEntityId(AUDIT_ENTITY_TYPE.EVALUATION, recordId, options);
 
 export function proposalRevisionDigest(proposalHash, solutionHash) {
   const first = assertBytes32(proposalHash, "Proposal hash");
@@ -190,12 +187,16 @@ export function prepareOpportunityCommit({
   const contentHash = keccak256(stringToHex(canonicalPayload));
   const normalizedKind = normalizeKind(kind);
   const normalizedExpiry = toUnixSeconds(expiresAt);
+  const expectedOwner = /^0x[0-9a-fA-F]{40}$/.test(String(payload?.ownerId ?? ""))
+    ? String(payload.ownerId).toLowerCase()
+    : null;
   return prepared({
     entityType: AUDIT_ENTITY_TYPE.OPPORTUNITY,
     entityId,
     contentHash,
     anchorHash: contentHash,
     canonicalPayload,
+    expectedOwner,
     hashScheme,
     functionName: "commitOpportunity",
     args: [entityId, normalizedKind, contentHash, normalizedExpiry],
@@ -242,42 +243,6 @@ export function prepareProposalCommit({
   });
 }
 
-export function prepareEvaluationCommit({
-  recordId,
-  proposalRecordId,
-  proposalId,
-  payload,
-  expectedRevisionIndex,
-  expectedRevisionDigest,
-  hashScheme = AUDIT_HASH_SCHEME,
-}) {
-  if (!Number.isInteger(expectedRevisionIndex) || expectedRevisionIndex < 0
-      || expectedRevisionIndex > 4_294_967_295) {
-    throw new TypeError("Expected proposal revision index must fit uint32.");
-  }
-  const parentId = proposalId
-    ? assertBytes32(proposalId, "Proposal id")
-    : proposalEntityId(proposalRecordId, { hashScheme });
-  const entityId = evaluationEntityId(recordId, { hashScheme });
-  const canonicalPayload = canonicalizeAuditPayload(AUDIT_ENTITY_TYPE.EVALUATION, payload, { hashScheme });
-  const contentHash = keccak256(stringToHex(canonicalPayload));
-  const revisionDigest = assertBytes32(expectedRevisionDigest, "Expected revision digest");
-  return prepared({
-    entityType: AUDIT_ENTITY_TYPE.EVALUATION,
-    entityId,
-    contractEntityId: parentId,
-    proposalId: parentId,
-    contentHash,
-    anchorHash: contentHash,
-    canonicalPayload,
-    expectedRevisionIndex,
-    expectedRevisionDigest: revisionDigest,
-    hashScheme,
-    functionName: "recordEvaluation",
-    args: [parentId, contentHash, expectedRevisionIndex, revisionDigest],
-  });
-}
-
 export function createWagmiAuditAdapters(config = wagmiConfig) {
   return {
     writeContract: (request) => wagmiWriteContract(config, request),
@@ -294,6 +259,15 @@ function auditAdapters(adapters) {
     }
   }
   return resolved;
+}
+
+function canonicalRegistryAddress(requestedAddress) {
+  const configured = getAuditRegistryAddress();
+  if (requestedAddress
+      && String(requestedAddress).toLowerCase() !== configured.toLowerCase()) {
+    throw new Error("AuditRegistry address does not match the configured deployment.");
+  }
+  return configured;
 }
 
 function cappedRetries(value) {
@@ -384,7 +358,7 @@ export async function executePreparedAudit(preparedAudit, {
 } = {}) {
   if (!preparedAudit?.__auditPrepared) throw new TypeError("A prepared audit operation is required.");
   const resolved = auditAdapters(adapters);
-  const contractAddress = getAuditRegistryAddress(address);
+  const contractAddress = canonicalRegistryAddress(address);
   // Status callbacks are awaited in order. A caller may persist each transition;
   // letting those writes race can otherwise leave an older `pending` write landing
   // after `confirmed` and permanently regress the displayed receipt state.
@@ -460,10 +434,6 @@ export function commitProposalAudit(input, options) {
   return executePreparedAudit(asPrepared(input, prepareProposalCommit), options);
 }
 
-export function recordEvaluationAudit(input, options) {
-  return executePreparedAudit(asPrepared(input, prepareEvaluationCommit), options);
-}
-
 function tupleField(value, name, index) {
   return value?.[name] ?? value?.[index];
 }
@@ -478,7 +448,7 @@ function mismatch(mismatches, field, expected, actual, compare = Object.is) {
 
 async function readWithRetries(functionName, args, options) {
   const resolved = auditAdapters(options.adapters);
-  const address = getAuditRegistryAddress(options.address);
+  const address = canonicalRegistryAddress(options.address);
   return retryRead(
     () => resolved.readContract({
       address,
@@ -527,6 +497,10 @@ export async function verifyOpportunityAudit(input, options = {}) {
   const expected = asPrepared(input, prepareOpportunityCommit);
   const actual = await readWithRetries("getOpportunity", [expected.entityId], options);
   const mismatches = [];
+  if (expected.expectedOwner) {
+    mismatch(mismatches, "owner", expected.expectedOwner,
+      tupleField(actual, "owner", 0), sameHex);
+  }
   mismatch(mismatches, "contentHash", expected.contentHash,
     tupleField(actual, "contentHash", 2), sameHex);
   mismatch(mismatches, "kind", Number(expected.args[1]),
@@ -551,36 +525,6 @@ export async function verifyProposalAudit(input, options = {}) {
     tupleField(actual, "solutionHash", 5), sameHex);
   const anchor = await findMatchingAnchor(
     expected.entityId, expected.anchorHash, options,
-  );
-  return verification(expected, actual, anchor, mismatches);
-}
-
-export async function verifyEvaluationAudit(input, options = {}) {
-  const expected = asPrepared(input, prepareEvaluationCommit);
-  let evaluationIndex = options.evaluationIndex;
-  if (evaluationIndex === undefined) {
-    const count = BigInt(await readWithRetries("evaluationCount", [expected.proposalId], options));
-    if (count === 0n) {
-      return verification(expected, null, null, [{
-        field: "evaluation",
-        expected: expected.contentHash,
-        actual: null,
-      }]);
-    }
-    evaluationIndex = count - 1n;
-  }
-  const actual = await readWithRetries(
-    "evaluationAt", [expected.proposalId, BigInt(evaluationIndex)], options,
-  );
-  const mismatches = [];
-  mismatch(mismatches, "contentHash", expected.contentHash,
-    tupleField(actual, "contentHash", 1), sameHex);
-  mismatch(mismatches, "revisionIndex", expected.expectedRevisionIndex,
-    Number(tupleField(actual, "revisionIndex", 2)));
-  mismatch(mismatches, "revisionDigest", expected.expectedRevisionDigest,
-    tupleField(actual, "revisionDigest", 3), sameHex);
-  const anchor = await findMatchingAnchor(
-    expected.proposalId, expected.anchorHash, options,
   );
   return verification(expected, actual, anchor, mismatches);
 }

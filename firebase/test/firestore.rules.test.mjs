@@ -97,7 +97,6 @@ function baseAudit(overrides = {}) {
   return {
     schemaVersion: 1,
     chainId: 421614,
-    contractAddress: `0x${"c".repeat(40)}`,
     entityId: `0x${"1".repeat(64)}`,
     contentHash: `0x${"2".repeat(64)}`,
     status: "queued",
@@ -744,14 +743,17 @@ describe("QCDAO-75..79 audit receipt state", () => {
     }));
   });
 
-  it("accepts the same receipt shape on proposal and evaluation records", async () => {
+  it("accepts the same receipt shape on proposal records", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "proposals", "audit-proposal"), baseProposal({
       audit: baseAudit({ entityId: `0x${"4".repeat(64)}` }),
     })));
-    await assertSucceeds(setDoc(doc(db, "evaluations", "audit-evaluation"), baseEvaluation({
-      proposalId: "audit-proposal",
-      audit: baseAudit({ entityId: `0x${"5".repeat(64)}` }),
+  });
+
+  it("rejects contract receipts on platform-only evaluation records", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "evaluations", "audit-evaluation"), baseEvaluation({
+      audit: baseAudit(),
     })));
   });
 
@@ -768,6 +770,12 @@ describe("QCDAO-75..79 audit receipt state", () => {
     })));
     await assertFails(setDoc(doc(db, "problems", "audit-extra"), baseProblem({
       audit: { ...baseAudit(), administratorApproved: true },
+    })));
+    await assertFails(setDoc(doc(db, "problems", "audit-address"), baseProblem({
+      audit: {
+        ...baseAudit(),
+        contractAddress: `0x${"c".repeat(40)}`,
+      },
     })));
   });
 

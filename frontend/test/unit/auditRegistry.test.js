@@ -14,20 +14,17 @@ import {
   classifyAuditError,
   commitOpportunityAudit,
   createAuditEntityId,
-  evaluationEntityId,
   hashAuditPayload,
   opportunityEntityId,
-  prepareEvaluationCommit,
   prepareOpportunityCommit,
   prepareProposalCommit,
   proposalEntityId,
   verifyOpportunityAudit,
 } from "../../src/lib/auditRegistry.js";
 
-const CONTRACT = `0x${"1".repeat(40)}`;
+const CONTRACT = DEFAULT_AUDIT_REGISTRY_ADDRESS;
 const ACCOUNT = `0x${"a".repeat(40)}`;
 const TX_HASH = `0x${"2".repeat(64)}`;
-const REVISION_DIGEST = `0x${"3".repeat(64)}`;
 
 const OPPORTUNITY_PAYLOAD = {
   title: "Cold-chain",
@@ -43,18 +40,17 @@ function unused() {
 describe("AuditRegistry canonical hash scheme", () => {
   it("uses the existing fixed-hash AuditRegistry write signatures", () => {
     const writes = AUDIT_REGISTRY_ABI.filter((entry) =>
-      ["commitOpportunity", "commitProposal", "recordEvaluation"].includes(entry.name));
+      ["commitOpportunity", "commitProposal"].includes(entry.name));
     assert.equal(AUDIT_REGISTRY_CHAIN_ID, 421614);
-    assert.equal(
-      DEFAULT_AUDIT_REGISTRY_ADDRESS,
-      "0xd119C050E51e7012B4Dea180c3e4F2727F354447",
-    );
+    assert.match(DEFAULT_AUDIT_REGISTRY_ADDRESS, /^0x[0-9a-fA-F]{40}$/);
+    assert.notEqual(DEFAULT_AUDIT_REGISTRY_ADDRESS.toLowerCase(), `0x${"0".repeat(40)}`);
     assert.equal(AUDIT_REGISTRY_ADDRESS, DEFAULT_AUDIT_REGISTRY_ADDRESS);
     assert.equal(AUDIT_HASH_SCHEME, 1);
-    assert.equal(writes.length, 3);
+    assert.equal(writes.length, 2);
     assert.equal(writes.find((entry) => entry.name === "commitOpportunity").inputs.length, 4);
     assert.equal(writes.find((entry) => entry.name === "commitProposal").inputs.length, 4);
-    assert.equal(writes.find((entry) => entry.name === "recordEvaluation").inputs.length, 4);
+    assert.equal(AUDIT_REGISTRY_ABI.some((entry) =>
+      ["recordEvaluation", "evaluationAt", "evaluationCount"].includes(entry.name)), false);
   });
 
   it("matches the canonical JSON v1 golden vector", () => {
@@ -98,10 +94,6 @@ describe("AuditRegistry canonical hash scheme", () => {
       proposalEntityId("proposal-123"),
       "0xdd640ef58b0858436bdb20ee825e3833ab25c1829f2c27a8dbe657d6874ec2d7",
     );
-    assert.equal(
-      evaluationEntityId("evaluation-123"),
-      "0x997475ef0db567e9969cccc2be31c5cd083d01c27654aa9353f23dffc154097a",
-    );
     assert.notEqual(
       createAuditEntityId(AUDIT_ENTITY_TYPE.OPPORTUNITY, "same-id"),
       createAuditEntityId(AUDIT_ENTITY_TYPE.PROPOSAL, "same-id"),
@@ -125,7 +117,7 @@ describe("AuditRegistry argument preparation", () => {
     assert.equal(prepared.args.length, 4);
   });
 
-  it("prepares separate proposal/solution hashes and a revision-bound evaluation", () => {
+  it("prepares separate proposal and solution hashes", () => {
     const proposal = prepareProposalCommit({
       recordId: "proposal-123",
       opportunityRecordId: "posting-123",
@@ -140,20 +132,6 @@ describe("AuditRegistry argument preparation", () => {
     assert.equal(proposal.args.length, 4);
     assert.notEqual(proposal.proposalHash, proposal.solutionHash);
 
-    const evaluation = prepareEvaluationCommit({
-      recordId: "evaluation-123",
-      proposalRecordId: "proposal-123",
-      payload: { score: 91, feedback: "Reproducible" },
-      expectedRevisionIndex: 2,
-      expectedRevisionDigest: REVISION_DIGEST,
-    });
-    assert.equal(evaluation.functionName, "recordEvaluation");
-    assert.deepEqual(evaluation.args, [
-      proposalEntityId("proposal-123"),
-      evaluation.contentHash,
-      2,
-      REVISION_DIGEST,
-    ]);
   });
 });
 
@@ -219,9 +197,59 @@ describe("AuditRegistry transaction lifecycle", () => {
       "contract-reverted",
     );
   });
+
+  it("rejects a contract address outside the configured deployment", async () => {
+    const prepared = prepareOpportunityCommit({
+      recordId: "posting-123",
+      payload: OPPORTUNITY_PAYLOAD,
+      kind: 0,
+      expiresAt: 1_796_083_200,
+    });
+    await assert.rejects(
+      commitOpportunityAudit(prepared, {
+        address: `0x${"1".repeat(40)}`,
+        account: ACCOUNT,
+        adapters: {
+          writeContract: unused,
+          waitForTransactionReceipt: unused,
+          readContract: unused,
+        },
+      }),
+      /does not match the configured deployment/,
+    );
+  });
 });
 
 describe("AuditRegistry read-side verification", () => {
+  it("rejects an opportunity anchored by a different wallet", async () => {
+    const expected = prepareOpportunityCommit({
+      recordId: "posting-123",
+      payload: { ...OPPORTUNITY_PAYLOAD, ownerId: ACCOUNT },
+      kind: 0,
+      expiresAt: 1_796_083_200,
+    });
+    const adapters = {
+      writeContract: unused,
+      waitForTransactionReceipt: unused,
+      readContract: async ({ functionName }) => {
+        assert.equal(functionName, "getOpportunity");
+        return {
+          owner: `0x${"b".repeat(40)}`,
+          kind: 0,
+          contentHash: expected.contentHash,
+          expiresAt: 1_796_083_200n,
+        };
+      },
+    };
+    const result = await verifyOpportunityAudit(expected, {
+      address: CONTRACT,
+      adapters,
+      verifyAnchor: false,
+    });
+    assert.equal(result.verified, false);
+    assert.deepEqual(result.mismatches.map(({ field }) => field), ["owner"]);
+  });
+
   it("reports the exact changed field instead of treating an existing record as verified", async () => {
     const expected = prepareOpportunityCommit({
       recordId: "posting-123",

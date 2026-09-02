@@ -23,9 +23,12 @@ function renderReceipt(props = {}) {
   return render(<AuditReceipt
     audit={receipt()}
     eventLabel="Funded problem statement submitted"
-    timestamp={new Date("2026-09-02T08:00:00Z")}
     actorRole="Problem owner"
     firebaseReference="problems/posting123"
+    onVerify={async () => ({
+      verified: true,
+      anchor: { anchor: { timestamp: 1_756_800_000n, actor: `0x${"a".repeat(40)}` } },
+    })}
     {...props}
   />);
 }
@@ -39,9 +42,9 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AuditReceipt", () => {
-  it("[QCDAO-77] renders a legible receipt and explorer link", () => {
+  it("[QCDAO-77] renders a legible receipt and explorer link", async () => {
     renderReceipt();
-    expect(screen.getByText("Verified on Arbitrum Sepolia")).toBeTruthy();
+    expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
     expect(screen.getByText("Problem owner")).toBeTruthy();
     expect(screen.getByText("problems/posting123")).toBeTruthy();
     expect(screen.getByText(HASH)).toBeTruthy();
@@ -58,18 +61,16 @@ describe("AuditReceipt", () => {
 
   it("[QCDAO-78] reports a verified match and a prominent mismatch", async () => {
     const { rerender } = renderReceipt({ onVerify: async () => ({ verified: true }) });
-    fireEvent.click(screen.getByRole("button", { name: /re-verify current record/i }));
     expect(await screen.findByText(/Verified match/)).toBeTruthy();
 
     rerender(<AuditReceipt
       audit={receipt()}
       eventLabel="Funded problem statement submitted"
-      timestamp={new Date("2026-09-02T08:00:00Z")}
       actorRole="Problem owner"
       firebaseReference="problems/posting123"
       onVerify={async () => ({ verified: false })}
     />);
-    fireEvent.click(screen.getByRole("button", { name: /re-verify current record/i }));
+    fireEvent.click(screen.getByRole("button", { name: /check again/i }));
     expect(await screen.findByText(/Mismatch detected/)).toBeTruthy();
   });
 
@@ -80,6 +81,7 @@ describe("AuditReceipt", () => {
         status: "failed", transactionHash: "", blockNumber: 0,
         attemptCount: 2, lastError: "Testnet unavailable",
       }),
+      onVerify: undefined,
       onRetry: retry,
     });
     expect(screen.getByText("Posting saved; verification needs attention")).toBeTruthy();
@@ -88,4 +90,3 @@ describe("AuditReceipt", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 });
-

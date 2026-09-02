@@ -50,12 +50,16 @@ vi.mock("../../src/lib/attachments.js", () => ({
 }));
 
 vi.mock("../../src/lib/postingAudit.js", () => ({
+  postingAuditReceipt: (posting) => posting.audit ?? null,
+  readPostingAudit: async () => {
+    if (mocks.auditShouldFail) throw new Error("No matching audit found");
+    return { verified: true };
+  },
   anchorPostingAudit: async (posting, options) => {
     mocks.auditCalls.push({ posting, account: options.account });
     const audit = {
       schemaVersion: 1,
       chainId: 421614,
-      contractAddress: `0x${"c".repeat(40)}`,
       entityId: `0x${"1".repeat(64)}`,
       contentHash: `0x${"2".repeat(64)}`,
       status: mocks.auditShouldFail ? "failed" : "confirmed",
@@ -195,7 +199,7 @@ describe("asynchronous AuditRegistry integration", () => {
     fireEvent.submit(document.querySelector("form"));
 
     expect(await screen.findByText("Cold-chain route optimisation")).toBeTruthy();
-    expect(await screen.findByText("Posting saved; verification needs attention")).toBeTruthy();
+    expect(await screen.findByText("Audit unavailable")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("Testnet unavailable");
     expect(screen.queryByText(/Nothing you typed has been lost/)).toBeNull();
   });

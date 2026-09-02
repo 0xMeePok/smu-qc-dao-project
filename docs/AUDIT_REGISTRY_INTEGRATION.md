@@ -22,7 +22,7 @@ The envelope is:
 
 ```json
 {
-  "entityType": "opportunity | proposal | evaluation",
+  "entityType": "opportunity | proposal",
   "hashScheme": 1,
   "payload": {}
 }
@@ -41,23 +41,22 @@ serialization changes.
 
 - Opportunities: `commitOpportunity(entityId, kind, contentHash, expiresAt)`
 - Proposals: `commitProposal(entityId, opportunityId, proposalHash, solutionHash)`
-- Evaluations: `recordEvaluation(proposalId, evaluationHash, revisionIndex, revisionDigest)`
 
-Evaluator eligibility is enforced by the platform. The contract intentionally
-does not store an evaluator list or restrict `recordEvaluation` by wallet; it
-only records the calling wallet as the event actor.
+Evaluations are platform records and are not anchored by this contract.
 
 ## Receipt lifecycle and retries
 
-The application creates the Firestore record first, then updates its embedded
-audit receipt through `queued`, `submitted`, `pending`, `confirmed`, or
-`failed`. A known transaction hash is only polled for its receipt and is never
-rebroadcast. Transient receipt reads are capped at three attempts. Posting use
-is not blocked if anchoring fails, and users can retry from the visible receipt.
+The application creates the Firestore record first, then keeps transaction
+delivery state there as `queued`, `submitted`, `pending`, `confirmed`, or
+`failed`. This state is only used to resume or retry a transaction. Every audit
+result shown in the frontend is read from the configured contract and compared
+with a freshly computed posting hash. A known transaction hash is only polled
+for its receipt and is never rebroadcast. Transient receipt reads are capped at
+three attempts. Posting use is not blocked if anchoring fails.
 
 The current Arbitrum Sepolia deployment is
-`0xd119C050E51e7012B4Dea180c3e4F2727F354447` (transaction
-`0xdb85cd262f365958ef1ae767cbaecd1408fbc4963088839f191fb7bc0742c916`).
+`0xF5d66411eBFDc8f58e0224AB60eF4CdFD6D01B3d` (transaction
+`0x2bf29bdf436837a4086046c4612b27afa0ca4f898af2417fb98e1b98983b17a1`).
 It is the checked-in frontend default. `VITE_AUDIT_REGISTRY_ADDRESS` may override
 it for a later deployment; an invalid override disables on-chain verification
 without blocking the Firestore workflow.

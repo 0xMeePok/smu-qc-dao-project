@@ -303,7 +303,7 @@ service cloud.firestore {
     function hasEvaluationSchema(data) {
       return data.keys().hasOnly([
         'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
-        'audit', 'createdAt', 'updatedAt'
+        'createdAt', 'updatedAt'
       ]) && data.keys().hasAll([
         'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
         'createdAt', 'updatedAt'
@@ -325,9 +325,8 @@ service cloud.firestore {
         || (data[field] is string && data[field].size() <= maxLength);
     }
 
-    // QCDAO-75..79 - client-visible state for the append-only AuditRegistry.
-    // The workflow record remains authoritative when the testnet is unavailable;
-    // this map is a resumable receipt/outbox and never grants data access.
+    // QCDAO-75..79 transaction delivery state. Audit verification reads the
+    // configured contract; this map is only a resumable receipt/outbox.
     function isBytes32(value) {
       return value is string && value.matches('^0x[0-9a-f]{64}$');
     }
@@ -336,18 +335,17 @@ service cloud.firestore {
       return !data.keys().hasAny(['audit'])
         || (data.audit is map
           && data.audit.keys().hasOnly([
-            'schemaVersion', 'chainId', 'contractAddress', 'entityId',
+            'schemaVersion', 'chainId', 'entityId',
             'contentHash', 'status', 'transactionHash', 'blockNumber',
             'attemptCount', 'lastError'
           ])
           && data.audit.keys().hasAll([
-            'schemaVersion', 'chainId', 'contractAddress', 'entityId',
+            'schemaVersion', 'chainId', 'entityId',
             'contentHash', 'status', 'transactionHash', 'blockNumber',
             'attemptCount', 'lastError'
           ])
           && data.audit.schemaVersion == 1
           && data.audit.chainId == 421614
-          && isWalletAddress(data.audit.contractAddress)
           && isBytes32(data.audit.entityId)
           && isBytes32(data.audit.contentHash)
           && data.audit.status in ['queued', 'submitted', 'pending', 'confirmed', 'failed']
@@ -571,7 +569,6 @@ service cloud.firestore {
 
     function validEvaluation(data) {
       return hasEvaluationSchema(data)
-        && hasValidAudit(data)
         && isWalletAddress(data.evaluatorId)
         && isNonEmptyString(data.proposalId, 128)
         && isNonEmptyString(data.title, 160)

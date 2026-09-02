@@ -8,8 +8,8 @@ vi.mock("../../src/lib/postings.js", () => ({
 }));
 
 const { anchorPostingAudit, preparePostingAudit } = await import("../../src/lib/postingAudit.js");
+const { DEFAULT_AUDIT_REGISTRY_ADDRESS } = await import("../../src/config/auditRegistry.js");
 
-const CONTRACT = `0x${"c".repeat(40)}`;
 const TX = `0x${"3".repeat(64)}`;
 const ACCOUNT = `0x${"a".repeat(40)}`;
 
@@ -23,8 +23,24 @@ function posting(audit) {
 }
 
 function queuedAudit() {
-  const prepared = preparePostingAudit(posting(), CONTRACT);
+  const prepared = preparePostingAudit(posting());
   return prepared.audit;
+}
+
+function configuredReads(value = posting()) {
+  const prepared = preparePostingAudit(value).prepared;
+  return async ({ functionName }) => {
+    if (functionName === "getOpportunity") {
+      return {
+        kind: 0,
+        contentHash: prepared.contentHash,
+        expiresAt: prepared.args[3],
+      };
+    }
+    if (functionName === "anchorCount") return 1n;
+    if (functionName === "anchorAt") return { contentHash: prepared.contentHash };
+    throw new Error(`unexpected read: ${functionName}`);
+  };
 }
 
 beforeEach(() => { mocks.updates = []; });
@@ -35,7 +51,7 @@ describe("QCDAO-79 posting audit recovery", () => {
     const adapters = {
       writeContract: async () => { writes += 1; return TX; },
       waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }),
-      readContract: async () => { throw new Error("unexpected read"); },
+      readContract: configuredReads(),
     };
 
     const result = await anchorPostingAudit(posting(queuedAudit()), {
@@ -49,6 +65,7 @@ describe("QCDAO-79 posting audit recovery", () => {
     ]);
     expect(result.transactionHash).toBe(TX);
     expect(result.blockNumber).toBe(88);
+    expect(result.contractAddress).toBeUndefined();
   });
 
   it("resumes a known transaction hash without rebroadcasting", async () => {
@@ -61,7 +78,7 @@ describe("QCDAO-79 posting audit recovery", () => {
         expect(hash).toBe(TX);
         return { status: "success", blockNumber: 99n };
       },
-      readContract: async () => { throw new Error("unexpected read"); },
+      readContract: configuredReads(),
     };
     const known = {
       ...queuedAudit(), status: "failed", transactionHash: TX,
@@ -75,5 +92,23 @@ describe("QCDAO-79 posting audit recovery", () => {
     expect(mocks.updates.map(({ status }) => status)).toEqual(["pending", "confirmed"]);
     expect(result.blockNumber).toBe(99);
   });
-});
 
+  it("ignores a contract address supplied by Firestore", async () => {
+    let writeRequest;
+    const stored = {
+      ...queuedAudit(),
+      contractAddress: `0x${"c".repeat(40)}`,
+    };
+    await anchorPostingAudit(posting(stored), {
+      account: ACCOUNT,
+      adapters: {
+        writeContract: async (request) => { writeRequest = request; return TX; },
+        waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 100n }),
+        readContract: configuredReads(),
+      },
+    });
+
+    expect(writeRequest.address).toBe(DEFAULT_AUDIT_REGISTRY_ADDRESS);
+    expect(mocks.updates.every((audit) => audit.contractAddress === undefined)).toBe(true);
+  });
+});

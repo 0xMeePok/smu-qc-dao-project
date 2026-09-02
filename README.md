@@ -188,7 +188,7 @@ need to redeploy, or want more detail on local emulators, see
 
 | Contract | Address (Arbitrum Sepolia) | Purpose |
 |---|---|---|
-| [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0xd119C050E51e7012B4Dea180c3e4F2727F354447`](https://sepolia.arbiscan.io/address/0xd119C050E51e7012B4Dea180c3e4F2727F354447#code) | Anchors opportunity, proposal, and evaluation hashes. Deployed in block `304637649`. |
+| [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0xF5d66411eBFDc8f58e0224AB60eF4CdFD6D01B3d`](https://sepolia.arbiscan.io/address/0xF5d66411eBFDc8f58e0224AB60eF4CdFD6D01B3d#code) | Anchors opportunity and proposal hashes. Deployed in block `304644898`. |
 | [`QFT.sol`](contracts/qft-tokens/contracts/QFT.sol) | Not yet deployed | Fixed-supply ERC-20 distributed for platform activity |
 
 ## Testing
