@@ -17,11 +17,11 @@ rules_version = '2';
 // posting is still an unsaved draft, so there is no posting document to consult
 // yet. Ownership is still provable, because it is in the path being written to.
 //
-// Read access deliberately mirrors the problems/{problemId} read rule in
-// firestore.rules exactly - owner only. When postings gain wider visibility
-// (published problems readable by evaluators/funders), extend BOTH rules
-// together, or the attachment will be readable by an audience that cannot read
-// the posting it belongs to.
+// Read access mirrors the problems/{problemId} read rule in firestore.rules and
+// must keep mirroring it. That coupling has already bitten once: QCDAO-48 widened
+// posting visibility for Discover without changing this file, so a solution
+// developer could read a posting and then be refused its attachments. Change BOTH
+// rules together, or the two audiences silently diverge again.
 //
 // ON OBJECT COUNT - what these rules can and cannot do.
 // firestore.rules caps a posting's attachment list at 5, but that governs the
@@ -92,6 +92,29 @@ service firebase.storage {
       return isWallet(address) && !isSuspended() && !hasRevokedSession();
     }
 
+    // Any signed-in wallet in good standing, whoever it belongs to. Used for
+    // reading a published posting's attachments, where the caller is a member of
+    // the marketplace rather than the owner of the file.
+    function isActiveReader() {
+      return isSignedIn() && !isSuspended() && !hasRevokedSession();
+    }
+
+    // Mirrors the problems/{problemId} read rule in firestore.rules, which since
+    // QCDAO-48 makes a submitted or open posting readable by anyone - that is the
+    // public marketplace Discover queries.
+    //
+    // The ownerId comparison is load-bearing, not decoration. Without it, anyone
+    // could upload into their OWN folder using a published posting's id
+    // (problems/{attacker}/{publishedId}/x.pdf) and have those bytes served to the
+    // world on the strength of someone else's posting being public.
+    function postingIsPublished(problemId, ownerId) {
+      return firestore.exists(/databases/(default)/documents/problems/$(problemId))
+        && firestore.get(/databases/(default)/documents/problems/$(problemId)).data.status
+             in ['submitted', 'open']
+        && firestore.get(/databases/(default)/documents/problems/$(problemId)).data.ownerId
+             == ownerId;
+    }
+
     // PDF only, per the story. Two independent checks because they can disagree:
     // contentType is metadata the client supplies, and the object name is the path
     // it writes to. Requiring both closes the case where a caller uploads
@@ -102,8 +125,11 @@ service firebase.storage {
     // arbitrary content inside a correctly-named, correctly-typed object; the
     // client checks the %PDF- magic number to catch honest mistakes, but real
     // content inspection means scanning server-side, which QCDAO-58 puts out of
-    // scope. Downloads are same-origin and never rendered inline, so the blast
-    // radius today is limited to the uploader's own postings.
+    // scope. That matters MORE than it used to: attachments on a published posting
+    // are now readable by anyone, so a malicious file reaches every viewer rather
+    // than only its uploader. The app still downloads via getBlob and never renders
+    // a PDF inline, which is what keeps this to "unpleasant" rather than "hostile
+    // content executing in the reader's browser". Revisit if preview is ever added.
     //
     // fileName and problemId are PARAMETERS, not free variables. Path captures are
     // bound inside their own match block, so a helper declared out here that reads
@@ -135,9 +161,18 @@ service firebase.storage {
     }
 
     match /problems/{ownerId}/{problemId}/{fileName} {
-      // Same audience as the posting itself: firestore.rules allows a problem to
-      // be read only by its owner, so an attachment is too.
-      allow read: if isActiveWallet(ownerId);
+      // Same audience as the posting itself, which is what QCDAO-58 asks for:
+      // "access controlled by the same role rules as the posting".
+      //
+      // A signed-in member can download the documents on any published posting -
+      // otherwise a solution developer finds the posting on Discover, sees the
+      // attachment listed, clicks Download and is refused, which is the exact
+      // technical context the story exists to give them. A draft stays private to
+      // its owner. Both halves match firestore.rules, including the requirement
+      // for a session: these PDFs carry the sponsor's competitive detail and are
+      // not for the open internet.
+      allow read: if isActiveReader()
+        && (postingIsPublished(problemId, ownerId) || isWallet(ownerId));
 
       // CREATE ONLY - a stored attachment is immutable for its whole life.
       //

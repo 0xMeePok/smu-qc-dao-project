@@ -275,3 +275,77 @@ describe("storage rules: reading and removing an attachment", () => {
     await assertFails(deleteObject(ref(storage, path)));
   });
 });
+
+// QCDAO-58 scope: "Download from the posting detail page, with access controlled by
+// the same role rules as the posting." Since QCDAO-48, a posting in submitted/open
+// is readable by anyone - it is the public marketplace Discover queries. These
+// tests hold the attachment rules to that same audience.
+describe("storage rules: attachments follow the posting's visibility", () => {
+  const PUBLIC_POSTING = "publicPosting1";
+  const DRAFT_POSTING = "draftPosting1";
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "problems", PUBLIC_POSTING), {
+        ownerId: OWNER, status: "submitted", title: "Public", summary: "Public posting",
+      });
+      await setDoc(doc(db, "problems", DRAFT_POSTING), {
+        ownerId: OWNER, status: "draft", title: "Draft", summary: "Draft posting",
+      });
+    });
+    await seedObject(objectPath(OWNER, PUBLIC_POSTING, "public.pdf"), {
+      contentType: "application/pdf",
+      customMetadata: { uploadedBy: OWNER, problemId: PUBLIC_POSTING },
+    });
+    await seedObject(objectPath(OWNER, DRAFT_POSTING, "draft.pdf"), {
+      contentType: "application/pdf",
+      customMetadata: { uploadedBy: OWNER, problemId: DRAFT_POSTING },
+    });
+  });
+
+  it("[BIT-ATT-075] refuses an unauthenticated download of a published attachment", async () => {
+    // The marketplace is open to members, not the open internet. These PDFs carry
+    // the sponsor's business context and budget.
+    const storage = env.unauthenticatedContext().storage();
+    await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+  });
+
+  it("[BIT-ATT-076] refuses a suspended member downloading a published attachment", async () => {
+    const storage = env.authenticatedContext(SUSPENDED).storage();
+    await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+  });
+
+  it("[BIT-ATT-070] lets another wallet download an attachment on a published posting", async () => {
+    // The whole point of QCDAO-58: a solution developer in another organisation
+    // reads the posting on Discover and needs its technical context to respond.
+    const storage = env.authenticatedContext(OTHER).storage();
+    await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+  });
+
+  it("[BIT-ATT-071] still refuses an attachment on a posting that is only a draft", async () => {
+    // A draft is private to its owner in firestore.rules, so its files are too.
+    const storage = env.authenticatedContext(OTHER).storage();
+    await assertFails(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
+  });
+
+  it("[BIT-ATT-072] lets the owner read their own draft attachment", async () => {
+    const storage = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
+  });
+
+  it("[BIT-ATT-073] still refuses another wallet from WRITING to a published posting", async () => {
+    // Readable by everyone does not mean writable by everyone.
+    const storage = env.authenticatedContext(OTHER).storage();
+    await assertFails(uploadBytes(
+      ref(storage, objectPath(OWNER, PUBLIC_POSTING, "intruder.pdf")),
+      PDF_BYTES,
+      { contentType: "application/pdf", customMetadata: { uploadedBy: OTHER, problemId: PUBLIC_POSTING } },
+    ));
+  });
+
+  it("[BIT-ATT-074] still refuses another wallet from DELETING from a published posting", async () => {
+    const storage = env.authenticatedContext(OTHER).storage();
+    await assertFails(deleteObject(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+  });
+});

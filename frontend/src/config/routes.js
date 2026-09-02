@@ -83,22 +83,10 @@ export const ROUTES_CONFIG = [
   },
   // Non-navigated or dynamic/utility routes:
   {
-    // QCDAO-58 integration harness for posting attachments. Same role set as
-    // "create", because it publishes a real posting. Kept out of the navigation
-    // deliberately: it is developer scaffolding, reachable at #/attachments-lab,
-    // and it goes away when the real posting form and detail page land.
-    key: "attachments-lab",
-    path: "attachments-lab",
-    label: "Attachment Lab",
-    allowedRoles: [ROLES.OWNER, ROLES.RESEARCHER, ROLES.FUNDER],
-    authRequired: true,
-    showInNav: false,
-  },
-  {
-    key: "opportunity",
-    path: "opportunity",
-    label: "Opportunity Detail",
-    allowedRoles: null, // Public
+    key: "posting",
+    path: "posting",
+    label: "Posting",
+    allowedRoles: null,
     authRequired: false,
     showInNav: false,
   },

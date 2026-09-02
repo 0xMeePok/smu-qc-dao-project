@@ -41,6 +41,7 @@ export const missingFirebaseConfig = REQUIRED_KEYS
 export const isFirebaseConfigured = missingFirebaseConfig.length === 0;
 
 const app = isFirebaseConfigured ? (getApps()[0] ?? initializeApp(config)) : null;
+const usingEmulators = import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true";
 
 const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY;
 export const isAppCheckConfigured = Boolean(appCheckSiteKey);
@@ -59,6 +60,13 @@ export const appCheck = app
   : null;
 
 export const auth = app ? getAuth(app) : null;
+
+// Connect the emulator before configuring persistence or registering auth listeners.
+// Those operations initialize the auth instance and can otherwise retain the
+// production token endpoint for refresh requests.
+if (auth && usingEmulators) {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+}
 
 // Persist the session across reloads AND across closing the tab, so a refresh in the
 // middle of a multi-step workflow does not throw the user back to sign-in.
@@ -107,10 +115,7 @@ export const functions = app ? getFunctions(app, FUNCTIONS_REGION) : null;
 export const isStorageConfigured = Boolean(app && config.storageBucket);
 export const storage = isStorageConfigured ? getStorage(app) : null;
 
-const usingEmulators = import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true";
-
 if (app && usingEmulators) {
-  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectFunctionsEmulator(functions, "127.0.0.1", 5001);
   if (storage) connectStorageEmulator(storage, "127.0.0.1", 9199);

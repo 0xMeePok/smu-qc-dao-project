@@ -2158,3 +2158,187 @@ footer > p { margin: 0 auto 0 0; }
   display: grid;
   gap: 8px;
 }
+
+/* FUNDED PROBLEM STATEMENT FORM (QCDAO-48) */
+.funding-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius-pill);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.tag-chip:hover {
+  border-color: var(--brand);
+}
+
+/* Categories shown on a saved posting are labels, not controls. */
+.tag-chip.static {
+  cursor: default;
+  background: var(--surface-muted);
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+
+.confirmation-page {
+  display: flex;
+  justify-content: center;
+}
+
+.confirmation-card {
+  max-width: 640px;
+  width: 100%;
+  margin-top: 32px;
+  padding: 28px 32px;
+}
+
+.confirmation-card h1 {
+  margin: 8px 0 4px;
+  font-size: 26px;
+  color: var(--ink);
+}
+
+.confirmation-facts {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+  padding: 16px 0;
+  border-top: 1px solid var(--success-line);
+  border-bottom: 1px solid var(--success-line);
+}
+
+.confirmation-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13.5px;
+}
+
+.confirmation-facts dt {
+  color: var(--muted);
+}
+
+.confirmation-facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .funding-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* EXPIRY COUNTDOWN (QCDAO-48) */
+.expiry-panel {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+}
+
+.expiry-countdown {
+  display: grid;
+  gap: 2px;
+}
+
+.expiry-countdown strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.expiry-countdown small {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.expiry-countdown.expired strong {
+  color: var(--danger);
+}
+
+/* TECHNOLOGY AREA PICKER (QCDAO-48) */
+/*
+  Its own grid rather than .radio-group. These are twelve short domain choices
+  scanned at a glance, so they want narrow columns and a compact card - the
+  opportunity-type cards elsewhere carry a sentence each and need the room.
+*/
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.category-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.category-card:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+
+.category-card.selected {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.category-card input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  /* Optical alignment with the label's cap height rather than its line box. */
+  margin-top: 2px;
+  accent-color: var(--brand);
+}
+
+.category-card strong {
+  display: block;
+  font-size: 13.5px;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.category-card span {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.category-grid.field-invalid .category-card {
+  border-color: var(--danger-line);
+}
