@@ -49,8 +49,8 @@ export function preparePostingAudit(posting) {
 
 function auditErrorMessage(error) {
   const rejected = error?.code === 4001 || /user rejected/i.test(error?.message ?? "");
-  if (rejected) return "The posting is live, but the wallet transaction was declined. You can retry from this receipt.";
-  return "The posting is live, but Arbitrum Sepolia could not confirm its verification anchor. You can retry safely.";
+  if (rejected) return "The wallet transaction was declined. You can retry when ready.";
+  return "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
 function blockNumber(value) {
@@ -84,7 +84,9 @@ export async function readPostingAudit(posting, { adapters } = {}) {
 }
 
 /**
- * Anchors QCDAO-48 after Firestore has accepted the authoritative posting.
+ * Anchors a posting in the audit registry. New postings can defer Firestore
+ * persistence until the chain receipt is confirmed by setting persistReceipt
+ * to false; recovery flows can persist receipt changes as they happen.
  * A known transaction hash is never re-broadcast: retry resumes receipt polling,
  * which avoids duplicate nonces and `_idTaken` reverts after a slow confirmation.
  */
@@ -92,10 +94,11 @@ export async function anchorPostingAudit(posting, {
   account,
   adapters,
   onChange,
+  persistReceipt = true,
   maxReceiptRetries = 2,
 } = {}) {
   const setup = preparePostingAudit(posting);
-  if (!setup) return null;
+  if (!setup) throw new Error("AuditRegistry is not configured.");
 
   const attemptCount = Math.min(
     MAX_AUDIT_RETRIES,
@@ -116,15 +119,18 @@ export async function anchorPostingAudit(posting, {
   const persist = async (patch) => {
     current = { ...current, ...patch };
     onChange?.(current);
+    if (!persistReceipt) return;
     try {
       await updatePostingAudit({ postingId: posting.id, audit: current });
     } catch {
-      // Do not abort or rebroadcast a chain transaction because receipt metadata
-      // could not be saved. Keep the full state in the mounted UI so the actor can
-      // copy the transaction reference and safely reconcile it later.
+      const persistenceError = current.transactionHash
+        ? "The transaction was submitted, but its receipt could not be saved to Firestore. Keep the transaction reference and retry after reconnecting."
+        : "The audit status could not be saved to Firestore. No transaction reference was received.";
       current = {
         ...current,
-        lastError: "The chain transaction continued, but its receipt could not be saved to Firestore. Keep the transaction reference and retry after reconnecting.",
+        lastError: current.lastError.includes(persistenceError)
+          ? current.lastError
+          : [current.lastError, persistenceError].filter(Boolean).join(" ").slice(0, 500),
       };
       onChange?.(current);
     }
