@@ -11,13 +11,14 @@ import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 import { getStorage, connectStorageEmulator } from "firebase/storage";
 
+const viteEnv = import.meta.env ?? {};
 const config = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: viteEnv.VITE_FIREBASE_API_KEY,
+  authDomain: viteEnv.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: viteEnv.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: viteEnv.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: viteEnv.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: viteEnv.VITE_FIREBASE_APP_ID,
 };
 
 // Must match the region the callable functions are deployed to (see firebase/functions/index.js).
@@ -41,9 +42,9 @@ export const missingFirebaseConfig = REQUIRED_KEYS
 export const isFirebaseConfigured = missingFirebaseConfig.length === 0;
 
 const app = isFirebaseConfigured ? (getApps()[0] ?? initializeApp(config)) : null;
-const usingEmulators = import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true";
+const usingEmulators = viteEnv.VITE_FIREBASE_USE_EMULATORS === "true";
 
-const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY;
+const appCheckSiteKey = viteEnv.VITE_FIREBASE_APP_CHECK_SITE_KEY;
 export const isAppCheckConfigured = Boolean(appCheckSiteKey);
 
 // Production nonce issuance enforces App Check and consumes a limited-use token.
@@ -51,7 +52,7 @@ export const isAppCheckConfigured = Boolean(appCheckSiteKey);
 // (score-based key). The same site key must be saved in the Firebase console
 // and in VITE_FIREBASE_APP_CHECK_SITE_KEY. Local emulators skip attestation.
 export const appCheck = app
-  && import.meta.env.VITE_FIREBASE_USE_EMULATORS !== "true"
+  && viteEnv.VITE_FIREBASE_USE_EMULATORS !== "true"
   && appCheckSiteKey
   ? initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),

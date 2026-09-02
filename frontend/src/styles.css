@@ -40,6 +40,70 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* QCDAO-77/78 — human-readable AuditRegistry receipt. */
+.audit-receipt {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid #d8d4c8;
+  border-radius: 14px;
+  background: #fbfaf6;
+}
+
+.audit-receipt-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.audit-receipt-heading h2 { margin: 0.2rem 0 0; }
+
+.audit-state {
+  max-width: 18rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: 999px;
+  background: #ece9df;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.audit-state-confirmed { background: #d9f2e3; color: #17653b; }
+.audit-state-failed { background: #fde2df; color: #8b271f; }
+.audit-state-pending,
+.audit-state-submitted,
+.audit-state-queued { background: #fff0c9; color: #6f4c00; }
+
+.audit-receipt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem 1rem;
+  margin: 1rem 0;
+}
+
+.audit-receipt-grid > div {
+  min-width: 0;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.audit-receipt-grid dt { color: #68645b; font-size: 0.78rem; }
+.audit-receipt-grid dd { margin: 0.25rem 0 0; overflow-wrap: anywhere; }
+.audit-receipt-value .text-button { margin-top: 0.35rem; }
+.audit-warning,
+.audit-verification { padding: 0.8rem; border-radius: 10px; }
+.audit-warning,
+.audit-verification-mismatch { background: #fde2df; color: #8b271f; }
+.audit-verification-match { background: #d9f2e3; color: #17653b; }
+.audit-verification-unavailable { background: #fff0c9; color: #6f4c00; }
+.audit-explorer-link { display: inline-flex; align-items: center; }
+.audit-unavailable { color: #59564f; }
+
+@media (max-width: 720px) {
+  .audit-receipt-heading { flex-direction: column; }
+  .audit-receipt-grid { grid-template-columns: 1fr; }
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   created: [],
   createShouldFail: false,
+  auditCalls: [],
+  auditShouldFail: false,
   deleted: [],
   uploader: {
     onChange: null,
@@ -44,6 +46,27 @@ vi.mock("../../src/lib/postings.js", () => ({
 vi.mock("../../src/lib/attachments.js", () => ({
   deleteAttachment: async (item) => {
     mocks.deleted.push(item);
+  },
+}));
+
+vi.mock("../../src/lib/postingAudit.js", () => ({
+  anchorPostingAudit: async (posting, options) => {
+    mocks.auditCalls.push({ posting, account: options.account });
+    const audit = {
+      schemaVersion: 1,
+      chainId: 421614,
+      contractAddress: `0x${"c".repeat(40)}`,
+      entityId: `0x${"1".repeat(64)}`,
+      contentHash: `0x${"2".repeat(64)}`,
+      status: mocks.auditShouldFail ? "failed" : "confirmed",
+      transactionHash: mocks.auditShouldFail ? "" : `0x${"3".repeat(64)}`,
+      blockNumber: mocks.auditShouldFail ? 0 : 123,
+      attemptCount: 1,
+      lastError: mocks.auditShouldFail ? "Testnet unavailable" : "",
+    };
+    options.onChange(audit);
+    if (mocks.auditShouldFail) throw new Error("RPC unavailable");
+    return audit;
   },
 }));
 
@@ -100,6 +123,8 @@ const DRAFT_ATTACHMENT = {
 beforeEach(() => {
   mocks.created = [];
   mocks.createShouldFail = false;
+  mocks.auditCalls = [];
+  mocks.auditShouldFail = false;
   mocks.deleted = [];
   mocks.uploader.onChange = null;
   mocks.uploader.onPendingChange = null;
@@ -147,6 +172,32 @@ describe("no data loss on a failed submit", () => {
       .toBe("Vehicle routing degrades badly under demand spikes.");
     expect(amountInput().value).toBe("1000000");
     expect(screen.getByRole("checkbox", { name: /AI & machine learning/i }).checked).toBe(true);
+  });
+});
+
+describe("asynchronous AuditRegistry integration", () => {
+  it("[QCDAO-75..79] publishes first and exposes the confirmed audit receipt", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+
+    expect(await screen.findByText("Cold-chain route optimisation")).toBeTruthy();
+    await waitFor(() => expect(mocks.auditCalls).toHaveLength(1));
+    expect(mocks.auditCalls[0].account).toBe(`0x${"a".repeat(40)}`);
+    expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
+    expect(screen.getAllByText("Funded problem statement submitted")).toHaveLength(2);
+  });
+
+  it("[QCDAO-79] keeps the posting live when anchoring fails", async () => {
+    mocks.auditShouldFail = true;
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+
+    expect(await screen.findByText("Cold-chain route optimisation")).toBeTruthy();
+    expect(await screen.findByText("Posting saved; verification needs attention")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Testnet unavailable");
+    expect(screen.queryByText(/Nothing you typed has been lost/)).toBeNull();
   });
 });
 

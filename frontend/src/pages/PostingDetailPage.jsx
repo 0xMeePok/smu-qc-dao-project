@@ -10,7 +10,10 @@ import {
 import { messageForFirebaseError } from "../lib/errors.js";
 import { categoryLabel } from "../config/postingCategories.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
+import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { formatInstant, isExpired } from "../lib/datetime.js";
+import { verifyOpportunityAudit } from "../lib/auditRegistry.js";
+import { anchorPostingAudit, preparePostingAudit } from "../lib/postingAudit.js";
 
 /**
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
@@ -33,10 +36,11 @@ function Detail({ heading, children }) {
 }
 
 export default function PostingDetailPage({ postingId, onNavigate }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [posting, setPosting] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [auditBusy, setAuditBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +62,26 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     } catch (downloadError) {
       setError(messageForStorageError(downloadError));
     }
+  };
+
+  const retryAudit = () => {
+    if (!posting || auditBusy) return;
+    setAuditBusy(true);
+    void anchorPostingAudit(posting, {
+      account: user?.id,
+      onChange: (audit) => setPosting((current) => ({ ...current, audit })),
+    }).catch(() => {
+      // The receipt explains the independent verification failure; the posting
+      // remains available and this retry never re-broadcasts a known tx hash.
+    }).finally(() => setAuditBusy(false));
+  };
+
+  const verifyAudit = async () => {
+    const setup = preparePostingAudit(posting, posting.audit?.contractAddress);
+    if (!setup) throw new Error("AuditRegistry is not configured for this record.");
+    return verifyOpportunityAudit(setup.prepared, {
+      address: posting.audit.contractAddress,
+    });
   };
 
   if (loading) {
@@ -146,6 +170,16 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               </ul>
             </div>
           )}
+
+          <AuditReceipt
+            audit={posting.audit}
+            eventLabel="Funded problem statement submitted"
+            timestamp={posting.createdAt}
+            actorRole="Problem owner"
+            firebaseReference={`problems/${posting.id}`}
+            onVerify={posting.audit?.status === "confirmed" ? verifyAudit : undefined}
+            onRetry={auditBusy ? undefined : retryAudit}
+          />
 
           {error && <p className="attachment-error" role="alert">{error}</p>}
         </article>

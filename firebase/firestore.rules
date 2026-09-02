@@ -284,7 +284,7 @@ service cloud.firestore {
         'businessContext', 'currentApproach', 'currentLimitations',
         'expectedOutcome', 'successCriteria', 'dataAvailability',
         'categories', 'currency', 'expiresAt',
-        'attachments', 'createdAt', 'updatedAt'
+        'attachments', 'audit', 'createdAt', 'updatedAt'
       ]) && data.keys().hasAll([
         'ownerId', 'title', 'summary', 'amount', 'status', 'createdAt', 'updatedAt'
       ]);
@@ -293,7 +293,7 @@ service cloud.firestore {
     function hasProposalSchema(data) {
       return data.keys().hasOnly([
         'researcherId', 'problemId', 'title', 'summary', 'outcomes', 'amount',
-        'status', 'deliverables', 'createdAt', 'updatedAt'
+        'status', 'deliverables', 'audit', 'createdAt', 'updatedAt'
       ]) && data.keys().hasAll([
         'researcherId', 'problemId', 'title', 'summary', 'amount', 'status',
         'createdAt', 'updatedAt'
@@ -303,7 +303,7 @@ service cloud.firestore {
     function hasEvaluationSchema(data) {
       return data.keys().hasOnly([
         'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
-        'createdAt', 'updatedAt'
+        'audit', 'createdAt', 'updatedAt'
       ]) && data.keys().hasAll([
         'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
         'createdAt', 'updatedAt'
@@ -323,6 +323,45 @@ service cloud.firestore {
     function optionalString(data, field, maxLength) {
       return !data.keys().hasAny([field])
         || (data[field] is string && data[field].size() <= maxLength);
+    }
+
+    // QCDAO-75..79 - client-visible state for the append-only AuditRegistry.
+    // The workflow record remains authoritative when the testnet is unavailable;
+    // this map is a resumable receipt/outbox and never grants data access.
+    function isBytes32(value) {
+      return value is string && value.matches('^0x[0-9a-f]{64}$');
+    }
+
+    function hasValidAudit(data) {
+      return !data.keys().hasAny(['audit'])
+        || (data.audit is map
+          && data.audit.keys().hasOnly([
+            'schemaVersion', 'chainId', 'contractAddress', 'entityId',
+            'contentHash', 'status', 'transactionHash', 'blockNumber',
+            'attemptCount', 'lastError'
+          ])
+          && data.audit.keys().hasAll([
+            'schemaVersion', 'chainId', 'contractAddress', 'entityId',
+            'contentHash', 'status', 'transactionHash', 'blockNumber',
+            'attemptCount', 'lastError'
+          ])
+          && data.audit.schemaVersion == 1
+          && data.audit.chainId == 421614
+          && isWalletAddress(data.audit.contractAddress)
+          && isBytes32(data.audit.entityId)
+          && isBytes32(data.audit.contentHash)
+          && data.audit.status in ['queued', 'submitted', 'pending', 'confirmed', 'failed']
+          && data.audit.transactionHash is string
+          && (data.audit.transactionHash == '' || isBytes32(data.audit.transactionHash))
+          && data.audit.blockNumber is int && data.audit.blockNumber >= 0
+          && data.audit.attemptCount is int
+          && data.audit.attemptCount >= 0 && data.audit.attemptCount <= 3
+          && data.audit.lastError is string && data.audit.lastError.size() <= 500
+          && (data.audit.status != 'queued'
+            || (data.audit.transactionHash == '' && data.audit.blockNumber == 0))
+          && (!(data.audit.status in ['submitted', 'pending', 'confirmed'])
+            || data.audit.transactionHash != '')
+          && (data.audit.status != 'confirmed' || data.audit.blockNumber > 0));
     }
 
     function stringListItemIsValid(items, index) {
@@ -472,6 +511,7 @@ service cloud.firestore {
 
     function validProblem(data) {
       return hasProblemSchema(data)
+        && hasValidAudit(data)
         && isWalletAddress(data.ownerId)
         && isNonEmptyString(data.title, 160)
         && isNonEmptyString(data.summary, 4000)
@@ -508,6 +548,7 @@ service cloud.firestore {
 
     function validProposal(data) {
       return hasProposalSchema(data)
+        && hasValidAudit(data)
         && isWalletAddress(data.researcherId)
         && isNonEmptyString(data.problemId, 128)
         && isNonEmptyString(data.title, 160)
@@ -530,6 +571,7 @@ service cloud.firestore {
 
     function validEvaluation(data) {
       return hasEvaluationSchema(data)
+        && hasValidAudit(data)
         && isWalletAddress(data.evaluatorId)
         && isNonEmptyString(data.proposalId, 128)
         && isNonEmptyString(data.title, 160)

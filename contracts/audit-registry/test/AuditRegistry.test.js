@@ -73,18 +73,14 @@ describe("AuditRegistry", function () {
     };
   }
 
-  async function commitFirstOpportunity(
-    ctx,
-    kind = OpportunityKind.BusinessProblem,
-    evaluators = []
-  ) {
+  async function commitFirstOpportunity(ctx, kind = OpportunityKind.BusinessProblem) {
     return ctx.registry
       .connect(ctx.owner)
-      .commitOpportunity(ctx.opportunityId, kind, ctx.opportunityHash, ctx.expiresAt, evaluators);
+      .commitOpportunity(ctx.opportunityId, kind, ctx.opportunityHash, ctx.expiresAt);
   }
 
-  async function commitFirstProposal(ctx, evaluators = []) {
-    await commitFirstOpportunity(ctx, OpportunityKind.BusinessProblem, evaluators);
+  async function commitFirstProposal(ctx) {
+    await commitFirstOpportunity(ctx, OpportunityKind.BusinessProblem);
     return ctx.registry
       .connect(ctx.researcher)
       .commitProposal(
@@ -159,8 +155,7 @@ describe("AuditRegistry", function () {
             openFundingId,
             OpportunityKind.OpenFunding,
             ethers.id("open-funding-hash"),
-            0,
-            []
+            0
           );
         const fundingTimestamp = await timestampOf(ethers, fundingTx);
         await expect(fundingTx)
@@ -185,8 +180,7 @@ describe("AuditRegistry", function () {
         fundingRequestId,
         OpportunityKind.FundingRequest,
         ethers.id("funding-request-hash"),
-        0,
-        []
+        0
       );
         const requestTimestamp = await timestampOf(ethers, requestTx);
         await expect(requestTx)
@@ -205,78 +199,6 @@ describe("AuditRegistry", function () {
         );
       });
 
-      it("stores none, one, or several evaluators named at post time", async function () {
-        const ctx = await deployFixture();
-        const { ethers, registry, owner, evaluator, other, opportunityId } = ctx;
-
-        await commitFirstOpportunity(ctx, OpportunityKind.BusinessProblem, [
-          evaluator.address,
-          other.address,
-        ]);
-        expect(await registry.evaluatorCount(opportunityId)).to.equal(2n);
-        expect(await registry.evaluatorAt(opportunityId, 0)).to.equal(evaluator.address);
-        expect(await registry.isEvaluator(opportunityId, evaluator.address)).to.equal(true);
-        expect(await registry.isEvaluator(opportunityId, owner.address)).to.equal(false);
-
-        const noneId = ethers.id("no-evaluators");
-        await registry
-          .connect(owner)
-          .commitOpportunity(noneId, OpportunityKind.OpenFunding, ethers.id("none-hash"), 0, []);
-        expect(await registry.evaluatorCount(noneId)).to.equal(0n);
-      });
-
-      it("lets the same wallet hold different roles on different postings", async function () {
-        const ctx = await deployFixture();
-        const { ethers, registry, owner, researcher, evaluator, other } = ctx;
-
-        const ownedByEvaluator = ethers.id("owned-by-evaluator");
-        await registry
-          .connect(evaluator)
-          .commitOpportunity(
-            ownedByEvaluator,
-            OpportunityKind.BusinessProblem,
-            ethers.id("owned-hash"),
-            0,
-            [owner.address]
-          );
-
-        const evaluatedByOwner = ethers.id("evaluated-by-owner");
-        await registry
-          .connect(researcher)
-          .commitOpportunity(
-            evaluatedByOwner,
-            OpportunityKind.FundingRequest,
-            ethers.id("eval-hash"),
-            0,
-            [owner.address, evaluator.address]
-          );
-        const proposalOnB = ethers.id("proposal-on-b");
-        await registry
-          .connect(other)
-          .commitProposal(proposalOnB, evaluatedByOwner, ethers.id("p-b"), ethers.id("s-b"));
-
-        expect(await registry.isEvaluator(ownedByEvaluator, evaluator.address)).to.equal(false);
-        expect(await registry.isEvaluator(evaluatedByOwner, evaluator.address)).to.equal(true);
-        expect(await registry.isEvaluator(evaluatedByOwner, owner.address)).to.equal(true);
-        expect((await registry.getOpportunity(ownedByEvaluator)).owner).to.equal(evaluator.address);
-
-        await recordCurrentEvaluation(
-          registry,
-          owner,
-          ethers,
-          proposalOnB,
-          ethers.id("owner-as-evaluator")
-        );
-        await recordCurrentEvaluation(
-          registry,
-          evaluator,
-          ethers,
-          proposalOnB,
-          ethers.id("evaluator-also-reviews")
-        );
-        expect(await registry.evaluationCount(proposalOnB)).to.equal(2n);
-      });
-
       it("allows the same content hash on two different opportunities", async function () {
         const ctx = await deployFixture();
         const { ethers, registry, owner, opportunityHash, expiresAt } = ctx;
@@ -285,7 +207,7 @@ describe("AuditRegistry", function () {
         const secondId = ethers.id("opportunity-2");
         await registry
           .connect(owner)
-          .commitOpportunity(secondId, OpportunityKind.OpenFunding, opportunityHash, expiresAt, []);
+          .commitOpportunity(secondId, OpportunityKind.OpenFunding, opportunityHash, expiresAt);
 
         expect((await registry.getOpportunity(secondId)).contentHash).to.equal(opportunityHash);
       });
@@ -299,8 +221,7 @@ describe("AuditRegistry", function () {
             ZERO_BYTES32,
             OpportunityKind.BusinessProblem,
             opportunityHash,
-            expiresAt,
-            []
+            expiresAt
           )
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
       });
@@ -312,8 +233,7 @@ describe("AuditRegistry", function () {
             opportunityId,
             OpportunityKind.BusinessProblem,
             ZERO_BYTES32,
-            expiresAt,
-            []
+            expiresAt
           )
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
       });
@@ -327,8 +247,7 @@ describe("AuditRegistry", function () {
             opportunityId,
             OpportunityKind.BusinessProblem,
             opportunityHash,
-            1,
-            []
+            1
           )
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
         await expect(
@@ -336,8 +255,7 @@ describe("AuditRegistry", function () {
             opportunityId,
             OpportunityKind.BusinessProblem,
             opportunityHash,
-            latest.timestamp,
-            []
+            latest.timestamp
           )
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
       });
@@ -351,30 +269,6 @@ describe("AuditRegistry", function () {
         );
       });
 
-      it("rejects a zero, duplicate, or owner evaluator address", async function () {
-        const ctx = await deployFixture();
-        const { ethers, registry, owner, evaluator, opportunityId, opportunityHash, expiresAt } = ctx;
-
-        await expect(
-          registry
-            .connect(owner)
-            .commitOpportunity(opportunityId, 0, opportunityHash, expiresAt, [ethers.ZeroAddress])
-        ).to.be.revertedWithCustomError(registry, "InvalidInput");
-        await expect(
-          registry
-            .connect(owner)
-            .commitOpportunity(opportunityId, 0, opportunityHash, expiresAt, [owner.address])
-        ).to.be.revertedWithCustomError(registry, "InvalidInput");
-        await expect(
-          registry
-            .connect(owner)
-            .commitOpportunity(opportunityId, 0, opportunityHash, expiresAt, [
-              evaluator.address,
-              evaluator.address,
-            ])
-        ).to.be.revertedWithCustomError(registry, "InvalidInput");
-      });
-
       it("rejects an opportunity id that is already used by a proposal", async function () {
         const ctx = await deployFixture();
         const { ethers, registry, owner, proposalId } = ctx;
@@ -383,7 +277,7 @@ describe("AuditRegistry", function () {
         await expect(
           registry
             .connect(owner)
-            .commitOpportunity(proposalId, OpportunityKind.OpenFunding, ethers.id("other"), 0, [])
+            .commitOpportunity(proposalId, OpportunityKind.OpenFunding, ethers.id("other"), 0)
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
       });
     });
@@ -484,8 +378,7 @@ describe("AuditRegistry", function () {
             opportunityId,
             OpportunityKind.BusinessProblem,
             ctx.opportunityHash,
-            BigInt(latest.timestamp) + 2n,
-            []
+            BigInt(latest.timestamp) + 2n
           );
         await ethers.provider.send("evm_increaseTime", [5]);
         await ethers.provider.send("evm_mine", []);
@@ -660,8 +553,7 @@ describe("AuditRegistry", function () {
             opportunityId,
             OpportunityKind.OpenFunding,
             ethers.id("open-funding-hash"),
-            0,
-            []
+            0
           );
         await registry
           .connect(researcher)
@@ -748,7 +640,7 @@ describe("AuditRegistry", function () {
         const secondOpportunity = ethers.id("opportunity-2");
         await registry
           .connect(ctx.owner)
-          .commitOpportunity(secondOpportunity, OpportunityKind.FundingRequest, ethers.id("fr"), 0, []);
+          .commitOpportunity(secondOpportunity, OpportunityKind.FundingRequest, ethers.id("fr"), 0);
         await registry
           .connect(other)
           .commitProposal(ethers.id("proposal-2"), secondOpportunity, proposalHash, solutionHash);
@@ -826,8 +718,7 @@ describe("AuditRegistry", function () {
             opportunityId,
             OpportunityKind.BusinessProblem,
             ctx.opportunityHash,
-            BigInt(latest.timestamp) + 2n,
-            []
+            BigInt(latest.timestamp) + 2n
           );
         await ethers.provider.send("evm_increaseTime", [5]);
         await ethers.provider.send("evm_mine", []);
@@ -1005,8 +896,7 @@ describe("AuditRegistry", function () {
             lateId,
             OpportunityKind.BusinessProblem,
             ethers.id("expiring-hash"),
-            BigInt(latest.timestamp) + 3n,
-            []
+            BigInt(latest.timestamp) + 3n
           );
         await registry
           .connect(researcher)
@@ -1112,10 +1002,10 @@ describe("AuditRegistry", function () {
 
   describe("recordEvaluation", function () {
     describe("positive", function () {
-      it("lets named evaluators record a review against the current revision", async function () {
+      it("lets any wallet record a review against the current revision", async function () {
         const ctx = await deployFixture();
         const { ethers, registry, evaluator, other, proposalId, proposalHash, solutionHash } = ctx;
-        await commitFirstProposal(ctx, [evaluator.address, other.address]);
+        await commitFirstProposal(ctx);
 
         const firstHash = ethers.id("evaluation-hash-v1");
         const digest = combinedHash(ethers, proposalHash, solutionHash);
@@ -1147,6 +1037,23 @@ describe("AuditRegistry", function () {
         expect(recorded.revisionDigest).to.equal(digest);
         expect((await registry.getProposal(proposalId)).evaluationLocked).to.equal(true);
       });
+
+      it("does not duplicate platform evaluator eligibility rules on chain", async function () {
+        const ctx = await deployFixture();
+        const { ethers, registry, researcher, proposalId } = ctx;
+        await commitFirstProposal(ctx);
+
+        await recordCurrentEvaluation(
+          registry,
+          researcher,
+          ethers,
+          proposalId,
+          ethers.id("platform-authorized-evaluation")
+        );
+
+        expect(await registry.evaluationCount(proposalId)).to.equal(1n);
+        expect((await registry.evaluationAt(proposalId, 0)).evaluator).to.equal(researcher.address);
+      });
     });
 
     describe("negative", function () {
@@ -1157,83 +1064,10 @@ describe("AuditRegistry", function () {
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
       });
 
-      it("rejects an evaluator reviewing their own proposal", async function () {
-        const ctx = await deployFixture();
-        const { ethers, registry, owner, evaluator, other, opportunityId } = ctx;
-        await registry
-          .connect(owner)
-          .commitOpportunity(
-            opportunityId,
-            OpportunityKind.BusinessProblem,
-            ctx.opportunityHash,
-            ctx.expiresAt,
-            [evaluator.address]
-          );
-        await registry
-          .connect(evaluator)
-          .commitProposal(
-            ctx.proposalId,
-            opportunityId,
-            ctx.proposalHash,
-            ctx.solutionHash
-          );
-
-        await expect(
-          recordCurrentEvaluation(
-            registry,
-            evaluator,
-            ethers,
-            ctx.proposalId,
-            ethers.id("self-evaluation")
-          )
-        ).to.be.revertedWithCustomError(registry, "AccessDenied");
-
-        await registry
-          .connect(other)
-          .commitProposal(
-            ethers.id("other-proposal"),
-            opportunityId,
-            ethers.id("other-p"),
-            ethers.id("other-s")
-          );
-        await recordCurrentEvaluation(
-          registry,
-          evaluator,
-          ethers,
-          ethers.id("other-proposal"),
-          ethers.id("peer-evaluation")
-        );
-        expect(await registry.evaluationCount(ethers.id("other-proposal"))).to.equal(1n);
-      });
-
-      it("rejects a wallet that was not named as an evaluator", async function () {
-        const ctx = await deployFixture();
-        const { ethers, registry, evaluator, other, proposalId } = ctx;
-        await commitFirstProposal(ctx, [evaluator.address]);
-        await expect(
-          recordCurrentEvaluation(registry, other, ethers, proposalId, ethers.id("evaluation-hash-v1"))
-        ).to.be.revertedWithCustomError(registry, "AccessDenied");
-      });
-
-      it("rejects evaluation when the posting named nobody", async function () {
-        const ctx = await deployFixture();
-        const { ethers, registry, evaluator, proposalId } = ctx;
-        await commitFirstProposal(ctx);
-        await expect(
-          recordCurrentEvaluation(
-            registry,
-            evaluator,
-            ethers,
-            proposalId,
-            ethers.id("evaluation-hash-v1")
-          )
-        ).to.be.revertedWithCustomError(registry, "AccessDenied");
-      });
-
       it("rejects a zero evaluation hash", async function () {
         const ctx = await deployFixture();
         const { ethers, registry, evaluator, proposalId } = ctx;
-        await commitFirstProposal(ctx, [evaluator.address]);
+        await commitFirstProposal(ctx);
         await expect(
           recordCurrentEvaluation(registry, evaluator, ethers, proposalId, ZERO_BYTES32)
         ).to.be.revertedWithCustomError(registry, "InvalidInput");
@@ -1242,7 +1076,7 @@ describe("AuditRegistry", function () {
       it("locks the proposal so the researcher cannot change hashes after a review starts", async function () {
         const ctx = await deployFixture();
         const { ethers, registry, researcher, evaluator, proposalId } = ctx;
-        await commitFirstProposal(ctx, [evaluator.address]);
+        await commitFirstProposal(ctx);
         await recordCurrentEvaluation(
           registry,
           evaluator,
@@ -1260,7 +1094,7 @@ describe("AuditRegistry", function () {
       it("rejects a review that names a revision that is no longer current", async function () {
         const ctx = await deployFixture();
         const { ethers, registry, researcher, evaluator, proposalId, proposalHash, solutionHash } = ctx;
-        await commitFirstProposal(ctx, [evaluator.address]);
+        await commitFirstProposal(ctx);
         const staleDigest = combinedHash(ethers, proposalHash, solutionHash);
 
         await registry

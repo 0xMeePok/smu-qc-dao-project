@@ -26,11 +26,11 @@ describe("AuditRegistry fuzz", function () {
     return { ethers, wallets, registry };
   }
 
-  async function openPosting(ethers, registry, owner, evaluators = []) {
+  async function openPosting(ethers, registry, owner) {
     const opportunityId = randHash(ethers);
     await registry
       .connect(owner)
-      .commitOpportunity(opportunityId, OpportunityKind.BusinessProblem, randHash(ethers), 0, evaluators);
+      .commitOpportunity(opportunityId, OpportunityKind.BusinessProblem, randHash(ethers), 0);
     return opportunityId;
   }
 
@@ -199,27 +199,39 @@ describe("AuditRegistry fuzz", function () {
     }
   });
 
-  it("a random wallet that was not named cannot record an evaluation", async function () {
+  it("any random wallet can record an evaluation authorized by the platform", async function () {
     const { ethers, wallets, registry } = await setup();
-    const [owner, researcher, evaluator] = wallets;
-    const opportunityId = await openPosting(ethers, registry, owner, [evaluator.address]);
+    const [owner, researcher] = wallets;
+    const opportunityId = await openPosting(ethers, registry, owner);
     const proposalId = randHash(ethers);
+    const proposalHash = randHash(ethers);
+    const solutionHash = randHash(ethers);
     await registry
       .connect(researcher)
-      .commitProposal(proposalId, opportunityId, randHash(ethers), randHash(ethers));
+      .commitProposal(proposalId, opportunityId, proposalHash, solutionHash);
+
+    const revisionDigest = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ["bytes32", "bytes32"],
+        [proposalHash, solutionHash]
+      )
+    );
 
     for (let i = 3; i < wallets.length; i += 1) {
-      await expect(
-        registry.connect(wallets[i]).recordEvaluation(proposalId, randHash(ethers), 0, randHash(ethers))
-      ).to.be.revertedWithCustomError(registry, "AccessDenied");
+      await registry.connect(wallets[i]).recordEvaluation(
+        proposalId,
+        randHash(ethers),
+        0,
+        revisionDigest
+      );
     }
-    expect(await registry.evaluationCount(proposalId)).to.equal(0n);
+    expect(await registry.evaluationCount(proposalId)).to.equal(BigInt(wallets.length - 3));
   });
 
   it("after the researcher withdraws, later edits and evaluations fail but the last hashes stay", async function () {
     const { ethers, wallets, registry } = await setup();
     const [owner, researcher, evaluator] = wallets;
-    const opportunityId = await openPosting(ethers, registry, owner, [evaluator.address]);
+    const opportunityId = await openPosting(ethers, registry, owner);
     const proposalId = randHash(ethers);
     const proposalHash = randHash(ethers);
     const solutionHash = randHash(ethers);

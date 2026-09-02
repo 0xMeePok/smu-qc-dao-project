@@ -2,11 +2,24 @@
 
 On-chain registry for Sprint 2 workflow hashes on Arbitrum Sepolia. Opportunity postings, proposal/solution pairs, and evaluation completions stay off-chain as full records; this contract stores only hashes, timestamps, and an append-only revision trail.
 
+## Current deployment
+
+| Field | Value |
+|---|---|
+| Network | Arbitrum Sepolia (`421614`) |
+| Address | [`0xd119C050E51e7012B4Dea180c3e4F2727F354447`](https://sepolia.arbiscan.io/address/0xd119C050E51e7012B4Dea180c3e4F2727F354447#code) |
+| Deployment transaction | [`0xdb85cd262f365958ef1ae767cbaecd1408fbc4963088839f191fb7bc0742c916`](https://sepolia.arbiscan.io/tx/0xdb85cd262f365958ef1ae767cbaecd1408fbc4963088839f191fb7bc0742c916) |
+| Block | `304637649` |
+| Deployed | `2026-09-02T12:30:34Z` |
+| Source | Verified on Arbiscan |
+
+The frontend contract manifest is `frontend/src/config/auditRegistry.contract.json`.
+
 Writers call from their own wallet:
 
 - Problem owners, funders, and researchers `commitOpportunity` / `updateOpportunity` / `withdrawOpportunity`
 - Researchers `commitProposal` / `updateHashes` / `withdrawProposal` against a live opportunity
-- Named evaluators (set when the posting is created; can be none, one, or several) `recordEvaluation` with a hash of their review write-up and the proposal revision they reviewed. Public comments stay off-chain for now.
+- Any wallet may call `recordEvaluation` with a hash of a review write-up and the proposal revision it reviewed. Evaluator eligibility and access control are platform concerns and are intentionally not tracked by this audit registry. Public comments stay off-chain for now.
 
 Install dependencies:
 

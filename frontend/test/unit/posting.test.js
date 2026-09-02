@@ -17,6 +17,7 @@ import {
   validatePosting,
   validatePostingTitle,
 } from "../../src/lib/validation.js";
+import { postingAuditPayload } from "../../src/lib/postings.js";
 
 /** QCDAO-48 - the funded business problem statement form. */
 
@@ -136,5 +137,34 @@ describe("[QCDAO-48] field-level validation", () => {
 
   it("[FUT-OPD-105] rejects text beyond the stored maximum", () => {
     assert.match(validatePostingTitle("x".repeat(161)), /160 characters or fewer/);
+  });
+});
+
+describe("[QCDAO-75] funded posting audit payload", () => {
+  it("normalises set-like fields and excludes mutable receipt timestamps", () => {
+    const expiresAt = new Date("2026-12-01T00:00:00Z");
+    const payload = postingAuditPayload({
+      ...completeForm({ categories: ["quantum", "ai"], amount: "80000" }),
+      ownerId: `0x${"A".repeat(40)}`,
+      organisation: " SMU ",
+      expiresAt,
+      createdAt: new Date("2026-09-01T00:00:00Z"),
+      updatedAt: new Date("2026-09-02T00:00:00Z"),
+      audit: { status: "confirmed" },
+      attachments: [
+        { id: "z", name: " Z.pdf ", size: 20, path: "z", contentType: "application/pdf" },
+        { id: "a", name: "A.pdf", size: 10, path: "a" },
+      ],
+    });
+
+    assert.deepEqual(payload.categories, ["ai", "quantum"]);
+    assert.deepEqual(payload.attachments.map(({ id }) => id), ["a", "z"]);
+    assert.equal(payload.ownerId, `0x${"a".repeat(40)}`);
+    assert.equal(payload.organisation, "SMU");
+    assert.equal(payload.amount, 80000);
+    assert.equal(payload.expiresAt, expiresAt);
+    assert.equal("createdAt" in payload, false);
+    assert.equal("updatedAt" in payload, false);
+    assert.equal("audit" in payload, false);
   });
 });

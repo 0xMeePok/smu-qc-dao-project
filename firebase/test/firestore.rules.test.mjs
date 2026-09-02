@@ -93,6 +93,22 @@ function baseFunding(overrides = {}) {
   };
 }
 
+function baseAudit(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    chainId: 421614,
+    contractAddress: `0x${"c".repeat(40)}`,
+    entityId: `0x${"1".repeat(64)}`,
+    contentHash: `0x${"2".repeat(64)}`,
+    status: "queued",
+    transactionHash: "",
+    blockNumber: 0,
+    attemptCount: 0,
+    lastError: "",
+    ...overrides,
+  };
+}
+
 function firestoreEmulator() {
   const raw = process.env.FIRESTORE_EMULATOR_HOST;
   if (!raw) return { host: "127.0.0.1", port: 8080 };
@@ -701,6 +717,68 @@ describe("problems/{problemId}", () => {
     });
     const db = env.authenticatedContext(REVOKED, { auth_time: 101 }).firestore();
     await assertFails(getDoc(doc(db, "problems", "p_same_second")));
+  });
+});
+
+describe("QCDAO-75..79 audit receipt state", () => {
+  it("accepts a queued receipt and its submitted, pending, and confirmed lifecycle", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "audit-flow"), baseProblem({
+      audit: baseAudit(),
+    })));
+
+    const transactionHash = `0x${"3".repeat(64)}`;
+    await assertSucceeds(updateDoc(doc(db, "problems", "audit-flow"), {
+      audit: baseAudit({ status: "submitted", transactionHash, attemptCount: 1 }),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "audit-flow"), {
+      audit: baseAudit({ status: "pending", transactionHash, attemptCount: 1 }),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "audit-flow"), {
+      audit: baseAudit({
+        status: "confirmed", transactionHash, blockNumber: 123456, attemptCount: 1,
+      }),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("accepts the same receipt shape on proposal and evaluation records", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "proposals", "audit-proposal"), baseProposal({
+      audit: baseAudit({ entityId: `0x${"4".repeat(64)}` }),
+    })));
+    await assertSucceeds(setDoc(doc(db, "evaluations", "audit-evaluation"), baseEvaluation({
+      proposalId: "audit-proposal",
+      audit: baseAudit({ entityId: `0x${"5".repeat(64)}` }),
+    })));
+  });
+
+  it("rejects forged, incomplete, and contradictory receipt metadata", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "audit-chain"), baseProblem({
+      audit: baseAudit({ chainId: 1 }),
+    })));
+    await assertFails(setDoc(doc(db, "problems", "audit-hash"), baseProblem({
+      audit: baseAudit({ contentHash: "not-a-hash" }),
+    })));
+    await assertFails(setDoc(doc(db, "problems", "audit-confirmed"), baseProblem({
+      audit: baseAudit({ status: "confirmed", blockNumber: 0 }),
+    })));
+    await assertFails(setDoc(doc(db, "problems", "audit-extra"), baseProblem({
+      audit: { ...baseAudit(), administratorApproved: true },
+    })));
+  });
+
+  it("caps failed retries and lets the workflow record survive a testnet failure", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "audit-failed"), baseProblem({
+      audit: baseAudit({ status: "failed", attemptCount: 3, lastError: "RPC unavailable" }),
+    })));
+    await assertFails(setDoc(doc(db, "problems", "audit-too-many"), baseProblem({
+      audit: baseAudit({ status: "failed", attemptCount: 4, lastError: "RPC unavailable" }),
+    })));
   });
 });
 

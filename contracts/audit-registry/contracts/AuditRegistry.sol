@@ -90,13 +90,9 @@ contract AuditRegistry {
         uint64 createdAt;
     }
 
-    uint256 public constant MAX_EVALUATORS = 32;
-
     mapping(bytes32 opportunityId => Opportunity) private _opportunities;
     mapping(bytes32 opportunityId => HashRevision[]) private _opportunityRevisions;
     mapping(bytes32 opportunityId => mapping(bytes32 contentHash => bool)) private _usedOpportunityHashes;
-    mapping(bytes32 opportunityId => address[]) private _evaluators;
-    mapping(bytes32 opportunityId => mapping(address evaluator => bool)) public isEvaluator;
     mapping(bytes32 proposalId => Proposal) private _proposals;
     mapping(bytes32 proposalId => Revision[]) private _revisions;
     mapping(bytes32 proposalId => mapping(bytes32 contentHash => bool)) private _usedHashes;
@@ -144,7 +140,6 @@ contract AuditRegistry {
         address indexed researcher,
         bytes32 evidenceHash
     );
-    event EvaluatorAdded(bytes32 indexed opportunityId, address indexed evaluator);
     event EvaluationRecorded(
         bytes32 indexed proposalId,
         address indexed evaluator,
@@ -162,13 +157,13 @@ contract AuditRegistry {
         uint64 timestamp
     );
 
-    // Post an opportunity and name the evaluators for that posting.
+    // Post an opportunity. Evaluator eligibility is enforced by the platform,
+    // not duplicated in this audit-only registry.
     function commitOpportunity(
         bytes32 opportunityId,
         OpportunityKind kind,
         bytes32 contentHash,
-        uint64 expiresAt,
-        address[] calldata evaluators
+        uint64 expiresAt
     ) external {
         if (
             opportunityId == bytes32(0)
@@ -190,8 +185,6 @@ contract AuditRegistry {
             withdrawn: false,
             exists: true
         });
-        _registerEvaluators(opportunityId, evaluators);
-
         _appendOpportunityRevision(opportunityId, contentHash, timestamp);
         _anchor(
             opportunityId,
@@ -400,7 +393,8 @@ contract AuditRegistry {
         emit ProposalWithdrawn(proposalId, msg.sender, evidenceHash);
     }
 
-    // Record a named evaluator's review against a specific proposal revision.
+    // Record a review against a specific proposal revision. The platform decides
+    // who may evaluate; the registry only preserves the submitting wallet.
     function recordEvaluation(
         bytes32 proposalId,
         bytes32 evaluationHash,
@@ -410,9 +404,6 @@ contract AuditRegistry {
         Proposal storage item = _proposal(proposalId);
         Opportunity storage parent = _opportunity(item.opportunityId);
         if (item.withdrawn || parent.withdrawn) revert InvalidState();
-        if (!isEvaluator[item.opportunityId][msg.sender] || msg.sender == item.researcher) {
-            revert AccessDenied();
-        }
         if (evaluationHash == bytes32(0)) revert InvalidInput();
 
         (uint32 revisionIndex, bytes32 revisionDigest) = _currentProposalRevision(proposalId);
@@ -470,16 +461,6 @@ contract AuditRegistry {
         return _opportunityRevisions[opportunityId][index];
     }
 
-    function evaluatorCount(bytes32 opportunityId) external view returns (uint256) {
-        _opportunity(opportunityId);
-        return _evaluators[opportunityId].length;
-    }
-
-    function evaluatorAt(bytes32 opportunityId, uint256 index) external view returns (address) {
-        _opportunity(opportunityId);
-        return _evaluators[opportunityId][index];
-    }
-
     function evaluationCount(bytes32 proposalId) external view returns (uint256) {
         _proposal(proposalId);
         return _evaluations[proposalId].length;
@@ -521,24 +502,6 @@ contract AuditRegistry {
     ) external view returns (Anchor memory) {
         _requireEntity(entityId);
         return _anchors[entityId][index];
-    }
-
-    function _registerEvaluators(bytes32 opportunityId, address[] calldata evaluators) private {
-        if (evaluators.length > MAX_EVALUATORS) revert InvalidInput();
-
-        for (uint256 index; index < evaluators.length; ++index) {
-            address evaluator = evaluators[index];
-            if (
-                evaluator == address(0)
-                    || evaluator == msg.sender
-                    || isEvaluator[opportunityId][evaluator]
-            ) {
-                revert InvalidInput();
-            }
-            isEvaluator[opportunityId][evaluator] = true;
-            _evaluators[opportunityId].push(evaluator);
-            emit EvaluatorAdded(opportunityId, evaluator);
-        }
     }
 
     function _currentOpportunityRevision(bytes32 opportunityId)
