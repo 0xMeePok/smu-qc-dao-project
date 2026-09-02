@@ -14,5 +14,9 @@ assert.ok(
 );
 assert.equal(policy.includes("*.cloudfunctions.net"), false, "Cloud Functions wildcard remains live");
 assert.equal(policy.includes("*.googleapis.com"), false, "Google APIs wildcard remains live");
+assert.ok(
+  policy.includes("https://firebasestorage.googleapis.com"),
+  "The deployed CSP does not allow Cloud Storage, so posting attachments cannot upload or download",
+);
 
 console.log("Deployed CSP is present and restricted to documented endpoints.");

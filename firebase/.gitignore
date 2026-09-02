@@ -67,3 +67,6 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Seed PDF fixtures. Real project documents - see scripts/fixtures/README.md.
+functions/scripts/fixtures/*.pdf

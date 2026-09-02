@@ -1976,3 +1976,369 @@ footer > p { margin: 0 auto 0 0; }
   color: var(--muted);
 }
 
+
+/* POSTING ATTACHMENTS (QCDAO-58) */
+.attachment-uploader {
+  display: grid;
+  gap: 12px;
+}
+
+.attachment-dropzone {
+  position: relative;
+}
+
+/* Visually hidden but still focusable, so the label below is the whole target
+   while keyboard focus and screen readers still reach the real input. */
+.attachment-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.attachment-input-label {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.attachment-input-label:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+
+.attachment-input:focus-visible + .attachment-input-label {
+  border-color: var(--brand);
+  box-shadow: var(--ring);
+}
+
+.attachment-input:disabled + .attachment-input-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.attachment-input-label strong {
+  display: block;
+  font-size: 14.5px;
+  color: var(--ink);
+}
+
+.attachment-input-label small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.attachment-input-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.attachment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.attachment-row.uploading {
+  border-style: dashed;
+  background: var(--surface-muted);
+}
+
+.attachment-mark {
+  flex: none;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.attachment-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.attachment-meta strong {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.attachment-progress {
+  width: 100%;
+  height: 4px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  appearance: none;
+}
+
+.attachment-progress::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: var(--radius-pill);
+}
+
+.attachment-progress::-webkit-progress-value {
+  background: var(--brand);
+  border-radius: var(--radius-pill);
+}
+
+.attachment-progress::-moz-progress-bar {
+  background: var(--brand);
+  border-radius: var(--radius-pill);
+}
+
+.attachment-actions {
+  display: flex;
+  gap: 10px;
+  flex: none;
+}
+
+.attachment-remove {
+  color: var(--danger);
+}
+
+.attachment-error {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.attachment-detail-list {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+}
+
+/* FUNDED PROBLEM STATEMENT FORM (QCDAO-48) */
+.funding-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius-pill);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.tag-chip:hover {
+  border-color: var(--brand);
+}
+
+/* Categories shown on a saved posting are labels, not controls. */
+.tag-chip.static {
+  cursor: default;
+  background: var(--surface-muted);
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+
+.confirmation-page {
+  display: flex;
+  justify-content: center;
+}
+
+.confirmation-card {
+  max-width: 640px;
+  width: 100%;
+  margin-top: 32px;
+  padding: 28px 32px;
+}
+
+.confirmation-card h1 {
+  margin: 8px 0 4px;
+  font-size: 26px;
+  color: var(--ink);
+}
+
+.confirmation-facts {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+  padding: 16px 0;
+  border-top: 1px solid var(--success-line);
+  border-bottom: 1px solid var(--success-line);
+}
+
+.confirmation-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13.5px;
+}
+
+.confirmation-facts dt {
+  color: var(--muted);
+}
+
+.confirmation-facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .funding-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* EXPIRY COUNTDOWN (QCDAO-48) */
+.expiry-panel {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+}
+
+.expiry-countdown {
+  display: grid;
+  gap: 2px;
+}
+
+.expiry-countdown strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.expiry-countdown small {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.expiry-countdown.expired strong {
+  color: var(--danger);
+}
+
+/* TECHNOLOGY AREA PICKER (QCDAO-48) */
+/*
+  Its own grid rather than .radio-group. These are twelve short domain choices
+  scanned at a glance, so they want narrow columns and a compact card - the
+  opportunity-type cards elsewhere carry a sentence each and need the room.
+*/
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.category-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.category-card:hover {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+}
+
+.category-card.selected {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.category-card input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  /* Optical alignment with the label's cap height rather than its line box. */
+  margin-top: 2px;
+  accent-color: var(--brand);
+}
+
+.category-card strong {
+  display: block;
+  font-size: 13.5px;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.category-card span {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.category-grid.field-invalid .category-card {
+  border-color: var(--danger-line);
+}

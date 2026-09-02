@@ -1,7 +1,9 @@
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { createPublicClient, http, verifyMessage } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { createSiweMessage, parseSiweMessage, validateSiweMessage } from "viem/siwe";
@@ -15,6 +17,7 @@ import {
   isAuthTimeRevoked,
   writeSessionCutoff,
 } from "./adminActions.js";
+import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 
 initializeApp();
 
@@ -598,3 +601,35 @@ export const adminSetSuspended = onCall({ region: REGION }, async (request) => {
     updatedAt: new Date().toISOString(),
   };
 });
+
+/**
+ * QCDAO-58 remediation - deletes posting attachments that no posting references.
+ *
+ * storage.rules constrains every property of an individual upload but cannot count
+ * objects, so nothing stops a wallet writing more PDFs than any posting will ever
+ * point at. The lifecycle rule handles abandoned PARTIAL uploads; this handles
+ * completed ones that ended up orphaned - a cancelled draft, or a deliberate one.
+ *
+ * DRY RUN BY DEFAULT. This is the only scheduled job here that destroys data, so it
+ * reports what it would delete and does nothing until ATTACHMENT_SWEEP_ENABLED is
+ * explicitly "true". Read one run's logs first, confirm the counts look sane, then
+ * turn it on. Objects younger than the grace period are never candidates, so a form
+ * somebody is still filling in is safe either way.
+ */
+export const sweepAttachments = onSchedule(
+  {
+    region: REGION,
+    schedule: "every day 03:00",
+    timeZone: "Asia/Singapore",
+    timeoutSeconds: 540,
+    memory: "512MiB",
+    retryCount: 0,
+  },
+  async () => {
+    await sweepOrphanedAttachments({
+      db,
+      bucket: getStorage().bucket(),
+      dryRun: process.env.ATTACHMENT_SWEEP_ENABLED !== "true",
+    });
+  },
+);

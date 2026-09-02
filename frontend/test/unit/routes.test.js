@@ -32,7 +32,7 @@ describe("Unit Tests: Route Configurations & Navigation Filtering", () => {
   });
 
   it("[FUT-AAR-006] should maintain correct public and protected flags across all routes", () => {
-    const expectedPublicKeys = ["home", "discover", "opportunity", "login", "access-denied"];
+    const expectedPublicKeys = ["home", "discover", "posting", "login", "access-denied"];
     const expectedProtectedKeys = [
       "create",
       "my-problems",
