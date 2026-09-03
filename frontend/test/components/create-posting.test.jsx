@@ -9,11 +9,19 @@ const mocks = vi.hoisted(() => ({
   createShouldFail: false,
   auditCalls: [],
   auditShouldFail: false,
+  connectedAddress: `0x${"a".repeat(40)}`,
   deleted: [],
   uploader: {
     onChange: null,
     onPendingChange: null,
   },
+}));
+
+vi.mock("wagmi", () => ({
+  useAccount: () => ({
+    address: mocks.connectedAddress,
+    isConnected: Boolean(mocks.connectedAddress),
+  }),
 }));
 
 vi.mock("../../src/lib/firebase.js", () => ({
@@ -23,6 +31,17 @@ vi.mock("../../src/lib/firebase.js", () => ({
 
 vi.mock("../../src/lib/postings.js", () => ({
   newPostingId: () => "posting123",
+  buildPostingDocument: ({ ownerId, organisation, form, attachments }) => ({
+    ownerId,
+    organisation,
+    ...form,
+    amount: Number(form.amount),
+    attachments,
+    status: "submitted",
+    expiresAt: new Date("2026-12-01T00:00:00Z"),
+    createdAt: new Date("2026-09-01T00:00:00Z"),
+    updatedAt: new Date("2026-09-01T00:00:00Z"),
+  }),
   createPosting: async (args) => {
     if (mocks.createShouldFail) {
       const failure = new Error("denied");
@@ -37,6 +56,7 @@ vi.mock("../../src/lib/postings.js", () => ({
       organisation: args.organisation,
       categories: args.form.categories,
       attachments: args.attachments ?? [],
+      audit: args.record?.audit,
       createdAt: new Date("2026-09-01T00:00:00Z"),
       expiresAt: new Date("2026-12-01T00:00:00Z"),
     };
@@ -56,7 +76,11 @@ vi.mock("../../src/lib/postingAudit.js", () => ({
     return { verified: true };
   },
   anchorPostingAudit: async (posting, options) => {
-    mocks.auditCalls.push({ posting, account: options.account });
+    mocks.auditCalls.push({
+      posting,
+      account: options.account,
+      persistReceipt: options.persistReceipt,
+    });
     const audit = {
       schemaVersion: 1,
       chainId: 421614,
@@ -82,6 +106,10 @@ vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
     mocks.uploader.onPendingChange = onPendingChange;
     return <div data-testid="uploader" />;
   },
+}));
+
+vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
+  ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));
 
 vi.mock("../../src/context/SessionContext.jsx", () => ({
@@ -129,6 +157,7 @@ beforeEach(() => {
   mocks.createShouldFail = false;
   mocks.auditCalls = [];
   mocks.auditShouldFail = false;
+  mocks.connectedAddress = `0x${"a".repeat(40)}`;
   mocks.deleted = [];
   mocks.uploader.onChange = null;
   mocks.uploader.onPendingChange = null;
@@ -179,8 +208,8 @@ describe("no data loss on a failed submit", () => {
   });
 });
 
-describe("asynchronous AuditRegistry integration", () => {
-  it("[QCDAO-75..79] publishes first and exposes the confirmed audit receipt", async () => {
+describe("AuditRegistry integration", () => {
+  it("[QCDAO-75..79] confirms the anchor before publishing to Firestore", async () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     fillRequired();
     fireEvent.submit(document.querySelector("form"));
@@ -188,20 +217,34 @@ describe("asynchronous AuditRegistry integration", () => {
     expect(await screen.findByText("Cold-chain route optimisation")).toBeTruthy();
     await waitFor(() => expect(mocks.auditCalls).toHaveLength(1));
     expect(mocks.auditCalls[0].account).toBe(`0x${"a".repeat(40)}`);
+    expect(mocks.auditCalls[0].persistReceipt).toBe(false);
+    expect(mocks.created[0].record.audit).toBeUndefined();
     expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
     expect(screen.getAllByText("Funded problem statement submitted")).toHaveLength(2);
   });
 
-  it("[QCDAO-79] keeps the posting live when anchoring fails", async () => {
+  it("[QCDAO-79] does not publish when anchoring fails", async () => {
     mocks.auditShouldFail = true;
     render(<CreatePostingPage onNavigate={() => {}} />);
     fillRequired();
     fireEvent.submit(document.querySelector("form"));
 
-    expect(await screen.findByText("Cold-chain route optimisation")).toBeTruthy();
-    expect(await screen.findByText("Audit unavailable")).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toContain("Testnet unavailable");
-    expect(screen.queryByText(/Nothing you typed has been lost/)).toBeNull();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("RPC unavailable"));
+    expect(mocks.created).toHaveLength(0);
+    expect(document.getElementById("title").value).toBe("Cold-chain route optimisation");
+    expect(screen.getByRole("alert").textContent).toContain("Nothing you typed has been lost");
+  });
+
+  it("requires the signed-in wallet to be actively connected", async () => {
+    mocks.connectedAddress = null;
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+
+    expect((await screen.findByRole("dialog")).textContent).toContain("Reconnect wallet");
+    expect(screen.getByRole("alert").textContent).toContain("Reconnect the wallet used to sign in");
+    expect(mocks.auditCalls).toHaveLength(0);
+    expect(mocks.created).toHaveLength(0);
   });
 });
 

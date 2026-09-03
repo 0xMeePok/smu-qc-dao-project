@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from "react";
+import { useAccount } from "wagmi";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
+import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { useSession } from "../context/SessionContext.jsx";
 import {
   CURRENCIES,
@@ -9,7 +11,7 @@ import {
   categoryLabel,
   expiryDateFrom,
 } from "../config/postingCategories.js";
-import { createPosting, newPostingId } from "../lib/postings.js";
+import { buildPostingDocument, createPosting, newPostingId } from "../lib/postings.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
@@ -86,6 +88,7 @@ function TextField({ id, label, hint, error, rows, value, onChange, ...rest }) {
 
 export default function CreatePostingPage({ onNavigate }) {
   const { address, profile } = useSession();
+  const { address: connectedAddress, isConnected } = useAccount();
 
   // Reserved up front: attachments are uploaded while the form is still being
   // filled in, and this id is part of their storage path.
@@ -97,9 +100,11 @@ export default function CreatePostingPage({ onNavigate }) {
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
-  const [auditBusy, setAuditBusy] = useState(false);
+  const [auditProgress, setAuditProgress] = useState(null);
+  const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const formTop = useRef(null);
   const pendingCountRef = useRef(0);
+  const pendingRecordRef = useRef(null);
 
   const updatePendingCount = (count) => {
     pendingCountRef.current = count;
@@ -107,20 +112,6 @@ export default function CreatePostingPage({ onNavigate }) {
   };
 
   const organisation = profile?.organisation ?? "";
-
-  const startAudit = (posting) => {
-    if (!posting || auditBusy || Number(posting.audit?.attemptCount ?? 0) >= 3) return;
-    setAuditBusy(true);
-    void anchorPostingAudit(posting, {
-      account: address,
-      onChange: (audit) => {
-        setPublished((current) => current ? { ...current, audit } : current);
-      },
-    }).catch(() => {
-      // The Firestore posting is already live. The receipt stores the failure and
-      // exposes a safe retry; a testnet problem must not turn into form data loss.
-    }).finally(() => setAuditBusy(false));
-  };
 
   // Same UTC-to-the-second format the posting will be stored and displayed in, so
   // what the form promises and what the detail page shows cannot disagree.
@@ -184,18 +175,56 @@ export default function CreatePostingPage({ onNavigate }) {
 
     if (pendingCountRef.current > 0) return;
 
+    const sameWallet = isConnected
+      && connectedAddress?.toLowerCase() === address?.toLowerCase();
+    if (!sameWallet) {
+      setSubmitError("Reconnect the wallet used to sign in before submitting the on-chain audit.");
+      setWalletPromptOpen(true);
+      return;
+    }
+
     setSubmitting(true);
+    let latestAudit = auditProgress;
     try {
-      const posting = await createPosting({
-        postingId, ownerId: address, organisation, form, attachments,
+      const record = pendingRecordRef.current ?? buildPostingDocument({
+        ownerId: address,
+        organisation,
+        form,
+        attachments,
       });
-      setPublished(posting);
-      // Do not await block confirmation. Publishing is authoritative off-chain;
-      // the AuditRegistry transaction advances independently on the receipt.
-      startAudit(posting);
+      pendingRecordRef.current = record;
+
+      const audit = await anchorPostingAudit({
+        id: postingId,
+        ...record,
+        audit: latestAudit,
+      }, {
+        account: address,
+        persistReceipt: false,
+        onChange: (nextAudit) => {
+          latestAudit = nextAudit;
+          setAuditProgress(nextAudit);
+        },
+      });
+
+      const posting = await createPosting({
+        postingId,
+        ownerId: address,
+        organisation,
+        form,
+        attachments,
+        // The contract is authoritative for the audit. Firebase stores only the
+        // posting content, after its exact hash has been confirmed on-chain.
+        record,
+      });
+      setPublished({ ...posting, audit });
+      setAuditProgress(null);
+      pendingRecordRef.current = null;
     } catch (error) {
-      // The form is untouched here on purpose: a rejected submit must never cost
-      // someone the problem statement they just spent ten minutes writing.
+      if (!latestAudit?.transactionHash) {
+        setAuditProgress(null);
+        pendingRecordRef.current = null;
+      }
       setSubmitError(messageForFirebaseError(error));
     } finally {
       setSubmitting(false);
@@ -217,6 +246,8 @@ export default function CreatePostingPage({ onNavigate }) {
     setErrors({});
     setSubmitError(null);
     setPublished(null);
+    setAuditProgress(null);
+    pendingRecordRef.current = null;
     await abandonDraftAttachments(abandoned);
   };
 
@@ -254,7 +285,6 @@ export default function CreatePostingPage({ onNavigate }) {
             actorRole="Problem owner"
             firebaseReference={`problems/${published.id}`}
             onVerify={() => readPostingAudit(published)}
-            onRetry={() => startAudit(published)}
           />
           <div className="form-actions">
             <button
@@ -440,6 +470,10 @@ export default function CreatePostingPage({ onNavigate }) {
             </p>
           )}
         </form>
+
+        {walletPromptOpen && (
+          <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />
+        )}
 
         <aside className="preview-panel" aria-label="Live preview">
           <div className="preview-sticky">

@@ -89,4 +89,20 @@ describe("AuditReceipt", () => {
     fireEvent.click(screen.getByRole("button", { name: /retry anchoring/i }));
     expect(retry).toHaveBeenCalledOnce();
   });
+
+  it("reads the contract even when Firestore has only a failed legacy receipt", async () => {
+    const verify = vi.fn(async () => {
+      throw new Error("execution reverted: InvalidInput");
+    });
+    renderReceipt({
+      audit: receipt({
+        status: "failed", transactionHash: "", blockNumber: 0,
+        lastError: "The wallet transaction was declined.",
+      }),
+      onVerify: verify,
+    });
+
+    expect(verify).toHaveBeenCalledOnce();
+    expect(await screen.findByText(/No matching audit/)).toBeTruthy();
+  });
 });
