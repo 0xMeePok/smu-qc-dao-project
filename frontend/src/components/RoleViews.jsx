@@ -68,7 +68,7 @@ export function MyProblems({ onNavigate }) {
 
   function Row({ item, isDraft }) {
     return (
-      <div className="table-row" key={item.id}>
+      <div className="table-row">
         <div>
           <strong>{item.title || "Untitled draft"}</strong>
           <small className="table-row-meta">

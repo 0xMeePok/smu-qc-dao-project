@@ -171,7 +171,6 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const [draftExists, setDraftExists] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
-  const [loadingDraft, setLoadingDraft] = useState(Boolean(resumeId));
   // Where the user was heading when the unsaved-work prompt interrupted them.
   const [leaveTarget, setLeaveTarget] = useState(null);
   // Snapshot of the last saved state; null until the draft is first saved.
@@ -208,8 +207,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
         setBaseline(snapshotOf(loadedForm, loadedAttachments));
         savedAttachmentIds.current = new Set(loadedAttachments.map((item) => item.id));
       })
-      .catch((error) => { if (!cancelled) setSubmitError(messageForFirebaseError(error)); })
-      .finally(() => { if (!cancelled) setLoadingDraft(false); });
+      .catch((error) => { if (!cancelled) setSubmitError(messageForFirebaseError(error)); });
 
     return () => { cancelled = true; };
   }, [resumeId]);
@@ -272,8 +270,10 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
       setSavedAt(saved?.updatedAt ?? new Date());
       setBaseline(snapshotOf(form, attachments));
       savedAttachmentIds.current = new Set(attachments.map((item) => item.id));
+      return true;
     } catch (error) {
       setSubmitError(messageForFirebaseError(error));
+      return false;
     } finally {
       setSavingDraft(false);
     }
@@ -434,7 +434,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
 
   const saveThenLeave = async () => {
     const target = leaveTarget;
-    await persistDraft();
+    const saved = await persistDraft();
+    if (!saved) return;
     setLeaveTarget(null);
     goTo(target);
   };
