@@ -1,0 +1,68 @@
+name: GrokBot Security Scan
+
+# Runs on every push to any branch so contributors get an early, advisory
+# security scan on their commits and can remediate before opening a pull request.
+# The scan posts its findings as a commit comment on the pushed head commit.
+on:
+  push:
+    branches:
+      - '**'
+
+concurrency:
+  group: grokbot-security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    name: Scan pushed commits for security findings
+    # Keep paid model usage limited to the current project contributors. GitHub
+    # login comparisons are case-insensitive in workflow expressions.
+    if: >-
+      github.event.deleted == false &&
+      (
+        github.actor == '0xMeePok' ||
+        github.actor == 'whale93' ||
+        github.actor == 'Darveloper1' ||
+        github.actor == '0xjunwei'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the scanner
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Test the scanner
+        run: |
+          node --test .github/scripts/security-review.test.mjs
+          node --test .github/scripts/grokbot-scan.test.mjs
+
+      - name: Run GrokBot security scan and post a commit comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          # Optional overrides. GrokBot defaults to xAI Grok; these let a
+          # maintainer switch provider/model or reuse the PR reviewer's keys.
+          GROKBOT_PROVIDER: ${{ vars.GROKBOT_PROVIDER }}
+          GROKBOT_MODEL: ${{ vars.GROKBOT_MODEL }}
+          SECURITY_REVIEW_REASONING_EFFORT: ${{ vars.GROKBOT_REASONING_EFFORT }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Give long generations time to finish. Timed-out requests are never
+          # retried, because the provider may still bill an abandoned inference.
+          SECURITY_REVIEW_PROVIDER_TIMEOUT_MS: ${{ vars.SECURITY_REVIEW_PROVIDER_TIMEOUT_MS }}
+          # UTF-8 bytes of diff data per request (default: 75,000; maximum: 100,000).
+          SECURITY_REVIEW_CHUNK_BYTES: ${{ vars.SECURITY_REVIEW_CHUNK_BYTES }}
+          # Cost/timeout guard; the script fails rather than returning a partial scan.
+          SECURITY_REVIEW_MAX_CHUNKS: ${{ vars.SECURITY_REVIEW_MAX_CHUNKS }}
+        run: node .github/scripts/grokbot-scan.mjs
