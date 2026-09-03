@@ -451,7 +451,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     const target = leaveTarget;
     // Leaving on a rejected save would discard the very work the prompt offered
     // to keep, so the dialog stays open and persistDraft reports the reason.
-    if (!(await persistDraft())) return;
+    // Called ONCE: a second call still sees draftExists false from this closure,
+    // so it re-issues setDoc and Firestore rejects it for moving createdAt.
     const saved = await persistDraft();
     if (!saved) return;
     setLeaveTarget(null);

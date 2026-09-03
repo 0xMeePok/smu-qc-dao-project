@@ -437,6 +437,10 @@ describe("leaving with unsaved work", () => {
     await waitFor(() => expect(mocks.drafts).toHaveLength(1));
     expect(mocks.drafts[0].form.title).toBe("Keep this");
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("discover"));
+    // Exactly ONE write. A second persistDraft still sees draftExists false from
+    // its closure, re-issues setDoc, and Firestore rejects it for moving
+    // createdAt - so the leave fails on the very first unsaved draft.
+    expect(mocks.drafts).toHaveLength(1);
   });
 
   it("[FIT-P50-28] leaves without saving when told to discard", async () => {

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import { after, before, describe, it } from "node:test";
 import {
@@ -239,9 +240,12 @@ describe("storage rules: reading and removing an attachment", () => {
     await assertSucceeds(getBytes(ref(storage, READ_PATH)));
   });
 
-  it("[BIT-OPD-131] lets another signed-in wallet read an attachment", async () => {
+  // No problems/{POSTING} document exists, so nothing proves this attachment
+  // belongs to a published posting. Non-owners are refused by default; the
+  // published case is covered against real fixtures in BIT-OPD-138.
+  it("[BIT-OPD-131] refuses another wallet an attachment with no published posting", async () => {
     const storage = env.authenticatedContext(OTHER).storage();
-    await assertSucceeds(getBytes(ref(storage, READ_PATH)));
+    await assertFails(getBytes(ref(storage, READ_PATH)));
   });
 
   it("[BIT-OPD-132] refuses a read by a suspended account", async () => {
@@ -309,12 +313,15 @@ describe("storage rules: attachments follow the posting's visibility", () => {
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-OPD-137] lets a signed-in wallet with no profile download", async () => {
+  it("[BIT-OPD-137] refuses a signed-in wallet with no profile from downloading", async () => {
+    // Membership gate: a SIWE token alone is not enough, a /users profile is.
     const NO_PROFILE = `0x${"2".repeat(40)}`;
     const storage = env.authenticatedContext(NO_PROFILE).storage();
-    await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+    await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
+  // THE case this story exists for, and the one that broke in production: a
+  // signed-in member downloading the PDF on a posting somebody else published.
   it("[BIT-OPD-138] lets another wallet download an attachment on a published posting", async () => {
     // The whole point of QCDAO-58: a solution developer in another organisation
     // reads the posting on Discover and needs its technical context to respond.
@@ -322,8 +329,33 @@ describe("storage rules: attachments follow the posting's visibility", () => {
     await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-OPD-139] lets another wallet download an attachment on a draft posting", async () => {
+  // The emulator does NOT enforce production's limit of TWO Firestore reads per
+  // Storage rule evaluation, so a third read passes every test in this file and
+  // then denies every real request with a bare 403. That is exactly how the
+  // bucket stayed empty for so long. Counted statically because it cannot be
+  // observed from behaviour here.
+  it("[BIT-OPD-178] keeps storage.rules within the two cross-service reads production allows", () => {
+    const source = fs.readFileSync(new URL("../storage.rules", import.meta.url), "utf8");
+    const code = source
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+    const reads = code.match(/firestore\.(get|exists)\(/g) ?? [];
+    assert.ok(
+      reads.length <= 2,
+      `storage.rules performs ${reads.length} cross-service reads; production denies above 2`,
+    );
+  });
+
+  // An unpublished draft's PDFs are the sponsor's competitive detail. Only the
+  // owner may read them; publication is what opens them to the marketplace.
+  it("[BIT-OPD-139] refuses another wallet an attachment on a draft posting", async () => {
     const storage = env.authenticatedContext(OTHER).storage();
+    await assertFails(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
+  });
+
+  it("[BIT-OPD-179] still lets the owner read their own draft's attachment", async () => {
+    const storage = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
   });
 

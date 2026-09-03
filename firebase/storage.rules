@@ -62,44 +62,49 @@ service firebase.storage {
       return isSignedIn() && request.auth.uid == address;
     }
 
-    // Cross-service read of the same suspension/revocation state Firestore
-    // enforces. Without this a suspended user, or one whose sessions were revoked
-    // on logout, would keep full access to Storage using an ID token that
-    // Firestore has already stopped honouring.
-    function userDoc() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    // BUDGET: Cloud Storage cross-service Rules allow at most TWO Firestore
+    // document reads per evaluation. Measured against production: one read
+    // passes, two pass, THREE are denied outright - and repeating the same
+    // document still counts, so nothing is cached. The previous shape called
+    // firestore.get/exists about eleven times through nested helpers, which is
+    // why every upload and download 403'd and the bucket stayed empty.
+    //
+    // So: ONE read of the caller's profile, and at most ONE of the posting.
+    // Each function binds its read with `let` and is called at most once per
+    // rule. Adding another firestore.get here will break every rule silently -
+    // the failure is a bare 403 with no message.
+
+    // Suspension AND revocation from a single read. firestore.get returns null
+    // for a missing document rather than failing, so absence is testable.
+    //
+    // The sessionRevocations document is deliberately NOT read: revokeOwnSessions
+    // (functions/index.js) and adminActions both mirror sessionsValidAfterEpoch
+    // onto the user document, so the profile carries the same cutoff for a second
+    // of the budget rather than a whole read of its own.
+    function isActiveMember() {
+      let user = firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+      return isSignedIn()
+        && user != null
+        && !user.data.get('suspended', false)
+        // Inclusive, matching hasRevokedSession() in firestore.rules: signing in
+        // and out inside the same whole second must still invalidate the token.
+        && !(user.data.keys().hasAny(['sessionsValidAfterEpoch'])
+          && request.auth.token.auth_time <= user.data.sessionsValidAfterEpoch);
     }
 
-    function userExists() {
-      return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
-    }
-
-    function isSuspended() {
-      return userExists() && userDoc().get('suspended', false);
-    }
-
-    // Inclusive comparison, matching hasRevokedSession() in firestore.rules: sign
-    // in and log out inside the same whole second must still invalidate the token.
-    function hasRevokedSession() {
-      return (firestore.exists(/databases/(default)/documents/sessionRevocations/$(request.auth.uid))
-          && request.auth.token.auth_time
-            <= firestore.get(/databases/(default)/documents/sessionRevocations/$(request.auth.uid)).data.sessionsValidAfterEpoch)
-        || (userExists()
-          && userDoc().keys().hasAny(['sessionsValidAfterEpoch'])
-          && request.auth.token.auth_time <= userDoc().sessionsValidAfterEpoch);
-    }
-
-    function isActiveWallet(address) {
-      return isWallet(address) && !isSuspended() && !hasRevokedSession();
-    }
-
-    // Signed-in, not suspended, not revoked. Intentionally does NOT require a
-    // /users document or a published posting: those checks are Firestore reads,
-    // and a failed cross-service get denies the whole rule. isSuspended and
-    // hasRevokedSession fail open when the user doc is missing, so a live
-    // session is enough to download.
-    function isActiveReader() {
-      return isSignedIn() && !isSuspended() && !hasRevokedSession();
+    // Mirrors the problems/{problemId} read rule in firestore.rules, which since
+    // QCDAO-48 makes a submitted or open posting readable by any member - that is
+    // the public marketplace Discover queries. A draft stays private to its owner.
+    //
+    // The ownerId comparison is load-bearing, not decoration. Without it, anyone
+    // could upload into their OWN folder using a published posting's id
+    // (problems/{attacker}/{publishedId}/x.pdf) and have those bytes served to the
+    // world on the strength of someone else's posting being public.
+    function postingIsPublished(problemId, ownerId) {
+      let posting = firestore.get(/databases/(default)/documents/problems/$(problemId));
+      return posting != null
+        && posting.data.status in ['submitted', 'open']
+        && posting.data.ownerId == ownerId;
     }
 
     // PDF only, per the story. Two independent checks because they can disagree:
@@ -148,9 +153,15 @@ service firebase.storage {
     }
 
     match /problems/{ownerId}/{problemId}/{fileName} {
-      // Any signed-in wallet may download. Anonymous visitors cannot. Write and
-      // delete remain owner-only below.
-      allow read: if isActiveReader();
+      // Published posting: any signed-in member may download, which is the point
+      // of QCDAO-58 - a solution developer needs the technical context to
+      // respond. Draft or any other status: owner only. These PDFs carry the
+      // sponsor's competitive detail before publication.
+      // TWO reads at most: the profile, then the posting. The owner check is a
+      // path comparison and costs nothing, and it is evaluated first so an owner
+      // reading their own draft never needs the posting lookup.
+      allow read: if isActiveMember()
+        && (isWallet(ownerId) || postingIsPublished(problemId, ownerId));
 
       // CREATE ONLY - a stored attachment is immutable for its whole life.
       //
@@ -172,7 +183,8 @@ service firebase.storage {
       // `resource` is the object already at this path, so requiring it to be null
       // is what actually makes the write create-only.
       allow create: if resource == null
-        && isActiveWallet(ownerId)
+        && isWallet(ownerId)
+        && isActiveMember()
         && isPostingId(problemId)
         && isPdf(fileName)
         && withinSizeCap()
@@ -180,7 +192,7 @@ service firebase.storage {
 
       // Remove-before-publish, and removal after the fact. Restricted to the
       // owner for the same reason writes are.
-      allow delete: if isActiveWallet(ownerId);
+      allow delete: if isWallet(ownerId) && isActiveMember();
     }
 
     // Deny everything not matched above, including any legacy path.
