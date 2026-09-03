@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   published: [],
   saveShouldFail: false,
   resumed: null,
+  resumeGate: null,
+  anchoredRecord: null,
 }));
 
 vi.mock("wagmi", () => ({
@@ -27,7 +29,11 @@ vi.mock("../../src/lib/postings.js", () => ({
   POSTING_STATUS_DRAFT: "draft",
   newPostingId: () => "posting123",
   buildPostingDocument: (args) => ({ ...args.form, ownerId: args.ownerId }),
-  findPosting: async () => mocks.resumed,
+  findPosting: async () => {
+    // Lets a test hold the load open and inspect the form mid-flight.
+    if (mocks.resumeGate) await mocks.resumeGate;
+    return mocks.resumed;
+  },
   saveDraft: async (args) => {
     mocks.lastSaveArgs = args;
     if (mocks.saveShouldFail) {
@@ -54,7 +60,12 @@ vi.mock("../../src/lib/postings.js", () => ({
 vi.mock("../../src/lib/postingAudit.js", () => ({
   postingAuditReceipt: (posting) => posting.audit ?? null,
   readPostingAudit: async () => ({ verified: true }),
-  anchorPostingAudit: async () => ({ status: "confirmed" }),
+  anchorPostingAudit: async (posting) => {
+    // Keep the exact document that was hashed, so a rebuild is detectable.
+    const { id, audit, ...record } = posting;
+    mocks.anchoredRecord = record;
+    return { status: "confirmed" };
+  },
 }));
 
 vi.mock("../../src/lib/attachments.js", () => ({
@@ -89,6 +100,7 @@ beforeEach(() => {
   mocks.published = [];
   mocks.saveShouldFail = false;
   mocks.resumed = null;
+  mocks.resumeGate = null;
   mocks.lastSaveArgs = null;
   mocks.deleted = [];
   mocks.uploader = {};
@@ -136,6 +148,25 @@ describe("saving a draft", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
     expect(field("title").value).toBe("Keep me");
   });
+
+  // Bug 2: the leave prompt navigated after persistDraft() regardless of outcome,
+  // so a rejected save unmounted the form and lost the work it offered to keep.
+  it("[FIT-P50-39] stays on the form when 'save and leave' is rejected", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fireEvent.change(field("title"), { target: { value: "Precious" } });
+
+    await act(async () => { window.location.hash = "#/discover"; });
+    const saveAndLeave = await screen.findByRole("button", { name: /save as draft and leave/i });
+
+    mocks.saveShouldFail = true;
+    await act(async () => { fireEvent.click(saveAndLeave); });
+
+    // The dialog staying open is the signal: dismissing it is what releases the
+    // navigation, and the work must still be here to retry.
+    expect(screen.queryByRole("button", { name: /save as draft and leave/i })).toBeTruthy();
+    expect(field("title").value).toBe("Precious");
+    await waitFor(() => expect(screen.getAllByRole("alert").length).toBeGreaterThan(0));
+  });
 });
 
 describe("resuming a draft", () => {
@@ -156,6 +187,43 @@ describe("resuming a draft", () => {
     updatedAt: new Date("2026-09-01T10:15:00Z"),
     expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
   };
+
+  // Bug 5: the window was derived from now, not createdAt, so a 90-day draft
+  // reopened weeks later snapped to 60 or 30 and the next save wrote that back.
+  it("[FIT-P50-40] keeps the window the owner chose, not the time remaining", async () => {
+    const created = new Date("2026-08-01T00:00:00Z");
+    mocks.resumed = {
+      ...stored,
+      createdAt: created,
+      // 90 days from creation, but only ~50 days remain as of "now".
+      expiresAt: new Date(created.getTime() + 90 * 24 * 60 * 60 * 1000),
+    };
+    render(<CreatePostingPage postingId="posting123" onNavigate={() => {}} />);
+
+    await waitFor(() => expect(field("title").value).toBe("Cold-chain route optimisation"));
+    expect(field("expiryDays").value).toBe("90");
+  });
+
+  // Bug 6: the form was interactive while findPosting ran, so typing was
+  // overwritten by the load and a save could run with draftExists still false.
+  it("[FIT-P50-41] is inert until the draft has loaded", async () => {
+    let release;
+    mocks.resumed = stored;
+    mocks.resumeGate = new Promise((resolve) => { release = resolve; });
+    render(<CreatePostingPage postingId="posting123" onNavigate={() => {}} />);
+
+    // One fieldset wraps every control, so disabling it disables them all in a
+    // browser. jsdom does not cascade that to descendants, so assert the
+    // fieldset itself - that is the mechanism - and that it contains the fields.
+    const body = document.querySelector("fieldset.form-body");
+    expect(body.disabled).toBe(true);
+    expect(body.contains(field("title"))).toBe(true);
+    expect(body.contains(saveDraftButton())).toBe(true);
+
+    await act(async () => { release(); mocks.resumeGate = null; });
+    await waitFor(() => expect(body.disabled).toBe(false));
+    expect(field("title").value).toBe("Cold-chain route optimisation");
+  });
 
   it("[FIT-P50-05] restores every previously entered field", async () => {
     mocks.resumed = stored;
@@ -239,6 +307,29 @@ describe("publishing", () => {
     await waitFor(() => expect(screen.getByText(/posting submitted/i)).toBeTruthy());
   });
 
+  // Bug 1: startAnother minted a new id but left draftExists set, so the next
+  // submit went down publishDraft() against a document that does not exist.
+  it("[FIT-P50-42] posting another problem creates, it does not publish a draft", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fireEvent.click(saveDraftButton());
+    await waitFor(() => expect(mocks.drafts).toHaveLength(1));
+
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    await waitFor(() => expect(mocks.published).toHaveLength(1));
+    expect(mocks.published[0].via).toBe("publishDraft");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /post another problem/i }));
+    });
+    expect(screen.getByText(/not saved yet/i)).toBeTruthy();
+
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    await waitFor(() => expect(mocks.published).toHaveLength(2));
+    expect(mocks.published[1].via).toBe("createPosting");
+  });
+
   // The contract is authoritative for the audit, so publishing a draft must anchor
   // on-chain WITHOUT writing the receipt into Firestore - same as a direct submit.
   it("[FIT-P50-37] anchors on publish without persisting the receipt", async () => {
@@ -251,7 +342,24 @@ describe("publishing", () => {
     await waitFor(() => expect(mocks.published).toHaveLength(1));
     expect(mocks.published[0].via).toBe("publishDraft");
     expect(mocks.published[0].audit).toBeUndefined();
-    expect(mocks.published[0].record).toBeUndefined();
+    // The anchored record IS reused - rebuilding it would derive a fresh
+    // expiresAt that no longer matches the confirmed hash - but the receipt
+    // itself still must not be written into Firestore.
+    expect(mocks.published[0].record).toBeDefined();
+    expect(mocks.published[0].record.audit).toBeUndefined();
+  });
+
+  // Bug 4: publishDraft used to rebuild the document from `now`, so expiresAt
+  // drifted from the value that was hashed and anchored.
+  it("[FIT-P50-38] publishes the exact document that was anchored", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fireEvent.click(saveDraftButton());
+    await waitFor(() => expect(mocks.drafts).toHaveLength(1));
+
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    await waitFor(() => expect(mocks.published).toHaveLength(1));
+    expect(mocks.published[0].record).toEqual(mocks.anchoredRecord);
   });
 
   it("[FIT-P50-10] creates outright when the form was never saved", async () => {

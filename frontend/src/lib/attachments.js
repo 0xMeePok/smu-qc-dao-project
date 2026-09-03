@@ -278,8 +278,10 @@ export function toPostingRecord(attachment) {
 const STORAGE_MESSAGES = {
   // storage.rules denies a revoked session exactly as it denies a stranger, so
   // this cannot blame ownership alone without misdiagnosing the common case.
+  // Covers upload, download and delete, so it cannot say "download" - an upload
+  // that is refused would otherwise report the wrong operation.
   "storage/unauthorized":
-    "You cannot download this file. Sign out, sign in with your wallet, and try again. Signed-in members can download attachments on any posting.",
+    "You do not have permission to use this file. Sign out, sign in with your wallet, and try again. Signed-in members can download attachments on any posting.",
   "storage/canceled": "Upload cancelled.",
   "storage/quota-exceeded":
     "The project's storage quota is full. Contact the platform team.",

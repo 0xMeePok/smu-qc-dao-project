@@ -64,8 +64,16 @@ export function collectReferencedPaths(postings) {
   const referenced = new Set();
   for (const posting of postings) {
     const attachments = Array.isArray(posting?.attachments) ? posting.attachments : [];
+    const ownerId = String(posting?.ownerId ?? "").toLowerCase();
+    const problemId = posting?.id;
     for (const attachment of attachments) {
+      // Legacy records carried `path`; current ones do not, so the path is rebuilt
+      // exactly as attachmentPath() builds it in frontend/src/lib/attachments.js.
+      // Reading only `path` made every live attachment look orphaned.
       if (typeof attachment?.path === "string") referenced.add(attachment.path);
+      if (ownerId && problemId && attachment?.id) {
+        referenced.add(`problems/${ownerId}/${problemId}/${attachment.id}.pdf`);
+      }
     }
   }
   return referenced;
@@ -136,7 +144,8 @@ async function isReferencedByCurrentPosting(db, path) {
   if (!parsed) return false;
   const snap = await db.collection("problems").doc(parsed.problemId).get();
   if (!snap.exists) return false;
-  return collectReferencedPaths([snap.data()]).has(path);
+  // The document id IS the problemId, and rebuilding the path needs it.
+  return collectReferencedPaths([{ id: snap.id, ...snap.data() }]).has(path);
 }
 
 /**
@@ -162,7 +171,9 @@ export async function sweepOrphanedAttachments({
   }));
 
   const snapshot = await db.collection("problems").get();
-  const referencedPaths = collectReferencedPaths(snapshot.docs.map((doc) => doc.data()));
+  const referencedPaths = collectReferencedPaths(
+    snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+  );
 
   const plan = planSweep({ objects, referencedPaths, now, graceMs });
   const byPath = new Map(objects.map((object) => [object.path, object]));

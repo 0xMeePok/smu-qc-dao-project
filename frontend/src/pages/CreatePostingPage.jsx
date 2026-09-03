@@ -117,10 +117,14 @@ function TextField({ id, label, hint, error, rows, value, onChange, ...rest }) {
 
 // Maps a stored expiry back to the window that produced it, so resuming a draft
 // shows the choice the owner made rather than the default.
-function windowFromExpiry(expiresAt) {
+// Measured from createdAt, not from now: time already elapsed is not part of the
+// choice. Against now, a 90-day draft reopened weeks later snaps to 60 or 30 and
+// the next save writes that shorter window back.
+function windowFromExpiry(expiresAt, createdAt) {
   const expiry = toDate(expiresAt);
   if (!expiry) return EMPTY_FORM.expiryDays;
-  const days = Math.round((expiry.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  const from = toDate(createdAt) ?? new Date();
+  const days = Math.round((expiry.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
   return EXPIRY_WINDOWS.reduce(
     (closest, option) => (Math.abs(option.value - days) < Math.abs(closest - days) ? option.value : closest),
     EMPTY_FORM.expiryDays,
@@ -148,7 +152,7 @@ function formFromPosting(posting) {
     categories: posting.categories ?? [],
     amount: posting.amount ? String(posting.amount) : "",
     currency: posting.currency ?? EMPTY_FORM.currency,
-    expiryDays: windowFromExpiry(posting.expiresAt),
+    expiryDays: windowFromExpiry(posting.expiresAt, posting.createdAt),
   };
 }
 
@@ -191,6 +195,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   };
 
   const organisation = profile?.organisation ?? "";
+  // The one hash that means "still this posting". Matches parseHash in App.jsx.
+  const createHash = resumeId ? `#/create/${resumeId}` : "#/create";
 
   useEffect(() => {
     if (!resumeId) return undefined;
@@ -244,7 +250,10 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
         currentHash.current = next;
         return;
       }
-      if (next === currentHash.current || next.startsWith("#/create")) {
+      // Only a create URL for THIS posting is a no-op. Waving through every
+      // "#/create*" let a switch to another draft skip the prompt and discard
+      // whatever was unsaved here.
+      if (next === currentHash.current || next === createHash) {
         currentHash.current = next;
         return;
       }
@@ -259,7 +268,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
       window.removeEventListener("beforeunload", warnOnUnload);
       window.removeEventListener("hashchange", interceptHash);
     };
-  }, [isDirty, published]);
+  }, [isDirty, published, createHash]);
 
   const persistDraft = async () => {
     setSubmitError(null);
@@ -272,8 +281,10 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
       setSavedAt(saved?.updatedAt ?? new Date());
       setBaseline(snapshotOf(form, attachments));
       savedAttachmentIds.current = new Set(attachments.map((item) => item.id));
+      return true;
     } catch (error) {
       setSubmitError(messageForFirebaseError(error));
+      return false;
     } finally {
       setSavingDraft(false);
     }
@@ -375,7 +386,9 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
 
       const posting = draftExists
         ? await publishDraft({
-          postingId, ownerId: address, organisation, form, attachments,
+          // The anchored record, not a rebuild: rebuilding derives a fresh
+          // expiresAt that would no longer match the confirmed hash.
+          postingId, ownerId: address, organisation, form, attachments, record,
         })
         : await createPosting({
           postingId,
@@ -434,7 +447,9 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
 
   const saveThenLeave = async () => {
     const target = leaveTarget;
-    await persistDraft();
+    // Leaving on a rejected save would discard the very work the prompt offered
+    // to keep, so the dialog stays open and persistDraft reports the reason.
+    if (!(await persistDraft())) return;
     setLeaveTarget(null);
     goTo(target);
   };
@@ -455,6 +470,13 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     setPublished(null);
     setAuditProgress(null);
     pendingRecordRef.current = null;
+    // The new id has no document behind it. Leaving these set sent the next
+    // submit down publishDraft(), updating a posting that does not exist.
+    setDraftExists(false);
+    setSavedAt(null);
+    setBaseline(null);
+    setLeaveTarget(null);
+    savedAttachmentIds.current = new Set();
     await abandonDraftAttachments(abandoned, address, postingId);
   };
 
@@ -523,6 +545,14 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
 
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>
+          {/* Inert until the draft has loaded. Typing into the empty template was
+              silently overwritten by the load, and saving during it ran with
+              draftExists still false, so setDoc was rejected for moving createdAt. */}
+          <fieldset
+            className="form-body"
+            disabled={loadingDraft}
+            style={{ border: 0, margin: 0, padding: 0, minInlineSize: "auto" }}
+          >
           <Section step="1" legend="The problem" hint="What is going wrong, and in what business context.">
             <TextField
               id="title" label="Title" value={form.title} onChange={update} error={errors.title}
@@ -673,6 +703,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
               Cancel
             </button>
           </div>
+          </fieldset>
 
           <DraftStatus savedAt={savedAt} saving={savingDraft} />
 

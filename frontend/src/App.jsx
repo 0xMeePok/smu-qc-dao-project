@@ -598,7 +598,10 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <CreatePostingPage postingId={id} onNavigate={go} />
+        {/* Keyed on the posting id: postingId is seeded once from this prop, so
+            without a remount, switching between Create and Resume kept the old
+            id for uploads and saves while showing the other draft's fields. */}
+        <CreatePostingPage key={id ?? "new"} postingId={id} onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "my-problems") {

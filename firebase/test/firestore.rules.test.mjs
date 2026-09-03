@@ -1599,6 +1599,22 @@ describe("problems/{problemId} drafts", () => {
     }));
   });
 
+  // The client sends ownerId, so the rules - not the client - must be what stops
+  // a guessed draft id being published under the caller's own identity.
+  it("[BIT-P50-19] refuses publishing someone else's draft as your own", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "d50_steal"), emptyDraft());
+    });
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(updateDoc(doc(db, "problems", "d50_steal"), {
+      ownerId: OTHER, status: "submitted", updatedAt: serverTimestamp(),
+    }));
+    // Leaving ownerId alone must fail too, or the draft is published for them.
+    await assertFails(updateDoc(doc(db, "problems", "d50_steal"), {
+      status: "submitted", updatedAt: serverTimestamp(),
+    }));
+  });
+
   it("[BIT-P50-07] publishes a completed draft", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "d50_publish"), emptyDraft()));
@@ -1607,6 +1623,22 @@ describe("problems/{problemId} drafts", () => {
       status: "submitted",
       updatedAt: serverTimestamp(),
     }));
+  });
+
+  // Bug 7: the completeness branch keyed off isMarketplaceVisible(), so every
+  // status outside submitted/open took the draft branch and could be blanked.
+  it("[BIT-P50-20] refuses blanking a posting moved to a post-publication status", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_states"), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d50_states"), {
+      ...completeFields(), status: "submitted", updatedAt: serverTimestamp(),
+    }));
+
+    for (const status of ["in_review", "matched", "funded", "completed", "cancelled"]) {
+      await assertFails(updateDoc(doc(db, "problems", "d50_states"), {
+        ...completeFields(), title: "", summary: "", status, updatedAt: serverTimestamp(),
+      }));
+    }
   });
 
   it("[BIT-P50-08] refuses to publish a draft that is still incomplete", async () => {

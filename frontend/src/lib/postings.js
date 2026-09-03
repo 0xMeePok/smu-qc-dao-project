@@ -224,12 +224,24 @@ export async function saveDraft({ postingId, ownerId, organisation, form, attach
   return findPosting(postingId);
 }
 
-/** Promotes a draft to submitted. Full validation applies at this point. */
-export async function publishDraft({ postingId, ownerId, organisation, form, attachments = [] }) {
+/**
+ * Promotes a draft to submitted. Full validation applies at this point.
+ *
+ * `record` is the document that was hashed and anchored on-chain. It MUST be
+ * reused rather than rebuilt: buildPostingDocument() derives expiresAt from
+ * `now`, so a rebuild here produces a different expiry from the one in the
+ * confirmed hash, and later verification against Firestore fails.
+ */
+export async function publishDraft({
+  postingId, ownerId, organisation, form, attachments = [], record: preparedRecord = null,
+}) {
   requireFirebase();
-  const { createdAt, ...record } = buildPostingDocument({
-    ownerId, organisation, form, attachments, status: POSTING_STATUS_SUBMITTED,
-  });
+  const built = preparedRecord
+    ? { ...preparedRecord, status: POSTING_STATUS_SUBMITTED }
+    : buildPostingDocument({
+      ownerId, organisation, form, attachments, status: POSTING_STATUS_SUBMITTED,
+    });
+  const { createdAt, ...record } = built;
   await updateDoc(postingRef(postingId), record);
   return findPosting(postingId);
 }

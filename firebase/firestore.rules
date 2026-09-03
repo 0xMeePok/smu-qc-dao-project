@@ -667,12 +667,12 @@ service cloud.firestore {
         && request.resource.data.ownerId == resource.data.ownerId
         && validProblem(request.resource.data)
         && validAttachments(request.resource.data)
-        // Structure cannot be stripped out of a marketplace-visible posting.
-        // Drafts without the funded schema stay editable; they cannot become
-        // submitted or open until they satisfy validFundedPosting.
-        && (isMarketplaceVisible(request.resource.data.status)
-          ? validFundedPosting(request.resource.data)
-          : draftTextIsBounded(request.resource.data))
+        // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
+        // let in_review, matched, funded, completed and cancelled take the draft
+        // branch, so a posting could be blanked on its way through those states.
+        && (request.resource.data.status == 'draft'
+          ? draftTextIsBounded(request.resource.data)
+          : validFundedPosting(request.resource.data))
         // Publishing a draft needs a live expiry. A draft can sit past its own
         // deadline, and it must not go to the marketplace already closed.
         && (resource.data.status != 'draft'
