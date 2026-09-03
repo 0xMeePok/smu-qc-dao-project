@@ -175,6 +175,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const [draftExists, setDraftExists] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
+  // Keeps the form inert until a resumed draft has loaded, so typing cannot be
+  // overwritten by the load and a save cannot run with draftExists still false.
   const [loadingDraft, setLoadingDraft] = useState(Boolean(resumeId));
   // Where the user was heading when the unsaved-work prompt interrupted them.
   const [leaveTarget, setLeaveTarget] = useState(null);
@@ -450,6 +452,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     // Leaving on a rejected save would discard the very work the prompt offered
     // to keep, so the dialog stays open and persistDraft reports the reason.
     if (!(await persistDraft())) return;
+    const saved = await persistDraft();
+    if (!saved) return;
     setLeaveTarget(null);
     goTo(target);
   };
