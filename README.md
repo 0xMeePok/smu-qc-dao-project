@@ -253,6 +253,17 @@ concrete, actionable security findings. Repository maintainers must add the
 See [`docs/AI_SECURITY_REVIEW.md`](docs/AI_SECURITY_REVIEW.md) for setup, security
 boundaries, cost controls, and the later switch from Fireworks AI to OpenAI.
 
+## Per-commit security scan (GrokBot)
+
+Every push to **any branch** is scanned by GrokBot, an xAI Grok-backed security
+scan that posts its findings as a commit comment on the pushed head commit. This
+gives contributors early, advisory feedback so issues can be remediated before a
+pull request is opened. Repository maintainers must add the `XAI_API_KEY` Actions
+secret once before the workflow can run.
+
+See [`docs/GROKBOT_SECURITY_SCAN.md`](docs/GROKBOT_SECURITY_SCAN.md) for setup,
+security boundaries, cost controls, and provider overrides.
+
 ## Current implementation status
 
 Implemented: wallet sign-in with server-verified signatures, onboarding (name +
