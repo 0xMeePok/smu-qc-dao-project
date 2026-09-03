@@ -1,9 +1,14 @@
 import fs from "node:fs/promises";
+import http from "node:http";
 import https from "node:https";
 import { pathToFileURL } from "node:url";
 
 export const COMMENT_MARKER = "<!-- qcdao-ai-security-review -->";
 export const FIREWORKS_MODEL = "accounts/fireworks/models/glm-5p3-flash";
+// xAI Grok default. Overridable with SECURITY_REVIEW_MODEL because xAI ships new
+// Grok revisions faster than this default is likely to be bumped.
+export const GROK_MODEL = "grok-4-fast-reasoning";
+export const GROK_API_URL = "https://api.x.ai/v1/chat/completions";
 export const DEFAULT_DIFF_CHUNK_BYTES = 75_000;
 export const MAX_DIFF_CHUNK_BYTES = 100_000;
 export const FIREWORKS_REASONING_EFFORT = "low";
@@ -92,6 +97,27 @@ export function resolveProviderConfig(env = process.env) {
       provider,
       apiKey: env.FIREWORKS_API_KEY,
       model: (env.SECURITY_REVIEW_MODEL || FIREWORKS_MODEL).trim(),
+      requestTimeoutMs: boundedInteger(
+        env.SECURITY_REVIEW_PROVIDER_TIMEOUT_MS,
+        DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+        60_000,
+        900_000,
+      ),
+    };
+  }
+
+  if (provider === "grok" || provider === "xai") {
+    if (!env.XAI_API_KEY) {
+      throw new Error("XAI_API_KEY is not configured");
+    }
+    return {
+      provider: "grok",
+      apiKey: env.XAI_API_KEY,
+      apiUrl: (env.GROK_API_URL || GROK_API_URL).trim(),
+      model: (env.SECURITY_REVIEW_MODEL || GROK_MODEL).trim(),
+      // Only forwarded when set: grok-3-mini accepts reasoning_effort, but Grok 4
+      // reasoning models reject it, so it must stay opt-in.
+      reasoningEffort: env.SECURITY_REVIEW_REASONING_EFFORT?.trim() || null,
       requestTimeoutMs: boundedInteger(
         env.SECURITY_REVIEW_PROVIDER_TIMEOUT_MS,
         DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
@@ -245,7 +271,7 @@ export function assertReviewChunkLimit(chunkCount, maxChunks) {
   }
 }
 
-function githubHeaders(token, accept = "application/vnd.github+json") {
+export function githubHeaders(token, accept = "application/vnd.github+json") {
   return {
     Accept: accept,
     Authorization: `Bearer ${token}`,
@@ -254,7 +280,7 @@ function githubHeaders(token, accept = "application/vnd.github+json") {
   };
 }
 
-async function checkedFetch(url, options, label) {
+export async function checkedFetch(url, options, label) {
   const response = await fetch(url, {
     ...options,
     signal: AbortSignal.timeout(180_000),
@@ -281,7 +307,8 @@ function providerFetch(url, options = {}) {
       headers["Content-Length"] = Buffer.byteLength(body);
     }
 
-    const request = https.request(
+    const transport = String(url).startsWith("http://") ? http : https;
+    const request = transport.request(
       url,
       {
         method: options.method || "GET",
@@ -505,9 +532,9 @@ export async function parseFireworksEventStream(response, logger = console) {
       throw new Error("Fireworks returned an invalid JSON streaming event");
     }
     eventCount += 1;
-    if (eventCount === 1) logger.log("Fireworks security review: stream established.");
+    if (eventCount === 1) logger.log("Security review: model stream established.");
     if (eventCount % 100 === 0) {
-      logger.log(`Fireworks security review: received ${eventCount} streaming events.`);
+      logger.log(`Security review: received ${eventCount} streaming events.`);
     }
 
     const choice = event?.choices?.[0];
@@ -582,6 +609,67 @@ export async function requestFireworksReview(config, prompt) {
   return content;
 }
 
+export function buildGrokPayload(config, prompt) {
+  const payload = {
+    model: config.model,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: prompt },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "security_review",
+        schema: REVIEW_SCHEMA,
+      },
+    },
+    stream: true,
+    stream_options: { include_usage: true },
+    max_tokens: MAX_REVIEW_OUTPUT_TOKENS,
+    temperature: 0.1,
+  };
+  if (config.reasoningEffort) payload.reasoning_effort = config.reasoningEffort;
+  return payload;
+}
+
+export async function requestGrokReview(config, prompt) {
+  const payload = buildGrokPayload(config, prompt);
+
+  // xAI's chat-completions endpoint is OpenAI/Fireworks compatible, so the same
+  // Server-Sent Events parser reconstructs the streamed JSON review.
+  const result = await retryingJsonRequest(
+    config.apiUrl || GROK_API_URL,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    "Grok security review",
+    {
+      timeoutMs: config.requestTimeoutMs,
+      parseResponse: (response) => parseFireworksEventStream(response),
+    },
+  );
+
+  const choice = result?.choices?.[0];
+  const content = choice?.message?.content;
+  if (choice?.finish_reason === "length") {
+    const completionTokens = result?.usage?.completion_tokens ?? "unknown";
+    throw new Error(
+      `Grok exceeded the completion token limit (${completionTokens} tokens)`,
+    );
+  }
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error(
+      `Grok returned no review content (finish_reason=${choice?.finish_reason ?? "unknown"})`,
+    );
+  }
+  return content;
+}
+
 function extractOpenAIText(result) {
   const parts = [];
   for (const item of result?.output ?? []) {
@@ -630,7 +718,13 @@ async function requestOpenAIReview(config, prompt) {
   return content;
 }
 
-function parseReview(content) {
+export function requestReview(config, prompt) {
+  if (config.provider === "openai") return requestOpenAIReview(config, prompt);
+  if (config.provider === "grok") return requestGrokReview(config, prompt);
+  return requestFireworksReview(config, prompt);
+}
+
+export function parseReview(content) {
   const stripped = content
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -702,15 +796,15 @@ export function normalizeReview(value) {
   };
 }
 
-export function mergeChunkReviews(reviews) {
+export function mergeChunkReviews(reviews, { diffLabel = "pull request diff" } = {}) {
   const merged = normalizeReview({
     summary: "",
     findings: reviews.flatMap((review) => review.findings),
   });
   const chunkDescription = `${reviews.length} chunk${reviews.length === 1 ? "" : "s"}`;
   merged.summary = merged.findings.length
-    ? `Reviewed the complete pull request diff across ${chunkDescription}; ${merged.findings.length} highest-priority security finding(s) require review.`
-    : `Reviewed the complete pull request diff across ${chunkDescription}; no supported security findings were identified.`;
+    ? `Reviewed the complete ${diffLabel} across ${chunkDescription}; ${merged.findings.length} highest-priority security finding(s) require review.`
+    : `Reviewed the complete ${diffLabel} across ${chunkDescription}; no supported security findings were identified.`;
   return merged;
 }
 
@@ -727,13 +821,19 @@ function safeCode(value) {
 }
 
 function displayProvider(provider) {
-  return provider === "openai" ? "OpenAI" : "Fireworks AI";
+  if (provider === "openai") return "OpenAI";
+  if (provider === "grok") return "xAI Grok";
+  return "Fireworks AI";
 }
 
-export function renderReviewComment(review, metadata) {
+export function renderReviewComment(
+  review,
+  metadata,
+  { marker = COMMENT_MARKER, heading = "AI security review" } = {},
+) {
   const lines = [
-    COMMENT_MARKER,
-    "## AI security review",
+    marker,
+    `## ${heading}`,
     "",
     safeMarkdown(review.summary, 800),
     "",
@@ -775,7 +875,11 @@ export function renderReviewComment(review, metadata) {
   return lines.join("\n").slice(0, 60_000);
 }
 
-export function renderFailureComment(error, metadata) {
+export function renderFailureComment(
+  error,
+  metadata,
+  { marker = COMMENT_MARKER, heading = "AI security review" } = {},
+) {
   let status = "The provider or GitHub API request failed. See the workflow logs for the HTTP status.";
   if (/not configured|must be set/i.test(error.message || "")) {
     status = "The reviewer configuration is incomplete. A repository maintainer must check its Actions secrets and variables.";
@@ -790,8 +894,8 @@ export function renderFailureComment(error, metadata) {
   }
 
   return [
-    COMMENT_MARKER,
-    "## AI security review",
+    marker,
+    `## ${heading}`,
     "",
     "⚠️ The automated security review could not complete for the latest commit.",
     "",
@@ -900,9 +1004,7 @@ export async function runSecurityReview(env = process.env) {
         chunkNumber: index + 1,
         chunkCount: chunks.length,
       });
-      const content = config.provider === "openai"
-        ? await requestOpenAIReview(config, prompt)
-        : await requestFireworksReview(config, prompt);
+      const content = await requestReview(config, prompt);
       chunkReviews.push(normalizeReview(parseReview(content)));
     }
     const review = mergeChunkReviews(chunkReviews);
