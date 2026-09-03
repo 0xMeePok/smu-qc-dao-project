@@ -233,12 +233,10 @@ export async function deleteAttachment({ attachment, ownerId, problemId }) {
 /**
  * Downloads through the authenticated SDK path rather than getDownloadURL().
  *
- * This is a security decision, not a style one. getDownloadURL() mints a URL
- * carrying a permanent access token that works for ANYONE who has the link, with
- * no sign-in and no rules evaluation - which would quietly defeat the
- * requirement that attachments follow the posting's access rules. getBlob()
- * sends the user's ID token and is evaluated against firebase/storage.rules on
- * every request, so a user who cannot read the posting cannot read its files.
+ * getDownloadURL() mints a URL carrying a permanent access token that works for
+ * ANYONE who has the link, with no sign-in. getBlob() sends the user's ID token
+ * and is evaluated against firebase/storage.rules on every request: any signed-in
+ * wallet may read, only the owner may write or delete.
  */
 export async function downloadAttachment({ attachment, ownerId, problemId }) {
   requireStorage();
@@ -278,8 +276,10 @@ export function toPostingRecord(attachment) {
 }
 
 const STORAGE_MESSAGES = {
+  // storage.rules denies a revoked session exactly as it denies a stranger, so
+  // this cannot blame ownership alone without misdiagnosing the common case.
   "storage/unauthorized":
-    "You do not have permission to use this file. Only the owner of a posting can attach or open its documents.",
+    "You cannot download this file. Sign out, sign in with your wallet, and try again. Signed-in members can download attachments on any posting.",
   "storage/canceled": "Upload cancelled.",
   "storage/quota-exceeded":
     "The project's storage quota is full. Contact the platform team.",

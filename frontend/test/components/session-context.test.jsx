@@ -97,7 +97,10 @@ describe("SessionProvider persistence and logout integration", () => {
     expect(currentSession.profile.fullName).toBe("Ada");
   });
 
-  it("keeps the session visible and reports an error when Firebase sign-out fails", async () => {
+  // Revocation already succeeded here, so the token is dead server-side. Staying
+  // "signed in" would leave the app using credentials every rule refuses, which
+  // surfaces as unexplained 403s on the next upload or download.
+  it("signs out locally even when Firebase sign-out fails, since the token is already revoked", async () => {
     mountProvider();
     await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
     mocks.signOut.mockRejectedValueOnce(new Error("persistence removal failed"));
@@ -105,9 +108,23 @@ describe("SessionProvider persistence and logout integration", () => {
     let result;
     await act(async () => { result = await currentSession.signOut(); });
 
+    expect(result.ok).toBe(true);
+    await waitFor(() => expect(currentSession.isSignedIn).toBe(false));
+    expect(mocks.revoke).toHaveBeenCalledOnce();
+    expect(mocks.go).toHaveBeenCalledWith("login");
+  });
+
+  it("keeps the session visible when server revocation itself fails", async () => {
+    mountProvider();
+    await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
+    mocks.revoke.mockRejectedValueOnce(new Error("revocation failed"));
+
+    let result;
+    await act(async () => { result = await currentSession.signOut(); });
+
     expect(result.ok).toBe(false);
     expect(currentSession.isSignedIn).toBe(true);
-    expect(currentSession.error).toContain("persistence removal failed");
+    expect(currentSession.error).toContain("revocation failed");
     expect(mocks.disconnect).not.toHaveBeenCalled();
     expect(mocks.go).not.toHaveBeenCalledWith("login");
   });

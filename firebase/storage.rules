@@ -17,11 +17,11 @@ rules_version = '2';
 // posting is still an unsaved draft, so there is no posting document to consult
 // yet. Ownership is still provable, because it is in the path being written to.
 //
-// Read access mirrors the problems/{problemId} read rule in firestore.rules and
-// must keep mirroring it. That coupling has already bitten once: QCDAO-48 widened
-// posting visibility for Discover without changing this file, so a solution
-// developer could read a posting and then be refused its attachments. Change BOTH
-// rules together, or the two audiences silently diverge again.
+// Any signed-in wallet can READ attachments under this prefix. Upload and delete
+// stay owner-only. Read does not look up the posting in Firestore: a Storage
+// rule that called firestore.get() on problems/{id} refused every non-owner
+// download in production (the owner still succeeded via the path), which is the
+// 403 on Discover. Keep reads on request.auth only.
 //
 // ON OBJECT COUNT - what these rules can and cannot do.
 // firestore.rules caps a posting's attachment list at 5, but that governs the
@@ -30,10 +30,11 @@ rules_version = '2';
 // per-REQUEST property is constrained (owner, type, name, size, metadata); volume
 // is not expressible as a rule and is handled outside this file:
 //
-//   1. App Check enforcement on Cloud Storage - ENABLED. Uploads now require a
-//      token from an attested instance of the real app, so a script holding a
-//      valid ID token is no longer sufficient. This is what closes the abuse
-//      vector; the SDK already attached the tokens, only enforcement was missing.
+//   1. App Check enforcement on Cloud Storage - CURRENTLY OFF. reCAPTCHA never
+//      mints a token here (zero assessments in 90 days; the provider iframe is
+//      denied storage access), so enforcing it refuses every upload. Re-enable
+//      only after grecaptcha.enterprise.execute() is confirmed to resolve. It
+//      bounds upload VOLUME; access is gated by SIWE and the rules below.
 //   2. sweepAttachments (functions/attachmentSweeper.js) deletes objects under
 //      this prefix that no posting references. Still needed WITH App Check on,
 //      because most orphans are not abuse: a user who uploads and then abandons
@@ -92,28 +93,13 @@ service firebase.storage {
       return isWallet(address) && !isSuspended() && !hasRevokedSession();
     }
 
-    // Any signed-in wallet in good standing, whoever it belongs to. Used for
-    // reading a published posting's attachments, where the caller is a member of
-    // the marketplace rather than the owner of the file. userExists() is the
-    // membership gate: a SIWE token without a /users profile is not enough.
+    // Signed-in, not suspended, not revoked. Intentionally does NOT require a
+    // /users document or a published posting: those checks are Firestore reads,
+    // and a failed cross-service get denies the whole rule. isSuspended and
+    // hasRevokedSession fail open when the user doc is missing, so a live
+    // session is enough to download.
     function isActiveReader() {
-      return isSignedIn() && userExists() && !isSuspended() && !hasRevokedSession();
-    }
-
-    // Mirrors the problems/{problemId} read rule in firestore.rules, which since
-    // QCDAO-48 makes a submitted or open posting readable by anyone - that is the
-    // public marketplace Discover queries.
-    //
-    // The ownerId comparison is load-bearing, not decoration. Without it, anyone
-    // could upload into their OWN folder using a published posting's id
-    // (problems/{attacker}/{publishedId}/x.pdf) and have those bytes served to the
-    // world on the strength of someone else's posting being public.
-    function postingIsPublished(problemId, ownerId) {
-      return firestore.exists(/databases/(default)/documents/problems/$(problemId))
-        && firestore.get(/databases/(default)/documents/problems/$(problemId)).data.status
-             in ['submitted', 'open']
-        && firestore.get(/databases/(default)/documents/problems/$(problemId)).data.ownerId
-             == ownerId;
+      return isSignedIn() && !isSuspended() && !hasRevokedSession();
     }
 
     // PDF only, per the story. Two independent checks because they can disagree:
@@ -162,18 +148,9 @@ service firebase.storage {
     }
 
     match /problems/{ownerId}/{problemId}/{fileName} {
-      // Same audience as the posting itself, which is what QCDAO-58 asks for:
-      // "access controlled by the same role rules as the posting".
-      //
-      // A signed-in member (completed /users profile) can download the documents
-      // on any published posting - otherwise a solution developer finds the
-      // posting on Discover, sees the attachment listed, clicks Download and is
-      // refused, which is the exact technical context the story exists to give
-      // them. A draft stays private to its owner. Both halves match
-      // firestore.rules: these PDFs carry the sponsor's competitive detail and
-      // are not for the open internet, nor for a wallet that has only signed SIWE.
-      allow read: if (isActiveReader() && postingIsPublished(problemId, ownerId))
-        || isActiveWallet(ownerId);
+      // Any signed-in wallet may download. Anonymous visitors cannot. Write and
+      // delete remain owner-only below.
+      allow read: if isActiveReader();
 
       // CREATE ONLY - a stored attachment is immutable for its whole life.
       //

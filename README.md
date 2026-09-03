@@ -237,7 +237,9 @@ To deploy by hand (same order the pipeline uses):
 
 ```bash
 cd firebase && npx firebase deploy --only firestore:rules,firestore:indexes,functions --project qcdao-a0c7a
-npm run build --prefix frontend && (cd firebase && npx firebase deploy --only hosting --project qcdao-a0c7a)
+# The variable is required: it outranks .env, which is set for local emulators.
+VITE_FIREBASE_USE_EMULATORS=false npm run build --prefix frontend \
+  && (cd firebase && npx firebase deploy --only hosting --project qcdao-a0c7a)
 ```
 
 To try a change on a real URL without touching the live site, deploy a preview

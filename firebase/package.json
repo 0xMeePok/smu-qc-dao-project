@@ -6,7 +6,8 @@
   "description": "Firestore security rules and their tests",
   "scripts": {
     "test": "firebase emulators:exec --only firestore,storage --project qc-dao-rules-test \"node --test --test-reporter=../scripts/test-reporter.mjs test/*.test.mjs\"",
-    "deploy:rules": "firebase deploy --only firestore:rules,storage"
+    "deploy:rules": "firebase deploy --only firestore:rules,storage",
+    "deploy:preview": "node scripts/preview-deploy.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.0",

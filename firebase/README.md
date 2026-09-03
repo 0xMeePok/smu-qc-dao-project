@@ -273,16 +273,31 @@ The service account needs `Firebase Hosting Admin`, `Firebase Rules Admin`,
 Deploy the current build to a temporary real URL without touching the live site:
 
 ```bash
-npm run build --prefix ../frontend
-npx firebase hosting:channel:deploy my-test --expires 1d --project <project-id>
+npm run deploy:preview             # channel "prod-twin", expires in 7 days
+npm run deploy:preview -- staging --expires 1d
 ```
 
-You get `https://<project>--my-test-<hash>.web.app`, served by real Firebase Hosting
-and talking to the **real deployed backend**. Add that exact host to
-`SIWE_ALLOWED_HOSTS` and redeploy the functions before testing sign-in. Hostname
-shape alone is not proof that a Firebase site belongs to this project.
+You get `https://<project>--<channel>-<hash>.web.app`, served by real Firebase Hosting
+and talking to the **real deployed backend**. The script builds with `VITE_FIREBASE_USE_EMULATORS=false` (a shell variable
+outranks `.env`, so your local emulator setup is untouched), refuses to deploy a
+bundle that still points at the emulators, then reconciles the backend.
 
-Two things to know:
+Three things gate a preview, and each fails closed:
+
+| Gate | Effect when missing | Handled by |
+| --- | --- | --- |
+| `SIWE_ALLOWED_HOSTS` | sign-in refused: "not available from this origin" | the script — regenerates `functions/.env.<project>` and redeploys functions only when it changed |
+| Storage CORS | attachment upload/download blocked by the browser | the script — applies `storage.cors.json` plus the live preview origins |
+| reCAPTCHA domains | every call 401s on App Check | **you**, in the Firebase console |
+
+No preview host is committed anywhere. Both lists are derived from
+`hosting:channel:list` on every run, so a new channel is picked up and an expired
+one drops off by itself. `storage.cors.json` holds only the permanent origins.
+
+Hostname shape alone is not proof that a Firebase site belongs to this project, so
+`resolveDomain()` matches the full host and never a pattern.
+
+Two more things to know:
 
 - It writes to **production** Firestore. Onboarding on a preview creates real
   `users/` and `publicProfiles/` documents. Use a throwaway wallet.
@@ -387,14 +402,15 @@ still a draft, but the path is still provably the caller's own.
 | PDF content type **and** `.pdf` object name | `storage.rules` |
 | 10 MB per file | `storage.rules` |
 | Max 2 attachments per posting | `firestore.rules` |
-| Only the posting owner may upload, read or delete | `storage.rules` |
+| Only the posting owner may upload or delete | `storage.rules` |
+| Any signed-in wallet may download | `storage.rules` |
 | Suspended / revoked sessions blocked | `storage.rules`, via cross-service reads of `users/` |
 | Recorded `path` must match owner + posting | `firestore.rules` |
 
-Read access deliberately mirrors the `problems/{problemId}` read rule exactly —
-owner only. **If postings later become readable by a wider audience, both rules
-must change together**, or an attachment becomes readable by people who cannot read
-the posting it belongs to.
+Any signed-in wallet can download attachments. Read rules do **not** look up the
+posting in Firestore; that cross-service get is what 403'd every non-owner
+download while the owner still succeeded. Upload and delete stay owner-only. The
+open internet still cannot read these PDFs.
 
 Downloads use the SDK's `getBlob()`, not `getDownloadURL()`. That is a security
 decision: `getDownloadURL()` mints a URL carrying a permanent token that works for
@@ -427,11 +443,12 @@ gcloud storage buckets update gs://qcdao-a0c7a.firebasestorage.app --cors-file=s
 gcloud storage buckets update gs://qcdao-a0c7a.firebasestorage.app --lifecycle-file=storage.lifecycle.json
 ```
 
-3. **Enable App Check enforcement for Cloud Storage** in the Firebase console. The
-   SDK already sends App Check tokens on Storage calls (`initializeAppCheck` runs on
-   the same app instance); only enforcement is off. This is the main defence against
-   someone scripting bulk uploads with a valid ID token — see the residual-risk note
-   at the top of `storage.rules`.
+3. **App Check enforcement for Cloud Storage — leave it OFF until reCAPTCHA is
+   verified.** Enabling it before the provider works makes every upload 403: the
+   SDK sends a token it could never obtain. Confirm the key mints one first
+   (`grecaptcha.enterprise.execute()` resolves, and the key's metrics show
+   assessments), then enable. It bounds upload VOLUME; it is not what protects
+   access — see the residual-risk note at the top of `storage.rules`.
 4. Set a **budget alert** on the project.
 5. Turn on the orphan sweeper once you have read a dry run — see below.
 
@@ -440,8 +457,8 @@ gcloud storage buckets update gs://qcdao-a0c7a.firebasestorage.app --lifecycle-f
 `sweepAttachments` runs daily at 03:00 SGT and deletes objects under `problems/`
 that no posting references.
 
-It is still needed with App Check enforcement on. App Check stops a script bulk
-uploading with a stolen ID token, but most orphans are not abuse — someone uploads
+It is needed whether or not App Check is enforced, and it carries more weight
+while enforcement is off. Most orphans are not abuse — someone uploads
 a PDF and then abandons the form or closes the tab before publishing. The client
 deletes what it can when a draft is abandoned deliberately; a closed tab offers no
 reliable moment to run a delete, so the cleanup has to happen server-side. The

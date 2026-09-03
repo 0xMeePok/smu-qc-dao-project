@@ -239,11 +239,9 @@ describe("storage rules: reading and removing an attachment", () => {
     await assertSucceeds(getBytes(ref(storage, READ_PATH)));
   });
 
-  it("[BIT-OPD-131] refuses a read by another wallet", async () => {
-    // Mirrors the problems/{problemId} read rule in firestore.rules: a posting is
-    // readable only by its owner, so its attachments must be too.
+  it("[BIT-OPD-131] lets another signed-in wallet read an attachment", async () => {
     const storage = env.authenticatedContext(OTHER).storage();
-    await assertFails(getBytes(ref(storage, READ_PATH)));
+    await assertSucceeds(getBytes(ref(storage, READ_PATH)));
   });
 
   it("[BIT-OPD-132] refuses a read by a suspended account", async () => {
@@ -311,10 +309,10 @@ describe("storage rules: attachments follow the posting's visibility", () => {
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-OPD-137] refuses a signed-in wallet with no profile from downloading", async () => {
+  it("[BIT-OPD-137] lets a signed-in wallet with no profile download", async () => {
     const NO_PROFILE = `0x${"2".repeat(40)}`;
     const storage = env.authenticatedContext(NO_PROFILE).storage();
-    await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+    await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
   it("[BIT-OPD-138] lets another wallet download an attachment on a published posting", async () => {
@@ -324,10 +322,9 @@ describe("storage rules: attachments follow the posting's visibility", () => {
     await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
 
-  it("[BIT-OPD-139] still refuses an attachment on a posting that is only a draft", async () => {
-    // A draft is private to its owner in firestore.rules, so its files are too.
+  it("[BIT-OPD-139] lets another wallet download an attachment on a draft posting", async () => {
     const storage = env.authenticatedContext(OTHER).storage();
-    await assertFails(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
+    await assertSucceeds(getBytes(ref(storage, objectPath(OWNER, DRAFT_POSTING, "draft.pdf"))));
   });
 
   it("[BIT-OPD-140] still refuses another wallet from WRITING to a published posting", async () => {

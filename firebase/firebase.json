@@ -5,7 +5,8 @@
     "indexes": "firestore.indexes.json"
   },
   "storage": {
-    "rules": "storage.rules"
+    "rules": "storage.rules",
+    "bucket": "qcdao-a0c7a.firebasestorage.app"
   },
   "functions": [
     {
