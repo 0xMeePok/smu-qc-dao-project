@@ -7,11 +7,13 @@ import {
   DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
   FIREWORKS_MODEL,
   FIREWORKS_REASONING_EFFORT,
+  GROK_MODEL,
   MAX_DIFF_CHUNK_BYTES,
   MAX_REVIEW_FINDINGS,
   MAX_REVIEW_OUTPUT_TOKENS,
   assertReviewChunkLimit,
   buildFireworksPayload,
+  buildGrokPayload,
   buildReviewPrompt,
   chunkPullRequestDiff,
   mergeChunkReviews,
@@ -181,6 +183,70 @@ test("OpenAI requires an explicit model so migration is deliberate", () => {
   });
   assert.equal(config.provider, "openai");
   assert.equal(config.model, "chosen-model");
+});
+
+test("grok uses the XAI key and a sensible default model", () => {
+  assert.throws(
+    () => resolveProviderConfig({ SECURITY_REVIEW_PROVIDER: "grok" }),
+    /XAI_API_KEY is not configured/,
+  );
+
+  const config = resolveProviderConfig({
+    SECURITY_REVIEW_PROVIDER: "grok",
+    XAI_API_KEY: "test-key",
+  });
+  assert.equal(config.provider, "grok");
+  assert.equal(config.model, GROK_MODEL);
+  assert.equal(config.apiUrl, "https://api.x.ai/v1/chat/completions");
+  assert.equal(config.reasoningEffort, null);
+
+  const aliased = resolveProviderConfig({
+    SECURITY_REVIEW_PROVIDER: "xai",
+    XAI_API_KEY: "test-key",
+    SECURITY_REVIEW_MODEL: "grok-4.6",
+    SECURITY_REVIEW_REASONING_EFFORT: "high",
+    GROK_API_URL: "http://127.0.0.1:9999/v1/chat/completions",
+  });
+  assert.equal(aliased.provider, "grok");
+  assert.equal(aliased.model, "grok-4.6");
+  assert.equal(aliased.reasoningEffort, "high");
+  assert.equal(aliased.apiUrl, "http://127.0.0.1:9999/v1/chat/completions");
+});
+
+test("grok requests stream schema-constrained JSON and omit reasoning by default", () => {
+  const payload = buildGrokPayload({ model: GROK_MODEL }, "review this diff");
+  assert.equal(payload.stream, true);
+  assert.deepEqual(payload.stream_options, { include_usage: true });
+  assert.equal(payload.max_tokens, MAX_REVIEW_OUTPUT_TOKENS);
+  assert.equal(payload.response_format.type, "json_schema");
+  assert.equal(payload.response_format.json_schema.name, "security_review");
+  assert.ok(!("reasoning_effort" in payload));
+
+  const reasoning = buildGrokPayload(
+    { model: GROK_MODEL, reasoningEffort: "high" },
+    "review this diff",
+  );
+  assert.equal(reasoning.reasoning_effort, "high");
+});
+
+test("rendered comments accept a custom marker, heading, and grok provider label", () => {
+  const review = normalizeReview({ summary: "clean", findings: [] });
+  const body = renderReviewComment(
+    review,
+    {
+      headSha: "abcdef1234567890",
+      provider: "grok",
+      model: GROK_MODEL,
+      diffBytes: 128,
+      chunkCount: 1,
+    },
+    { marker: "<!-- grokbot -->", heading: "GrokBot security scan" },
+  );
+
+  assert.ok(body.startsWith("<!-- grokbot -->"));
+  assert.match(body, /## GrokBot security scan/);
+  assert.match(body, /xAI Grok/);
+  assert.match(body, new RegExp(GROK_MODEL));
 });
 
 test("prompt labels chunked diff data as untrusted", () => {
