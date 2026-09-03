@@ -73,8 +73,9 @@ export function AuditReceipt({
   const [verification, setVerification] = useState(null);
   const [checking, setChecking] = useState(false);
   const canVerify = Boolean(onVerify);
-  const shouldVerifyAutomatically = canVerify
-    && (audit?.status === "confirmed" || Number(audit?.blockNumber ?? 0) > 0);
+  // Firestore is not the source of truth for audit state. Always read the
+  // configured registry when a record can be verified.
+  const shouldVerifyAutomatically = canVerify && Boolean(audit);
 
   const check = async (verify) => {
     setChecking(true);

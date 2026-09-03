@@ -101,7 +101,6 @@ export default function CreatePostingPage({ onNavigate }) {
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
   const [auditProgress, setAuditProgress] = useState(null);
-  const [auditBusy, setAuditBusy] = useState(false);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const formTop = useRef(null);
   const pendingCountRef = useRef(0);
@@ -113,20 +112,6 @@ export default function CreatePostingPage({ onNavigate }) {
   };
 
   const organisation = profile?.organisation ?? "";
-
-  const startAudit = (posting) => {
-    if (!posting || auditBusy || Number(posting.audit?.attemptCount ?? 0) >= 3) return;
-    setAuditBusy(true);
-    void anchorPostingAudit(posting, {
-      account: address,
-      onChange: (audit) => {
-        setPublished((current) => current ? { ...current, audit } : current);
-      },
-    }).catch(() => {
-      // The Firestore posting is already live. The receipt stores the failure and
-      // exposes a safe retry; a testnet problem must not turn into form data loss.
-    }).finally(() => setAuditBusy(false));
-  };
 
   // Same UTC-to-the-second format the posting will be stored and displayed in, so
   // what the form promises and what the detail page shows cannot disagree.
@@ -228,9 +213,11 @@ export default function CreatePostingPage({ onNavigate }) {
         organisation,
         form,
         attachments,
-        record: { ...record, audit },
+        // The contract is authoritative for the audit. Firebase stores only the
+        // posting content, after its exact hash has been confirmed on-chain.
+        record,
       });
-      setPublished(posting);
+      setPublished({ ...posting, audit });
       setAuditProgress(null);
       pendingRecordRef.current = null;
     } catch (error) {
@@ -298,7 +285,6 @@ export default function CreatePostingPage({ onNavigate }) {
             actorRole="Problem owner"
             firebaseReference={`problems/${published.id}`}
             onVerify={() => readPostingAudit(published)}
-            onRetry={() => startAudit(published)}
           />
           <div className="form-actions">
             <button
