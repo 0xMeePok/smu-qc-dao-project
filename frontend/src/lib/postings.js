@@ -225,10 +225,10 @@ export async function saveDraft({ postingId, ownerId, organisation, form, attach
 }
 
 /** Promotes a draft to submitted. Full validation applies at this point. */
-export async function publishDraft({ postingId, ownerId, organisation, form, attachments = [], audit = null }) {
+export async function publishDraft({ postingId, ownerId, organisation, form, attachments = [] }) {
   requireFirebase();
   const { createdAt, ...record } = buildPostingDocument({
-    ownerId, organisation, form, attachments, audit, status: POSTING_STATUS_SUBMITTED,
+    ownerId, organisation, form, attachments, status: POSTING_STATUS_SUBMITTED,
   });
   await updateDoc(postingRef(postingId), record);
   return findPosting(postingId);

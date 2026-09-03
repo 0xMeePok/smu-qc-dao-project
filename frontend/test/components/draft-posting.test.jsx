@@ -239,9 +239,9 @@ describe("publishing", () => {
     await waitFor(() => expect(screen.getByText(/posting submitted/i)).toBeTruthy());
   });
 
-  // Publishing a draft anchors its receipt exactly as a direct submit does; the
-  // draft path must not quietly drop it.
-  it("[FIT-P50-37] carries the anchored audit receipt down the draft path", async () => {
+  // The contract is authoritative for the audit, so publishing a draft must anchor
+  // on-chain WITHOUT writing the receipt into Firestore - same as a direct submit.
+  it("[FIT-P50-37] anchors on publish without persisting the receipt", async () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     fireEvent.click(saveDraftButton());
     await waitFor(() => expect(mocks.drafts).toHaveLength(1));
@@ -250,7 +250,8 @@ describe("publishing", () => {
     fireEvent.submit(document.querySelector("form"));
     await waitFor(() => expect(mocks.published).toHaveLength(1));
     expect(mocks.published[0].via).toBe("publishDraft");
-    expect(mocks.published[0].audit).toEqual({ status: "confirmed" });
+    expect(mocks.published[0].audit).toBeUndefined();
+    expect(mocks.published[0].record).toBeUndefined();
   });
 
   it("[FIT-P50-10] creates outright when the form was never saved", async () => {

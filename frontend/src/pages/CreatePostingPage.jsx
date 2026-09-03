@@ -167,7 +167,6 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
   const [auditProgress, setAuditProgress] = useState(null);
-  const [auditBusy, setAuditBusy] = useState(false);
   // QCDAO-50 draft state.
   const [draftExists, setDraftExists] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
@@ -192,20 +191,6 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   };
 
   const organisation = profile?.organisation ?? "";
-
-  const startAudit = (posting) => {
-    if (!posting || auditBusy || Number(posting.audit?.attemptCount ?? 0) >= 3) return;
-    setAuditBusy(true);
-    void anchorPostingAudit(posting, {
-      account: address,
-      onChange: (audit) => {
-        setPublished((current) => current ? { ...current, audit } : current);
-      },
-    }).catch(() => {
-      // The Firestore posting is already live. The receipt stores the failure and
-      // exposes a safe retry; a testnet problem must not turn into form data loss.
-    }).finally(() => setAuditBusy(false));
-  };
 
   useEffect(() => {
     if (!resumeId) return undefined;
@@ -388,11 +373,9 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
         },
       });
 
-      // A draft already exists as a document, so it is promoted rather than
-      // created. Both paths carry the same anchored receipt.
       const posting = draftExists
         ? await publishDraft({
-          postingId, ownerId: address, organisation, form, attachments, audit,
+          postingId, ownerId: address, organisation, form, attachments,
         })
         : await createPosting({
           postingId,
@@ -400,9 +383,11 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
           organisation,
           form,
           attachments,
-          record: { ...record, audit },
+          // The contract is authoritative for the audit. Firebase stores only the
+          // posting content, after its exact hash has been confirmed on-chain.
+          record,
         });
-      setPublished(posting);
+      setPublished({ ...posting, audit });
       setAuditProgress(null);
       pendingRecordRef.current = null;
     } catch (error) {
@@ -507,7 +492,6 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             actorRole="Problem owner"
             firebaseReference={`problems/${published.id}`}
             onVerify={() => readPostingAudit(published)}
-            onRetry={() => startAudit(published)}
           />
           <div className="form-actions">
             <button

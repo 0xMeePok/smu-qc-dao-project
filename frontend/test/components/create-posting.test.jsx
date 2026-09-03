@@ -217,7 +217,7 @@ describe("AuditRegistry integration", () => {
     await waitFor(() => expect(mocks.auditCalls).toHaveLength(1));
     expect(mocks.auditCalls[0].account).toBe(`0x${"a".repeat(40)}`);
     expect(mocks.auditCalls[0].persistReceipt).toBe(false);
-    expect(mocks.created[0].record.audit.status).toBe("confirmed");
+    expect(mocks.created[0].record.audit).toBeUndefined();
     expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
     expect(screen.getAllByText("Funded problem statement submitted")).toHaveLength(2);
   });
