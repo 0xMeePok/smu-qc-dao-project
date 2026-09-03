@@ -83,6 +83,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     setAuditBusy(true);
     void anchorPostingAudit(posting, {
       account: user?.id,
+      persistReceipt: false,
       onChange: (audit) => setPosting((current) => ({ ...current, audit })),
     }).catch(() => {
       // The receipt explains the independent verification failure; the posting

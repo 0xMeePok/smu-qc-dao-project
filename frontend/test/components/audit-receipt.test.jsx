@@ -90,7 +90,7 @@ describe("AuditReceipt", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it("does not report a missing on-chain record before a transaction is confirmed", async () => {
+  it("reads the contract even when Firestore has only a failed legacy receipt", async () => {
     const verify = vi.fn(async () => {
       throw new Error("execution reverted: InvalidInput");
     });
@@ -102,11 +102,7 @@ describe("AuditReceipt", () => {
       onVerify: verify,
     });
 
-    await Promise.resolve();
-    expect(verify).not.toHaveBeenCalled();
-    expect(screen.queryByText(/No matching audit/)).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /check again/i }));
+    expect(verify).toHaveBeenCalledOnce();
     expect(await screen.findByText(/No matching audit/)).toBeTruthy();
   });
 });
