@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ updates: [] }));
+const mocks = vi.hoisted(() => ({ updates: [], updateError: null }));
 
 vi.mock("../../src/lib/postings.js", () => ({
   postingAuditPayload: (posting) => ({ title: posting.title, expiresAt: posting.expiresAt }),
-  updatePostingAudit: async ({ audit }) => { mocks.updates.push(audit); },
+  updatePostingAudit: async ({ audit }) => {
+    mocks.updates.push(audit);
+    if (mocks.updateError) throw mocks.updateError;
+  },
 }));
 
 const { anchorPostingAudit, preparePostingAudit } = await import("../../src/lib/postingAudit.js");
@@ -43,7 +46,10 @@ function configuredReads(value = posting()) {
   };
 }
 
-beforeEach(() => { mocks.updates = []; });
+beforeEach(() => {
+  mocks.updates = [];
+  mocks.updateError = null;
+});
 
 describe("QCDAO-79 posting audit recovery", () => {
   it("writes once and persists the ordered transaction lifecycle", async () => {
@@ -91,6 +97,41 @@ describe("QCDAO-79 posting audit recovery", () => {
     expect(waits).toBe(1);
     expect(mocks.updates.map(({ status }) => status)).toEqual(["pending", "confirmed"]);
     expect(result.blockNumber).toBe(99);
+  });
+
+  it("can confirm an anchor before the Firestore posting exists", async () => {
+    const result = await anchorPostingAudit(posting(), {
+      account: ACCOUNT,
+      persistReceipt: false,
+      adapters: {
+        writeContract: async () => TX,
+        waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 101n }),
+        readContract: configuredReads(),
+      },
+    });
+
+    expect(result.status).toBe("confirmed");
+    expect(mocks.updates).toEqual([]);
+  });
+
+  it("does not claim a transaction continued when no hash was received", async () => {
+    mocks.updateError = new Error("Firestore denied the update");
+    const changes = [];
+
+    await expect(anchorPostingAudit(posting(), {
+      account: ACCOUNT,
+      onChange: (audit) => changes.push(audit),
+      adapters: {
+        writeContract: async () => { throw new Error("Wallet is disconnected"); },
+        waitForTransactionReceipt: async () => { throw new Error("unexpected receipt wait"); },
+        readContract: configuredReads(),
+      },
+    })).rejects.toThrow("Wallet is disconnected");
+
+    const last = changes.at(-1);
+    expect(last.transactionHash).toBe("");
+    expect(last.lastError).toContain("No transaction reference was received");
+    expect(last.lastError).not.toContain("transaction continued");
   });
 
   it("ignores a contract address supplied by Firestore", async () => {

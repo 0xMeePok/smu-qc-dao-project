@@ -73,6 +73,8 @@ export function AuditReceipt({
   const [verification, setVerification] = useState(null);
   const [checking, setChecking] = useState(false);
   const canVerify = Boolean(onVerify);
+  const shouldVerifyAutomatically = canVerify
+    && (audit?.status === "confirmed" || Number(audit?.blockNumber ?? 0) > 0);
 
   const check = async (verify) => {
     setChecking(true);
@@ -87,7 +89,11 @@ export function AuditReceipt({
   };
 
   useEffect(() => {
-    if (!audit || !onVerify) return undefined;
+    if (!shouldVerifyAutomatically) {
+      setVerification(null);
+      setChecking(false);
+      return undefined;
+    }
     let active = true;
     setVerification(null);
     setChecking(true);
@@ -102,7 +108,7 @@ export function AuditReceipt({
       })
       .finally(() => { if (active) setChecking(false); });
     return () => { active = false; };
-  }, [audit?.entityId, audit?.contentHash, audit?.status, canVerify]);
+  }, [audit?.entityId, audit?.contentHash, audit?.status, shouldVerifyAutomatically]);
 
   if (!audit) {
     return (

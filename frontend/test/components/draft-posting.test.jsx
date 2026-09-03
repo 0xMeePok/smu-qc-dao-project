@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => ({
   resumed: null,
 }));
 
+vi.mock("wagmi", () => ({
+  useAccount: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true }),
+}));
+
 vi.mock("../../src/lib/firebase.js", () => ({
   db: {}, auth: null, functions: null, storage: {},
   isStorageConfigured: true, storageNeedsEmulator: false, app: {},
@@ -22,6 +26,7 @@ vi.mock("../../src/lib/firebase.js", () => ({
 vi.mock("../../src/lib/postings.js", () => ({
   POSTING_STATUS_DRAFT: "draft",
   newPostingId: () => "posting123",
+  buildPostingDocument: (args) => ({ ...args.form, ownerId: args.ownerId }),
   findPosting: async () => mocks.resumed,
   saveDraft: async (args) => {
     mocks.lastSaveArgs = args;
@@ -61,6 +66,10 @@ vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
     mocks.uploader.onChange = props.onChange;
     return <div data-testid="uploader" />;
   },
+}));
+// Pulls in the real wagmi config at import time, which the bare wagmi mock breaks.
+vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
+  ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));
 vi.mock("../../src/context/SessionContext.jsx", () => ({
   useSession: () => ({
@@ -228,6 +237,20 @@ describe("publishing", () => {
     await waitFor(() => expect(mocks.published).toHaveLength(1));
     expect(mocks.published[0].via).toBe("publishDraft");
     await waitFor(() => expect(screen.getByText(/posting submitted/i)).toBeTruthy());
+  });
+
+  // Publishing a draft anchors its receipt exactly as a direct submit does; the
+  // draft path must not quietly drop it.
+  it("[FIT-P50-37] carries the anchored audit receipt down the draft path", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fireEvent.click(saveDraftButton());
+    await waitFor(() => expect(mocks.drafts).toHaveLength(1));
+
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    await waitFor(() => expect(mocks.published).toHaveLength(1));
+    expect(mocks.published[0].via).toBe("publishDraft");
+    expect(mocks.published[0].audit).toEqual({ status: "confirmed" });
   });
 
   it("[FIT-P50-10] creates outright when the form was never saved", async () => {

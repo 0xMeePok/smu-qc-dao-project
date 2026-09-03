@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAccount } from "wagmi";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
+import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { Modal } from "../components/Modal.jsx";
 import { useSession } from "../context/SessionContext.jsx";
 import {
@@ -11,6 +13,7 @@ import {
   expiryDateFrom,
 } from "../config/postingCategories.js";
 import {
+  buildPostingDocument,
   createPosting,
   findPosting,
   newPostingId,
@@ -151,6 +154,7 @@ function formFromPosting(posting) {
 
 export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const { address, profile } = useSession();
+  const { address: connectedAddress, isConnected } = useAccount();
 
   // Reserved up front: attachments are uploaded while the form is still being
   // filled in, and this id is part of their storage path.
@@ -162,6 +166,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
+  const [auditProgress, setAuditProgress] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
   // QCDAO-50 draft state.
   const [draftExists, setDraftExists] = useState(false);
@@ -174,10 +179,12 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const [baseline, setBaseline] = useState(null);
   // Attachments the saved draft already references, so discard leaves them alone.
   const savedAttachmentIds = useRef(new Set());
+  const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const formTop = useRef(null);
   const allowNavigation = useRef(false);
   const currentHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
   const pendingCountRef = useRef(0);
+  const pendingRecordRef = useRef(null);
 
   const updatePendingCount = (count) => {
     pendingCountRef.current = count;
@@ -349,17 +356,60 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
 
     if (pendingCountRef.current > 0) return;
 
+    const sameWallet = isConnected
+      && connectedAddress?.toLowerCase() === address?.toLowerCase();
+    if (!sameWallet) {
+      setSubmitError("Reconnect the wallet used to sign in before submitting the on-chain audit.");
+      setWalletPromptOpen(true);
+      return;
+    }
+
     setSubmitting(true);
+    let latestAudit = auditProgress;
     try {
-      const args = { postingId, ownerId: address, organisation, form, attachments };
-      const posting = draftExists ? await publishDraft(args) : await createPosting(args);
+      const record = pendingRecordRef.current ?? buildPostingDocument({
+        ownerId: address,
+        organisation,
+        form,
+        attachments,
+      });
+      pendingRecordRef.current = record;
+
+      const audit = await anchorPostingAudit({
+        id: postingId,
+        ...record,
+        audit: latestAudit,
+      }, {
+        account: address,
+        persistReceipt: false,
+        onChange: (nextAudit) => {
+          latestAudit = nextAudit;
+          setAuditProgress(nextAudit);
+        },
+      });
+
+      // A draft already exists as a document, so it is promoted rather than
+      // created. Both paths carry the same anchored receipt.
+      const posting = draftExists
+        ? await publishDraft({
+          postingId, ownerId: address, organisation, form, attachments, audit,
+        })
+        : await createPosting({
+          postingId,
+          ownerId: address,
+          organisation,
+          form,
+          attachments,
+          record: { ...record, audit },
+        });
       setPublished(posting);
-      // Do not await block confirmation. Publishing is authoritative off-chain;
-      // the AuditRegistry transaction advances independently on the receipt.
-      startAudit(posting);
+      setAuditProgress(null);
+      pendingRecordRef.current = null;
     } catch (error) {
-      // The form is untouched here on purpose: a rejected submit must never cost
-      // someone the problem statement they just spent ten minutes writing.
+      if (!latestAudit?.transactionHash) {
+        setAuditProgress(null);
+        pendingRecordRef.current = null;
+      }
       setSubmitError(messageForFirebaseError(error));
     } finally {
       setSubmitting(false);
@@ -418,6 +468,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     setErrors({});
     setSubmitError(null);
     setPublished(null);
+    setAuditProgress(null);
+    pendingRecordRef.current = null;
     await abandonDraftAttachments(abandoned, address, postingId);
   };
 
@@ -681,6 +733,10 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             </p>
           )}
         </form>
+
+        {walletPromptOpen && (
+          <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />
+        )}
 
         <aside className="preview-panel" aria-label="Live preview">
           <div className="preview-sticky">

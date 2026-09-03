@@ -118,15 +118,25 @@ export function buildPostingDocument({
     updatedAt: serverTimestamp(),
   };
 
-  // The posting is authoritative even while Arbitrum Sepolia is unavailable.
-  // Audit metadata is an optional resumable outbox/receipt, never the record itself.
+  // Audit metadata is excluded from the content hash and records only delivery
+  // state. The create screen now supplies it after the chain confirms.
   if (audit) document.audit = { ...audit };
   return document;
 }
 
-export async function createPosting({ postingId, ownerId, organisation, form, attachments = [], audit = null }) {
+export async function createPosting({
+  postingId,
+  ownerId,
+  organisation,
+  form,
+  attachments = [],
+  audit = null,
+  record: preparedRecord = null,
+}) {
   requireFirebase();
-  const record = buildPostingDocument({ ownerId, organisation, form, attachments, audit });
+  const record = preparedRecord
+    ? { ...preparedRecord }
+    : buildPostingDocument({ ownerId, organisation, form, attachments, audit });
   await setDoc(postingRef(postingId), record);
 
   // Read back rather than returning `record`. createdAt and updatedAt are
@@ -215,10 +225,10 @@ export async function saveDraft({ postingId, ownerId, organisation, form, attach
 }
 
 /** Promotes a draft to submitted. Full validation applies at this point. */
-export async function publishDraft({ postingId, ownerId, organisation, form, attachments = [] }) {
+export async function publishDraft({ postingId, ownerId, organisation, form, attachments = [], audit = null }) {
   requireFirebase();
   const { createdAt, ...record } = buildPostingDocument({
-    ownerId, organisation, form, attachments, status: POSTING_STATUS_SUBMITTED,
+    ownerId, organisation, form, attachments, audit, status: POSTING_STATUS_SUBMITTED,
   });
   await updateDoc(postingRef(postingId), record);
   return findPosting(postingId);

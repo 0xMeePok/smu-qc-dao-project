@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findPosting } from "../lib/postings.js";
 import {
@@ -11,6 +12,7 @@ import { messageForFirebaseError } from "../lib/errors.js";
 import { categoryLabel } from "../config/postingCategories.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
+import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { formatInstant, isExpired } from "../lib/datetime.js";
 import {
   anchorPostingAudit,
@@ -40,10 +42,12 @@ function Detail({ heading, children }) {
 
 export default function PostingDetailPage({ postingId, onNavigate }) {
   const { isAuthenticated, user } = useAuth();
+  const { address: connectedAddress, isConnected } = useAccount();
   const [posting, setPosting] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
+  const [walletPromptOpen, setWalletPromptOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +74,14 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   };
 
   const retryAudit = () => {
-    if (!posting || auditBusy) return;
+    const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
+    if (!posting || auditBusy || !ownsPosting) return;
+    const sameWallet = isConnected
+      && connectedAddress?.toLowerCase() === user?.id?.toLowerCase();
+    if (!sameWallet) {
+      setWalletPromptOpen(true);
+      return;
+    }
     setAuditBusy(true);
     void anchorPostingAudit(posting, {
       account: user?.id,
@@ -84,6 +95,8 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const verifyAudit = async () => {
     return readPostingAudit(posting);
   };
+
+  const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
 
   if (loading) {
     return (
@@ -135,6 +148,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         Back to opportunities
       </button>
 
+      {walletPromptOpen && (
+        <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />
+      )}
+
       <div className="detail-layout">
         <article className="detail-main">
           <div className="card-top">
@@ -179,7 +196,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             actorRole="Problem owner"
             firebaseReference={`problems/${posting.id}`}
             onVerify={verifyAudit}
-            onRetry={auditBusy ? undefined : retryAudit}
+            onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
           />
 
           {error && <p className="attachment-error" role="alert">{error}</p>}
