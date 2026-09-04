@@ -13,6 +13,7 @@ export function ConnectWalletModal({ onClose }) {
   const { connectors, connectAsync } = useConnect();
   const { signIn } = useSession();
   const [pending, setPending] = useState(null);
+  const [phase, setPhase] = useState(null);
   const [error, setError] = useState(null);
 
   // The modal stays open until sign-in genuinely succeeds. It used to close right
@@ -22,8 +23,10 @@ export function ConnectWalletModal({ onClose }) {
   const choose = async (connector) => {
     setError(null);
     setPending(connector.uid);
+    setPhase("connecting");
     try {
       const result = await connectAsync({ connector });
+      setPhase("authorizing");
       const outcome = await signIn(result.accounts?.[0]);
       if (outcome.ok) {
         onClose();
@@ -48,6 +51,7 @@ export function ConnectWalletModal({ onClose }) {
       );
     } finally {
       setPending(null);
+      setPhase(null);
     }
   };
 
@@ -97,7 +101,9 @@ export function ConnectWalletModal({ onClose }) {
                 <span className="connector-mark" aria-hidden="true"><WalletIcon /></span>
               )}
               <span>{connector.name}</span>
-              {pending === connector.uid ? <small>Connecting…</small> : null}
+              {pending === connector.uid ? (
+                <small>{phase === "connecting" ? "Connecting…" : "Authorising…"}</small>
+              ) : null}
             </button>
           ))}
         </div>

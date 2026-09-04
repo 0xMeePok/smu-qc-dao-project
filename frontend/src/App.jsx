@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { opportunities, opportunityTypes } from "./data.js";
+import { useEffect, useRef, useState } from "react";
+import { opportunityTypes } from "./data.js";
 import { ROLES } from "./config/roles.js";
 import { getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
@@ -22,6 +22,10 @@ import {
   FundingPortfolio,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import CreatePostingPage from "./pages/CreatePostingPage.jsx";
+import PostingDetailPage from "./pages/PostingDetailPage.jsx";
+import { listPublishedPostings } from "./lib/postings.js";
+import { formatInstantDate } from "./lib/datetime.js";
 
 function parseHash() {
   if (typeof window !== "undefined") {
@@ -321,7 +325,7 @@ function StakeholderIcon({ type }) {
 
 function OpportunityCard({ item }) {
   return (
-    <button className="opportunity-card" type="button" onClick={() => go(`opportunity/${item.id}`)}>
+    <button className="opportunity-card" type="button" onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}>
       <span className="opportunity-mark">
         <OpportunityIcon type={item.type} />
       </span>
@@ -397,6 +401,8 @@ function ResearchNetwork() {
 }
 
 function Home() {
+  const { postings, loading, isAuthenticated } = usePublishedPostings();
+
   return (
     <>
       <section className="hero">
@@ -419,7 +425,12 @@ function Home() {
           </div>
           <button className="text-button" type="button" onClick={() => go("discover")}>Browse all <ArrowIcon /></button>
         </div>
-        <OpportunityList items={opportunities} />
+        {!isAuthenticated && <SignedOutNotice />}
+        {isAuthenticated && loading && <p className="lead">Loading opportunities…</p>}
+        {isAuthenticated && !loading && postings.length === 0 && (
+          <p className="lead">No open opportunities yet. Publish the first one.</p>
+        )}
+        {postings.length > 0 && <OpportunityList items={postings.slice(0, 5)} />}
       </section>
 
       <section className="how">
@@ -433,12 +444,62 @@ function Home() {
   );
 }
 
+// Live postings, shared by Home and Discover. Reading one needs an active session,
+// so a signed-out visitor is never sent to Firestore just to be denied.
+function usePublishedPostings() {
+  const { isAuthenticated } = useAuth();
+  const [postings, setPostings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isAuthenticated) {
+      setPostings([]);
+      setLoadError(null);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    setLoading(true);
+    listPublishedPostings()
+      .then((items) => {
+        if (cancelled) return;
+        setPostings(items.map((item) => ({
+          ...item,
+          route: "posting",
+          owner: item.organisation,
+          type: "Business problem",
+          amount: `${item.currency} ${Number(item.amount).toLocaleString()}`,
+          deadline: formatInstantDate(item.expiresAt),
+        })));
+      })
+      .catch((error) => { if (!cancelled) setLoadError(error); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
+
+  return { postings, loading, loadError, isAuthenticated };
+}
+
+function SignedOutNotice() {
+  return (
+    <p className="notice" role="status">
+      Sign in to see problem statements posted by other organisations.
+    </p>
+  );
+}
+
 function Discover() {
+  const { postings, loading, loadError, isAuthenticated } = usePublishedPostings();
   const [filter, setFilter] = useState("All");
+
   const filters = ["All", ...opportunityTypes.map(({ label }) => label)];
   const visibleOpportunities = filter === "All"
-    ? opportunities
-    : opportunities.filter((item) => item.type === filter);
+    ? postings
+    : postings.filter((item) => item.type === filter);
 
   return (
     <section className="page">
@@ -458,262 +519,21 @@ function Discover() {
           </button>
         ))}
       </div>
-      <OpportunityList items={visibleOpportunities} />
+      {!isAuthenticated && <SignedOutNotice />}
+      {loading && <p className="lead">Loading published opportunities…</p>}
+      {loadError && (
+        <p className="notice notice-error" role="alert">
+          We could not load published postings. Please refresh and try again.
+        </p>
+      )}
+      {!loading && !loadError && visibleOpportunities.length === 0 && (
+        <p className="lead">No published opportunities match this filter.</p>
+      )}
+      {!loadError && <OpportunityList items={visibleOpportunities} />}
     </section>
   );
 }
 
-function OpportunityDetail({ id }) {
-  const item = opportunities.find((candidate) => candidate.id === id);
-  const { hasRole, isAuthenticated } = useAuth();
-  if (!item) return <NotFound />;
-
-  const canSubmitProposal = !isAuthenticated || hasRole(ROLES.RESEARCHER);
-  const canCreateBrief = !isAuthenticated || hasRole(ROLES.OWNER) || hasRole(ROLES.FUNDER);
-
-  return (
-    <section className="page detail-page">
-      <button className="back" type="button" onClick={() => go("discover")}>Back to opportunities</button>
-      <div className="detail-layout">
-        <article className="detail-main">
-          <div className="card-top">
-            <span className="eyebrow">{item.type}</span>
-            <span className="status-dot">{item.status}</span>
-          </div>
-          <h1>{item.title}</h1>
-          <p className="lead">{item.summary}</p>
-          <div className="detail-section"><h2>Why this work matters</h2><p>{item.benefits}</p></div>
-          <div className="detail-section"><h2>Expected outcomes</h2><p>{item.outcomes}</p></div>
-          <div className="detail-section"><h2>Deliverables</h2><p>{item.deliverables}</p></div>
-        </article>
-        <aside className="context-panel">
-          <span className="eyebrow">Funding overview</span>
-          <strong>{item.amount}</strong>
-          <dl>
-            <div><dt>Published by</dt><dd>{item.owner}</dd></div>
-            <div><dt>Timing</dt><dd>{item.deadline}</dd></div>
-            <div><dt>Current stage</dt><dd>{item.status}</dd></div>
-          </dl>
-          <div className="context-panel-actions">
-            {canSubmitProposal && (
-              <button className="primary" type="button" onClick={() => go("proposals")}>
-                Submit Proposal for Brief
-              </button>
-            )}
-            {canCreateBrief && (
-              <button className="secondary" type="button" onClick={() => go("create")}>
-                Create a similar brief
-              </button>
-            )}
-          </div>
-        </aside>
-      </div>
-    </section>
-  );
-}
-
-function getAvailableOpportunityTypes(roles) {
-  const roleList = Array.isArray(roles) ? roles : roles ? [roles] : [];
-  if (roleList.includes(ROLES.ADMIN)) {
-    return opportunityTypes;
-  }
-
-  const allowedTypes = new Set();
-  if (roleList.includes(ROLES.RESEARCHER)) {
-    allowedTypes.add("funding-request");
-  }
-  if (roleList.includes(ROLES.OWNER)) {
-    allowedTypes.add("business-problem");
-    allowedTypes.add("open-funding");
-  }
-  if (roleList.includes(ROLES.FUNDER)) {
-    allowedTypes.add("open-funding");
-    allowedTypes.add("business-problem");
-  }
-
-  // If user has no specific role (e.g. guest fallback), return standard options
-  if (allowedTypes.size === 0) {
-    return opportunityTypes;
-  }
-
-  return opportunityTypes.filter((t) => allowedTypes.has(t.value));
-}
-
-function CreateOpportunity() {
-  const { roles, hasRole } = useAuth();
-  const availableTypes = useMemo(() => getAvailableOpportunityTypes(roles), [roles]);
-
-  const [form, setForm] = useState(() => ({
-    opportunityType: availableTypes[0]?.value || "business-problem",
-    title: "",
-    summary: "",
-    outcomes: "",
-    amount: "",
-  }));
-
-  useEffect(() => {
-    if (!availableTypes.some((t) => t.value === form.opportunityType)) {
-      setForm((prev) => ({
-        ...prev,
-        opportunityType: availableTypes[0]?.value || "business-problem",
-      }));
-    }
-  }, [availableTypes, form.opportunityType]);
-
-  const [submitted, setSubmitted] = useState(false);
-  const selectedType = useMemo(
-    () => opportunityTypes.find((type) => type.value === form.opportunityType),
-    [form.opportunityType],
-  );
-
-  const update = (event) => {
-    const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
-    setSubmitted(false);
-  };
-
-  const submit = (event) => {
-    event.preventDefault();
-    if (form.opportunityType === "funding-request" && !hasRole(ROLES.RESEARCHER) && !hasRole(ROLES.ADMIN)) {
-      alert("Only researchers are permitted to submit funding requests.");
-      return;
-    }
-    setSubmitted(true);
-  };
-
-  return (
-    <section className="page create-page">
-      <div className="page-heading">
-        <h1>Create a research brief</h1>
-        <p>Publish a clear challenge, open funding offer, or researcher-led funding request.</p>
-      </div>
-
-      <div className="form-layout">
-        <form className="brief-form" onSubmit={submit}>
-          <fieldset className="field-group">
-            <legend>1. Opportunity type</legend>
-            <p className="field-hint">Choose your publishing capacity for this brief.</p>
-            <div className="radio-group" role="radiogroup">
-              {availableTypes.map((type) => (
-                <label
-                  key={type.value}
-                  className={`radio-card ${form.opportunityType === type.value ? "selected" : ""}`}
-                >
-                  <input
-                    type="radio"
-                    name="opportunityType"
-                    value={type.value}
-                    checked={form.opportunityType === type.value}
-                    onChange={update}
-                  />
-                  <div>
-                    <strong>{type.label}</strong>
-                    <span>{type.note}</span>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset className="field-group">
-            <legend>2. Core details</legend>
-            <div className="field">
-              <label htmlFor="title">Opportunity title</label>
-              <input
-                id="title"
-                name="title"
-                type="text"
-                required
-                placeholder="e.g. Robust error decoding for neutral atom systems"
-                value={form.title}
-                onChange={update}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="summary">Problem summary & scope</label>
-              <textarea
-                id="summary"
-                name="summary"
-                rows={4}
-                required
-                placeholder="Describe the context, technical bottleneck and what a solution should achieve."
-                value={form.summary}
-                onChange={update}
-              />
-            </div>
-          </fieldset>
-
-          <fieldset className="field-group">
-            <legend>3. Deliverables & funding</legend>
-            <div className="field">
-              <label htmlFor="outcomes">Key deliverables & milestones</label>
-              <textarea
-                id="outcomes"
-                name="outcomes"
-                rows={3}
-                required
-                placeholder="List verification milestones required before funds are unlocked."
-                value={form.outcomes}
-                onChange={update}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="amount">Target funding / budget allocation</label>
-              <input
-                id="amount"
-                name="amount"
-                type="text"
-                required
-                placeholder="e.g. $80,000"
-                value={form.amount}
-                onChange={update}
-              />
-            </div>
-          </fieldset>
-
-          <div className="form-actions">
-            <button className="primary" type="submit">Publish brief to registry</button>
-            <button className="secondary" type="button" onClick={() => go("discover")}>Cancel</button>
-          </div>
-
-          {submitted && (
-            <div className="success-banner" role="status">
-              <strong>Brief published successfully!</strong>
-              <p>Your brief "{form.title}" is now available in the platform registry.</p>
-              <button className="text-button" type="button" onClick={() => go("discover")}>
-                View in Discover <ArrowIcon />
-              </button>
-            </div>
-          )}
-        </form>
-
-        <aside className="preview-panel" aria-label="Live preview">
-          <div className="preview-sticky">
-            <span className="eyebrow">Registry Live Preview</span>
-            <div className="preview-card">
-              <div className="card-top">
-                <span className="eyebrow">{selectedType?.label || "Opportunity"}</span>
-                <span className="status-dot">Draft Preview</span>
-              </div>
-              <h3>{form.title || "Untitled Research Brief"}</h3>
-              <p>{form.summary || "Summary and problem description will appear here as you type."}</p>
-              <div className="preview-meta">
-                <div>
-                  <small>Funding</small>
-                  <strong>{form.amount || "$0"}</strong>
-                </div>
-                <div>
-                  <small>Deliverables</small>
-                  <span>{form.outcomes ? "Milestones defined" : "Pending entry"}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </aside>
-      </div>
-    </section>
-  );
-}
 
 function NotFound() {
   return (
@@ -757,9 +577,18 @@ function AppContent() {
         <ProfilePage />
       </RouteGuard>
     );
-  } else if (section === "opportunity") {
-    pageComponent = <OpportunityDetail id={id} />;
-  } else if (section === "login") {
+  } else if (section === "posting") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <PostingDetailPage postingId={id} onNavigate={go} />
+      </RouteGuard>
+    );
+    } else if (section === "login") {
     pageComponent = <Login redirectTarget={params.get("redirect")} onNavigate={go} />;
   } else if (section === "create") {
     pageComponent = (
@@ -769,7 +598,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <CreateOpportunity />
+        <CreatePostingPage onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "my-problems") {

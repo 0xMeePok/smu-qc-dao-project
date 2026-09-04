@@ -15,7 +15,6 @@ function requireEnvironment() {
   const required = [
     "ARBITRUM_SEPOLIA_RPC_URL",
     "DEPLOYER_PRIVATE_KEY",
-    "ETHERSCAN_API_KEY",
   ];
   const missing = required.filter((name) => !process.env[name]?.trim());
 
@@ -23,7 +22,7 @@ function requireEnvironment() {
     throw new Error(`Missing required .env values: ${missing.join(", ")}`);
   }
 
-  if (!/^0x[0-9a-fA-F]{64}$/.test(process.env.DEPLOYER_PRIVATE_KEY)) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(process.env.DEPLOYER_PRIVATE_KEY?.trim() ?? "")) {
     throw new Error("DEPLOYER_PRIVATE_KEY is not a valid 32-byte private key");
   }
 }
@@ -242,6 +241,19 @@ async function main() {
 
   console.log(`AuditRegistry deployed to: ${address}`);
   console.log(`Deployment record: ${deploymentFile}`);
+
+  if (!process.env.ETHERSCAN_API_KEY?.trim()) {
+    record.verification = {
+      provider: "etherscan",
+      status: "skipped",
+      reason: "ETHERSCAN_API_KEY was not configured",
+    };
+    fs.writeFileSync(deploymentFile, `${JSON.stringify(record, null, 2)}\n`, {
+      mode: 0o644,
+    });
+    console.log("Etherscan verification skipped: ETHERSCAN_API_KEY is not configured.");
+    return;
+  }
 
   try {
     await verifyOnEtherscan(address, []);

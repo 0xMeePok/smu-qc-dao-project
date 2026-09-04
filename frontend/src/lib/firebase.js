@@ -9,14 +9,16 @@ import {
 } from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
+const viteEnv = import.meta.env ?? {};
 const config = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: viteEnv.VITE_FIREBASE_API_KEY,
+  authDomain: viteEnv.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: viteEnv.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: viteEnv.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: viteEnv.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: viteEnv.VITE_FIREBASE_APP_ID,
 };
 
 // Must match the region the callable functions are deployed to (see firebase/functions/index.js).
@@ -40,16 +42,18 @@ export const missingFirebaseConfig = REQUIRED_KEYS
 export const isFirebaseConfigured = missingFirebaseConfig.length === 0;
 
 const app = isFirebaseConfigured ? (getApps()[0] ?? initializeApp(config)) : null;
+const usingEmulators = viteEnv.VITE_FIREBASE_USE_EMULATORS === "true";
 
-const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY;
+const appCheckSiteKey = viteEnv.VITE_FIREBASE_APP_CHECK_SITE_KEY;
 export const isAppCheckConfigured = Boolean(appCheckSiteKey);
 
-// Production nonce issuance enforces App Check and consumes a limited-use token.
+// Production nonce issuance enforces App Check. Replay protection is disabled, so
+// the SDK can reuse its cached App Check token instead of requesting a fresh one.
 // Firebase App Check now registers web apps only with reCAPTCHA Enterprise
 // (score-based key). The same site key must be saved in the Firebase console
 // and in VITE_FIREBASE_APP_CHECK_SITE_KEY. Local emulators skip attestation.
 export const appCheck = app
-  && import.meta.env.VITE_FIREBASE_USE_EMULATORS !== "true"
+  && viteEnv.VITE_FIREBASE_USE_EMULATORS !== "true"
   && appCheckSiteKey
   ? initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
@@ -58,6 +62,13 @@ export const appCheck = app
   : null;
 
 export const auth = app ? getAuth(app) : null;
+
+// Connect the emulator before configuring persistence or registering auth listeners.
+// Those operations initialize the auth instance and can otherwise retain the
+// production token endpoint for refresh requests.
+if (auth && usingEmulators) {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+}
 
 // Persist the session across reloads AND across closing the tab, so a refresh in the
 // middle of a multi-step workflow does not throw the user back to sign-in.
@@ -99,10 +110,33 @@ if (auth) {
 export const db = app ? getFirestore(app) : null;
 export const functions = app ? getFunctions(app, FUNCTIONS_REGION) : null;
 
-if (app && import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true") {
-  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+// Posting attachments (QCDAO-58). storageBucket is optional for the rest of the
+// app, so this is null when it is absent rather than throwing at import time -
+// frontend/src/lib/attachments.js reports that as a configuration error the user
+// can act on, instead of the whole module failing to load.
+export const isStorageConfigured = Boolean(app && config.storageBucket);
+export const storage = isStorageConfigured ? getStorage(app) : null;
+
+if (app && usingEmulators) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+  if (storage) connectStorageEmulator(storage, "127.0.0.1", 9199);
 }
+
+// True when the page is served from localhost but Storage is pointed at the REAL
+// bucket, because VITE_FIREBASE_USE_EMULATORS is not "true".
+//
+// That combination cannot work: the production bucket's CORS allow-list
+// (firebase/storage.cors.json) deliberately does not include localhost, so every
+// upload and download fails with a bare "CORS error" that says nothing about the
+// cause. Everything ELSE in the app - sign-in, Firestore, functions - works fine
+// against the live backend from localhost, which is exactly what makes this
+// confusing: only the attachment features break.
+//
+// Detected here rather than left to fail, so the message names the fix.
+export const storageNeedsEmulator = Boolean(storage)
+  && !usingEmulators
+  && typeof window !== "undefined"
+  && ["localhost", "127.0.0.1", "[::1]", "::1"].includes(window.location.hostname);
 
 export default app;

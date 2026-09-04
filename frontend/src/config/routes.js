@@ -83,10 +83,10 @@ export const ROUTES_CONFIG = [
   },
   // Non-navigated or dynamic/utility routes:
   {
-    key: "opportunity",
-    path: "opportunity",
-    label: "Opportunity Detail",
-    allowedRoles: null, // Public
+    key: "posting",
+    path: "posting",
+    label: "Posting",
+    allowedRoles: null,
     authRequired: false,
     showInNav: false,
   },
