@@ -1,0 +1,59 @@
+name: Gitleaks
+
+on:
+  push:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Official Gitleaks Action needs a license on private repos. Run the CLI image instead.
+      # Without -v, Gitleaks only prints "leaks found: N". --redact still masks secret values.
+      - name: Scan commits for secrets
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          ZERO="0000000000000000000000000000000000000000"
+          IMAGE="zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+          LOG_OPTS=""
+          if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "${ZERO}" ]; then
+            LOG_OPTS="--log-opts=${BEFORE}..${SHA}"
+          fi
+          docker run --rm \
+            -v "${PWD}:/repo" \
+            -w /repo \
+            "${IMAGE}" \
+            detect \
+              --source=/repo \
+              --verbose \
+              --redact \
+              --exit-code=1 \
+              --report-format=json \
+              --report-path=/repo/gitleaks-report.json \
+              ${LOG_OPTS}
+
+      - name: Upload Gitleaks report
+        if: always() && hashFiles('gitleaks-report.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          if-no-files-found: ignore

@@ -3,6 +3,12 @@ import {
   CURRENCIES,
   MAX_CATEGORIES,
 } from "../config/postingCategories.js";
+import {
+  fundingTagsFromCategories,
+  MAX_FUNDING_TAG_LENGTH,
+  MAX_FUNDING_TAGS,
+  parseFundingTags,
+} from "../config/fundingOpportunity.js";
 
 export function validateFullName(value = "") {
   const trimmed = value.trim();
@@ -159,6 +165,44 @@ export function validatePosting(form) {
     successCriteria: validateLongText(form.successCriteria, { label: "Success criteria" }),
     dataAvailability: validateLongText(form.dataAvailability, { label: "Data availability" }),
     categories: validateCategories(form.categories),
+    amount: validateFundingAmount(form.amount),
+    currency: validateCurrency(form.currency),
+    expiryDays: validateExpiry(form.expiryDays),
+  };
+
+  for (const key of Object.keys(errors)) {
+    if (errors[key] === null) delete errors[key];
+  }
+  return errors;
+}
+
+/* ------------------------------------------------------------------ QCDAO-51 */
+
+export function validateFundingTags(value) {
+  const tags = parseFundingTags(value);
+  if (tags.length === 0) return "Add at least one tag.";
+  if (tags.length > MAX_FUNDING_TAGS) {
+    return `Add no more than ${MAX_FUNDING_TAGS} tags.`;
+  }
+  if (tags.some((tag) => tag.length > MAX_FUNDING_TAG_LENGTH)) {
+    return `Each tag must be ${MAX_FUNDING_TAG_LENGTH} characters or fewer.`;
+  }
+  return null;
+}
+
+/** Field-level validation for the open-funding form. */
+export function validateFundingOpportunity(form) {
+  const categoriesError = validateCategories(form.categories);
+  const generatedTagsError = validateFundingTags(
+    fundingTagsFromCategories(form.categories),
+  );
+  const errors = {
+    title: validatePostingTitle(form.title),
+    fundingThesis: validateLongText(form.fundingThesis, { label: "Funding thesis" }),
+    eligibilityNotes: validateLongText(form.eligibilityNotes, { label: "Eligibility notes" }),
+    // Tags are generated from categories, so any tag/configuration problem belongs
+    // on the single control the user can act on instead of a hidden field.
+    categories: categoriesError || generatedTagsError,
     amount: validateFundingAmount(form.amount),
     currency: validateCurrency(form.currency),
     expiryDays: validateExpiry(form.expiryDays),

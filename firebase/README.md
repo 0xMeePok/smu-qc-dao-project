@@ -14,7 +14,7 @@ firebase/
 ├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, siweNonces/
 ├── storage.rules                # Authorisation for posting attachments (QCDAO-58)
 ├── storage.cors.json            # Bucket CORS allow-list - see "Posting attachments"
-├── firestore.indexes.json       # No composite indexes needed yet
+├── firestore.indexes.json       # Discover query indexes (QCDAO-52/53)
 ├── firebase.json                # Emulator ports, hosting config, functions source path
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
 ├── test/
@@ -22,7 +22,8 @@ firebase/
 │   ├── security-config.test.mjs # CSP, CORS and rules-file assertions
 │   └── storage.rules.test.mjs   # Attachment rules tests via the Storage emulator
 └── functions/
-    ├── index.js                 # Callable functions + the scheduled attachment sweep
+    ├── index.js                 # Callable, scheduled, and Firestore-triggered functions
+    ├── opportunityMetrics.js    # Public-safe Discover aggregates from private records
     ├── attachmentSweeper.js     # Deletes objects no posting references
     ├── scripts/mock_data.mjs    # Seeds three sample postings - see below
     ├── package.json
@@ -31,7 +32,7 @@ firebase/
         └── attachmentSweeper.test.mjs
 ```
 
-### What the two Cloud Functions do
+### What the Cloud Functions do
 
 Wallet sign-in is verified server-side, not in the browser — a client-side check
 proves nothing, since anyone can call Firestore directly and skip it. The uid
@@ -50,6 +51,12 @@ because one of these functions verified a real signature first:
 Administrative role and suspension changes are also callable functions. They update
 the user and matching audit record transactionally; suspension additionally records
 and retries Firebase credential revocation.
+
+Firestore triggers also rebuild `opportunityMetrics/{problemId}` whenever an
+opportunity, proposal, or funding record changes. Discover reads those safe totals
+for proposal count and funding progress without gaining access to proposal bodies or
+funder records. Deploy function, rules, and index changes together so the projection
+and its read policy stay in sync.
 
 ## Connect to the shared backend
 

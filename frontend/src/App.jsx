@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunityTypes } from "./data.js";
+import { POSTING_CATEGORIES } from "./config/postingCategories.js";
 import { ROLES } from "./config/roles.js";
 import { getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
@@ -23,9 +24,21 @@ import {
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import CreatePostingPage from "./pages/CreatePostingPage.jsx";
+import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
 import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { listPublishedPostings } from "./lib/postings.js";
-import { formatInstantDate } from "./lib/datetime.js";
+import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
+import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
+import { formatCountdown } from "./lib/datetime.js";
+import {
+  DEFAULT_DISCOVERY_FILTERS,
+  DISCOVERY_SORT_OPTIONS,
+  DISCOVERY_TIME_OPTIONS,
+  discoverOpportunities,
+  discoveryParams,
+  hasActiveDiscoveryFilters,
+  parseDiscoveryParams,
+} from "./lib/opportunityDiscovery.js";
 
 function parseHash() {
   if (typeof window !== "undefined") {
@@ -324,6 +337,11 @@ function StakeholderIcon({ type }) {
 }
 
 function OpportunityCard({ item }) {
+  const proposalLabel = `${item.proposalCount} ${item.proposalCount === 1 ? "proposal" : "proposals"}`;
+  const statusLabel = String(item.status ?? "open")
+    .replaceAll("_", " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+
   return (
     <button className="opportunity-card" type="button" onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}>
       <span className="opportunity-mark">
@@ -331,13 +349,36 @@ function OpportunityCard({ item }) {
       </span>
       <div className="opportunity-summary">
         <strong>{item.title}</strong>
-        <small>{item.owner} · {item.type}</small>
+        <span className="opportunity-byline">
+          <small>{item.owner}</small>
+          <span className={`opportunity-type-badge ${item.type === "Open funding" ? "funding" : "problem"}`}>
+            {item.type}
+          </span>
+        </span>
+        <span className="opportunity-categories" aria-label="Technology areas">
+          {item.categoryLabels.slice(0, 3).map((category) => (
+            <small className="opportunity-category" key={category}>{category}</small>
+          ))}
+          {item.categoryLabels.length > 3 && (
+            <small className="opportunity-category">+{item.categoryLabels.length - 3}</small>
+          )}
+        </span>
       </div>
-      <div>
-        <span className="status-dot">{item.status}</span>
+      <div className="opportunity-activity">
+        <span className="status-dot">{statusLabel}</span>
+        <small>{proposalLabel}</small>
       </div>
-      <div className="opportunity-amount">{item.amount}</div>
-      <div className="opportunity-deadline">{item.deadline}</div>
+      <div className="opportunity-funding">
+        <span className="opportunity-amount">{item.amount}</span>
+        <span className="funding-progress" aria-label={`${item.fundingProgressPercent}% funded`}>
+          <span style={{ width: `${item.fundingProgressPercent}%` }} />
+        </span>
+        <small>{item.fundingProgressPercent}% funded</small>
+      </div>
+      <div className="opportunity-deadline">
+        <strong>{formatCountdown(item.expiresAt)}</strong>
+        <small>{item.deadline}</small>
+      </div>
       <span className="row-arrow">
         <ArrowIcon />
       </span>
@@ -350,12 +391,35 @@ function OpportunityList({ items }) {
     <div className="opportunity-list">
       <div className="opportunity-list-head">
         <span>Problem or funding call</span>
-        <span>Status</span>
-        <span>Indicative budget</span>
-        <span>Timeline</span>
+        <span>Status &amp; proposals</span>
+        <span>Funding</span>
+        <span>Time remaining</span>
         <span />
       </div>
       {items.map((item) => <OpportunityCard item={item} key={item.id} />)}
+    </div>
+  );
+}
+
+function OpportunityListSkeleton() {
+  return (
+    <div className="opportunity-list opportunity-list-skeleton" aria-label="Loading opportunities" aria-busy="true">
+      <div className="opportunity-list-head">
+        <span>Problem or funding call</span>
+        <span>Status &amp; proposals</span>
+        <span>Funding</span>
+        <span>Time remaining</span>
+        <span />
+      </div>
+      {[0, 1, 2, 3].map((row) => (
+        <div className="opportunity-skeleton-row" key={row}>
+          <span className="skeleton-block skeleton-icon" />
+          <span className="skeleton-lines"><i /><i /></span>
+          <span className="skeleton-block" />
+          <span className="skeleton-block" />
+          <span className="skeleton-block" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -463,17 +527,11 @@ function usePublishedPostings() {
     }
 
     setLoading(true);
+    setLoadError(null);
     listPublishedPostings()
       .then((items) => {
         if (cancelled) return;
-        setPostings(items.map((item) => ({
-          ...item,
-          route: "posting",
-          owner: item.organisation,
-          type: "Business problem",
-          amount: `${item.currency} ${Number(item.amount).toLocaleString()}`,
-          deadline: formatInstantDate(item.expiresAt),
-        })));
+        setPostings(items.map(toOpportunityListItem));
       })
       .catch((error) => { if (!cancelled) setLoadError(error); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -487,49 +545,230 @@ function usePublishedPostings() {
 function SignedOutNotice() {
   return (
     <p className="notice" role="status">
-      Sign in to see problem statements posted by other organisations.
+      Sign in to see opportunities posted by other organisations.
     </p>
   );
 }
 
-function Discover() {
-  const { postings, loading, loadError, isAuthenticated } = usePublishedPostings();
-  const [filter, setFilter] = useState("All");
+function syncDiscoverUrl(filters) {
+  const query = discoveryParams(filters).toString();
+  const hash = `#/discover${query ? `?${query}` : ""}`;
+  if (window.location.hash !== hash) {
+    window.history.replaceState(window.history.state, "", hash);
+  }
+}
 
-  const filters = ["All", ...opportunityTypes.map(({ label }) => label)];
-  const visibleOpportunities = filter === "All"
-    ? postings
-    : postings.filter((item) => item.type === filter);
+function Discover({ params }) {
+  const { postings, loading, loadError, isAuthenticated } = usePublishedPostings();
+  const paramsKey = params.toString();
+  const [filters, setFilters] = useState(() => parseDiscoveryParams(params));
+
+  useEffect(() => {
+    setFilters(parseDiscoveryParams(params));
+  }, [paramsKey]);
+
+  const organisations = useMemo(() => (
+    [...new Set(postings.map((item) => item.organisation || item.owner).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right))
+  ), [postings]);
+  const statuses = useMemo(() => (
+    [...new Set(postings.map((item) => String(item.status ?? "").toLowerCase()).filter(Boolean))]
+      .sort()
+  ), [postings]);
+  const results = useMemo(
+    () => discoverOpportunities(postings, filters),
+    [postings, filters],
+  );
+  const activeFilters = hasActiveDiscoveryFilters(filters);
+
+  const updateFilters = (changes) => {
+    setFilters((current) => {
+      const next = { ...current, ...changes, page: changes.page ?? 1 };
+      syncDiscoverUrl(next);
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    const next = { ...DEFAULT_DISCOVERY_FILTERS, sort: filters.sort };
+    setFilters(next);
+    syncDiscoverUrl(next);
+  };
 
   return (
-    <section className="page">
-      <div className="page-heading">
-        <h1>Explore research opportunities</h1>
-        <p>Review open challenges, funding offers and researcher-led requests.</p>
+    <section className="page discover-page">
+      <div className="discover-heading-row">
+        <div className="page-heading">
+          <h1>Explore research opportunities</h1>
+          <p>Browse every open problem statement and funding opportunity in one place.</p>
+        </div>
+        <label className="discover-sort">
+          <span>Sort by</span>
+          <select value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}>
+            {DISCOVERY_SORT_OPTIONS.map((option) => (
+              <option value={option.value} key={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
       </div>
-      <div className="filters" aria-label="Filter opportunities">
-        {filters.map((item) => (
+
+      <div className="discover-search-row">
+        <label className="discover-search">
+          <span className="sr-only">Search opportunities</span>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="8.5" cy="8.5" r="5.5" />
+            <path d="M12.5 12.5L17 17" />
+          </svg>
+          <input
+            type="search"
+            value={filters.query}
+            placeholder="Search title, description or tags"
+            onChange={(event) => updateFilters({ query: event.target.value })}
+          />
+        </label>
+        {activeFilters && (
+          <button className="secondary discover-clear" type="button" onClick={clearFilters}>
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      <div className="filters" aria-label="Posting type">
+        {[{ value: "", label: "All opportunities" }, ...opportunityTypes.filter(({ value }) => value !== "funding-request")].map((item) => (
           <button
-            className={filter === item ? "selected" : ""}
-            key={item}
+            className={filters.type === item.value ? "selected" : ""}
+            key={item.value || "all"}
             type="button"
-            onClick={() => setFilter(item)}
+            aria-pressed={filters.type === item.value}
+            onClick={() => updateFilters({ type: item.value })}
           >
-            {item}
+            {item.label}
           </button>
         ))}
       </div>
+
+      <div className="discover-filter-panel" aria-label="Opportunity filters">
+        <label>
+          <span>Technology area</span>
+          <select value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}>
+            <option value="">All areas</option>
+            {POSTING_CATEGORIES.map((category) => (
+              <option value={category.value} key={category.value}>
+                {category.value === "quantum" ? "Quantum — gate-based, annealing & quantum-inspired" : category.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Status</span>
+          <select value={filters.status} onChange={(event) => updateFilters({ status: event.target.value })}>
+            <option value="">All statuses</option>
+            {statuses.map((status) => (
+              <option value={status} key={status}>{status.replaceAll("_", " ")}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Organisation</span>
+          <select value={filters.organisation} onChange={(event) => updateFilters({ organisation: event.target.value })}>
+            <option value="">All organisations</option>
+            {organisations.map((organisation) => (
+              <option value={organisation} key={organisation}>{organisation}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Time remaining</span>
+          <select value={filters.timeRemaining} onChange={(event) => updateFilters({ timeRemaining: event.target.value })}>
+            <option value="">Any closing date</option>
+            {DISCOVERY_TIME_OPTIONS.map((option) => (
+              <option value={option.value} key={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <fieldset className="funding-range">
+          <legend>Funding amount</legend>
+          <label>
+            <span className="sr-only">Minimum funding</span>
+            <input
+              min="0"
+              inputMode="decimal"
+              type="number"
+              value={filters.minimumFunding}
+              placeholder="Minimum"
+              onChange={(event) => updateFilters({ minimumFunding: event.target.value })}
+            />
+          </label>
+          <span aria-hidden="true">–</span>
+          <label>
+            <span className="sr-only">Maximum funding</span>
+            <input
+              min="0"
+              inputMode="decimal"
+              type="number"
+              value={filters.maximumFunding}
+              placeholder="Maximum"
+              onChange={(event) => updateFilters({ maximumFunding: event.target.value })}
+            />
+          </label>
+        </fieldset>
+      </div>
+
       {!isAuthenticated && <SignedOutNotice />}
-      {loading && <p className="lead">Loading published opportunities…</p>}
+      {isAuthenticated && loading && <OpportunityListSkeleton />}
       {loadError && (
         <p className="notice notice-error" role="alert">
-          We could not load published postings. Please refresh and try again.
+          We could not load published opportunities. Please refresh and try again.
         </p>
       )}
-      {!loading && !loadError && visibleOpportunities.length === 0 && (
-        <p className="lead">No published opportunities match this filter.</p>
+      {!loading && !loadError && isAuthenticated && postings.length === 0 && (
+        <div className="discover-empty" role="status">
+          <span className="empty-icon-wrapper" aria-hidden="true"><OpportunityIcon /></span>
+          <h2>No open opportunities yet</h2>
+          <p>New problem statements and funding opportunities will appear here once published.</p>
+        </div>
       )}
-      {!loadError && <OpportunityList items={visibleOpportunities} />}
+      {!loading && !loadError && postings.length > 0 && (
+        <>
+          <div className="discover-results-summary" aria-live="polite">
+            <strong>{results.totalResults} {results.totalResults === 1 ? "opportunity" : "opportunities"}</strong>
+            {results.totalResults > 0 && (
+              <span>Showing {results.firstResult}–{results.lastResult}</span>
+            )}
+          </div>
+          {results.totalResults === 0 ? (
+            <div className="discover-empty discover-no-results" role="status">
+              <span className="empty-icon-wrapper" aria-hidden="true"><OpportunityIcon /></span>
+              <h2>No opportunities match these filters</h2>
+              <p>Try a broader keyword, funding range, category or closing window.</p>
+              <button className="secondary" type="button" onClick={clearFilters}>Clear all filters</button>
+            </div>
+          ) : (
+            <OpportunityList items={results.items} />
+          )}
+          {results.totalPages > 1 && (
+            <nav className="discover-pagination" aria-label="Opportunity pages">
+              <button
+                className="secondary small"
+                type="button"
+                disabled={results.page === 1}
+                onClick={() => updateFilters({ page: results.page - 1 })}
+              >
+                Previous
+              </button>
+              <span>Page {results.page} of {results.totalPages}</span>
+              <button
+                className="secondary small"
+                type="button"
+                disabled={results.page === results.totalPages}
+                onClick={() => updateFilters({ page: results.page + 1 })}
+              >
+                Next
+              </button>
+            </nav>
+          )}
+        </>
+      )}
     </section>
   );
 }
@@ -555,7 +794,7 @@ function NotFound() {
 }
 
 function AppContent() {
-  const { section, id, params } = useRoute();
+  const { section, id, fullPath, params } = useRoute();
   const routeConfig = getRouteConfig(section);
 
   let pageComponent = <NotFound />;
@@ -563,7 +802,7 @@ function AppContent() {
   if (section === "home") {
     pageComponent = <Home />;
   } else if (section === "discover") {
-    pageComponent = <Discover />;
+    pageComponent = <Discover params={params} />;
   } else if (section === "profile") {
     pageComponent = id ? (
       <PublicProfilePage address={id} onNavigate={go} />
@@ -593,15 +832,19 @@ function AppContent() {
   } else if (section === "create") {
     pageComponent = (
       <RouteGuard
-        targetRoute={section}
+        targetRoute={fullPath}
         allowedRoles={routeConfig?.allowedRoles}
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        {/* Keyed on the posting id: postingId is seeded once from this prop, so
-            without a remount, switching between Create and Resume kept the old
-            id for uploads and saves while showing the other draft's fields. */}
-        <CreatePostingPage key={id ?? "new"} postingId={id} onNavigate={go} />
+        {/* The id segment carries two meanings now: the funding-opportunity type
+            from main, or a draft id to resume (QCDAO-50). Keyed on it because
+            postingId is seeded once, so without a remount switching between
+            Create and Resume kept the old id for uploads and saves while showing
+            the other draft's fields. */}
+        {id === OPEN_FUNDING_TYPE
+          ? <CreateFundingOpportunityPage onNavigate={go} />
+          : <CreatePostingPage key={id ?? "new"} postingId={id} onNavigate={go} />}
       </RouteGuard>
     );
   } else if (section === "my-problems") {

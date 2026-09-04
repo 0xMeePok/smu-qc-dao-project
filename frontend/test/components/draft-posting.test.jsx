@@ -182,7 +182,7 @@ describe("resuming a draft", () => {
     dataAvailability: "Two years of telemetry.",
     categories: ["ai", "robotics"],
     amount: 80000,
-    currency: "USD",
+    currency: "USDC",
     attachments: [],
     updatedAt: new Date("2026-09-01T10:15:00Z"),
     expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
@@ -238,7 +238,7 @@ describe("resuming a draft", () => {
     expect(field("successCriteria").value).toBe("Ten percent lower distance.");
     expect(field("dataAvailability").value).toBe("Two years of telemetry.");
     expect(field("amount").value).toBe("80000");
-    expect(field("currency").value).toBe("USD");
+    expect(field("currency").value).toBe("USDC");
     expect(screen.getByRole("checkbox", { name: /AI & machine learning/i }).checked).toBe(true);
     expect(screen.getByRole("checkbox", { name: /Robotics/i }).checked).toBe(true);
   });
@@ -498,7 +498,7 @@ describe("prompting only for unsaved work", () => {
     const onNavigate = vi.fn();
     mocks.resumed = {
       id: "posting123", title: "Untouched", summary: "As saved",
-      categories: ["ai"], amount: 500, currency: "SGD",
+      categories: ["ai"], amount: 500, currency: "USDT",
       attachments: [], updatedAt: new Date("2026-09-01T10:15:00Z"),
     };
     render(<CreatePostingPage postingId="posting123" onNavigate={onNavigate} />);
@@ -512,7 +512,7 @@ describe("prompting only for unsaved work", () => {
   it("[FIT-P50-33] prompts when a resumed draft is edited", async () => {
     mocks.resumed = {
       id: "posting123", title: "Untouched", summary: "As saved",
-      categories: ["ai"], amount: 500, currency: "SGD",
+      categories: ["ai"], amount: 500, currency: "USDT",
       attachments: [], updatedAt: new Date("2026-09-01T10:15:00Z"),
     };
     render(<CreatePostingPage postingId="posting123" onNavigate={() => {}} />);
