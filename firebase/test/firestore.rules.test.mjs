@@ -1581,3 +1581,60 @@ describe("problems/{problemId} marketplace visibility", () => {
     await assertFails(getDoc(doc(db, "problems", PUBLISHED)));
   });
 });
+
+describe("opportunityMetrics/{problemId}", () => {
+  const PROBLEM = "metrics_problem";
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "users", ADDRESS), baseProfile(null, ADDRESS));
+      await setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, {
+        organisation: "Another Lab",
+      }));
+      await setDoc(doc(db, "problems", PROBLEM), baseProblem({ status: "submitted" }));
+      await setDoc(doc(db, "opportunityMetrics", PROBLEM), {
+        problemId: PROBLEM,
+        proposalCount: 3,
+        fundedAmount: 600,
+        fundingProgressPercent: 60,
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  it("[QCDAO-52] lets an active member retrieve safe opportunity metrics", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    const snapshot = await assertSucceeds(getDoc(doc(db, "opportunityMetrics", PROBLEM)));
+    assert.equal(snapshot.data().proposalCount, 3);
+    assert.equal(snapshot.data().fundingProgressPercent, 60);
+  });
+
+  it("[QCDAO-52] keeps the metric collection non-enumerable", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDocs(collection(db, "opportunityMetrics")));
+  });
+
+  it("[QCDAO-52] blocks guests, incomplete accounts and suspended members", async () => {
+    await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), "opportunityMetrics", PROBLEM)));
+
+    const NO_PROFILE = `0x${"8".repeat(40)}`;
+    await assertFails(getDoc(doc(env.authenticatedContext(NO_PROFILE).firestore(), "opportunityMetrics", PROBLEM)));
+
+    const SUSPENDED = `0x${"9".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED),
+        baseProfile(null, SUSPENDED, { suspended: true }));
+    });
+    await assertFails(getDoc(doc(env.authenticatedContext(SUSPENDED).firestore(), "opportunityMetrics", PROBLEM)));
+  });
+
+  it("[QCDAO-52] blocks client metric forgery and deletion", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(updateDoc(doc(db, "opportunityMetrics", PROBLEM), { proposalCount: 999 }));
+    await assertFails(setDoc(doc(db, "opportunityMetrics", "forged"), {
+      problemId: "forged", proposalCount: 999,
+    }));
+    await assertFails(deleteDoc(doc(db, "opportunityMetrics", PROBLEM)));
+  });
+});

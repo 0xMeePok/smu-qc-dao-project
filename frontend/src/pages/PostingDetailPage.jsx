@@ -154,6 +154,9 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const audit = isOpenFunding
     ? fundingOpportunityAuditReceipt(posting)
     : postingAuditReceipt(posting);
+  const proposalCount = Number(posting.proposalCount ?? 0);
+  const fundedAmount = Number(posting.fundedAmount ?? 0);
+  const fundingProgressPercent = Number(posting.fundingProgressPercent ?? 0);
 
   return (
     <section className="page detail-page">
@@ -228,8 +231,20 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         <aside className="context-panel">
           <span className="eyebrow">{isOpenFunding ? "Indicative funding" : "Funding"}</span>
           <strong>{posting.currency} {Number(posting.amount).toLocaleString()}</strong>
+          <div className="detail-funding-progress">
+            <span className="funding-progress" aria-label={`${fundingProgressPercent}% funded`}>
+              <span style={{ width: `${fundingProgressPercent}%` }} />
+            </span>
+            <small>
+              {posting.currency} {fundedAmount.toLocaleString()} committed · {fundingProgressPercent}%
+            </small>
+          </div>
           <dl>
             <div><dt>Posted by</dt><dd>{posting.organisation}</dd></div>
+            <div>
+              <dt>Proposals received</dt>
+              <dd>{proposalCount} {proposalCount === 1 ? "proposal" : "proposals"}</dd>
+            </div>
             <div><dt>Submitted</dt><dd>{formatInstant(posting.createdAt)}</dd></div>
             <div><dt>Reference</dt><dd><code>{posting.id}</code></dd></div>
           </dl>

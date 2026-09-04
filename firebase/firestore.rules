@@ -814,6 +814,22 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
         && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
     }
+
+    // Public-safe counters derived by Cloud Functions from role-scoped proposal
+    // and funding records. Clients can read metrics only when they can browse the
+    // corresponding opportunity, and can never forge the values themselves.
+    match /opportunityMetrics/{problemId} {
+      function canBrowseOpportunity() {
+        let problem = get(/databases/$(database)/documents/problems/$(problemId)).data;
+        return isActiveUser(request.auth.uid)
+          && (problem.ownerId == request.auth.uid
+            || (problem.status in ['submitted', 'open']
+              && hasCompletedProfile(request.auth.uid)));
+      }
+
+      allow get: if canBrowseOpportunity();
+      allow list, create, update, delete: if false;
+    }
     
     match /audits/{auditId} {
       allow read: if request.auth != null

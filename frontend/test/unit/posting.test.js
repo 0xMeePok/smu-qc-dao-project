@@ -17,7 +17,7 @@ import {
   validatePosting,
   validatePostingTitle,
 } from "../../src/lib/validation.js";
-import { postingAuditPayload } from "../../src/lib/postings.js";
+import { normaliseOpportunityMetrics, postingAuditPayload } from "../../src/lib/postings.js";
 
 /** QCDAO-48 - the funded business problem statement form. */
 
@@ -82,6 +82,37 @@ describe("[QCDAO-48] quantum-adjacent categories", () => {
       validateCategories(Array(MAX_CATEGORIES + 1).fill("ai")),
       /no more than/,
     );
+  });
+});
+
+describe("[QCDAO-52] opportunity metric retrieval", () => {
+  it("normalises backend aggregates and supplies safe zero placeholders", () => {
+    assert.deepEqual(normaliseOpportunityMetrics(), {
+      proposalCount: 0,
+      fundedAmount: 0,
+      fundingProgressPercent: 0,
+    });
+    assert.deepEqual(normaliseOpportunityMetrics({
+      proposalCount: 3,
+      fundedAmount: 600,
+      fundingProgressPercent: 60,
+    }), {
+      proposalCount: 3,
+      fundedAmount: 600,
+      fundingProgressPercent: 60,
+    });
+  });
+
+  it("rejects malformed aggregates instead of displaying forged-looking values", () => {
+    assert.deepEqual(normaliseOpportunityMetrics({
+      proposalCount: -4,
+      fundedAmount: "not-a-number",
+      fundingProgressPercent: 140,
+    }), {
+      proposalCount: 0,
+      fundedAmount: 0,
+      fundingProgressPercent: 100,
+    });
   });
 });
 
