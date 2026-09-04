@@ -127,4 +127,20 @@ describe("[QCDAO-51] shared discovery presentation", () => {
     assert.equal(toOpportunityListItem({ ...base, opportunityType: OPEN_FUNDING_TYPE }).type, "Open funding");
     assert.equal(toOpportunityListItem({ ...base, opportunityType: OPEN_FUNDING_TYPE }).route, "posting");
   });
+
+  it("preserves metrics retrieved from related proposal and funding records", () => {
+    const item = toOpportunityListItem({
+      id: "one",
+      organisation: "SMU",
+      currency: "USDT",
+      amount: 250000,
+      proposalCount: 4,
+      fundedAmount: 100000,
+      fundingProgressPercent: 40,
+      expiresAt: new Date("2026-12-03T00:00:00Z"),
+    });
+    assert.equal(item.proposalCount, 4);
+    assert.equal(item.fundedAmount, 100000);
+    assert.equal(item.fundingProgressPercent, 40);
+  });
 });
