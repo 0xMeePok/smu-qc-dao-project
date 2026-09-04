@@ -22,6 +22,7 @@ import {
   postingAuditReceipt,
   readPostingAudit,
 } from "../lib/postingAudit.js";
+import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 
 /**
  * QCDAO-48 - post a funded business problem statement.
@@ -51,7 +52,7 @@ const EMPTY_FORM = {
   dataAvailability: "",
   categories: [],
   amount: "",
-  currency: "SGD",
+  currency: CURRENCIES[0],
   expiryDays: 90,
 };
 
@@ -238,6 +239,14 @@ export default function CreatePostingPage({ onNavigate }) {
     onNavigate("discover");
   };
 
+  const switchOpportunityType = async (route) => {
+    if (route === "create" || submitting) return;
+    const abandoned = attachments;
+    setAttachments([]);
+    await abandonDraftAttachments(abandoned);
+    onNavigate(route);
+  };
+
   const startAnother = async () => {
     const abandoned = published ? [] : attachments;
     setPostingId(newPostingId());
@@ -313,6 +322,12 @@ export default function CreatePostingPage({ onNavigate }) {
           organisation can judge whether they can help, without needing a call first.
         </p>
       </div>
+
+      <OpportunityTypeSwitch
+        activeType="business-problem"
+        onNavigate={switchOpportunityType}
+        disabled={submitting}
+      />
 
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>

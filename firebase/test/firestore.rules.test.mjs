@@ -1261,7 +1261,7 @@ describe("problems/{problemId} funded posting", () => {
       dataAvailability: "Two years of anonymised delivery telemetry, CSV, 4 GB.",
       categories: ["ai", "quantum"],
       amount: 80000,
-      currency: "SGD",
+      currency: "USDC",
       expiresAt: FUTURE,
       status: "submitted",
       createdAt: serverTimestamp(),
@@ -1313,6 +1313,7 @@ describe("problems/{problemId} funded posting", () => {
   it("[BIT-OPD-160] rejects an unsupported currency", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_cur"), submitted({ currency: "XYZ" })));
+    await assertFails(setDoc(doc(db, "problems", "q48_fiat"), submitted({ currency: "SGD" })));
   });
 
   it("[BIT-OPD-161] rejects a posting that has already expired", async () => {
@@ -1419,6 +1420,100 @@ describe("problems/{problemId} funded posting", () => {
     await assertFails(setDoc(doc(db, "problems", "q48_spoof_org"), submitted({
       organisation: "A Trusted Institution We Do Not Belong To",
     })));
+  });
+});
+
+// QCDAO-51 - funding seeks both a problem and a solution.
+describe("problems/{problemId} open funding opportunity", () => {
+  const FUTURE = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ADDRESS), baseProfile(null, ADDRESS));
+    });
+  });
+
+  function openFunding(overrides = {}) {
+    return {
+      opportunityType: "open-funding",
+      ownerId: ADDRESS,
+      organisation: "Singapore Management University",
+      title: "Open call for resilient supply chains",
+      fundingThesis: "Fund practical research into more resilient supply chains.",
+      eligibilityNotes: "Universities and registered research organisations may apply.",
+      categories: ["quantum", "optimisation"],
+      tags: ["logistics", "resilience"],
+      amount: 250000,
+      currency: "USDC",
+      expiresAt: FUTURE,
+      status: "submitted",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...overrides,
+    };
+  }
+
+  it("[QCDAO-51] accepts the distinct shape without a fixed problem", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q51_ok"), openFunding()));
+  });
+
+  it("[QCDAO-51] requires every open-funding field", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    for (const field of [
+      "organisation", "fundingThesis", "eligibilityNotes", "categories",
+      "tags", "currency", "expiresAt",
+    ]) {
+      const record = openFunding();
+      delete record[field];
+      await assertFails(
+        setDoc(doc(db, "problems", `q51_missing_${field}`), record),
+        `omitting ${field} should be rejected`,
+      );
+    }
+  });
+
+  it("[QCDAO-51] rejects problem-specific fields and attachments", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q51_problem"), openFunding({
+      summary: "A fixed problem should not be part of this entity.",
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_attachment"), openFunding({
+      attachments: [],
+    })));
+  });
+
+  it("[QCDAO-51] validates and de-duplicates discovery tags", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q51_notags"), openFunding({ tags: [] })));
+    await assertFails(setDoc(doc(db, "problems", "q51_dupetags"), openFunding({
+      tags: ["logistics", "logistics"],
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_longtag"), openFunding({
+      tags: ["x".repeat(41)],
+    })));
+  });
+
+  it("[QCDAO-51] rejects expired funding, fiat currency and a spoofed organisation", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q51_expired"), openFunding({
+      expiresAt: new Date(Date.now() - 1000),
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_fiat"), openFunding({
+      currency: "SGD",
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_spoof"), openFunding({
+      organisation: "Another Sponsor",
+    })));
+  });
+
+  it("[QCDAO-51] freezes the on-chain opportunity kind after creation", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q51_kind"), openFunding()));
+    await assertFails(updateDoc(doc(db, "problems", "q51_kind"), {
+      opportunityType: "business-problem",
+      updatedAt: serverTimestamp(),
+    }));
   });
 });
 
