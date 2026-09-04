@@ -69,7 +69,9 @@ vi.mock("../../src/lib/postingAudit.js", () => ({
 }));
 
 vi.mock("../../src/lib/attachments.js", () => ({
-  deleteAttachment: async ({ attachment }) => { mocks.deleted.push(attachment); },
+  // Full args: deleteAttachment derives the storage path from owner + posting,
+  // so a caller omitting them silently deletes nothing.
+  deleteAttachment: async (args) => { mocks.deleted.push(args); },
 }));
 vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
   // Captures onChange so a test can hand the form an uploaded file.
@@ -104,6 +106,9 @@ beforeEach(() => {
   mocks.lastSaveArgs = null;
   mocks.deleted = [];
   mocks.uploader = {};
+  // The hash is global and the leave guard reads it, so a test that navigates
+  // would otherwise arm the next one's interceptor before it renders.
+  window.location.hash = "#/create";
 });
 afterEach(cleanup);
 
@@ -147,6 +152,42 @@ describe("saving a draft", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
     expect(field("title").value).toBe("Keep me");
+  });
+
+  // Review finding: switchOpportunityType ran with main's one-argument
+  // abandonDraftAttachments, so deleteAttachment built problems/undefined/... and
+  // the uploaded PDFs were orphaned in Storage forever.
+  it("[FIT-P50-43] deletes attachments with the owner and posting when switching type", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    await act(async () => {
+      mocks.uploader.onChange([{ id: "att0001x", name: "a.pdf", size: 10, contentType: "application/pdf" }]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /open funding/i }));
+    });
+
+    expect(mocks.deleted).toHaveLength(1);
+    expect(mocks.deleted[0].ownerId).toBe(`0x${"a".repeat(40)}`);
+    expect(mocks.deleted[0].problemId).toBe("posting123");
+    expect(mocks.deleted[0].attachment.id).toBe("att0001x");
+  });
+
+  // Review finding: goTo only armed allowNavigation on the "#" branch, but the
+  // real onNavigate (App.jsx go()) changes the hash too. Mocking onNavigate as a
+  // no-op hides this, so this test drives the hash exactly as the app does.
+  it("[FIT-P50-44] discard actually leaves instead of reopening the prompt", async () => {
+    const navigateLikeTheApp = (route) => { window.location.hash = `/${route}`; };
+    window.location.hash = "#/create";
+    render(<CreatePostingPage onNavigate={navigateLikeTheApp} />);
+    fireEvent.change(field("title"), { target: { value: "Throwaway" } });
+
+    await act(async () => { window.location.hash = "#/discover"; });
+    const discard = await screen.findByRole("button", { name: /discard/i });
+    await act(async () => { fireEvent.click(discard); });
+
+    expect(window.location.hash).toBe("#/discover");
+    expect(screen.queryByRole("button", { name: /discard/i })).toBeNull();
   });
 
   // Bug 2: the leave prompt navigated after persistDraft() regardless of outcome,
@@ -541,7 +582,7 @@ describe("discarding rolls back to the last save", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     fireEvent.click(screen.getByText(/^discard/i));
 
-    await waitFor(() => expect(mocks.deleted).toEqual([]));
+    await waitFor(() => expect(mocks.deleted.map((d) => d.attachment)).toEqual([]));
   });
 
   it("[FIT-P50-35] removes only files added since the last save", async () => {
@@ -556,7 +597,7 @@ describe("discarding rolls back to the last save", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     fireEvent.click(screen.getByText(/^discard/i));
 
-    await waitFor(() => expect(mocks.deleted).toEqual([NEW_FILE]));
+    await waitFor(() => expect(mocks.deleted.map((d) => d.attachment)).toEqual([NEW_FILE]));
   });
 
   it("[FIT-P50-36] removes everything when no draft was ever saved", async () => {
@@ -568,7 +609,7 @@ describe("discarding rolls back to the last save", () => {
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     fireEvent.click(screen.getByText(/^discard/i));
 
-    await waitFor(() => expect(mocks.deleted).toEqual([NEW_FILE]));
+    await waitFor(() => expect(mocks.deleted.map((d) => d.attachment)).toEqual([NEW_FILE]));
     expect(mocks.drafts).toHaveLength(0);
   });
 });

@@ -420,8 +420,10 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   // A hash captured by the interceptor is navigated to directly; a route id goes
   // through onNavigate.
   const goTo = (target) => {
+    // Set BEFORE either branch: onNavigate changes the hash as well, so leaving
+    // it unset let the interceptor revert the move and reopen the leave prompt.
+    allowNavigation.current = true;
     if (typeof target === "string" && target.startsWith("#")) {
-      allowNavigation.current = true;
       window.location.hash = target;
       return;
     }
@@ -470,8 +472,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     if (route === "create" || submitting) return;
     const abandoned = attachments;
     setAttachments([]);
-    await abandonDraftAttachments(abandoned);
-    onNavigate(route);
+    await abandonDraftAttachments(abandoned, address, postingId);
+    goTo(route);
   };
 
   const startAnother = async () => {
@@ -492,6 +494,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     setLeaveTarget(null);
     savedAttachmentIds.current = new Set();
     await abandonDraftAttachments(abandoned, address, postingId);
+    if (resumeId) goTo("#/create");
   };
 
   if (published) {

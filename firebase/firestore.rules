@@ -282,14 +282,25 @@ service cloud.firestore {
     // every document key against every allowed key, so the shorter list is what
     // brings problem writes back under the 1000-expression cap.
     function hasProblemSchema(data) {
-      // keys().size(), not hasOnly([22 names]). hasOnly compares every key against
-      // every name, which on this document is the single largest term in the
-      // 1000-expression budget - and it is what tipped QCDAO-50 drafts over once
-      // QCDAO-51 added three more fields. Every one of the 22 is validated by name
-      // elsewhere in validProblem, so an unknown key can only fit by displacing a
-      // known one, and that field's own check then fails. Same argument as
-      // hasValidAudit and attachmentEntry below.
-      return data.keys().size() <= 22;
+      // hasOnly, NOT keys().size(). A size bound looked equivalent but is not:
+      // almost every field is optional through data.get() defaults, so an unknown
+      // key does not displace a validated one - it fits beside the six required
+      // fields and is never checked, on a document other members can read.
+      //
+      // The five pre-QCDAO-48 fields (outcomes, deadline, benefits, deliverables,
+      // type) are deliberately absent: nothing writes them - not the client, not
+      // the tests, and none of the production documents - so allowing them only
+      // widened the surface, and validating them cost the expression budget that
+      // publishing a draft with attachments needs.
+      return data.keys().hasOnly([
+        'ownerId', 'organisation', 'title', 'summary', 'amount', 'status',
+        'businessContext', 'currentApproach', 'currentLimitations',
+        'expectedOutcome', 'successCriteria', 'dataAvailability',
+        // QCDAO-51 - open funding without a fixed problem statement.
+        'opportunityType', 'fundingThesis', 'eligibilityNotes', 'tags',
+        'categories', 'currency', 'expiresAt',
+        'attachments', 'audit', 'createdAt', 'updatedAt'
+      ]);
     }
 
     function hasProposalSchema(data) {
@@ -527,10 +538,7 @@ service cloud.firestore {
     // The fields validFundedPosting does NOT check, so a published posting still
     // has every string bounded without checking the same field twice.
     function legacyTextIsBounded(data) {
-      return optionalString(data, 'benefits', 4000)
-        && optionalString(data, 'deliverables', 4000)
-        && optionalString(data, 'type', 80)
-        && optionalString(data, 'opportunityType', 80)
+      return optionalString(data, 'opportunityType', 80)
         && optionalString(data, 'fundingThesis', 4000)
         && optionalString(data, 'eligibilityNotes', 4000);
     }
@@ -649,9 +657,7 @@ service cloud.firestore {
           && (data.get('tags', []).size() == 0 || validFundingTags(data.get('tags', [])))
           && validCurrency(data.get('currency', 'USDT'))
           && data.get('expiresAt', request.time) is timestamp
-          && data.get('deadline', request.time) is timestamp
-          && (data.get('outcomes', []).size() == 0
-            || stringListIsValid(data.get('outcomes', []))));
+);
     }
 
     function validProposalStatus(status) {
@@ -674,6 +680,7 @@ service cloud.firestore {
         && isNonEmptyString(data.summary, 4000)
         && validAmount(data.amount)
         && validProposalStatus(data.status)
+        && optionalString(data, 'deliverables', 4000)
         && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
     }
 
