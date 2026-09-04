@@ -1261,7 +1261,7 @@ describe("problems/{problemId} funded posting", () => {
       dataAvailability: "Two years of anonymised delivery telemetry, CSV, 4 GB.",
       categories: ["ai", "quantum"],
       amount: 80000,
-      currency: "SGD",
+      currency: "USDC",
       expiresAt: FUTURE,
       status: "submitted",
       createdAt: serverTimestamp(),
@@ -1313,6 +1313,7 @@ describe("problems/{problemId} funded posting", () => {
   it("[BIT-OPD-160] rejects an unsupported currency", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q48_cur"), submitted({ currency: "XYZ" })));
+    await assertFails(setDoc(doc(db, "problems", "q48_fiat"), submitted({ currency: "SGD" })));
   });
 
   it("[BIT-OPD-161] rejects a posting that has already expired", async () => {
@@ -1422,6 +1423,100 @@ describe("problems/{problemId} funded posting", () => {
   });
 });
 
+// QCDAO-51 - funding seeks both a problem and a solution.
+describe("problems/{problemId} open funding opportunity", () => {
+  const FUTURE = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ADDRESS), baseProfile(null, ADDRESS));
+    });
+  });
+
+  function openFunding(overrides = {}) {
+    return {
+      opportunityType: "open-funding",
+      ownerId: ADDRESS,
+      organisation: "Singapore Management University",
+      title: "Open call for resilient supply chains",
+      fundingThesis: "Fund practical research into more resilient supply chains.",
+      eligibilityNotes: "Universities and registered research organisations may apply.",
+      categories: ["quantum", "optimisation"],
+      tags: ["logistics", "resilience"],
+      amount: 250000,
+      currency: "USDC",
+      expiresAt: FUTURE,
+      status: "submitted",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...overrides,
+    };
+  }
+
+  it("[QCDAO-51] accepts the distinct shape without a fixed problem", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q51_ok"), openFunding()));
+  });
+
+  it("[QCDAO-51] requires every open-funding field", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    for (const field of [
+      "organisation", "fundingThesis", "eligibilityNotes", "categories",
+      "tags", "currency", "expiresAt",
+    ]) {
+      const record = openFunding();
+      delete record[field];
+      await assertFails(
+        setDoc(doc(db, "problems", `q51_missing_${field}`), record),
+        `omitting ${field} should be rejected`,
+      );
+    }
+  });
+
+  it("[QCDAO-51] rejects problem-specific fields and attachments", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q51_problem"), openFunding({
+      summary: "A fixed problem should not be part of this entity.",
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_attachment"), openFunding({
+      attachments: [],
+    })));
+  });
+
+  it("[QCDAO-51] validates and de-duplicates discovery tags", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q51_notags"), openFunding({ tags: [] })));
+    await assertFails(setDoc(doc(db, "problems", "q51_dupetags"), openFunding({
+      tags: ["logistics", "logistics"],
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_longtag"), openFunding({
+      tags: ["x".repeat(41)],
+    })));
+  });
+
+  it("[QCDAO-51] rejects expired funding, fiat currency and a spoofed organisation", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q51_expired"), openFunding({
+      expiresAt: new Date(Date.now() - 1000),
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_fiat"), openFunding({
+      currency: "SGD",
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q51_spoof"), openFunding({
+      organisation: "Another Sponsor",
+    })));
+  });
+
+  it("[QCDAO-51] freezes the on-chain opportunity kind after creation", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q51_kind"), openFunding()));
+    await assertFails(updateDoc(doc(db, "problems", "q51_kind"), {
+      opportunityType: "business-problem",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+});
+
 // QCDAO-48 - who can see a published posting.
 describe("problems/{problemId} marketplace visibility", () => {
   const PUBLISHED = "vis_published";
@@ -1484,5 +1579,62 @@ describe("problems/{problemId} marketplace visibility", () => {
     const NO_PROFILE = `0x${"e".repeat(40)}`;
     const db = env.authenticatedContext(NO_PROFILE).firestore();
     await assertFails(getDoc(doc(db, "problems", PUBLISHED)));
+  });
+});
+
+describe("opportunityMetrics/{problemId}", () => {
+  const PROBLEM = "metrics_problem";
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "users", ADDRESS), baseProfile(null, ADDRESS));
+      await setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, {
+        organisation: "Another Lab",
+      }));
+      await setDoc(doc(db, "problems", PROBLEM), baseProblem({ status: "submitted" }));
+      await setDoc(doc(db, "opportunityMetrics", PROBLEM), {
+        problemId: PROBLEM,
+        proposalCount: 3,
+        fundedAmount: 600,
+        fundingProgressPercent: 60,
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  it("[QCDAO-52] lets an active member retrieve safe opportunity metrics", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    const snapshot = await assertSucceeds(getDoc(doc(db, "opportunityMetrics", PROBLEM)));
+    assert.equal(snapshot.data().proposalCount, 3);
+    assert.equal(snapshot.data().fundingProgressPercent, 60);
+  });
+
+  it("[QCDAO-52] keeps the metric collection non-enumerable", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(getDocs(collection(db, "opportunityMetrics")));
+  });
+
+  it("[QCDAO-52] blocks guests, incomplete accounts and suspended members", async () => {
+    await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), "opportunityMetrics", PROBLEM)));
+
+    const NO_PROFILE = `0x${"8".repeat(40)}`;
+    await assertFails(getDoc(doc(env.authenticatedContext(NO_PROFILE).firestore(), "opportunityMetrics", PROBLEM)));
+
+    const SUSPENDED = `0x${"9".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", SUSPENDED),
+        baseProfile(null, SUSPENDED, { suspended: true }));
+    });
+    await assertFails(getDoc(doc(env.authenticatedContext(SUSPENDED).firestore(), "opportunityMetrics", PROBLEM)));
+  });
+
+  it("[QCDAO-52] blocks client metric forgery and deletion", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(updateDoc(doc(db, "opportunityMetrics", PROBLEM), { proposalCount: 999 }));
+    await assertFails(setDoc(doc(db, "opportunityMetrics", "forged"), {
+      problemId: "forged", proposalCount: 999,
+    }));
+    await assertFails(deleteDoc(doc(db, "opportunityMetrics", PROBLEM)));
   });
 });

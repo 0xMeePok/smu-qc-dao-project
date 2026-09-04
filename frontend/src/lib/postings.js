@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -40,8 +41,42 @@ function postingRef(postingId) {
   return doc(db, "problems", postingId);
 }
 
+function opportunityMetricsRef(postingId) {
+  return doc(db, "opportunityMetrics", postingId);
+}
+
 function trimmed(value) {
   return String(value ?? "").trim();
+}
+
+export function normaliseOpportunityMetrics(value = {}) {
+  const proposalCount = Number(value.proposalCount);
+  const fundedAmount = Number(value.fundedAmount);
+  const fundingProgressPercent = Number(value.fundingProgressPercent);
+  return {
+    proposalCount: Number.isInteger(proposalCount) && proposalCount >= 0 ? proposalCount : 0,
+    fundedAmount: Number.isFinite(fundedAmount) && fundedAmount >= 0 ? fundedAmount : 0,
+    fundingProgressPercent: Number.isFinite(fundingProgressPercent)
+      ? Math.max(0, Math.min(100, fundingProgressPercent))
+      : 0,
+  };
+}
+
+async function findOpportunityMetrics(postingId, fallback = {}) {
+  const snapshot = await getDoc(opportunityMetricsRef(postingId));
+  return normaliseOpportunityMetrics(snapshot.exists() ? snapshot.data() : fallback);
+}
+
+function postingFromSnapshot(snapshot, metrics) {
+  const data = snapshot.data();
+  return {
+    id: snapshot.id,
+    ...data,
+    ...metrics,
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    attachments: Array.isArray(data.attachments) ? data.attachments : [],
+  };
 }
 
 /**
@@ -164,13 +199,8 @@ export async function findPosting(postingId) {
   requireFirebase();
   const snapshot = await getDoc(postingRef(postingId));
   if (!snapshot.exists()) return null;
-  const data = snapshot.data();
-  return {
-    id: snapshot.id,
-    ...data,
-    categories: Array.isArray(data.categories) ? data.categories : [],
-    attachments: Array.isArray(data.attachments) ? data.attachments : [],
-  };
+  const metrics = await findOpportunityMetrics(snapshot.id, snapshot.data());
+  return postingFromSnapshot(snapshot, metrics);
 }
 
 export async function listPublishedPostings() {
@@ -178,20 +208,21 @@ export async function listPublishedPostings() {
   const snapshot = await getDocs(query(
     collection(db, "problems"),
     where("status", "in", ["submitted", "open"]),
+    orderBy("createdAt", "desc"),
   ));
 
-  return snapshot.docs
-    .map((item) => {
-      const data = item.data();
-      return {
-        id: item.id,
-        ...data,
-        categories: Array.isArray(data.categories) ? data.categories : [],
-            attachments: Array.isArray(data.attachments) ? data.attachments : [],
-      };
-    })
-    .filter((item) => !item.expiresAt
-      || (typeof item.expiresAt.toDate === "function"
-        ? item.expiresAt.toDate()
-        : new Date(item.expiresAt)) > new Date());
+  const visible = snapshot.docs.filter((item) => {
+    const data = item.data();
+    return !data.expiresAt
+      || (typeof data.expiresAt.toDate === "function"
+        ? data.expiresAt.toDate()
+        : new Date(data.expiresAt)) > new Date();
+  });
+
+  // Each metric read is independent. Running them together keeps the listing to
+  // two network turns without exposing private proposal or funding documents.
+  return Promise.all(visible.map(async (item) => postingFromSnapshot(
+    item,
+    await findOpportunityMetrics(item.id, item.data()),
+  )));
 }

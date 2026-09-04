@@ -283,10 +283,12 @@ service cloud.firestore {
         // QCDAO-48 - the structured funded problem statement.
         'businessContext', 'currentApproach', 'currentLimitations',
         'expectedOutcome', 'successCriteria', 'dataAvailability',
+        // QCDAO-51 - open funding without a fixed problem statement.
+        'fundingThesis', 'eligibilityNotes', 'tags',
         'categories', 'currency', 'expiresAt',
         'attachments', 'audit', 'createdAt', 'updatedAt'
       ]) && data.keys().hasAll([
-        'ownerId', 'title', 'summary', 'amount', 'status', 'createdAt', 'updatedAt'
+        'ownerId', 'title', 'amount', 'status', 'createdAt', 'updatedAt'
       ]);
     }
 
@@ -452,8 +454,29 @@ service cloud.firestore {
         && categories.toSet().hasOnly(allowedCategories());
     }
 
+    function fundingTagIsValid(tags, index) {
+      return tags.size() <= index
+        || (tags[index] is string
+          && tags[index].size() > 0
+          && tags[index].size() <= 40);
+    }
+
+    function validFundingTags(tags) {
+      return tags is list
+        && tags.size() >= 1 && tags.size() <= 8
+        && tags.toSet().size() == tags.size()
+        && fundingTagIsValid(tags, 0)
+        && fundingTagIsValid(tags, 1)
+        && fundingTagIsValid(tags, 2)
+        && fundingTagIsValid(tags, 3)
+        && fundingTagIsValid(tags, 4)
+        && fundingTagIsValid(tags, 5)
+        && fundingTagIsValid(tags, 6)
+        && fundingTagIsValid(tags, 7);
+    }
+
     function validCurrency(value) {
-      return value in ['SGD', 'USD', 'EUR', 'GBP'];
+      return value in ['USDT', 'USDC', 'XSGD'];
     }
 
     // Marketplace-visible postings. A submitted or open problem is readable by
@@ -474,12 +497,17 @@ service cloud.firestore {
     // runs on every write, and duplicating those checks here blows the 1000
     // expression cap. This helper owns key presence, non-empty text, amount
     // and the organisation binding.
+    function opportunityType(data) {
+      return data.get('opportunityType', 'business-problem');
+    }
+
     function validFundedPosting(data) {
       return data.keys().hasAll([
           'organisation', 'businessContext', 'currentApproach', 'currentLimitations',
           'expectedOutcome', 'successCriteria', 'dataAvailability',
           'categories', 'currency', 'expiresAt'
         ])
+        && opportunityType(data) == 'business-problem'
         && isNonEmptyString(data.businessContext, 4000)
         && isNonEmptyString(data.currentApproach, 4000)
         && isNonEmptyString(data.currentLimitations, 4000)
@@ -491,6 +519,43 @@ service cloud.firestore {
         // Sponsor identity is the owner's profile, not a free-text claim.
         && data.organisation
           == get(/databases/$(database)/documents/users/$(data.ownerId)).data.organisation;
+    }
+
+    // Funding is the starting point here: there must be no fixed problem fields
+    // or posting attachments masquerading as a QCDAO-48 problem statement.
+    function validOpenFunding(data) {
+      return data.keys().hasOnly([
+          'opportunityType', 'ownerId', 'organisation', 'title',
+          'fundingThesis', 'eligibilityNotes', 'categories', 'tags',
+          'amount', 'currency', 'expiresAt', 'status', 'audit',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasAll([
+          'opportunityType', 'ownerId', 'organisation', 'title',
+          'fundingThesis', 'eligibilityNotes', 'categories', 'tags',
+          'amount', 'currency', 'expiresAt', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.opportunityType == 'open-funding'
+        && hasValidAudit(data)
+        && isWalletAddress(data.ownerId)
+        && isNonEmptyString(data.title, 160)
+        && isNonEmptyString(data.fundingThesis, 4000)
+        && isNonEmptyString(data.eligibilityNotes, 4000)
+        && validCategories(data.categories)
+        && validFundingTags(data.tags)
+        && validAmount(data.amount) && data.amount > 0
+        && validCurrency(data.currency)
+        && data.expiresAt is timestamp
+        && validProblemStatus(data.status)
+        && data.organisation
+          == get(/databases/$(database)/documents/users/$(data.ownerId)).data.organisation;
+    }
+
+    function validMarketplaceOpportunity(data) {
+      // validProblem has already checked the complete open-funding shape. Avoid
+      // evaluating it twice here; that duplication crosses Firestore's hard
+      // per-request expression limit for QCDAO-51 writes.
+      return opportunityType(data) == 'open-funding' || validFundedPosting(data);
     }
 
     function validProblemStatus(status) {
@@ -508,29 +573,38 @@ service cloud.firestore {
     }
 
     function validProblem(data) {
-      return hasProblemSchema(data)
-        && hasValidAudit(data)
-        && isWalletAddress(data.ownerId)
-        && isNonEmptyString(data.title, 160)
-        && isNonEmptyString(data.summary, 4000)
-        && validAmount(data.amount)
-        && validProblemStatus(data.status)
-        && optionalString(data, 'benefits', 4000)
-        && optionalString(data, 'deliverables', 4000)
-        && optionalString(data, 'type', 80)
-        && optionalString(data, 'opportunityType', 80)
-        && optionalString(data, 'organisation', 120)
-        && optionalString(data, 'businessContext', 4000)
-        && optionalString(data, 'currentApproach', 4000)
-        && optionalString(data, 'currentLimitations', 4000)
-        && optionalString(data, 'expectedOutcome', 4000)
-        && optionalString(data, 'successCriteria', 4000)
-        && optionalString(data, 'dataAvailability', 4000)
-        && (!data.keys().hasAny(['categories']) || validCategories(data.categories))
-        && (!data.keys().hasAny(['currency']) || validCurrency(data.currency))
-        && (!data.keys().hasAny(['expiresAt']) || data.expiresAt is timestamp)
-        && (!data.keys().hasAny(['deadline']) || data.deadline is timestamp)
-        && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
+      // Branch early: QCDAO-51 has a smaller, distinct schema. Running it through
+      // every optional QCDAO-48 field as well exceeds Firestore's hard 1,000-
+      // expression evaluation limit on a valid create.
+      return (opportunityType(data) == 'open-funding' && validOpenFunding(data))
+        || (opportunityType(data) != 'open-funding'
+          && hasProblemSchema(data)
+          && hasValidAudit(data)
+          && isWalletAddress(data.ownerId)
+          && isNonEmptyString(data.title, 160)
+          && data.keys().hasAny(['summary'])
+          && isNonEmptyString(data.summary, 4000)
+          && validAmount(data.amount)
+          && validProblemStatus(data.status)
+          && optionalString(data, 'benefits', 4000)
+          && optionalString(data, 'deliverables', 4000)
+          && optionalString(data, 'type', 80)
+          && optionalString(data, 'opportunityType', 80)
+          && optionalString(data, 'organisation', 120)
+          && optionalString(data, 'businessContext', 4000)
+          && optionalString(data, 'currentApproach', 4000)
+          && optionalString(data, 'currentLimitations', 4000)
+          && optionalString(data, 'expectedOutcome', 4000)
+          && optionalString(data, 'successCriteria', 4000)
+          && optionalString(data, 'dataAvailability', 4000)
+          && optionalString(data, 'fundingThesis', 4000)
+          && optionalString(data, 'eligibilityNotes', 4000)
+          && (!data.keys().hasAny(['categories']) || validCategories(data.categories))
+          && (!data.keys().hasAny(['tags']) || validFundingTags(data.tags))
+          && (!data.keys().hasAny(['currency']) || validCurrency(data.currency))
+          && (!data.keys().hasAny(['expiresAt']) || data.expiresAt is timestamp)
+          && (!data.keys().hasAny(['deadline']) || data.deadline is timestamp)
+          && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes)));
     }
 
     function validProposalStatus(status) {
@@ -643,7 +717,7 @@ service cloud.firestore {
         // posting cannot start life already open, matched or funded.
         && request.resource.data.status in ['draft', 'submitted']
         && (!isMarketplaceVisible(request.resource.data.status)
-          || (validFundedPosting(request.resource.data)
+          || (validMarketplaceOpportunity(request.resource.data)
             // Expiry is the window solution developers respond within, so a
             // posting that arrives already expired is a mistake, not a state.
             && request.resource.data.expiresAt > request.time))
@@ -653,13 +727,15 @@ service cloud.firestore {
         && resource != null
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
+        // The AuditRegistry kind is immutable, so its Firestore discriminator is too.
+        && opportunityType(request.resource.data) == opportunityType(resource.data)
         && validProblem(request.resource.data)
         && validAttachments(request.resource.data, problemId)
         // Structure cannot be stripped out of a marketplace-visible posting.
         // Drafts without the funded schema stay editable; they cannot become
         // submitted or open until they satisfy validFundedPosting.
         && (!isMarketplaceVisible(request.resource.data.status)
-          || validFundedPosting(request.resource.data))
+          || validMarketplaceOpportunity(request.resource.data))
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validProblemTransition(resource.data.status, request.resource.data.status);
@@ -737,6 +813,22 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
         && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
         && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
+    }
+
+    // Public-safe counters derived by Cloud Functions from role-scoped proposal
+    // and funding records. Clients can read metrics only when they can browse the
+    // corresponding opportunity, and can never forge the values themselves.
+    match /opportunityMetrics/{problemId} {
+      function canBrowseOpportunity() {
+        let problem = get(/databases/$(database)/documents/problems/$(problemId)).data;
+        return isActiveUser(request.auth.uid)
+          && (problem.ownerId == request.auth.uid
+            || (problem.status in ['submitted', 'open']
+              && hasCompletedProfile(request.auth.uid)));
+      }
+
+      allow get: if canBrowseOpportunity();
+      allow list, create, update, delete: if false;
     }
     
     match /audits/{auditId} {

@@ -19,6 +19,12 @@ import {
   postingAuditReceipt,
   readPostingAudit,
 } from "../lib/postingAudit.js";
+import {
+  anchorFundingOpportunityAudit,
+  fundingOpportunityAuditReceipt,
+  readFundingOpportunityAudit,
+} from "../lib/fundingOpportunityAudit.js";
+import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 
 /**
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
@@ -81,7 +87,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
       return;
     }
     setAuditBusy(true);
-    void anchorPostingAudit(posting, {
+    const anchorAudit = posting.opportunityType === OPEN_FUNDING_TYPE
+      ? anchorFundingOpportunityAudit
+      : anchorPostingAudit;
+    void anchorAudit(posting, {
       account: user?.id,
       persistReceipt: false,
       onChange: (audit) => setPosting((current) => ({ ...current, audit })),
@@ -92,7 +101,9 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   };
 
   const verifyAudit = async () => {
-    return readPostingAudit(posting);
+    return posting.opportunityType === OPEN_FUNDING_TYPE
+      ? readFundingOpportunityAudit(posting)
+      : readPostingAudit(posting);
   };
 
   const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
@@ -114,7 +125,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         <section className="page empty">
           <span className="http-status">Sign in required</span>
           <h1>Sign in to view this posting.</h1>
-          <p>Problem statements are shared with platform members.</p>
+          <p>Research opportunities are shared with platform members.</p>
           <button
             className="primary"
             type="button"
@@ -139,7 +150,13 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   }
 
   const expired = isExpired(posting.expiresAt);
-  const audit = postingAuditReceipt(posting);
+  const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
+  const audit = isOpenFunding
+    ? fundingOpportunityAuditReceipt(posting)
+    : postingAuditReceipt(posting);
+  const proposalCount = Number(posting.proposalCount ?? 0);
+  const fundedAmount = Number(posting.fundedAmount ?? 0);
+  const fundingProgressPercent = Number(posting.fundingProgressPercent ?? 0);
 
   return (
     <section className="page detail-page">
@@ -154,20 +171,28 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
       <div className="detail-layout">
         <article className="detail-main">
           <div className="card-top">
-            <span className="eyebrow">Funded business problem</span>
+            <span className="eyebrow">
+              {isOpenFunding ? "Open funding opportunity" : "Funded business problem"}
+            </span>
             <span className="status-dot">{expired ? "expired" : posting.status}</span>
           </div>
           <h1>{posting.title}</h1>
-          <p className="lead">{posting.summary}</p>
+          <p className="lead">{isOpenFunding ? posting.fundingThesis : posting.summary}</p>
 
-          <Detail heading="Business context">{posting.businessContext}</Detail>
-          <Detail heading="Current approach">{posting.currentApproach}</Detail>
-          <Detail heading="Limitations of that approach">{posting.currentLimitations}</Detail>
-          <Detail heading="Expected outcome">{posting.expectedOutcome}</Detail>
-          <Detail heading="Success criteria">{posting.successCriteria}</Detail>
-          <Detail heading="Data availability">{posting.dataAvailability}</Detail>
+          {isOpenFunding ? (
+            <Detail heading="Eligibility">{posting.eligibilityNotes}</Detail>
+          ) : (
+            <>
+              <Detail heading="Business context">{posting.businessContext}</Detail>
+              <Detail heading="Current approach">{posting.currentApproach}</Detail>
+              <Detail heading="Limitations of that approach">{posting.currentLimitations}</Detail>
+              <Detail heading="Expected outcome">{posting.expectedOutcome}</Detail>
+              <Detail heading="Success criteria">{posting.successCriteria}</Detail>
+              <Detail heading="Data availability">{posting.dataAvailability}</Detail>
+            </>
+          )}
 
-          {posting.attachments.length > 0 && (
+          {!isOpenFunding && posting.attachments.length > 0 && (
             <div className="detail-section">
               <h2>Supporting documents</h2>
               <ul className="attachment-list">
@@ -191,8 +216,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
           <AuditReceipt
             audit={audit}
-            eventLabel="Funded problem statement submitted"
-            actorRole="Problem owner"
+            eventLabel={isOpenFunding
+              ? "Open funding opportunity submitted"
+              : "Funded problem statement submitted"}
+            actorRole={isOpenFunding ? "Funder" : "Problem owner"}
             firebaseReference={`problems/${posting.id}`}
             onVerify={verifyAudit}
             onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
@@ -202,10 +229,22 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         </article>
 
         <aside className="context-panel">
-          <span className="eyebrow">Funding</span>
+          <span className="eyebrow">{isOpenFunding ? "Indicative funding" : "Funding"}</span>
           <strong>{posting.currency} {Number(posting.amount).toLocaleString()}</strong>
+          <div className="detail-funding-progress">
+            <span className="funding-progress" aria-label={`${fundingProgressPercent}% funded`}>
+              <span style={{ width: `${fundingProgressPercent}%` }} />
+            </span>
+            <small>
+              {posting.currency} {fundedAmount.toLocaleString()} committed · {fundingProgressPercent}%
+            </small>
+          </div>
           <dl>
             <div><dt>Posted by</dt><dd>{posting.organisation}</dd></div>
+            <div>
+              <dt>Proposals received</dt>
+              <dd>{proposalCount} {proposalCount === 1 ? "proposal" : "proposals"}</dd>
+            </div>
             <div><dt>Submitted</dt><dd>{formatInstant(posting.createdAt)}</dd></div>
             <div><dt>Reference</dt><dd><code>{posting.id}</code></dd></div>
           </dl>
@@ -221,6 +260,17 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               <div className="tag-list">
                 {posting.categories.map((value) => (
                   <span className="tag-chip static" key={value}>{categoryLabel(value)}</span>
+                ))}
+              </div>
+            </>
+          )}
+
+          {isOpenFunding && posting.tags.length > 0 && (
+            <>
+              <span className="eyebrow">Tags</span>
+              <div className="tag-list">
+                {posting.tags.map((tag) => (
+                  <span className="tag-chip static" key={tag}>{tag}</span>
                 ))}
               </div>
             </>
