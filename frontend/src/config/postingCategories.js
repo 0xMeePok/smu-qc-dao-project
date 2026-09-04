@@ -33,7 +33,7 @@ export const CATEGORY_VALUES = POSTING_CATEGORIES.map((category) => category.val
 
 export const MAX_CATEGORIES = 6;
 
-export const CURRENCIES = ["SGD", "USD", "EUR", "GBP"];
+export const CURRENCIES = ["USDT", "USDC", "XSGD"];
 
 /** How long a posting stays open for responses. Written as a concrete expiry date. */
 export const EXPIRY_WINDOWS = [

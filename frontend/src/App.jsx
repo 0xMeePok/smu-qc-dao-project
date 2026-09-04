@@ -23,9 +23,11 @@ import {
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import CreatePostingPage from "./pages/CreatePostingPage.jsx";
+import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
 import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { listPublishedPostings } from "./lib/postings.js";
-import { formatInstantDate } from "./lib/datetime.js";
+import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
+import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
 
 function parseHash() {
   if (typeof window !== "undefined") {
@@ -331,7 +333,12 @@ function OpportunityCard({ item }) {
       </span>
       <div className="opportunity-summary">
         <strong>{item.title}</strong>
-        <small>{item.owner} · {item.type}</small>
+        <span className="opportunity-byline">
+          <small>{item.owner}</small>
+          <span className={`opportunity-type-badge ${item.type === "Open funding" ? "funding" : "problem"}`}>
+            {item.type}
+          </span>
+        </span>
       </div>
       <div>
         <span className="status-dot">{item.status}</span>
@@ -466,14 +473,7 @@ function usePublishedPostings() {
     listPublishedPostings()
       .then((items) => {
         if (cancelled) return;
-        setPostings(items.map((item) => ({
-          ...item,
-          route: "posting",
-          owner: item.organisation,
-          type: "Business problem",
-          amount: `${item.currency} ${Number(item.amount).toLocaleString()}`,
-          deadline: formatInstantDate(item.expiresAt),
-        })));
+        setPostings(items.map(toOpportunityListItem));
       })
       .catch((error) => { if (!cancelled) setLoadError(error); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -487,7 +487,7 @@ function usePublishedPostings() {
 function SignedOutNotice() {
   return (
     <p className="notice" role="status">
-      Sign in to see problem statements posted by other organisations.
+      Sign in to see opportunities posted by other organisations.
     </p>
   );
 }
@@ -513,6 +513,7 @@ function Discover() {
             className={filter === item ? "selected" : ""}
             key={item}
             type="button"
+            aria-pressed={filter === item}
             onClick={() => setFilter(item)}
           >
             {item}
@@ -523,7 +524,7 @@ function Discover() {
       {loading && <p className="lead">Loading published opportunities…</p>}
       {loadError && (
         <p className="notice notice-error" role="alert">
-          We could not load published postings. Please refresh and try again.
+          We could not load published opportunities. Please refresh and try again.
         </p>
       )}
       {!loading && !loadError && visibleOpportunities.length === 0 && (
@@ -555,7 +556,7 @@ function NotFound() {
 }
 
 function AppContent() {
-  const { section, id, params } = useRoute();
+  const { section, id, fullPath, params } = useRoute();
   const routeConfig = getRouteConfig(section);
 
   let pageComponent = <NotFound />;
@@ -593,12 +594,14 @@ function AppContent() {
   } else if (section === "create") {
     pageComponent = (
       <RouteGuard
-        targetRoute={section}
+        targetRoute={fullPath}
         allowedRoles={routeConfig?.allowedRoles}
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <CreatePostingPage onNavigate={go} />
+        {id === OPEN_FUNDING_TYPE
+          ? <CreateFundingOpportunityPage onNavigate={go} />
+          : <CreatePostingPage onNavigate={go} />}
       </RouteGuard>
     );
   } else if (section === "my-problems") {

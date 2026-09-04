@@ -33,7 +33,7 @@ function completeForm(overrides = {}) {
     dataAvailability: "Two years of anonymised delivery telemetry.",
     categories: ["ai"],
     amount: "80000",
-    currency: "SGD",
+    currency: "USDC",
     expiryDays: 90,
     ...overrides,
   };

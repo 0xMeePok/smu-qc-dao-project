@@ -169,6 +169,7 @@ export async function findPosting(postingId) {
     id: snapshot.id,
     ...data,
     categories: Array.isArray(data.categories) ? data.categories : [],
+    tags: Array.isArray(data.tags) ? data.tags : [],
     attachments: Array.isArray(data.attachments) ? data.attachments : [],
   };
 }
@@ -187,7 +188,8 @@ export async function listPublishedPostings() {
         id: item.id,
         ...data,
         categories: Array.isArray(data.categories) ? data.categories : [],
-            attachments: Array.isArray(data.attachments) ? data.attachments : [],
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        attachments: Array.isArray(data.attachments) ? data.attachments : [],
       };
     })
     .filter((item) => !item.expiresAt
