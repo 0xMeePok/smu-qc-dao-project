@@ -30,10 +30,9 @@ import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
  * attachments are downloaded from.
  *
- * Reads are governed by firebase/firestore.rules, which currently allows a posting
- * to be read only by its owner. A viewer who is not the owner therefore sees the
- * not-found state rather than the content - correct today, and the single place to
- * revisit when postings become discoverable by other organisations.
+ * Reads are governed by firebase/firestore.rules: a submitted or open posting is
+ * readable by any active member, and so are its PDFs (firebase/storage.rules).
+ * A draft stays private to its owner.
  */
 
 function Detail({ heading, children }) {
@@ -71,7 +70,9 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const download = async (attachment) => {
     setError(null);
     try {
-      saveBlobAs(await downloadAttachment(attachment), attachment.name);
+      saveBlobAs(await downloadAttachment({
+        attachment, ownerId: posting.ownerId, problemId: posting.id,
+      }), attachment.name);
     } catch (downloadError) {
       setError(messageForStorageError(downloadError));
     }

@@ -25,7 +25,7 @@ fields are required versus optional, and why.
 npm test
 ```
 
-73 tests, no emulator or network needed. Covers field validation, the default role
+138 tests, no emulator or network needed. Covers field validation, the default role
 assigned at account creation, the whole-form validator, route-permission resolution,
 and the 15-minute idle session.
 

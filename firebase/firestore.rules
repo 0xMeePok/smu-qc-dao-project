@@ -25,13 +25,13 @@ service cloud.firestore {
     // Inclusive: auth_time and the cutoff are whole seconds, so sign-in then logout
     // in the same second must still invalidate that ID token.
     function hasRevokedSession(address) {
-      return (exists(/databases/$(database)/documents/sessionRevocations/$(address))
-          && request.auth.token.auth_time
-            <= get(/databases/$(database)/documents/sessionRevocations/$(address)).data.sessionsValidAfterEpoch)
-        || (exists(/databases/$(database)/documents/users/$(address))
-          && get(/databases/$(database)/documents/users/$(address)).data.keys().hasAny(['sessionsValidAfterEpoch'])
-          && request.auth.token.auth_time
-            <= get(/databases/$(database)/documents/users/$(address)).data.sessionsValidAfterEpoch);
+      let revocation = /databases/$(database)/documents/sessionRevocations/$(address);
+      let profile = /databases/$(database)/documents/users/$(address);
+      return (exists(revocation)
+          && request.auth.token.auth_time <= get(revocation).data.sessionsValidAfterEpoch)
+        || (exists(profile)
+          && get(profile).data.keys().hasAny(['sessionsValidAfterEpoch'])
+          && request.auth.token.auth_time <= get(profile).data.sessionsValidAfterEpoch);
     }
 
     function isUnrevokedWallet(address) {
@@ -276,19 +276,30 @@ service cloud.firestore {
     // ACTIVE COLLECTIONS (Document-based authorization & schema validation)
     // ------------------------------------------------------------------------
 
+    // Exactly what buildPostingDocument and the seeder write, and nothing else.
+    // Six pre-QCDAO-48 fields (outcomes, deadline, benefits, deliverables, type,
+    // opportunityType) were dropped: no writer produces them, and hasOnly compares
+    // every document key against every allowed key, so the shorter list is what
+    // brings problem writes back under the 1000-expression cap.
     function hasProblemSchema(data) {
+      // hasOnly, NOT keys().size(). A size bound looked equivalent but is not:
+      // almost every field is optional through data.get() defaults, so an unknown
+      // key does not displace a validated one - it fits beside the six required
+      // fields and is never checked, on a document other members can read.
+      //
+      // The five pre-QCDAO-48 fields (outcomes, deadline, benefits, deliverables,
+      // type) are deliberately absent: nothing writes them - not the client, not
+      // the tests, and none of the production documents - so allowing them only
+      // widened the surface, and validating them cost the expression budget that
+      // publishing a draft with attachments needs.
       return data.keys().hasOnly([
-        'ownerId', 'organisation', 'title', 'summary', 'outcomes', 'amount', 'deadline',
-        'benefits', 'deliverables', 'status', 'type', 'opportunityType',
-        // QCDAO-48 - the structured funded problem statement.
+        'ownerId', 'organisation', 'title', 'summary', 'amount', 'status',
         'businessContext', 'currentApproach', 'currentLimitations',
         'expectedOutcome', 'successCriteria', 'dataAvailability',
         // QCDAO-51 - open funding without a fixed problem statement.
-        'fundingThesis', 'eligibilityNotes', 'tags',
+        'opportunityType', 'fundingThesis', 'eligibilityNotes', 'tags',
         'categories', 'currency', 'expiresAt',
         'attachments', 'audit', 'createdAt', 'updatedAt'
-      ]) && data.keys().hasAll([
-        'ownerId', 'title', 'amount', 'status', 'createdAt', 'updatedAt'
       ]);
     }
 
@@ -322,9 +333,8 @@ service cloud.firestore {
       ]);
     }
 
-    function optionalString(data, field, maxLength) {
-      return !data.keys().hasAny([field])
-        || (data[field] is string && data[field].size() <= maxLength);
+    function boundedText(value, maxLength) {
+      return value is string && value.size() <= maxLength;
     }
 
     // QCDAO-75..79 transaction delivery state. Audit verification reads the
@@ -336,16 +346,12 @@ service cloud.firestore {
     function hasValidAudit(data) {
       return !data.keys().hasAny(['audit'])
         || (data.audit is map
-          && data.audit.keys().hasOnly([
-            'schemaVersion', 'chainId', 'entityId',
-            'contentHash', 'status', 'transactionHash', 'blockNumber',
-            'attemptCount', 'lastError'
-          ])
-          && data.audit.keys().hasAll([
-            'schemaVersion', 'chainId', 'entityId',
-            'contentHash', 'status', 'transactionHash', 'blockNumber',
-            'attemptCount', 'lastError'
-          ])
+          // keys().size() == 9, not hasOnly + hasAll on the same nine names. Those
+          // two list comparisons cost enough that a posting carrying both an audit
+          // receipt and two attachments exceeded Firestore's 1000-expression cap.
+          // Equivalent: every one of the nine is checked by name below, so an
+          // unknown key can only fit by displacing one, and that check then fails.
+          && data.audit.keys().size() == 9
           && data.audit.schemaVersion == 1
           && data.audit.chainId == 421614
           && isBytes32(data.audit.entityId)
@@ -367,6 +373,18 @@ service cloud.firestore {
     function stringListItemIsValid(items, index) {
       return items.size() <= index
         || (items[index] is string && items[index].size() > 0 && items[index].size() <= 500);
+    }
+
+    // Present-or-valid. Used by validProblem for every field that only some
+    // opportunity types carry.
+    // data.get() with a PASSING default rather than keys().hasAny(): an absent
+    // field falls back to '' which satisfies both checks, while a present but
+    // wrong one still fails. validProblem calls this thirteen times, and building
+    // the document's key list that often is what exceeded Firestore's 1000
+    // expression evaluation cap once QCDAO-51's fields joined QCDAO-50's drafts.
+    function optionalString(data, field, maxLength) {
+      let value = data.get(field, '');
+      return value is string && value.size() <= maxLength;
     }
 
     function stringListIsValid(items) {
@@ -395,35 +413,37 @@ service cloud.firestore {
     // into someone else's folder, and any later feature that renders the list
     // would happily hand out a reference to a document they cannot read. Storage
     // rules would still refuse the download, but the reference should never exist.
-    function attachmentIsValid(items, index, ownerId, problemId) {
-      return items.size() <= index
-        || (items[index] is map
-          // No 'uploadedAt'. An earlier draft allowed one, but nothing writes it and
-          // rules cannot pin it to request.time inside a list (existing entries keep
-          // their original value across later updates, so the comparison would fail
-          // every edit). That left a client-controlled timestamp any future feature
-          // might have displayed as fact. Add it back only with a server-side writer.
-          && items[index].keys().hasOnly(['id', 'name', 'size', 'contentType', 'path'])
-          && items[index].keys().hasAll(['id', 'name', 'size', 'path'])
-          && items[index].id is string
-          && items[index].name is string
-          && items[index].name.size() <= 200
-          && items[index].size is number
-          && items[index].size > 0 && items[index].size <= 10485760
-          && items[index].path == 'problems/' + ownerId + '/' + problemId + '/' + items[index].id + '.pdf'
-          && (!items[index].keys().hasAny(['contentType'])
-            || items[index].contentType == 'application/pdf'));
+    // `prefix` is built once by the caller, and the fields are read once each with
+    // let bindings: this runs up to five times per write and the repeated keys()
+    // and string concatenation were a large part of the expression budget.
+    // No `path`: it is derived by the client from the owner, the posting and this
+    // id, so there is nothing here to forge and nothing to compare. That removed
+    // the per-entry string concatenation, which was the most expensive part of
+    // this check against Firestore's 1000-expression evaluation cap.
+    function attachmentEntry(item) {
+      let id = item.get('id', '');
+      let size = item.get('size', 0);
+      let name = item.get('name', '');
+      return item is map
+        // Four named fields, all checked below: an unknown key can only fit by
+        // displacing one of them, and that one's check then fails.
+        && item.keys().size() == 4
+        && id is string && id.matches('^[A-Za-z0-9_-]{8,64}$')
+        && name is string && name.size() > 0 && name.size() <= 200
+        && size is number && size > 0 && size <= 10485760
+        && item.get('contentType', '') == 'application/pdf';
     }
 
-    function validAttachments(data, problemId) {
-      return !data.keys().hasAny(['attachments'])
-        || (data.attachments is list
-          && data.attachments.size() <= 5
-          && attachmentIsValid(data.attachments, 0, data.ownerId, problemId)
-          && attachmentIsValid(data.attachments, 1, data.ownerId, problemId)
-          && attachmentIsValid(data.attachments, 2, data.ownerId, problemId)
-          && attachmentIsValid(data.attachments, 3, data.ownerId, problemId)
-          && attachmentIsValid(data.attachments, 4, data.ownerId, problemId));
+    // Two. Rules cannot loop, so every slot is unrolled and costs expressions
+    // against Firestore's 1000-per-evaluation cap. Two is what still passes with an
+    // audit receipt on the same document; at three, anchoring a posting fails.
+    // Mirrored in lib/attachments.js.
+    function validAttachments(data) {
+      let items = data.get('attachments', []);
+      return items is list
+        && items.size() <= 2
+        && (items.size() < 1 || attachmentEntry(items[0]))
+        && (items.size() < 2 || attachmentEntry(items[1]));
     }
 
     // QCDAO-48 - the technology areas a posting can ask for help in.
@@ -446,7 +466,7 @@ service cloud.firestore {
 
     function validCategories(categories) {
       return categories is list
-        && categories.size() >= 1 && categories.size() <= 6
+        && categories.size() <= 6
         // toSet().hasOnly() checks membership for the whole list in one expression.
         // Firestore caps a rule evaluation at 1000 expressions and this file is
         // close to that ceiling, so unrolling six index comparisons here is a cost
@@ -501,23 +521,61 @@ service cloud.firestore {
       return data.get('opportunityType', 'business-problem');
     }
 
+    // Every text field a draft may carry, emptiness allowed - that is QCDAO-50.
+    function draftTextIsBounded(data) {
+      return optionalString(data, 'title', 160)
+        && optionalString(data, 'summary', 4000)
+        && optionalString(data, 'organisation', 120)
+        && optionalString(data, 'businessContext', 4000)
+        && optionalString(data, 'currentApproach', 4000)
+        && optionalString(data, 'currentLimitations', 4000)
+        && optionalString(data, 'expectedOutcome', 4000)
+        && optionalString(data, 'successCriteria', 4000)
+        && optionalString(data, 'dataAvailability', 4000)
+        && legacyTextIsBounded(data);
+    }
+
+    // The fields validFundedPosting does NOT check, so a published posting still
+    // has every string bounded without checking the same field twice.
+    function legacyTextIsBounded(data) {
+      return optionalString(data, 'opportunityType', 80)
+        && optionalString(data, 'fundingThesis', 4000)
+        && optionalString(data, 'eligibilityNotes', 4000);
+    }
+
+    function fundedCategories(data) {
+      return data.get('categories', []);
+    }
+
     function validFundedPosting(data) {
-      return data.keys().hasAll([
-          'organisation', 'businessContext', 'currentApproach', 'currentLimitations',
-          'expectedOutcome', 'successCriteria', 'dataAvailability',
-          'categories', 'currency', 'expiresAt'
-        ])
-        && opportunityType(data) == 'business-problem'
-        && isNonEmptyString(data.businessContext, 4000)
-        && isNonEmptyString(data.currentApproach, 4000)
-        && isNonEmptyString(data.currentLimitations, 4000)
-        && isNonEmptyString(data.expectedOutcome, 4000)
-        && isNonEmptyString(data.successCriteria, 4000)
-        && isNonEmptyString(data.dataAvailability, 4000)
+      // data.get() with a FAILING default rather than keys().hasAll([...]): a
+      // missing field falls back to a value the check below rejects, so presence
+      // is covered without scanning the key list. That scan was the single
+      // biggest cost here against the 1000-expression cap.
+      return opportunityType(data) == 'business-problem'
+        && isNonEmptyString(data.get('title', ''), 160)
+        && isNonEmptyString(data.get('summary', ''), 4000)
+        && isNonEmptyString(data.get('organisation', ''), 120)
+        && isNonEmptyString(data.get('businessContext', ''), 4000)
+        && isNonEmptyString(data.get('currentApproach', ''), 4000)
+        && isNonEmptyString(data.get('currentLimitations', ''), 4000)
+        && isNonEmptyString(data.get('expectedOutcome', ''), 4000)
+        && isNonEmptyString(data.get('successCriteria', ''), 4000)
+        && isNonEmptyString(data.get('dataAvailability', ''), 4000)
+        // Only what validProblem has NOT already established. It has run on this
+        // same write and checked the category set, the currency and the expiry
+        // type; repeating them here is what pushed publishing a draft with
+        // attachments past the 1000-expression cap. What is left is the stricter
+        // requirement: at least one category, and a real expiry.
+        && fundedCategories(data).size() >= 1
+        // Presence only - validProblem already checked the value is a supported
+        // currency. '' is what an absent field falls back to.
+        && data.get('currency', '') != ''
+        && data.get('expiresAt', '') is timestamp
         // A funded problem statement with no funding attached is not one.
-        && data.amount > 0
+        && data.get('amount', 0) > 0
         // Sponsor identity is the owner's profile, not a free-text claim.
-        && data.organisation
+        && data.get('organisation', '')
           == get(/databases/$(database)/documents/users/$(data.ownerId)).data.organisation;
     }
 
@@ -581,30 +639,25 @@ service cloud.firestore {
           && hasProblemSchema(data)
           && hasValidAudit(data)
           && isWalletAddress(data.ownerId)
-          && isNonEmptyString(data.title, 160)
-          && data.keys().hasAny(['summary'])
-          && isNonEmptyString(data.summary, 4000)
+          // A draft is allowed to be empty - that is the point of QCDAO-50.
+          // Everything else must carry its text.
           && validAmount(data.amount)
           && validProblemStatus(data.status)
-          && optionalString(data, 'benefits', 4000)
-          && optionalString(data, 'deliverables', 4000)
-          && optionalString(data, 'type', 80)
-          && optionalString(data, 'opportunityType', 80)
-          && optionalString(data, 'organisation', 120)
-          && optionalString(data, 'businessContext', 4000)
-          && optionalString(data, 'currentApproach', 4000)
-          && optionalString(data, 'currentLimitations', 4000)
-          && optionalString(data, 'expectedOutcome', 4000)
-          && optionalString(data, 'successCriteria', 4000)
-          && optionalString(data, 'dataAvailability', 4000)
-          && optionalString(data, 'fundingThesis', 4000)
-          && optionalString(data, 'eligibilityNotes', 4000)
-          && (!data.keys().hasAny(['categories']) || validCategories(data.categories))
-          && (!data.keys().hasAny(['tags']) || validFundingTags(data.tags))
-          && (!data.keys().hasAny(['currency']) || validCurrency(data.currency))
-          && (!data.keys().hasAny(['expiresAt']) || data.expiresAt is timestamp)
-          && (!data.keys().hasAny(['deadline']) || data.deadline is timestamp)
-          && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes)));
+          // Bounds are split so the two paths are MUTUALLY EXCLUSIVE. A draft is
+          // bounded here and skips validFundedPosting entirely; anything else is
+          // checked non-empty by validFundedPosting, so this only has to cover
+          // the fields that helper does not. Running the full block on both paths
+          // duplicated thirteen checks and crossed the 1000-expression cap.
+          && (data.status == 'draft'
+            ? draftTextIsBounded(data)
+            : legacyTextIsBounded(data))
+          && validCategories(data.get('categories', []))
+          // validFundingTags demands at least one tag, so an absent or empty list
+          // has to short-circuit: a business problem carries no tags at all.
+          && (data.get('tags', []).size() == 0 || validFundingTags(data.get('tags', [])))
+          && validCurrency(data.get('currency', 'USDT'))
+          && data.get('expiresAt', request.time) is timestamp
+);
     }
 
     function validProposalStatus(status) {
@@ -711,12 +764,12 @@ service cloud.firestore {
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
         && validProblem(request.resource.data)
-        && validAttachments(request.resource.data, problemId)
+        && validAttachments(request.resource.data)
         // QCDAO-48 posts straight to 'submitted'; 'draft' stays for anything that
         // saves before it is complete. Nothing else may be created directly - a
         // posting cannot start life already open, matched or funded.
         && request.resource.data.status in ['draft', 'submitted']
-        && (!isMarketplaceVisible(request.resource.data.status)
+        && (request.resource.data.status == 'draft'
           || (validMarketplaceOpportunity(request.resource.data)
             // Expiry is the window solution developers respond within, so a
             // posting that arrives already expired is a mistake, not a state.
@@ -730,12 +783,21 @@ service cloud.firestore {
         // The AuditRegistry kind is immutable, so its Firestore discriminator is too.
         && opportunityType(request.resource.data) == opportunityType(resource.data)
         && validProblem(request.resource.data)
-        && validAttachments(request.resource.data, problemId)
-        // Structure cannot be stripped out of a marketplace-visible posting.
-        // Drafts without the funded schema stay editable; they cannot become
-        // submitted or open until they satisfy validFundedPosting.
-        && (!isMarketplaceVisible(request.resource.data.status)
+        && validAttachments(request.resource.data)
+        // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
+        // let in_review, matched, funded, completed and cancelled take the draft
+        // branch, so a posting could be blanked on its way through those states.
+        // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
+        // let in_review, matched, funded, completed and cancelled skip the
+        // contract, so a posting could be blanked passing through those states.
+        // Bounds and types still apply to a draft - validProblem does that.
+        && (request.resource.data.status == 'draft'
           || validMarketplaceOpportunity(request.resource.data))
+        // Publishing a draft needs a live expiry. A draft can sit past its own
+        // deadline, and it must not go to the marketplace already closed.
+        && (resource.data.status != 'draft'
+          || !isMarketplaceVisible(request.resource.data.status)
+          || request.resource.data.expiresAt > request.time)
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validProblemTransition(resource.data.status, request.resource.data.status);

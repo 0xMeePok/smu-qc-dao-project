@@ -1,7 +1,10 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { Modal } from "./Modal.jsx";
+import { POSTING_STATUS_DRAFT, deletePosting, listOwnPostings } from "../lib/postings.js";
+import { formatInstant } from "../lib/datetime.js";
 import { ROLE_LABELS } from "../config/roles.js";
 
 function RoleBadge({ role }) {
@@ -26,25 +29,75 @@ export function MyProblems({ onNavigate }) {
   const [data, setData] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    async function fetchData() {
-      if (!user?.id || !db) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const q = query(collection(db, "problems"), where("ownerId", "==", user.id));
-        const querySnapshot = await getDocs(q);
-        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (err) {
-        setError(err);
-      } finally {
-        setLoading(false);
-      }
+  const load = useCallback(async () => {
+    if (!user?.id || !db) {
+      setLoading(false);
+      return;
     }
-    fetchData();
+    setLoading(true);
+    try {
+      setData(await listOwnPostings(user.id));
+      setError(null);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
   }, [user?.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const drafts = data.filter((item) => item.status === POSTING_STATUS_DRAFT);
+  const published = data.filter((item) => item.status !== POSTING_STATUS_DRAFT);
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      await deletePosting(pendingDelete);
+      setPendingDelete(null);
+      await load();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  function Row({ item, isDraft }) {
+    return (
+      <div className="table-row">
+        <div>
+          <strong>{item.title || "Untitled draft"}</strong>
+          <small className="table-row-meta">
+            {isDraft ? "Last saved " : "Submitted "}
+            {formatInstant(item.updatedAt)}
+          </small>
+        </div>
+        <div className="table-row-actions">
+          {isDraft && <span className="draft-badge">Draft</span>}
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => onNavigate(isDraft ? `create/${item.id}` : `posting/${item.id}`)}
+          >
+            {isDraft ? "Resume editing" : "View"}
+          </button>
+          {isDraft && (
+            <button
+              className="text-button danger-text"
+              type="button"
+              onClick={() => setPendingDelete(item)}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <section className="page dashboard-page">
@@ -57,33 +110,65 @@ export function MyProblems({ onNavigate }) {
         <p>Manage your published research challenges, track submission deadlines, and evaluate inbound researcher proposals.</p>
       </div>
 
+      {error && (
+        <div className="error-banner" role="alert" style={{ padding: "1rem" }}>
+          <strong>Error:</strong> {error.message}
+        </div>
+      )}
+
+      {/* Drafts are visible only here, and only to their owner. */}
+      <div className="card-table">
+        <div className="table-header">
+          <h3>Drafts {drafts.length > 0 && <span className="count-pill">{drafts.length}</span>}</h3>
+          <button className="primary small" type="button" onClick={() => onNavigate("create")}>+ New Brief</button>
+        </div>
+        {loading ? (
+          <div className="table-empty">Loading…</div>
+        ) : drafts.length === 0 ? (
+          <div className="table-empty">No drafts. Start a brief and save it to finish later.</div>
+        ) : (
+          drafts.map((item) => <Row item={item} isDraft key={item.id} />)
+        )}
+      </div>
+
       <div className="card-table">
         <div className="table-header">
           <h3>Published Problem Statements</h3>
-          <button className="primary small" type="button" onClick={() => onNavigate("create")}>+ New Brief</button>
         </div>
-        
         {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
-        ) : error ? (
-          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
-             <strong>Error:</strong> {error.message}
-          </div>
-        ) : data.length === 0 ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No problems found.</div>
+          <div className="table-empty">Loading…</div>
+        ) : published.length === 0 ? (
+          <div className="table-empty">Nothing published yet.</div>
         ) : (
-          data.map(item => (
-            <div className="table-row" key={item.id}>
-              <div>
-                <strong>{item.title}</strong>
-                <small className="table-row-meta">
-                  Submitted by <ProfileLink address={item.researcherId} label="view profile" onNavigate={onNavigate} />
-                </small>
-              </div>
-            </div>
-          ))
+          published.map((item) => <Row item={item} isDraft={false} key={item.id} />)
         )}
       </div>
+
+      {pendingDelete && (
+        <Modal
+          labelledBy="delete-draft-title"
+          describedBy="delete-draft-desc"
+          onDismiss={() => setPendingDelete(null)}
+        >
+          <div className="modal-head">
+            <div>
+              <h2 id="delete-draft-title">Delete this draft?</h2>
+              <p id="delete-draft-desc">
+                <strong>{pendingDelete.title || "Untitled draft"}</strong> and any files
+                attached to it will be permanently removed. This cannot be undone.
+              </p>
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="secondary" type="button" disabled={deleting} onClick={() => setPendingDelete(null)}>
+              Keep it
+            </button>
+            <button className="danger-btn" type="button" disabled={deleting} onClick={confirmDelete}>
+              {deleting ? "Deleting…" : "Delete draft"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }

@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
+import { Modal } from "../components/Modal.jsx";
 import { useSession } from "../context/SessionContext.jsx";
 import {
   CURRENCIES,
@@ -11,12 +12,19 @@ import {
   categoryLabel,
   expiryDateFrom,
 } from "../config/postingCategories.js";
-import { buildPostingDocument, createPosting, newPostingId } from "../lib/postings.js";
+import {
+  buildPostingDocument,
+  createPosting,
+  findPosting,
+  newPostingId,
+  publishDraft,
+  saveDraft,
+} from "../lib/postings.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
-import { formatInstant } from "../lib/datetime.js";
+import { formatInstant, toDate } from "../lib/datetime.js";
 import {
   anchorPostingAudit,
   postingAuditReceipt,
@@ -37,8 +45,10 @@ import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
  * thing that clears the form is a successful write, and by then the posting exists.
  */
 
-function abandonDraftAttachments(items) {
-  return Promise.allSettled(items.map((item) => deleteAttachment(item)));
+function abandonDraftAttachments(items, ownerId, problemId) {
+  return Promise.allSettled(items.map((attachment) => deleteAttachment({
+    attachment, ownerId, problemId,
+  })));
 }
 
 const EMPTY_FORM = {
@@ -55,6 +65,25 @@ const EMPTY_FORM = {
   currency: CURRENCIES[0],
   expiryDays: 90,
 };
+
+function DraftStatus({ savedAt, saving }) {
+  const saved = toDate(savedAt);
+
+  if (saving) return <p className="draft-status" role="status">Saving draft…</p>;
+  if (!saved) {
+    return (
+      <p className="draft-status muted" role="status">
+        Not saved yet. Save as draft to keep this and finish later.
+      </p>
+    );
+  }
+
+  return (
+    <p className="draft-status" role="status">
+      Draft saved <strong>{formatInstant(saved)}</strong>
+    </p>
+  );
+}
 
 function Section({ step, legend, hint, children }) {
   return (
@@ -87,13 +116,54 @@ function TextField({ id, label, hint, error, rows, value, onChange, ...rest }) {
   );
 }
 
-export default function CreatePostingPage({ onNavigate }) {
+// Maps a stored expiry back to the window that produced it, so resuming a draft
+// shows the choice the owner made rather than the default.
+// Measured from createdAt, not from now: time already elapsed is not part of the
+// choice. Against now, a 90-day draft reopened weeks later snaps to 60 or 30 and
+// the next save writes that shorter window back.
+function windowFromExpiry(expiresAt, createdAt) {
+  const expiry = toDate(expiresAt);
+  if (!expiry) return EMPTY_FORM.expiryDays;
+  const from = toDate(createdAt) ?? new Date();
+  const days = Math.round((expiry.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
+  return EXPIRY_WINDOWS.reduce(
+    (closest, option) => (Math.abs(option.value - days) < Math.abs(closest - days) ? option.value : closest),
+    EMPTY_FORM.expiryDays,
+  );
+}
+
+function snapshotOf(form, attachments) {
+  return JSON.stringify({
+    ...form,
+    categories: [...form.categories].sort(),
+    attachments: attachments.map((item) => item.id).sort(),
+  });
+}
+
+function formFromPosting(posting) {
+  return {
+    title: posting.title ?? "",
+    businessContext: posting.businessContext ?? "",
+    summary: posting.summary ?? "",
+    currentApproach: posting.currentApproach ?? "",
+    currentLimitations: posting.currentLimitations ?? "",
+    expectedOutcome: posting.expectedOutcome ?? "",
+    successCriteria: posting.successCriteria ?? "",
+    dataAvailability: posting.dataAvailability ?? "",
+    categories: posting.categories ?? [],
+    amount: posting.amount ? String(posting.amount) : "",
+    currency: posting.currency ?? EMPTY_FORM.currency,
+    expiryDays: windowFromExpiry(posting.expiresAt, posting.createdAt),
+  };
+}
+
+export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const { address, profile } = useSession();
   const { address: connectedAddress, isConnected } = useAccount();
 
   // Reserved up front: attachments are uploaded while the form is still being
   // filled in, and this id is part of their storage path.
-  const [postingId, setPostingId] = useState(() => newPostingId());
+  const [postingId, setPostingId] = useState(() => resumeId ?? newPostingId());
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachments, setAttachments] = useState([]);
   const [pendingCount, setPendingCount] = useState(0);
@@ -102,8 +172,23 @@ export default function CreatePostingPage({ onNavigate }) {
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
   const [auditProgress, setAuditProgress] = useState(null);
+  // QCDAO-50 draft state.
+  const [draftExists, setDraftExists] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+  // Keeps the form inert until a resumed draft has loaded, so typing cannot be
+  // overwritten by the load and a save cannot run with draftExists still false.
+  const [loadingDraft, setLoadingDraft] = useState(Boolean(resumeId));
+  // Where the user was heading when the unsaved-work prompt interrupted them.
+  const [leaveTarget, setLeaveTarget] = useState(null);
+  // Snapshot of the last saved state; null until the draft is first saved.
+  const [baseline, setBaseline] = useState(null);
+  // Attachments the saved draft already references, so discard leaves them alone.
+  const savedAttachmentIds = useRef(new Set());
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const formTop = useRef(null);
+  const allowNavigation = useRef(false);
+  const currentHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
   const pendingCountRef = useRef(0);
   const pendingRecordRef = useRef(null);
 
@@ -113,6 +198,100 @@ export default function CreatePostingPage({ onNavigate }) {
   };
 
   const organisation = profile?.organisation ?? "";
+  // The one hash that means "still this posting". Matches parseHash in App.jsx.
+  const createHash = resumeId ? `#/create/${resumeId}` : "#/create";
+
+  useEffect(() => {
+    if (!resumeId) return undefined;
+    let cancelled = false;
+
+    findPosting(resumeId)
+      .then((posting) => {
+        if (cancelled || !posting) return;
+        const loadedForm = formFromPosting(posting);
+        const loadedAttachments = posting.attachments ?? [];
+        setForm(loadedForm);
+        setAttachments(loadedAttachments);
+        setDraftExists(true);
+        setSavedAt(posting.updatedAt ?? null);
+        setBaseline(snapshotOf(loadedForm, loadedAttachments));
+        savedAttachmentIds.current = new Set(loadedAttachments.map((item) => item.id));
+      })
+      .catch((error) => { if (!cancelled) setSubmitError(messageForFirebaseError(error)); })
+      .finally(() => { if (!cancelled) setLoadingDraft(false); });
+
+    return () => { cancelled = true; };
+  }, [resumeId]);
+
+  // Unsaved work, not "any work". With a saved baseline this is a comparison
+  // against it, so saving a draft - or resuming one and changing nothing - leaves
+  // the form clean and the leave prompt stays out of the way.
+  const isDirty = useMemo(() => {
+    if (baseline === null) {
+      const touchedText = ["title", "businessContext", "summary", "currentApproach",
+        "currentLimitations", "expectedOutcome", "successCriteria", "dataAvailability", "amount"]
+        .some((key) => String(form[key] ?? "").trim().length > 0);
+      return touchedText || form.categories.length > 0 || attachments.length > 0;
+    }
+    return snapshotOf(form, attachments) !== baseline;
+  }, [form, attachments, baseline]);
+
+  // Hash routing means a nav click mutates location.hash directly, so leaving is
+  // intercepted here rather than by a router guard: revert the hash, then ask.
+  useEffect(() => {
+    if (!isDirty || published) return undefined;
+
+    const warnOnUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    const interceptHash = () => {
+      const next = window.location.hash;
+      if (allowNavigation.current) {
+        allowNavigation.current = false;
+        currentHash.current = next;
+        return;
+      }
+      // Only a create URL for THIS posting is a no-op. Waving through every
+      // "#/create*" let a switch to another draft skip the prompt and discard
+      // whatever was unsaved here.
+      if (next === currentHash.current || next === createHash) {
+        currentHash.current = next;
+        return;
+      }
+      allowNavigation.current = true;
+      window.location.hash = currentHash.current;
+      setLeaveTarget(next);
+    };
+
+    window.addEventListener("beforeunload", warnOnUnload);
+    window.addEventListener("hashchange", interceptHash);
+    return () => {
+      window.removeEventListener("beforeunload", warnOnUnload);
+      window.removeEventListener("hashchange", interceptHash);
+    };
+  }, [isDirty, published, createHash]);
+
+  const persistDraft = async () => {
+    setSubmitError(null);
+    setSavingDraft(true);
+    try {
+      const saved = await saveDraft({
+        postingId, ownerId: address, organisation, form, attachments, exists: draftExists,
+      });
+      setDraftExists(true);
+      setSavedAt(saved?.updatedAt ?? new Date());
+      setBaseline(snapshotOf(form, attachments));
+      savedAttachmentIds.current = new Set(attachments.map((item) => item.id));
+      return true;
+    } catch (error) {
+      setSubmitError(messageForFirebaseError(error));
+      return false;
+    } finally {
+      setSavingDraft(false);
+    }
+  };
 
   // Same UTC-to-the-second format the posting will be stored and displayed in, so
   // what the form promises and what the detail page shows cannot disagree.
@@ -208,16 +387,22 @@ export default function CreatePostingPage({ onNavigate }) {
         },
       });
 
-      const posting = await createPosting({
-        postingId,
-        ownerId: address,
-        organisation,
-        form,
-        attachments,
-        // The contract is authoritative for the audit. Firebase stores only the
-        // posting content, after its exact hash has been confirmed on-chain.
-        record,
-      });
+      const posting = draftExists
+        ? await publishDraft({
+          // The anchored record, not a rebuild: rebuilding derives a fresh
+          // expiresAt that would no longer match the confirmed hash.
+          postingId, ownerId: address, organisation, form, attachments, record,
+        })
+        : await createPosting({
+          postingId,
+          ownerId: address,
+          organisation,
+          form,
+          attachments,
+          // The contract is authoritative for the audit. Firebase stores only the
+          // posting content, after its exact hash has been confirmed on-chain.
+          record,
+        });
       setPublished({ ...posting, audit });
       setAuditProgress(null);
       pendingRecordRef.current = null;
@@ -232,19 +417,63 @@ export default function CreatePostingPage({ onNavigate }) {
     }
   };
 
-  const cancel = async () => {
-    const abandoned = attachments;
+  // A hash captured by the interceptor is navigated to directly; a route id goes
+  // through onNavigate.
+  const goTo = (target) => {
+    // Set BEFORE either branch: onNavigate changes the hash as well, so leaving
+    // it unset let the interceptor revert the move and reopen the leave prompt.
+    allowNavigation.current = true;
+    if (typeof target === "string" && target.startsWith("#")) {
+      window.location.hash = target;
+      return;
+    }
+    onNavigate(target ?? "discover");
+  };
+
+  /**
+   * Leaves without keeping the current edits. Files the saved draft already
+   * references are kept - deleting those would gut the draft the user chose to
+   * keep. With no saved draft nothing was persisted, so everything goes.
+   */
+  const leave = async (target) => {
+    const unsaved = attachments.filter((item) => !savedAttachmentIds.current.has(item.id));
     setAttachments([]);
-    await abandonDraftAttachments(abandoned);
-    onNavigate("discover");
+    await abandonDraftAttachments(unsaved, address, postingId);
+    goTo(target);
+  };
+
+  const cancel = () => {
+    if (isDirty) {
+      setLeaveTarget("discover");
+      return;
+    }
+    leave("discover");
+  };
+
+  const saveThenLeave = async () => {
+    const target = leaveTarget;
+    // Leaving on a rejected save would discard the very work the prompt offered
+    // to keep, so the dialog stays open and persistDraft reports the reason.
+    // Called ONCE: a second call still sees draftExists false from this closure,
+    // so it re-issues setDoc and Firestore rejects it for moving createdAt.
+    const saved = await persistDraft();
+    if (!saved) return;
+    setLeaveTarget(null);
+    goTo(target);
+  };
+
+  const discardAndLeave = async () => {
+    const target = leaveTarget;
+    setLeaveTarget(null);
+    await leave(target);
   };
 
   const switchOpportunityType = async (route) => {
     if (route === "create" || submitting) return;
     const abandoned = attachments;
     setAttachments([]);
-    await abandonDraftAttachments(abandoned);
-    onNavigate(route);
+    await abandonDraftAttachments(abandoned, address, postingId);
+    goTo(route);
   };
 
   const startAnother = async () => {
@@ -257,7 +486,15 @@ export default function CreatePostingPage({ onNavigate }) {
     setPublished(null);
     setAuditProgress(null);
     pendingRecordRef.current = null;
-    await abandonDraftAttachments(abandoned);
+    // The new id has no document behind it. Leaving these set sent the next
+    // submit down publishDraft(), updating a posting that does not exist.
+    setDraftExists(false);
+    setSavedAt(null);
+    setBaseline(null);
+    setLeaveTarget(null);
+    savedAttachmentIds.current = new Set();
+    await abandonDraftAttachments(abandoned, address, postingId);
+    if (resumeId) goTo("#/create");
   };
 
   if (published) {
@@ -331,6 +568,14 @@ export default function CreatePostingPage({ onNavigate }) {
 
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>
+          {/* Inert until the draft has loaded. Typing into the empty template was
+              silently overwritten by the load, and saving during it ran with
+              draftExists still false, so setDoc was rejected for moving createdAt. */}
+          <fieldset
+            className="form-body"
+            disabled={loadingDraft}
+            style={{ border: 0, margin: 0, padding: 0, minInlineSize: "auto" }}
+          >
           <Section step="1" legend="The problem" hint="What is going wrong, and in what business context.">
             <TextField
               id="title" label="Title" value={form.title} onChange={update} error={errors.title}
@@ -467,12 +712,53 @@ export default function CreatePostingPage({ onNavigate }) {
               {submitting ? "Submitting…" : "Submit problem statement"}
             </button>
             <button
+              className="secondary"
+              type="button"
+              disabled={savingDraft || submitting || pendingCount > 0}
+              onClick={persistDraft}
+            >
+              {savingDraft ? "Saving…" : "Save as draft"}
+            </button>
+            <button
               className="secondary" type="button" disabled={submitting}
               onClick={cancel}
             >
               Cancel
             </button>
           </div>
+          </fieldset>
+
+          <DraftStatus savedAt={savedAt} saving={savingDraft} />
+
+          {leaveTarget && (
+            <Modal
+              labelledBy="leave-draft-title"
+              describedBy="leave-draft-desc"
+              onDismiss={() => setLeaveTarget(null)}
+            >
+              <div className="modal-head">
+                <div>
+                  <h2 id="leave-draft-title">Save this as a draft?</h2>
+                  <p id="leave-draft-desc">
+                    {draftExists
+                      ? "You have changes that are not in the saved draft. Discarding rolls back to the last save."
+                      : "You have unsaved work on this problem statement. Save it as a draft and you can pick it up from My Problems later."}
+                  </p>
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button className="secondary" type="button" disabled={savingDraft} onClick={() => setLeaveTarget(null)}>
+                  Keep editing
+                </button>
+                <button className="secondary" type="button" disabled={savingDraft} onClick={discardAndLeave}>
+                  {draftExists ? "Discard changes" : "Discard and leave"}
+                </button>
+                <button className="primary" type="button" disabled={savingDraft} onClick={saveThenLeave}>
+                  {savingDraft ? "Saving…" : "Save as draft and leave"}
+                </button>
+              </div>
+            </Modal>
+          )}
 
           {submitError && (
             <p className="attachment-error" role="alert">

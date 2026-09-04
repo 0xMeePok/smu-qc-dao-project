@@ -183,8 +183,8 @@ describe("[QCDAO-75] funded posting audit payload", () => {
       updatedAt: new Date("2026-09-02T00:00:00Z"),
       audit: { status: "confirmed" },
       attachments: [
-        { id: "z", name: " Z.pdf ", size: 20, path: "z", contentType: "application/pdf" },
-        { id: "a", name: "A.pdf", size: 10, path: "a" },
+        { id: "z", name: " Z.pdf ", size: 20, contentType: "application/pdf" },
+        { id: "a", name: "A.pdf", size: 10 },
       ],
     });
 

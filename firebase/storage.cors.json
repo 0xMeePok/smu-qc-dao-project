@@ -4,7 +4,13 @@
       "https://qcdao-a0c7a.web.app",
       "https://qcdao-a0c7a.firebaseapp.com"
     ],
-    "method": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+    "method": [
+      "GET",
+      "PUT",
+      "POST",
+      "DELETE",
+      "HEAD"
+    ],
     "responseHeader": [
       "Content-Type",
       "Content-Length",
@@ -20,7 +26,9 @@
       "x-goog-upload-protocol",
       "x-goog-upload-status",
       "x-goog-upload-url",
-      "x-firebase-storage-version"
+      "x-firebase-storage-version",
+      "x-firebase-appcheck",
+      "x-firebase-gmpid"
     ],
     "maxAgeSeconds": 3600
   }

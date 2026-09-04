@@ -837,9 +837,14 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
+        {/* The id segment carries two meanings now: the funding-opportunity type
+            from main, or a draft id to resume (QCDAO-50). Keyed on it because
+            postingId is seeded once, so without a remount switching between
+            Create and Resume kept the old id for uploads and saves while showing
+            the other draft's fields. */}
         {id === OPEN_FUNDING_TYPE
           ? <CreateFundingOpportunityPage onNavigate={go} />
-          : <CreatePostingPage onNavigate={go} />}
+          : <CreatePostingPage key={id ?? "new"} postingId={id} onNavigate={go} />}
       </RouteGuard>
     );
   } else if (section === "my-problems") {

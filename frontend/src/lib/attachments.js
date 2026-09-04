@@ -24,7 +24,7 @@ import { storage, isStorageConfigured, storageNeedsEmulator } from "./firebase.j
 // Must stay in step with maxBytes() in firebase/storage.rules and the 10485760
 // literal in the attachment validator in firebase/firestore.rules.
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
-export const MAX_FILES_PER_POSTING = 5;
+export const MAX_FILES_PER_POSTING = 2;
 export const ACCEPTED_MIME = "application/pdf";
 export const ACCEPTED_EXTENSION = ".pdf";
 
@@ -219,10 +219,12 @@ export function uploadAttachment({ file, ownerId, problemId, onProgress }) {
  * cancelled upload can leave a path that was never completed. Failing there would
  * strand a row in the UI that the user cannot clear.
  */
-export async function deleteAttachment(attachment) {
+export async function deleteAttachment({ attachment, ownerId, problemId }) {
   requireStorage();
   try {
-    await deleteObject(storageRef(storage, attachment.path));
+    await deleteObject(storageRef(storage, attachmentPath({
+      ownerId, problemId, attachmentId: attachment.id,
+    })));
   } catch (error) {
     if (error?.code !== "storage/object-not-found") throw error;
   }
@@ -231,17 +233,16 @@ export async function deleteAttachment(attachment) {
 /**
  * Downloads through the authenticated SDK path rather than getDownloadURL().
  *
- * This is a security decision, not a style one. getDownloadURL() mints a URL
- * carrying a permanent access token that works for ANYONE who has the link, with
- * no sign-in and no rules evaluation - which would quietly defeat the
- * requirement that attachments follow the posting's access rules. getBlob()
- * sends the user's ID token and is evaluated against firebase/storage.rules on
- * every request, so a user who cannot read the posting cannot read its files.
+ * getDownloadURL() mints a URL carrying a permanent access token that works for
+ * ANYONE who has the link, with no sign-in. getBlob() sends the user's ID token
+ * and is evaluated against firebase/storage.rules on every request: any signed-in
+ * wallet may read, only the owner may write or delete.
  */
-export async function downloadAttachment(attachment) {
+export async function downloadAttachment({ attachment, ownerId, problemId }) {
   requireStorage();
-  const blob = await getBlob(storageRef(storage, attachment.path));
-  return blob;
+  return getBlob(storageRef(storage, attachmentPath({
+    ownerId, problemId, attachmentId: attachment.id,
+  })));
 }
 
 /** Hands the downloaded blob to the browser as a save action. */
@@ -258,20 +259,29 @@ export function saveBlobAs(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-/** The subset of an attachment that belongs on the posting record. */
+/**
+ * The subset of an attachment that belongs on the posting record.
+ *
+ * No `path`: it is derivable from the owner, the posting and this id, so storing
+ * it duplicated data the client had to be trusted not to forge. Callers rebuild it
+ * with attachmentPath().
+ */
 export function toPostingRecord(attachment) {
   return {
     id: attachment.id,
     name: attachment.name,
     size: attachment.size,
     contentType: attachment.contentType,
-    path: attachment.path,
   };
 }
 
 const STORAGE_MESSAGES = {
+  // storage.rules denies a revoked session exactly as it denies a stranger, so
+  // this cannot blame ownership alone without misdiagnosing the common case.
+  // Covers upload, download and delete, so it cannot say "download" - an upload
+  // that is refused would otherwise report the wrong operation.
   "storage/unauthorized":
-    "You do not have permission to use this file. Only the owner of a posting can attach or open its documents.",
+    "You do not have permission to use this file. Sign out, sign in with your wallet, and try again. Signed-in members can download attachments on any posting.",
   "storage/canceled": "Upload cancelled.",
   "storage/quota-exceeded":
     "The project's storage quota is full. Contact the platform team.",

@@ -25,6 +25,7 @@ import { getStorage } from "firebase-admin/storage";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, "fixtures");
+const ATTACHMENT_PREFIX = "problems/";
 
 const PROJECT_ID = process.env.MOCK_PROJECT_ID ?? "qcdao-a0c7a";
 const STORAGE_BUCKET = process.env.MOCK_STORAGE_BUCKET ?? `${PROJECT_ID}.firebasestorage.app`;
@@ -176,6 +177,33 @@ function missingFixtures() {
   return needed.filter((name) => !existsSync(path.join(FIXTURES, name)));
 }
 
+/**
+ * Clears every posting before seeding. EMULATOR ONLY - this deletes user data, and
+ * the seeder can also target the live project.
+ *
+ * Needed because attachment records written before the path field was dropped no
+ * longer satisfy hasOnly, so those documents cannot be updated by the app at all.
+ * Overwriting the three samples is not enough: anything created by hand while
+ * testing is stale in the same way.
+ */
+export async function resetPostings({ db, bucket, logger = console }) {
+  // Storage FIRST, and it is allowed to throw. Deleting the documents before
+  // knowing the bucket is reachable wipes the postings and then fails to rebuild
+  // them - which is exactly what happened when the Storage emulator was down.
+  const [files] = await bucket.getFiles({ prefix: ATTACHMENT_PREFIX });
+
+  const snapshot = await db.collection("problems").get();
+  if (snapshot.empty && files.length === 0) return 0;
+
+  await Promise.allSettled(files.map((file) => file.delete()));
+  if (files.length > 0) logger.info(`cleared ${files.length} stored file(s)`);
+
+  await Promise.all(snapshot.docs.map((entry) => entry.ref.delete()));
+  if (snapshot.size > 0) logger.info(`cleared ${snapshot.size} existing posting(s)`);
+
+  return snapshot.size;
+}
+
 export async function seed({ db, bucket, logger = console }) {
   for (const posting of SAMPLE_POSTINGS) {
     const attachments = [];
@@ -206,7 +234,6 @@ export async function seed({ db, bucket, logger = console }) {
         name: fixture,
         size: bytes.length,
         contentType: "application/pdf",
-        path: objectPath,
       });
       logger.info(`  uploaded ${objectPath} (${bytes.length} bytes)`);
     }
@@ -253,10 +280,18 @@ async function main() {
     ...(process.env.GOOGLE_APPLICATION_CREDENTIALS ? { credential: applicationDefault() } : {}),
   });
 
-  const count = await seed({
-    db: getFirestore(),
-    bucket: getStorage().bucket(),
-  });
+  const db = getFirestore();
+  const bucket = getStorage().bucket();
+
+  // Only ever against the emulator. Wiping the live marketplace because someone
+  // ran a seed script is not a recoverable mistake.
+  if (target === "emulator") {
+    await resetPostings({ db, bucket });
+  } else {
+    console.log("Production target: existing postings are left alone.");
+  }
+
+  const count = await seed({ db, bucket });
 
   console.log(`\nDone. ${count} sample postings owned by ${OWNER}.`);
   console.log("Set MOCK_OWNER_ADDRESS to your wallet to see them under My Problems.");
