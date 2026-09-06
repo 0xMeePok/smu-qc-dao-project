@@ -104,7 +104,7 @@ describe("AuditReceipt", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it("reads the contract even when Firestore has only a failed legacy receipt", async () => {
+  it("allows checking a failed legacy receipt without mislabelling it a mismatch", async () => {
     const verify = vi.fn(async () => {
       throw new Error("execution reverted: InvalidInput");
     });
@@ -116,7 +116,16 @@ describe("AuditReceipt", () => {
       onVerify: verify,
     });
 
-    expect(verify).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: /check again/i }));
+    await waitFor(() => expect(verify).toHaveBeenCalledOnce());
     expect(await screen.findByText(/No matching audit/)).toBeTruthy();
   });
+});
+
+it("explains a clipboard failure and allows resuming a known transaction at the attempt cap", async () => {
+  navigator.clipboard.writeText.mockRejectedValue(new Error("Denied"));
+  renderReceipt({ audit: receipt({ status: "pending", attemptCount: 3 }), onVerify: undefined, onRetry: vi.fn() });
+  fireEvent.click(screen.getByRole("button", { name: /copy transaction reference/i }));
+  expect(await screen.findByText(/Copy unavailable/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Resume verification" })).toBeTruthy();
 });

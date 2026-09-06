@@ -63,5 +63,8 @@ const config = {
 
 fs.mkdirSync(path.dirname(outputFile), { recursive: true });
 fs.writeFileSync(outputFile, `${JSON.stringify(config, null, 2)}\n`);
+if (!option("output")) {
+  fs.writeFileSync(path.join(repositoryDirectory, "firebase/functions/auditRegistry.contract.json"), `${JSON.stringify(config, null, 2)}\n`);
+}
 console.log(`AuditRegistry frontend config synced to ${outputFile}`);
 console.log(`Chain ${chainId}, address ${address}, ABI entries ${artifact.abi.length}`);

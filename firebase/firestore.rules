@@ -437,13 +437,14 @@ service cloud.firestore {
       let size = item.get('size', 0);
       let name = item.get('name', '');
       return item is map
-        // Four named fields, all checked below: an unknown key can only fit by
-        // displacing one of them, and that one's check then fails.
-        && item.keys().size() == 4
+        // New records carry sha256; four-field legacy posting records remain
+        // readable and updateable during the rollout.
+        && item.keys().size() in [4, 5]
         && id is string && id.matches('^[A-Za-z0-9_-]{8,64}$')
         && name is string && name.size() > 0 && name.size() <= 200
         && size is number && size > 0 && size <= 10485760
-        && item.get('contentType', '') == 'application/pdf';
+        && item.get('contentType', '') == 'application/pdf'
+        && (item.keys().size() == 4 || isBytes32(item.get('sha256', '')));
     }
 
     // Two. Rules cannot loop, so every slot is unrolled and costs expressions
@@ -456,6 +457,19 @@ service cloud.firestore {
         && items.size() <= 2
         && (items.size() < 1 || attachmentEntry(items[0]))
         && (items.size() < 2 || attachmentEntry(items[1]));
+    }
+
+    function validProposalAttachmentDigests(data) {
+      let items = data.get('attachments', []);
+      return items is list
+        && (items.size() < 1 || items[0].keys().size() == 5)
+        && (items.size() < 2 || items[1].keys().size() == 5);
+    }
+
+    function preservesKnownAuditTransactionHash(data) {
+      let storedHash = resource.data.get('audit', {}).get('transactionHash', '');
+      return storedHash == ''
+        || data.get('audit', {}).get('transactionHash', '') == storedHash;
     }
 
     // QCDAO-48 - the technology areas a posting can ask for help in.
@@ -888,14 +902,18 @@ service cloud.firestore {
         && (resource.data.researcherId == request.auth.uid
           || resource.data.get('postingOwnerId', '') == request.auth.uid);
       allow delete: if isActiveUser(request.auth.uid)
-        && resource.data.researcherId == request.auth.uid && resource.data.status == 'draft';
+        && resource.data.researcherId == request.auth.uid
+        && resource.data.status == 'draft'
+        && resource.data.get('audit', {}).get('transactionHash', '') == '';
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.researcherId == request.auth.uid
         && validProposal(request.resource.data)
         && validAttachments(request.resource.data)
         && (request.resource.data.status == 'draft'
-          || (request.resource.data.status == 'submitted' && validSubmittedProposal(request.resource.data, proposalId)))
+          || (request.resource.data.status == 'submitted'
+            && validProposalAttachmentDigests(request.resource.data)
+            && validSubmittedProposal(request.resource.data, proposalId)))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId));
@@ -904,6 +922,9 @@ service cloud.firestore {
       // rejects it so a researcher cannot mint a sponsor-facing receipt.
       allow update: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
+        && preservesKnownAuditTransactionHash(request.resource.data)
+        && (resource.data.get('audit', {}).get('status', '') != 'confirmed'
+          || request.resource.data.get('audit', {}) == resource.data.audit)
         && request.resource.data.researcherId == resource.data.researcherId
         && request.resource.data.problemId == resource.data.problemId
         && validProposal(request.resource.data)
@@ -912,7 +933,9 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time
         && ((resource.data.status == 'draft'
             && (request.resource.data.status in ['draft', 'withdrawn']
-              || (request.resource.data.status == 'submitted' && validSubmittedProposal(request.resource.data, proposalId))))
+              || (request.resource.data.status == 'submitted'
+                && validProposalAttachmentDigests(request.resource.data)
+                && validSubmittedProposal(request.resource.data, proposalId))))
           || (resource.data.status != 'draft'
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'audit', 'updatedAt'])
             && (request.resource.data.status == resource.data.status

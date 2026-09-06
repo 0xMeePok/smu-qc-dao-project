@@ -4,6 +4,7 @@ import {
   ref as storageRef,
   uploadBytesResumable,
 } from "firebase/storage";
+import { sha256 } from "viem";
 import { storage, isStorageConfigured, storageNeedsEmulator } from "./firebase.js";
 
 /**
@@ -134,6 +135,21 @@ export async function hasPdfSignature(file) {
   return PDF_SIGNATURE.every((byte, index) => bytes[index] === byte);
 }
 
+async function blobArrayBuffer(blob) {
+  if (typeof blob.arrayBuffer === "function") return blob.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+/** Returns the lowercase SHA-256 digest that is committed in proposal anchors. */
+export async function sha256Blob(blob) {
+  return sha256(new Uint8Array(await blobArrayBuffer(blob)));
+}
+
 export async function validateFile(file, options = {}) {
   const metadataError = validateFileMetadata(file, options);
   if (metadataError) return metadataError;
@@ -172,8 +188,11 @@ function requireStorage() {
  *   cancel()    aborts the transfer (scope item: cancel)
  *   done        resolves with the attachment, or rejects with "storage/canceled"
  */
-export function uploadAttachment({ file, ownerId, problemId, onProgress, scope = "problems" }) {
+export function uploadAttachment({ file, ownerId, problemId, sha256: contentDigest, onProgress, scope = "problems" }) {
   requireStorage();
+  if (!/^0x[0-9a-f]{64}$/.test(contentDigest ?? "")) {
+    throw new Error("The attachment digest is missing or invalid. Select the file again.");
+  }
 
   const attachmentId = newAttachmentId();
   const path = attachmentPath({ ownerId, problemId, attachmentId, scope });
@@ -184,6 +203,7 @@ export function uploadAttachment({ file, ownerId, problemId, onProgress, scope =
     size: file.size,
     contentType: ACCEPTED_MIME,
     path,
+    sha256: contentDigest,
   };
 
   const task = uploadBytesResumable(storageRef(storage, path), file, {
@@ -194,6 +214,7 @@ export function uploadAttachment({ file, ownerId, problemId, onProgress, scope =
       uploadedBy: String(ownerId).toLowerCase(),
       problemId: String(problemId),
       originalName: attachment.name,
+      sha256: contentDigest,
     },
   });
 
@@ -241,9 +262,15 @@ export async function deleteAttachment({ attachment, ownerId, problemId, scope =
  */
 export async function downloadAttachment({ attachment, ownerId, problemId, scope = "problems" }) {
   requireStorage();
-  return getBlob(storageRef(storage, attachmentPath({
+  const blob = await getBlob(storageRef(storage, attachmentPath({
     ownerId, problemId, attachmentId: attachment.id, scope,
   })));
+  if (attachment.sha256 && await sha256Blob(blob) !== attachment.sha256) {
+    const error = new Error("The downloaded file does not match its recorded digest.");
+    error.code = "storage/integrity-check-failed";
+    throw error;
+  }
+  return blob;
 }
 
 /** Hands the downloaded blob to the browser as a save action. */
@@ -273,6 +300,7 @@ export function toPostingRecord(attachment) {
     name: attachment.name,
     size: attachment.size,
     contentType: attachment.contentType,
+    ...(attachment.sha256 ? { sha256: attachment.sha256 } : {}),
   };
 }
 
@@ -291,6 +319,7 @@ const STORAGE_MESSAGES = {
     "The upload kept failing. Check your connection and try again.",
   "storage/object-not-found": "That file is no longer stored. Refresh the page.",
   "storage/invalid-checksum": "The file was corrupted in transit. Try uploading it again.",
+  "storage/integrity-check-failed": "The downloaded file failed its integrity check. Do not open it; contact the platform team.",
 };
 
 export function messageForStorageError(error) {

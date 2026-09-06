@@ -7,6 +7,7 @@ import { UserManagementTable } from "../components/UserManagementTable.jsx";
 import { RoleChangeModal } from "../components/RoleChangeModal.jsx";
 import { SuspendUserModal } from "../components/SuspendUserModal.jsx";
 import { AdminAudit } from "../components/RoleViews.jsx";
+import { ProposalAuditQueue } from "../components/ProposalAuditQueue.jsx";
 
 export default function AdminPage() {
   const { isSignedIn, isChecking, profile, address } = useSession();
@@ -175,7 +176,7 @@ export default function AdminPage() {
             currentAdminAddress={address}
           />
         ) : (
-          <AdminAudit />
+          <><ProposalAuditQueue /><AdminAudit /></>
         )}
       </div>
 

@@ -1,19 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ updates: [] }));
-vi.mock("../../src/lib/proposals.js", () => ({ updateProposalReceipt: async ({ audit }) => mocks.updates.push(audit) }));
-import { anchorProposalAudit, proposalAuditReceipt, proposalAuditPayload } from "../../src/lib/proposalAudit.js";
+const mocks = vi.hoisted(() => ({ updates: [], find: vi.fn(), failedStatuses: new Set() }));
+vi.mock("../../src/lib/proposals.js", () => ({
+  findProposal: (...args) => mocks.find(...args),
+  updateProposalReceipt: async ({ audit }) => {
+    mocks.updates.push(audit);
+    if (mocks.failedStatuses.has(audit.status)) {
+      throw new Error(`Unable to persist ${audit.status}.`);
+    }
+  },
+}));
+import { anchorProposalAudit, proposalAuditReceipt, proposalAuditPayload, readProposalAudit } from "../../src/lib/proposalAudit.js";
 import { prepareProposalCommit } from "../../src/lib/auditRegistry.js";
 const account = `0x${"a".repeat(40)}`;
 const tx = `0x${"3".repeat(64)}`;
 const record = { id: "proposal123", problemId: "problem123", researcherId: account, title: "Annealing", methodology: "Benchmark routing", attachments: [] };
 const prepared = prepareProposalCommit({ recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { methodology: record.methodology, attachments: [] } });
 function readContract({ functionName }) {
-  if (functionName === "getProposal") return { opportunityId: prepared.opportunityId, opportunityRevisionIndex: 0, proposalHash: prepared.proposalHash, solutionHash: prepared.solutionHash };
+  if (functionName === "getProposal") return { researcher: account, opportunityId: prepared.opportunityId, opportunityRevisionIndex: 0, proposalHash: prepared.proposalHash, solutionHash: prepared.solutionHash };
   if (functionName === "anchorCount") return 1n;
   if (functionName === "anchorAt") return { contentHash: prepared.anchorHash };
   throw new Error(`Unexpected read: ${functionName}`);
 }
-beforeEach(() => { mocks.updates = []; });
+beforeEach(() => {
+  mocks.updates = [];
+  mocks.failedStatuses.clear();
+});
 describe("proposal audit handoff", () => {
   it("supports fractional token amounts without rejecting the saved proposal", () => {
     expect(proposalAuditReceipt({ ...record, amount: 1500.25 }).contentHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -23,7 +34,7 @@ describe("proposal audit handoff", () => {
     const writeContract = vi.fn(async () => tx);
     const result = await anchorProposalAudit(record, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } });
     expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
-    expect(mocks.updates.map((audit) => audit.status)).toEqual(["queued", "submitted", "pending"]);
+    expect(mocks.updates.map((audit) => audit.status)).toEqual(["queued", "submitted", "pending", "confirmed"]);
     expect(result.status).toBe("confirmed");
     expect(result.transactionHash).toBe(tx);
   });
@@ -36,7 +47,54 @@ describe("proposal audit handoff", () => {
     const writeContract = vi.fn();
     const result = await anchorProposalAudit({ ...record, audit: { ...proposalAuditReceipt(record), status: "pending", transactionHash: tx } }, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 99n }) } });
     expect(writeContract).not.toHaveBeenCalled();
-    expect(mocks.updates.map((audit) => audit.status)).not.toContain("confirmed");
+    expect(mocks.updates.map((audit) => audit.status)).toContain("confirmed");
     expect(result.status).toBe("confirmed");
   });
+  it("keeps a mined proposal pending until trusted server confirmation", async () => {
+    mocks.failedStatuses.add("confirmed");
+    const onChange = vi.fn();
+    const result = await anchorProposalAudit(record, {
+      account,
+      onChange,
+      adapters: {
+        writeContract: async () => tx,
+        readContract,
+        waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }),
+      },
+    });
+    expect(result.status).toBe("pending");
+    expect(result.lastError).toMatch(/trusted server confirmation is still pending/i);
+    expect(onChange.mock.calls.map(([audit]) => audit.status)).not.toContain("confirmed");
+  });
+  it("preserves transaction recovery guidance when confirmation persistence fails", async () => {
+    mocks.failedStatuses.add("pending");
+    mocks.failedStatuses.add("confirmed");
+    const result = await anchorProposalAudit(record, {
+      account,
+      adapters: {
+        writeContract: async () => tx,
+        readContract,
+        waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }),
+      },
+    });
+    expect(result.status).toBe("pending");
+    expect(result.transactionHash).toBe(tx);
+    expect(result.lastError).toMatch(/receipt could not be saved/i);
+    expect(result.lastError).toMatch(/retry verification/i);
+  });
+});
+
+it("re-verifies a fresh server read and detects a changed proposal", async () => {
+  mocks.find.mockResolvedValue({ ...record, title: "Tampered" });
+  const result = await readProposalAudit(record, { adapters: { readContract, writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() } });
+  expect(mocks.find).toHaveBeenCalledWith(record.id, { fromServer: true });
+  expect(result.verified).toBe(false);
+});
+it("does not broadcast beyond the wallet attempt cap", async () => {
+  const writeContract = vi.fn();
+  await expect(anchorProposalAudit({ ...record, audit: { attemptCount: 3 } }, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: vi.fn() } })).rejects.toThrow(/limit/);
+  expect(writeContract).not.toHaveBeenCalled();
+});
+it("does not treat an unsupported schema as a verified v1 receipt", () => {
+  expect(proposalAuditReceipt({ ...record, audit: { schemaVersion: 2 } })).toBeNull();
 });

@@ -9,6 +9,7 @@ import {
   messageForStorageError,
   saveBlobAs,
   uploadAttachment,
+  sha256Blob,
   validateFile,
 } from "../lib/attachments.js";
 
@@ -117,11 +118,13 @@ export function AttachmentUploader({
 
       let upload;
       try {
+        const contentDigest = await sha256Blob(file);
         upload = uploadAttachment({
           file,
           ownerId,
           problemId,
           scope,
+          sha256: contentDigest,
           onProgress: (progress) => {
             const id = upload.attachment.id;
             setPending((rows) => rows.map((row) => (

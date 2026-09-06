@@ -17,6 +17,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       firebase: ${{ steps.filter.outputs.firebase }}
       functions: ${{ steps.filter.outputs.functions }}
+      audit-registry: ${{ steps.filter.outputs.audit-registry }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -39,6 +40,9 @@ jobs:
             functions:
               - 'firebase/functions/**'
               - 'firebase/firebase.json'
+              - '.github/workflows/ci.yml'
+            audit-registry:
+              - 'contracts/audit-registry/**'
               - '.github/workflows/ci.yml'
 
   test:
@@ -134,11 +138,36 @@ jobs:
       - name: Run Cloud Functions test suite
         run: npm test
 
-  # Always runs so a skipped functions/frontend job is not treated as a failed
+  audit-registry-test:
+    name: Run Audit Registry Contract Tests
+    needs: changes
+    if: needs.changes.outputs.audit-registry == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./contracts/audit-registry
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+          cache-dependency-path: contracts/audit-registry/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile and run contract tests
+        run: npm test
+
+  # Always runs so a skipped test job is not treated as a failed
   # required check. Fail only when a selected job actually failed or was cancelled.
   ci:
     name: CI
-    needs: [changes, test, firebase-test, functions-test]
+    needs: [changes, test, firebase-test, functions-test, audit-registry-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -148,11 +177,12 @@ jobs:
           frontend="${{ needs.test.result }}"
           firebase="${{ needs.firebase-test.result }}"
           functions="${{ needs.functions-test.result }}"
-          echo "changes=$changes frontend=$frontend firebase=$firebase functions=$functions"
+          contracts="${{ needs.audit-registry-test.result }}"
+          echo "changes=$changes frontend=$frontend firebase=$firebase functions=$functions contracts=$contracts"
           if [ "$changes" != "success" ]; then
             exit 1
           fi
-          for result in "$frontend" "$firebase" "$functions"; do
+          for result in "$frontend" "$firebase" "$functions" "$contracts"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               exit 1
             fi
