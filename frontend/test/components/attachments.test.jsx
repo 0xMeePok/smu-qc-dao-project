@@ -23,9 +23,10 @@ const mocks = vi.hoisted(() => ({
 // A stand-in for the UploadTask returned by uploadBytesResumable: records its
 // observer so a test can drive progress, completion, cancellation or failure by
 // hand instead of waiting on real network timing.
-function makeTask(path) {
+function makeTask(path, metadata) {
   const task = {
     path,
+    metadata,
     observer: null,
     cancelled: false,
     on(_event, next, error, complete) {
@@ -54,8 +55,8 @@ function makeTask(path) {
 
 vi.mock("firebase/storage", () => ({
   ref: (_storage, path) => ({ fullPath: path }),
-  uploadBytesResumable: (reference) => {
-    const task = makeTask(reference.fullPath);
+  uploadBytesResumable: (reference, _file, metadata) => {
+    const task = makeTask(reference.fullPath, metadata);
     mocks.tasks.push(task);
     return task;
   },
@@ -86,7 +87,9 @@ const {
   MAX_FILE_BYTES,
   MAX_FILES_PER_POSTING,
   attachmentPath,
+  downloadAttachment,
   safeDisplayName,
+  sha256Blob,
   toPostingRecord,
   validateFile,
   validateFileMetadata,
@@ -117,6 +120,11 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("attachment validation", () => {
+  it("hashes the complete file with SHA-256", async () => {
+    await expect(sha256Blob(new Blob(["abc"]))).resolves.toBe(
+      "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
+  });
   it("[FUT-OPD-106] rejects a file that is not named .pdf", () => {
     const file = new File(["data"], "notes.docx", { type: "application/pdf" });
     expect(validateFileMetadata(file)).toMatch(/Only PDF files/);
@@ -155,6 +163,15 @@ describe("attachment validation", () => {
 });
 
 describe("attachment naming and paths", () => {
+  it("rejects downloaded bytes that do not match the recorded digest", async () => {
+    mocks.blob = new Blob(["different"]);
+    await expect(downloadAttachment({
+      attachment: { id: "abc123xy", sha256: `0x${"1".repeat(64)}` },
+      ownerId: OWNER,
+      problemId: POSTING,
+    })).rejects.toMatchObject({ code: "storage/integrity-check-failed" });
+  });
+
   it("[FUT-OPD-113] builds the storage path the security rules expect", () => {
     const path = attachmentPath({ ownerId: OWNER.toUpperCase(), problemId: POSTING, attachmentId: "abc123xy" });
     expect(path).toBe(`problems/${OWNER}/${POSTING}/abc123xy.pdf`);
@@ -182,9 +199,12 @@ describe("attachment naming and paths", () => {
   it("[FUT-OPD-118] narrows an attachment to the fields the posting record allows", () => {
     const record = toPostingRecord({
       id: "abc123xy", name: "a.pdf", size: 10, contentType: "application/pdf",
+      sha256: `0x${"1".repeat(64)}`,
       cancel: () => {}, secret: "leak",
     });
-    expect(Object.keys(record).sort()).toEqual(["contentType", "id", "name", "size"]);
+    expect(Object.keys(record).sort()).toEqual(["contentType", "id", "name", "sha256", "size"]);
+    expect(toPostingRecord({ id: "legacy001", name: "old.pdf", size: 10, contentType: "application/pdf" }))
+      .not.toHaveProperty("sha256");
   });
 });
 
@@ -241,6 +261,7 @@ describe("AttachmentUploader", () => {
     render(<Harness />);
     await selectFiles([pdfFile("spec.pdf")]);
     await waitFor(() => expect(mocks.tasks).toHaveLength(1));
+    expect(mocks.tasks[0].metadata.customMetadata.sha256).toMatch(/^0x[0-9a-f]{64}$/);
 
     await act(async () => { mocks.tasks[0].emitProgress(50, 100); });
     expect(screen.getByText(/uploading 50%/)).toBeTruthy();

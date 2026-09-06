@@ -6,7 +6,7 @@ stores only deterministic hashes and the wallet that submitted each anchor.
 
 ## Canonical format
 
-The frontend has one supported hash format: canonical JSON version 1 followed
+The application has one supported hash format: canonical JSON version 1 followed
 by `keccak256` over its UTF-8 bytes. The version is part of the off-chain
 canonical envelope and Firestore receipt, not a Solidity argument.
 
@@ -53,7 +53,7 @@ Evaluations are platform records and are not anchored by this contract.
 
 ## Receipt lifecycle and retries
 
-Creation is chain-first: the application prepares the final Firestore content,
+Opportunity creation is chain-first: the application prepares the final Firestore content,
 asks the signed-in wallet to commit its deterministic hash, verifies the confirmed
 contract state, and only then writes the record. A failed or declined anchor leaves
 the form intact and does not publish unverifiable content. Recovery state uses
@@ -95,3 +95,134 @@ npm run sync:audit-registry -- \
 To keep the checked-in ABI and change only the address for one environment, set
 `VITE_AUDIT_REGISTRY_ADDRESS`. The environment override is validated as a
 non-zero EVM address before any contract request is made.
+
+## Proposal implementation (QCDAO-59/60 + QCDAO-75–79)
+
+The chain-first publication behavior above applies to opportunities. Proposal
+submission is **Firestore first**: the saved confirmation appears immediately,
+then the researcher wallet signs `commitProposal`. Navigation, withdrawal and
+other workflow actions remain available while confirmation is pending or failed.
+
+### Reproducing proposal hashes
+
+`firebase/functions/auditCanonical.js` is the pure canonical implementation shared
+by browser and backend. `proposalAuditPayload.js` freezes the proposal v1 field
+list independently of future form changes. Both funded-problem and open-funding
+proposals use the following fields (sorted by the canonical serializer):
+
+`researcherId`, `problemId`, `postingOwnerId`, `opportunityType`, `category`,
+`amount`, `currency`, `title`, `summary`, `methodology`, `suitability`,
+`expectedOutcomes`, `successCriteria`, `timeline`, `milestones`, `team`,
+`proposedProblem`, `relevance`, `thesisFit`.
+
+Missing/null fields become `""`. Amount is the JavaScript decimal string of the
+stored numeric value, so fractional token amounts are supported. The proposal
+hash covers `{document: "proposal", value: <fields above>}` inside the canonical
+proposal envelope. A second solution hash covers
+`{document: "solution", value: {methodology, attachments}}`; attachments retain
+all stored metadata, ordered by their generated IDs using the existing v1
+`localeCompare` ordering. Storage rules make submitted PDF bytes immutable.
+New proposal attachments also store a lowercase SHA-256 digest of the complete
+PDF. Submission rules require that digest, the solution hash commits to it, and
+downloads recompute it before releasing the file to the browser. Legacy records
+without attachments retain their historical v1 hash; an older proposal attachment
+without a digest must be backfilled before its first audit confirmation.
+Status, receipt delivery metadata and Firestore creation/update timestamps are
+excluded; withdrawal and retry do not change submission hashes. The on-chain
+submission timestamp comes from the mined event. Proposal revision linkage remains
+revision 0 because the integrated posting workflow publishes only that revision.
+
+The registry anchor digest is `keccak256(abi.encode(proposalHash, solutionHash))`.
+For an independently fetched Firestore record, including its document ID:
+
+```js
+import { prepareStoredProposal } from "./firebase/functions/proposalAuditPayload.js";
+const prepared = prepareStoredProposal(record);
+console.log(prepared.canonicalPayload, prepared.canonicalSolution);
+console.log(prepared.proposalHash, prepared.solutionHash, prepared.anchorHash);
+```
+
+Golden vectors for both proposal variants are in
+`firebase/functions/test/proposal-audit.test.mjs`. Unsupported scheme versions
+are reported as unavailable instead of silently being treated as v1. Existing
+v1 hashes are preserved.
+
+### Confirmation and recovery
+
+The browser records queued → submitted → pending delivery states. After checking
+the chain it calls `confirmProposalAudit`; only the author can call this endpoint.
+The server reads current Firestore content and verifies the mined transaction's
+success, chain, registry address, researcher and exact calldata, then checks the
+receipt and transaction belong to the same canonical block and waits for two
+block confirmations before checking the current registry proposal. Only the
+server persists `confirmed` and its block number. A non-final observation remains
+pending and is retried. Rules reject client confirmation, preserve the first
+non-empty transaction hash, and prevent downgrading a server-confirmed
+receipt. Client state remains a display hint; **Check again** fetches the current
+record from the server and recomputes both hashes on every invocation.
+
+`queueProposalAudit` creates private `proposalAuditJobs/{proposalId}` records for
+saved submissions. `retryPendingProposalAudits` checks up to 25 jobs every minute.
+Transient failures, including missing/dropped transaction receipts and network
+outages, retry after 1, 2 and 4 minutes, with at most three attempts per cycle.
+A 90-second transactional lease prevents concurrent recovery workers from racing.
+The original transaction reference is retained; recovery never broadcasts another
+transaction. Reverts and mismatches require attention rather than automatic retry.
+
+In **Admin → Governance Audit Trail → Verification queue**, administrators can inspect the
+paginated proposal audit trail, open receipts, re-verify current content and retry
+confirmation after the automatic budget is exhausted. Jobs with no transaction
+show **Waiting for researcher wallet**. An administrator can reset wallet attempt
+limits, after which the author starts verification from their proposal receipt.
+Browser receipt polling picks up server updates without reloading the page.
+
+There is **no platform signer** in this deployment: `commitProposal` binds the
+researcher to `msg.sender`. The connected wallet manages its own nonce and gas.
+Neither scheduled recovery nor administrators submit transactions or impersonate
+researchers, so concurrent recovery jobs do not allocate nonces or spend gas.
+Creating a platform signer, relaying researcher signatures, evaluation anchors and
+receipts for later workflow events require separate contract/workflow changes.
+Those are outside this integration against QCDAO-59/60.
+
+During a testnet outage the submission remains saved, the receipt explains the
+verification issue, and the admin queue retains exhausted jobs. A wallet
+transaction that was never submitted cannot be recovered without its author.
+The contract's expiry/revision checks still apply when a delayed transaction is
+mined; an off-chain submission does not override those constraints.
+
+### Deployment and demonstration
+
+Deploy the frontend, new Cloud Functions, Firestore rules and indexes together.
+The backend uses `ARBITRUM_SEPOLIA_RPC_URL` and optional `AUDIT_REGISTRY_ADDRESS`;
+its address must match `VITE_AUDIT_REGISTRY_ADDRESS`. `npm run sync:audit-registry`
+now refreshes both frontend and backend manifests. Recovery continues in the
+scheduler after the browser closes. Existing proposals enter the queue the next
+time their receipt is updated; new submissions are queued by their write trigger.
+
+After the merged application reaches the live site, use dedicated test proposals
+and funded test wallets to check:
+
+1. Submit against a funded problem and an open funding opportunity. Confirm the
+   saved proposal stays usable during anchoring, then compare its confirmed hash,
+   actor and transaction reference with Arbiscan.
+2. Decline the wallet request, then retry. The proposal remains saved and only the
+   successful wallet submission creates an anchor.
+3. Close the browser after the transaction hash has been saved. Reopen after the
+   recovery worker runs and verify the same transaction becomes confirmed.
+4. Interrupt RPC access, then restore it and resume verification. Check that
+   pending/unavailable messages stay distinct from a content mismatch.
+5. Inspect the admin queue, retry an exhausted confirmation job and check access
+   is refused for a non-admin account. Capture proposal IDs and transaction
+   references as acceptance evidence.
+
+To demonstrate tamper detection locally:
+
+1. Use Firebase emulators and an isolated test proposal. Complete submission and
+   obtain a matching receipt using the configured test registry.
+2. Keep its receipt open. In the emulator Firestore UI, change the saved `title`
+   (or attachment metadata) without changing its transaction reference.
+3. Select **Check again**. The fresh server read is hashed against the original
+   registry record and displays **Mismatch detected** prominently.
+4. Restore the original content and check again to recover **Verified match**.
+   Disconnect the RPC endpoint to demonstrate **Unable to verify**, which is
+   distinct from a mismatch and leaves the proposal available.

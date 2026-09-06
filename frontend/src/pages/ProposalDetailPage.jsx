@@ -23,8 +23,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const started = useRef(false);
+  const anchorInFlight = useRef(new Set());
+  const activeProposalId = useRef(proposalId);
+  activeProposalId.current = proposalId;
   useEffect(() => {
     let cancelled = false;
+    setLoading(true); setProposal(null); setError(""); setConfirm(false);
+    setAuditBusy(anchorInFlight.current.has(proposalId)); started.current = false;
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -32,19 +37,31 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   }, [proposalId]);
   const owns = Boolean(proposal && user?.id?.toLowerCase() === proposal.researcherId);
   const anchor = async (record = proposal, promptForWallet = true) => {
-    if (!isConnected || address?.toLowerCase() !== record.researcherId) {
+    if (!record || anchorInFlight.current.has(record.id)) return;
+    if (!record.audit?.transactionHash && (!isConnected || address?.toLowerCase() !== record.researcherId)) {
       setError("Your proposal is saved. Connect the wallet that submitted it to start verification.");
       if (promptForWallet) setWalletPromptOpen(true);
       return;
     }
+    anchorInFlight.current.add(record.id);
     setAuditBusy(true); setError("");
-    try { await anchorProposalAudit(record, { account: address, onChange: (audit) => setProposal((old) => ({ ...old, audit })) }); }
-    catch { /* The receipt carries the retryable failure; submission stays saved. */ }
-    finally { setAuditBusy(false); }
+    try { await anchorProposalAudit(record, { account: address, onChange: (audit) => setProposal((old) => old?.id === record.id ? { ...old, audit } : old) }); }
+    catch (err) { if (activeProposalId.current === record.id) setError(`Your proposal is saved. ${err?.message || "Verification is unavailable. Try again later."}`); }
+    finally { anchorInFlight.current.delete(record.id); if (activeProposalId.current === record.id) setAuditBusy(false); }
   };
   useEffect(() => {
     if (autoAnchor && proposal && owns && !started.current) { started.current = true; void anchor(proposal, false); }
   }, [autoAnchor, proposal, owns]);
+  useEffect(() => {
+    if (!proposal || auditBusy || proposal.audit?.status === "confirmed") return;
+    let active = true;
+    const timer = setInterval(() => {
+      findProposal(proposalId, { fromServer: true }).then((current) => {
+        if (active && current) setProposal(current);
+      }).catch(() => { /* Keep the saved record visible while offline. */ });
+    }, 10_000);
+    return () => { active = false; clearInterval(timer); };
+  }, [proposalId, Boolean(proposal), auditBusy, proposal?.audit?.status]);
   const withdraw = async () => {
     setWithdrawing(true); setError("");
     try { await withdrawProposal(proposalId); setProposal((old) => ({ ...old, status: "withdrawn" })); setConfirm(false); }

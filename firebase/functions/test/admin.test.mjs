@@ -397,3 +397,37 @@ describe("revokeOwnSessions", () => {
     assert.equal(typeof cutoff.data()?.sessionsValidAfterEpoch, "number");
   });
 });
+
+describe("proposal audit recovery access", () => {
+  it("requires authentication on every receipt administration endpoint", async () => {
+    for (const name of ["confirmProposalAudit", "adminListProposalAudits", "adminRetryProposalAudit", "adminVerifyProposalAudit"]) {
+      const res = await call(name, { proposalId: "access-fixture" });
+      assert.equal(res.error?.status, "UNAUTHENTICATED", name);
+    }
+  });
+  it("denies queue access to regular users", async () => {
+    const token = await getIdTokenForAccount(user1Account);
+    for (const name of ["adminListProposalAudits", "adminRetryProposalAudit", "adminVerifyProposalAudit"]) {
+      const res = await call(name, { proposalId: "access-fixture" }, { token });
+      assert.equal(res.error?.status, "PERMISSION_DENIED", name);
+    }
+  });
+  it("lets an admin inspect jobs and reset only the author's wallet attempts", async () => {
+    const id = "audit-admin-reset-fixture";
+    const audit = { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "failed", transactionHash: "", blockNumber: 0, attemptCount: 3, lastError: "Wallet declined" };
+    await db.collection("proposals").doc(id).set({ researcherId: user1Address, problemId: "audit-parent", title: "Saved proposal", status: "submitted", audit });
+    await db.collection("proposalAuditJobs").doc(id).set({ proposalId: id, title: "Saved proposal", researcherId: user1Address, status: "waiting-wallet", attemptCount: 0, transactionHash: "", lastError: "", updatedAt: Timestamp.now(), nextAttemptAt: Timestamp.now() });
+    const list = await call("adminListProposalAudits", {}, { token: adminToken });
+    assert.ok(Array.isArray(list.result?.items), JSON.stringify(list));
+    assert.ok(list.result.items.some((item) => item.id === id));
+    const reset = await call("adminRetryProposalAudit", { proposalId: id }, { token: adminToken });
+    assert.match(reset.result?.message || "", /researcher/);
+    const saved = (await db.collection("proposals").doc(id).get()).data();
+    assert.equal(saved.title, "Saved proposal");
+    assert.equal(saved.audit.attemptCount, 0);
+    assert.equal(saved.audit.status, "queued");
+    assert.equal(saved.audit.transactionHash, "");
+    const forbidden = await call("confirmProposalAudit", { proposalId: id }, { token: adminToken });
+    assert.equal(forbidden.error?.status, "PERMISSION_DENIED");
+  });
+});

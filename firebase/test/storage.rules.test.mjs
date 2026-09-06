@@ -43,6 +43,7 @@ function pdfMetadata(overrides = {}) {
       uploadedBy: OWNER,
       problemId: POSTING,
       originalName: "spec.pdf",
+      sha256: `0x${"4".repeat(64)}`,
       ...overrides.customMetadata,
     },
     ...(overrides.contentType ? { contentType: overrides.contentType } : {}),
@@ -169,6 +170,15 @@ describe("storage rules: uploading a posting attachment", () => {
         pdfMetadata({ customMetadata: { problemId: "someOtherPosting" } }),
       ),
     );
+  });
+
+  it("refuses a missing or malformed attachment digest", async () => {
+    const storage = env.authenticatedContext(OWNER).storage();
+    await assertFails(uploadBytes(
+      ref(storage, objectPath(OWNER, POSTING, "bad-digest.pdf")),
+      PDF_BYTES,
+      pdfMetadata({ customMetadata: { sha256: "invalid" } }),
+    ));
   });
 
   it("[BIT-OPD-125] refuses an upload from a suspended account", async () => {

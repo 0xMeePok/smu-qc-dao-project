@@ -29,6 +29,9 @@ function blockNumber(value) {
 function auditErrorMessage(error) {
   const rejected = error?.code === 4001 || /user rejected/i.test(error?.message ?? "");
   if (rejected) return "The wallet transaction was declined. You can retry when ready.";
+  if (/revert|invalidstate|invalidinput/i.test(error?.message ?? "")) {
+    return "The verification transaction reverted. Check the opportunity's status and revision before retrying.";
+  }
   return "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
@@ -57,6 +60,8 @@ export function createOpportunityAuditFlow({
   prepareCommit,
   commitAudit = commitOpportunityAudit,
   verifyAudit = verifyOpportunityAudit,
+  persistConfirmed = false,
+  enforceWalletRetryLimit = false,
 }) {
   const prepare = (opportunity) => {
     const address = configuredAuditRegistryAddress();
@@ -105,6 +110,9 @@ export function createOpportunityAuditFlow({
     const setup = prepare(opportunity);
     if (!setup) throw new Error("AuditRegistry is not configured.");
 
+    if (enforceWalletRetryLimit && !opportunity.audit?.transactionHash && Number(opportunity.audit?.attemptCount ?? 0) >= MAX_AUDIT_RETRIES) {
+      throw new Error("The wallet retry limit has been reached. Ask an administrator to reset verification attempts.");
+    }
     const attemptCount = Math.min(
       MAX_AUDIT_RETRIES,
       Number(opportunity.audit?.attemptCount ?? 0) + 1,
@@ -116,15 +124,38 @@ export function createOpportunityAuditFlow({
     };
 
     const persist = async (patch) => {
-      current = { ...current, ...patch };
-      onChange?.(current);
+      const next = { ...current, ...patch };
+      const trustedConfirmation = persistReceipt
+        && persistConfirmed
+        && next.status === "confirmed";
+      if (!trustedConfirmation) {
+        current = next;
+        onChange?.(current);
+      }
       if (!persistReceipt) return;
       // Firestore rules reject client `confirmed` writes — the contract is the
-      // verifier. Keep that status in memory; the outbox stays pending/failed.
-      if (current.status === "confirmed") return;
+      // verifier. Proposal confirmation goes through the trusted callable;
+      // opportunity flows keep confirmed state in memory.
+      if (next.status === "confirmed" && !persistConfirmed) return;
       try {
-        await persistAudit({ recordId: opportunity.id, audit: current });
+        await persistAudit({ recordId: opportunity.id, audit: next });
+        if (trustedConfirmation) {
+          current = next;
+          onChange?.(current);
+        }
       } catch {
+        if (trustedConfirmation && next.transactionHash) {
+          const confirmationError = "The transaction is mined, but trusted server confirmation is still pending. Retry verification to save and recheck this transaction.";
+          current = {
+            ...next,
+            status: "pending",
+            lastError: current.lastError.includes(confirmationError)
+              ? current.lastError
+              : [current.lastError, confirmationError].filter(Boolean).join(" ").slice(0, 500),
+          };
+          onChange?.(current);
+          return;
+        }
         const persistenceError = current.transactionHash
           ? "The transaction was submitted, but its receipt could not be saved to Firestore. Keep the transaction reference and retry after reconnecting."
           : "The audit status could not be saved to Firestore. No transaction reference was received.";

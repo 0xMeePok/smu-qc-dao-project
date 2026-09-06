@@ -1,5 +1,6 @@
-import { collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, updateDoc, where } from "firebase/firestore";
-import { db } from "./firebase.js";
+import { httpsCallable } from "firebase/functions";
+import { collection, doc, getDoc, getDocFromServer, getDocs, query, runTransaction, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { db, functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { toPostingRecord } from "./attachments.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
@@ -39,9 +40,9 @@ export async function findActiveProposal(problemId, uid) {
   return proposal?.status !== "withdrawn" ? proposal : null;
 }
 
-export async function findProposal(id) {
+export async function findProposal(id, { fromServer = false } = {}) {
   requireFirebase();
-  const snapshot = await getDoc(proposalRef(id));
+  const snapshot = await (fromServer ? getDocFromServer : getDoc)(proposalRef(id));
   return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
 }
 
@@ -79,6 +80,13 @@ export async function withdrawProposal(id) {
 }
 export async function updateProposalReceipt({ recordId, audit }) {
   requireFirebase();
+  if (audit.status === "confirmed") {
+    const { data } = await httpsCallable(functions, "confirmProposalAudit")({ proposalId: recordId });
+    if (data?.status !== "confirmed" && data?.audit?.status !== "confirmed") {
+      throw new Error("Server confirmation is queued. Refresh the receipt after its next verification check.");
+    }
+    return;
+  }
   await updateDoc(proposalRef(recordId), { audit, updatedAt: serverTimestamp() });
 }
 export async function listProposals(field, uid) {

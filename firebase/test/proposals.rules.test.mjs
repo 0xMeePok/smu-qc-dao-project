@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import { after, before, describe, it } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 
 const AUTHOR = `0x${"81".repeat(20)}`;
 const SPONSOR = `0x${"91".repeat(20)}`;
 const OUTSIDER = `0x${"71".repeat(20)}`;
+const ATTACHMENT_DIGEST = `0x${"4".repeat(64)}`;
 let env;
 let serial = 0;
 before(async () => {
@@ -30,10 +31,17 @@ function submit(db, id, data, withSlot = true) {
   return batch.commit();
 }
 describe("QCDAO-59/60 submitted proposals", () => {
-  it("atomically submits with two attachments and a queued verification receipt", async () => {
+  it("atomically submits with two attachments, then queues the verification receipt", async () => {
     const id = await parent();
-    const data = record(id, { attachments: ["file0001", "file0002"].map((id) => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200 })), audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "", blockNumber: 0, attemptCount: 0, lastError: "" } });
-    await assertSucceeds(submit(env.authenticatedContext(AUTHOR).firestore(), "proposal-full", data));
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const data = record(id, { attachments: ["file0001", "file0002"].map((id) => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })) });
+    await assertSucceeds(submit(db, "proposal-full", data));
+    // Match submitProposal followed by updateProposalReceipt: the wallet audit
+    // handoff starts only after the proposal and author slot commit successfully.
+    await assertSucceeds(updateDoc(doc(db, "proposals", "proposal-full"), {
+      audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "", blockNumber: 0, attemptCount: 0, lastError: "" },
+      updatedAt: serverTimestamp(),
+    }));
   });
   it("allows sponsor dashboard reads and denies unrelated wallets", async () => {
     const sponsor = env.authenticatedContext(SPONSOR).firestore();
@@ -65,13 +73,66 @@ describe("QCDAO-59/60 submitted proposals", () => {
     await assertFails(submit(db, "funding-forged-owner", { ...data, postingOwnerId: OUTSIDER }));
     await assertSucceeds(submit(db, "funding-complete", { ...data,
       amount: 1500.25,
-      attachments: ["file0003", "file0004"].map((id) => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200 })),
+      attachments: ["file0003", "file0004"].map((id) => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })),
     }));
     // Receipt creation is an asynchronous handoff after the proposal is saved.
     await assertSucceeds(updateDoc(doc(db, "proposals", "funding-complete"), {
       audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "", blockNumber: 0, attemptCount: 0, lastError: "" },
       updatedAt: serverTimestamp(),
     }));
+  });
+  it("requires attachment digests for new submissions", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const id = await parent();
+    const attachment = { id: "digestfile", name: "support.pdf", contentType: "application/pdf", size: 200 };
+    await assertFails(submit(db, "proposal-missing-digest", record(id, { attachments: [attachment] })));
+    await assertFails(submit(db, "proposal-bad-digest", record(id, { attachments: [{ ...attachment, sha256: "bad" }] })));
+    const draft = record(id, { status: "draft", attachments: [attachment] });
+    delete draft.postingOwnerId;
+    await assertSucceeds(setDoc(doc(db, "proposals", "proposal-draft-digest"), draft));
+    const publish = (attachments) => {
+      const batch = writeBatch(db);
+      batch.update(doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() });
+      batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "proposal-draft-digest" });
+      return batch.commit();
+    };
+    await assertFails(publish([attachment]));
+    await assertSucceeds(publish([{ ...attachment, sha256: ATTACHMENT_DIGEST }]));
+  });
+  it("preserves the first known audit transaction hash", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const id = await parent();
+    const proposalId = `proposal-hash-${serial}`;
+    const baseAudit = { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+      contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "", blockNumber: 0,
+      attemptCount: 0, lastError: "" };
+    await assertSucceeds(submit(db, proposalId, record(id, { audit: baseAudit })));
+    const ref = doc(db, "proposals", proposalId);
+    const firstHash = `0x${"3".repeat(64)}`;
+    const submitted = { ...baseAudit, status: "submitted", transactionHash: firstHash };
+    await assertSucceeds(updateDoc(ref, { audit: submitted, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { "audit.transactionHash": `0x${"5".repeat(64)}`, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { audit: baseAudit, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { audit: deleteField(), updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(ref, { audit: { ...submitted, status: "pending", attemptCount: 1 }, updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(ref, { "audit.status": "failed", "audit.lastError": "RPC unavailable", updatedAt: serverTimestamp() }));
+  });
+  it("does not allow a known hash to be erased by deleting a draft", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const id = await parent();
+    const proposalId = `draft-hash-${serial}`;
+    const draft = record(id, { status: "draft" });
+    delete draft.postingOwnerId;
+    await assertSucceeds(setDoc(doc(db, "proposals", proposalId), draft));
+    await assertSucceeds(deleteDoc(doc(db, "proposals", proposalId)));
+    await assertSucceeds(setDoc(doc(db, "proposals", proposalId), draft));
+    await assertSucceeds(updateDoc(doc(db, "proposals", proposalId), {
+      audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+        contentHash: `0x${"2".repeat(64)}`, status: "submitted", transactionHash: `0x${"3".repeat(64)}`,
+        blockNumber: 0, attemptCount: 1, lastError: "" },
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(db, "proposals", proposalId)));
   });
   it("prevents editing submitted content and self-acceptance, while allowing audit retries", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
@@ -94,4 +155,21 @@ describe("QCDAO-59/60 submitted proposals", () => {
     await assertFails(getDoc(doc(sponsor, "proposals", "private-draft")));
     await assertSucceeds(getDoc(doc(sponsor, "proposals", "proposal-full")));
   });
+});
+
+it("protects server-confirmed proposal receipts while allowing withdrawal", async () => {
+  const db = env.authenticatedContext(AUTHOR).firestore();
+  const id = await parent();
+  await assertSucceeds(submit(db, "confirmed-proposal", record(id)));
+  const audit = { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "confirmed", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 88, attemptCount: 1, lastError: "" };
+  await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { audit, updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(db, "proposals", "confirmed-proposal"), { audit: { ...audit, status: "pending", blockNumber: 0 }, updatedAt: serverTimestamp() }));
+  // Preserving a known transaction hash does not grant permission to confirm it.
+  await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { audit, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { "audit.status": "confirmed", updatedAt: serverTimestamp() }));
+  await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), "proposals", "confirmed-proposal"), { audit }));
+  await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { "audit.status": "pending", updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(db, "proposals", "confirmed-proposal"), { status: "withdrawn", updatedAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(db, "proposalAuditJobs", "forged-job"), { status: "confirmed" }));
+  await assertFails(getDocs(collection(db, "proposalAuditJobs")));
 });

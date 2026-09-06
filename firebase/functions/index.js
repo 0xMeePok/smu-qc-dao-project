@@ -20,6 +20,8 @@ import {
 } from "./adminActions.js";
 import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectedProblemIds, refreshOpportunityMetrics } from "./opportunityMetrics.js";
+import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, verifyMinedProposal } from "./proposalAuditRecovery.js";
+import { prepareStoredProposal } from "./proposalAuditPayload.js";
 
 initializeApp();
 
@@ -440,6 +442,123 @@ async function requireAdmin(request) {
   }
   return { uid, adminUser: userDoc.data() };
 }
+
+function auditProposalId(request) {
+  const id = request.data?.proposalId;
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    throw new HttpsError("invalid-argument", "A valid proposal reference is required.");
+  }
+  return id;
+}
+
+async function recoverAudit(proposalId, manual = false) {
+  return recoverProposalAudit({ db, client: publicClient, proposalId, manual, now: Timestamp.now(), Timestamp });
+}
+
+export const queueProposalAudit = onDocumentWritten(
+  { document: "proposals/{proposalId}", region: REGION, retry: true, maxInstances: 10 },
+  async (event) => {
+    const after = event.data?.after;
+    if (!after?.exists) return;
+    await enqueueProposalAudit({ db, record: { ...after.data(), id: after.id }, now: Timestamp.now() });
+  },
+);
+
+export const retryPendingProposalAudits = onSchedule(
+  { schedule: "every 1 minutes", region: REGION, maxInstances: 1 },
+  async () => {
+    const jobs = await db.collection(AUDIT_JOBS).where("status", "==", "pending")
+      .where("nextAttemptAt", "<=", Timestamp.now()).orderBy("nextAttemptAt").limit(25).get();
+    for (const job of jobs.docs) {
+      try { await recoverAudit(job.id); } catch (error) { console.warn("Proposal audit recovery:", job.id, error.message); }
+    }
+  },
+);
+
+export const confirmProposalAudit = onCall({ region: REGION, maxInstances: 5 }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to confirm this receipt.");
+  const id = auditProposalId(request);
+  const [profile, revocation, proposal] = await Promise.all([
+    db.collection("users").doc(uid).get(), db.collection(SESSION_REVOCATIONS_COLLECTION).doc(uid).get(),
+    db.collection("proposals").doc(id).get(),
+  ]);
+  if (!profile.exists || profile.data().suspended || !proposal.exists || proposal.data().researcherId !== uid) {
+    throw new HttpsError("permission-denied", "Only the active proposal author can confirm this receipt.");
+  }
+  if (isAuthTimeRevoked(request.auth.token.auth_time ?? 0, profile.data().sessionsValidAfterEpoch, revocation.data()?.sessionsValidAfterEpoch)) {
+    throw new HttpsError("unauthenticated", "This session was revoked. Sign in again.");
+  }
+  await enqueueProposalAudit({ db, record: { ...proposal.data(), id }, now: Timestamp.now() });
+  if (proposal.data().audit?.status === "confirmed") return { status: "confirmed" };
+  try { return { audit: await recoverAudit(id) }; }
+  catch (error) { throw new HttpsError("unavailable", error.message); }
+});
+
+export const adminListProposalAudits = onCall({ region: REGION }, async (request) => {
+  await requireAdmin(request);
+  let query = db.collection(AUDIT_JOBS).orderBy("updatedAt", "desc");
+  const cursor = request.data?.cursor;
+  if (cursor) {
+    if (typeof cursor !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(cursor)) throw new HttpsError("invalid-argument", "Invalid page cursor.");
+    const snapshot = await db.collection(AUDIT_JOBS).doc(cursor).get();
+    if (!snapshot.exists) throw new HttpsError("invalid-argument", "Page cursor no longer exists. Refresh the queue.");
+    query = query.startAfter(snapshot);
+  }
+  const page = await query.limit(26).get();
+  const rows = page.docs.slice(0, 25);
+  const items = await Promise.all(rows.map(async (row) => {
+    const { leaseUntil, ...job } = row.data();
+    const proposal = await db.collection("proposals").doc(row.id).get();
+    let audit = proposal.data()?.audit || null;
+    if (proposal.exists) {
+      try {
+        const prepared = prepareStoredProposal({ ...proposal.data(), id: row.id });
+        audit = { schemaVersion: 1, chainId: 421614, status: "queued", attemptCount: 0, ...audit,
+          entityId: prepared.entityId, contentHash: prepared.contentHash, solutionHash: prepared.solutionHash };
+      } catch { audit = null; }
+    }
+    return { ...job, id: row.id, audit, updatedAt: job.updatedAt.toDate().toISOString(), nextAttemptAt: job.nextAttemptAt.toDate().toISOString() };
+  }));
+  return { items, cursor: page.size > 25 ? rows.at(-1).id : null };
+});
+
+export const adminVerifyProposalAudit = onCall({ region: REGION, maxInstances: 3 }, async (request) => {
+  await requireAdmin(request);
+  const id = auditProposalId(request);
+  const snapshot = await db.collection("proposals").doc(id).get();
+  if (!snapshot.exists) throw new HttpsError("not-found", "Proposal no longer exists.");
+  try {
+    const record = { ...snapshot.data(), id };
+    const audit = await verifyMinedProposal(record, publicClient);
+    const block = await publicClient.getBlock({ blockNumber: BigInt(audit.blockNumber) });
+    return { verified: true, anchor: { anchor: { actor: record.researcherId, timestamp: Number(block.timestamp) } } };
+  } catch (error) {
+    if (/mismatch/i.test(error.message)) return { verified: false };
+    throw new HttpsError("unavailable", "Unable to verify: the transaction may be pending or the network unavailable.");
+  }
+});
+
+export const adminRetryProposalAudit = onCall({ region: REGION, maxInstances: 3 }, async (request) => {
+  await requireAdmin(request);
+  const id = auditProposalId(request);
+  const proposal = await db.collection("proposals").doc(id).get();
+  if (!proposal.exists) throw new HttpsError("not-found", "Proposal no longer exists.");
+  const record = proposal.data();
+  if (!record.audit?.transactionHash) {
+    // An admin cannot impersonate the contract's researcher. Reset only the
+    // wallet attempt budget; preserve all proposal content and any known hash.
+    await db.runTransaction(async (tx) => {
+      const current = await tx.get(proposal.ref);
+      if (current.data().audit?.transactionHash) throw new HttpsError("aborted", "A transaction was just submitted. Refresh and resume it.");
+      if (current.data().audit) tx.update(proposal.ref, { "audit.attemptCount": 0, "audit.status": "queued", "audit.lastError": "", updatedAt: Timestamp.now() });
+    });
+    return { message: "Wallet attempts reset. The researcher can start verification from their proposal receipt." };
+  }
+  await enqueueProposalAudit({ db, record: { ...record, id }, now: Timestamp.now() });
+  try { await recoverAudit(id, true); return { message: "Verification confirmed and receipt saved." }; }
+  catch (error) { throw new HttpsError("unavailable", error.message); }
+});
 
 /**
  * Admin: List platform users with search, filtering, and pagination.

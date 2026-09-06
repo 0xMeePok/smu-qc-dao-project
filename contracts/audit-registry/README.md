@@ -30,11 +30,18 @@ npm install
 
 Copy `.env.example` to `.env` and set the Arbitrum Sepolia RPC URL, deployer private key, and Etherscan API key. Never commit `.env` or use a wallet that controls mainnet funds.
 
-Compile and test:
+Compile and test on a local Hardhat chain (use Node.js 22 or newer):
 
 ```bash
 npm test
 ```
+
+The suite covers opportunity and proposal lifecycles, access control, invalid
+inputs, revision linkage, withdrawal and public reads. The workflow tests add
+exact deadline boundaries, rejected-update rollback, and competing submissions
+mined in the same block. These tests deploy fresh local contracts and do not send
+transactions to Arbitrum Sepolia. CI runs the suite for changes to this contract
+package, and its result is included in the required aggregate CI check.
 
 Deploy and automatically verify on Arbiscan through Etherscan API v2:
 

@@ -146,7 +146,8 @@ service firebase.storage {
     function metadataIsHonest(problemId) {
       return request.resource.metadata != null
         && request.resource.metadata.uploadedBy == request.auth.uid
-        && request.resource.metadata.problemId == problemId;
+        && request.resource.metadata.problemId == problemId
+        && request.resource.metadata.sha256.matches('^0x[0-9a-f]{64}$');
     }
 
     // The posting id is a Firestore document id, so bound it to that shape. The
