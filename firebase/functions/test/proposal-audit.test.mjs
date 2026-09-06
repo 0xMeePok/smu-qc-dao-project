@@ -107,6 +107,10 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
   });
   it("rejects the wrong actor, contract, chain and reverted transaction", async () => {
     const record = fixture();
+    await assert.rejects(
+      verifyMinedProposal({ ...record, researcherId: `0x${"b".repeat(40)}` }, clientFor(record)),
+      /does not belong/,
+    );
     for (const patch of [{ from: `0x${"b".repeat(40)}` }, { to: `0x${"c".repeat(40)}` }, { chainId: 1 }]) {
       const client = clientFor(record), original = client.getTransaction;
       client.getTransaction = async () => ({ ...await original(), ...patch });
@@ -117,9 +121,12 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
     await assert.rejects(verifyMinedProposal(record, client), /reverted/);
   });
   it("detects a later change in the registry itself", async () => {
-    const record = fixture(), client = clientFor(record), read = client.readContract;
-    client.readContract = async () => ({ ...await read(), solutionHash: hash });
-    await assert.rejects(verifyMinedProposal(record, client), /Mismatch/);
+    const record = fixture();
+    for (const patch of [{ solutionHash: hash }, { researcher: `0x${"b".repeat(40)}` }]) {
+      const client = clientFor(record), read = client.readContract;
+      client.readContract = async () => ({ ...await read(), ...patch });
+      await assert.rejects(verifyMinedProposal(record, client), /Mismatch/);
+    }
   });
   it("requires one canonical block view and two confirmations", async () => {
     const record = fixture();

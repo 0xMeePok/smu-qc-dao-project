@@ -163,6 +163,10 @@ it("protects server-confirmed proposal receipts while allowing withdrawal", asyn
   await assertSucceeds(submit(db, "confirmed-proposal", record(id)));
   const audit = { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "confirmed", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 88, attemptCount: 1, lastError: "" };
   await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { audit, updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(db, "proposals", "confirmed-proposal"), { audit: { ...audit, status: "pending", blockNumber: 0 }, updatedAt: serverTimestamp() }));
+  // Preserving a known transaction hash does not grant permission to confirm it.
+  await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { audit, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { "audit.status": "confirmed", updatedAt: serverTimestamp() }));
   await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), "proposals", "confirmed-proposal"), { audit }));
   await assertFails(updateDoc(doc(db, "proposals", "confirmed-proposal"), { "audit.status": "pending", updatedAt: serverTimestamp() }));
   await assertSucceeds(updateDoc(doc(db, "proposals", "confirmed-proposal"), { status: "withdrawn", updatedAt: serverTimestamp() }));
