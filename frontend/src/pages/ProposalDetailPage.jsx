@@ -4,6 +4,7 @@ import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findProposal, withdrawProposal } from "../lib/proposals.js";
 import { anchorProposalAudit, proposalAuditReceipt, readProposalAudit } from "../lib/proposalAudit.js";
+import { auditErrorMessage } from "../lib/errors.js";
 import { downloadAttachment, saveBlobAs } from "../lib/attachments.js";
 import { formatInstant } from "../lib/datetime.js";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
@@ -46,7 +47,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     anchorInFlight.current.add(record.id);
     setAuditBusy(true); setError("");
     try { await anchorProposalAudit(record, { account: address, onChange: (audit) => setProposal((old) => old?.id === record.id ? { ...old, audit } : old) }); }
-    catch (err) { if (activeProposalId.current === record.id) setError(`Your proposal is saved. ${err?.message || "Verification is unavailable. Try again later."}`); }
+    catch (err) { if (activeProposalId.current === record.id) setError(`Your proposal is saved. ${auditErrorMessage(err)}`); }
     finally { anchorInFlight.current.delete(record.id); if (activeProposalId.current === record.id) setAuditBusy(false); }
   };
   useEffect(() => {

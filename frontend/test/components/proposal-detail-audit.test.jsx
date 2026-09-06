@@ -17,6 +17,25 @@ const record = { id: "proposal1", researcherId: account, title: "Saved routing s
   audit: { schemaVersion: 1, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, attemptCount: 0, status: "queued", transactionHash: "" } };
 beforeEach(() => { mocks.connected = false; mocks.anchor.mockReset(); mocks.find.mockReset().mockResolvedValue(record); });
 afterEach(cleanup);
+it("shows a concise rejection banner and clears it on retry without losing the proposal", async () => {
+  mocks.connected = true;
+  mocks.anchor.mockRejectedValueOnce(new Error(`User rejected the request. Request Arguments: data: 0x${"a".repeat(2000)} Details: MetaMask Tx Signature: User denied transaction signature.`))
+    .mockResolvedValueOnce(undefined);
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} autoAnchor />);
+  expect((await screen.findByRole("alert")).textContent).toBe("Your proposal is saved. The wallet transaction was declined. You can retry when ready.");
+  expect(screen.queryByText(/Request Arguments|MetaMask Tx Signature/)).toBeNull();
+  expect(screen.getByRole("heading", { name: record.title })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Start verification" }));
+  await waitFor(() => expect(mocks.anchor).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+it("keeps retry-limit guidance actionable without exposing the underlying error", async () => {
+  mocks.connected = true;
+  mocks.anchor.mockRejectedValue(new Error("The wallet retry limit has been reached. Internal details: should not be rendered."));
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} autoAnchor />);
+  expect((await screen.findByRole("alert")).textContent).toBe("Your proposal is saved. The wallet retry limit has been reached. Ask an administrator to reset verification attempts.");
+  expect(screen.queryByText(/Internal details/)).toBeNull();
+});
 it("keeps a successfully saved proposal visible when its wallet is disconnected", async () => {
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} autoAnchor />);
   expect(await screen.findByRole("heading", { name: record.title })).toBeTruthy();

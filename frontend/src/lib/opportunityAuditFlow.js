@@ -10,7 +10,7 @@ import {
   verifyOpportunityAudit,
   waitForAuditReceipt,
 } from "./auditRegistry.js";
-import { isTransactionFeeTooLow, TRANSACTION_FEE_TOO_LOW_MESSAGE } from "./errors.js";
+import { auditErrorMessage } from "./errors.js";
 
 const AUDIT_STATUSES = new Set(["queued", "submitted", "pending", "confirmed", "failed"]);
 
@@ -25,16 +25,6 @@ export function configuredAuditRegistryAddress() {
 function blockNumber(value) {
   const numeric = Number(value ?? 0);
   return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : 0;
-}
-
-function auditErrorMessage(error) {
-  const rejected = error?.code === 4001 || /user rejected/i.test(error?.message ?? "");
-  if (rejected) return "The wallet transaction was declined. You can retry when ready.";
-  if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
-  if (/revert|invalidstate|invalidinput/i.test(error?.message ?? "")) {
-    return "The verification transaction reverted. Check the opportunity's status and revision before retrying.";
-  }
-  return "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
 function storedAudit(setup, opportunity) {
