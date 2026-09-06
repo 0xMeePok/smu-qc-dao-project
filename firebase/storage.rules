@@ -100,8 +100,12 @@ service firebase.storage {
     // could upload into their OWN folder using a published posting's id
     // (problems/{attacker}/{publishedId}/x.pdf) and have those bytes served to the
     // world on the strength of someone else's posting being public.
+    function attachmentRecord(collectionName, recordId) {
+      return firestore.get(/databases/(default)/documents/$(collectionName)/$(recordId));
+    }
+
     function postingIsPublished(problemId, ownerId) {
-      let posting = firestore.get(/databases/(default)/documents/problems/$(problemId));
+      let posting = attachmentRecord('problems', problemId);
       return posting != null
         && posting.data.status in ['submitted', 'open']
         && posting.data.ownerId == ownerId;
@@ -193,6 +197,23 @@ service firebase.storage {
       // Remove-before-publish, and removal after the fact. Restricted to the
       // owner for the same reason writes are.
       allow delete: if isWallet(ownerId) && isActiveMember();
+    }
+
+    // Proposal files are private to the submitting wallet and the sponsor.
+    // Once submitted, the bytes and references remain immutable for review.
+    function proposalReader(proposalId, ownerId) {
+      let proposal = attachmentRecord('proposals', proposalId);
+      return proposal != null && proposal.data.researcherId == ownerId
+        && proposal.data.postingOwnerId == request.auth.uid;
+    }
+    match /proposals/{ownerId}/{proposalId}/{fileName} {
+      allow read: if isActiveMember() && (isWallet(ownerId) || proposalReader(proposalId, ownerId));
+      allow create: if resource == null && isWallet(ownerId) && isActiveMember()
+        && isPostingId(proposalId) && isPdf(fileName) && withinSizeCap()
+        && metadataIsHonest(proposalId)
+        && attachmentRecord('proposals', proposalId) == null;
+      allow delete: if isWallet(ownerId) && isActiveMember()
+        && attachmentRecord('proposals', proposalId) == null;
     }
 
     // Deny everything not matched above, including any legacy path.

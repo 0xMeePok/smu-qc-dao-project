@@ -1,3 +1,5 @@
+import CreateProposalPage from "./pages/CreateProposalPage.jsx";
+import ProposalDetailPage from "./pages/ProposalDetailPage.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunityTypes } from "./data.js";
 import { POSTING_CATEGORIES } from "./config/postingCategories.js";
@@ -7,6 +9,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { useSession } from "./context/SessionContext.jsx";
 import { shortenAddress } from "./lib/chain.js";
 import { isAdmin } from "./lib/roles.js";
+import { ResponsiveHeader } from "./components/ResponsiveHeader.jsx";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
 import { AccessDenied } from "./components/AccessDenied.jsx";
@@ -91,15 +94,6 @@ function ArrowIcon() {
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="M4 10h11M11 6l4 4-4 4" />
     </svg>
-  );
-}
-
-function Logo() {
-  return (
-    <button className="brand" type="button" onClick={() => go("home")} aria-label="QC DAO home">
-      <span aria-hidden="true">Q</span>
-      QC DAO
-    </button>
   );
 }
 
@@ -232,31 +226,9 @@ function Shell({ route, children }) {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-left">
-          <Logo />
-          <nav aria-label="Primary navigation">
-            {primaryRoutes.map(({ key, label }) => (
-              <button
-                key={key}
-                className={route === key ? "active" : ""}
-                type="button"
-                onClick={() => go(key)}
-              >
-                {label}
-              </button>
-            ))}
-
-            {workspaceRoutes.length > 0 && (
-              <WorkspacesDropdown route={route} workspaceRoutes={workspaceRoutes} />
-            )}
-          </nav>
-        </div>
-
-        <div className="topbar-right">
-          <AccountControls />
-        </div>
-      </header>
+      <ResponsiveHeader route={route} primaryRoutes={primaryRoutes} workspaceRoutes={workspaceRoutes}
+        desktopWorkspaces={<WorkspacesDropdown route={route} workspaceRoutes={workspaceRoutes} />}
+        accountControls={<AccountControls />} onNavigate={go} />
 
       <main className="content">{children}</main>
 
@@ -794,6 +766,7 @@ function NotFound() {
 }
 
 function AppContent() {
+  const { user } = useAuth();
   const { section, id, fullPath, params } = useRoute();
   const routeConfig = getRouteConfig(section);
 
@@ -816,6 +789,10 @@ function AppContent() {
         <ProfilePage />
       </RouteGuard>
     );
+  } else if (section === "submit-proposal" || section === "proposal") {
+    pageComponent = <RouteGuard targetRoute={fullPath} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
+      {section === "submit-proposal" ? <CreateProposalPage key={`${id}-${user?.id}`} postingId={id} onNavigate={go} /> : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} onNavigate={go} />}
+    </RouteGuard>;
   } else if (section === "posting") {
     pageComponent = (
       <RouteGuard

@@ -49,11 +49,11 @@ function storedAudit(setup, opportunity) {
  * The contract, receipt state machine and recovery behaviour stay identical;
  * only the canonical payload, enum value and Firestore updater vary by kind.
  */
-export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, entityLabel }) {
+export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, entityLabel, prepareCommit, commitAudit = commitOpportunityAudit, verifyAudit = verifyOpportunityAudit }) {
   const prepare = (opportunity) => {
     const address = configuredAuditRegistryAddress();
     if (!address) return null;
-    const prepared = prepareOpportunityCommit({
+    const prepared = prepareCommit ? prepareCommit(opportunity) : prepareOpportunityCommit({
       recordId: opportunity.id,
       payload: payloadFor(opportunity),
       kind,
@@ -84,7 +84,7 @@ export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, ent
   const read = async (opportunity, { adapters } = {}) => {
     const setup = prepare(opportunity);
     if (!setup) throw new Error("AuditRegistry is not configured.");
-    return verifyOpportunityAudit(setup.prepared, { address: setup.address, adapters });
+    return verifyAudit(setup.prepared, { address: setup.address, adapters });
   };
 
   const anchor = async (opportunity, {
@@ -137,7 +137,7 @@ export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, ent
           maxRetries: maxReceiptRetries,
         });
         if (chainReceipt?.status !== "success") throw new Error("AuditRegistry transaction reverted.");
-        const verification = await verifyOpportunityAudit(setup.prepared, {
+        const verification = await verifyAudit(setup.prepared, {
           address: setup.address,
           adapters,
         });
@@ -153,7 +153,7 @@ export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, ent
     }
 
     try {
-      const result = await commitOpportunityAudit(setup.prepared, {
+      const result = await commitAudit(setup.prepared, {
         address: setup.address,
         account,
         adapters,
@@ -166,7 +166,7 @@ export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, ent
           }
         },
       });
-      const verification = await verifyOpportunityAudit(setup.prepared, {
+      const verification = await verifyAudit(setup.prepared, {
         address: setup.address,
         adapters,
       });

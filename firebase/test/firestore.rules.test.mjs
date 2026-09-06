@@ -982,7 +982,7 @@ describe("proposals/{proposalId}", () => {
       status: "accepted",
       updatedAt: serverTimestamp(),
     }));
-    await assertSucceeds(updateDoc(doc(db, "proposals", "prop_tr"), {
+    await assertFails(updateDoc(doc(db, "proposals", "prop_tr"), {
       status: "submitted",
       updatedAt: serverTimestamp(),
     }));

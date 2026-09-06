@@ -306,11 +306,11 @@ service cloud.firestore {
     function hasProposalSchema(data) {
       return data.keys().hasOnly([
         'researcherId', 'problemId', 'title', 'summary', 'outcomes', 'amount',
-        'status', 'deliverables', 'audit', 'createdAt', 'updatedAt'
-      ]) && data.keys().hasAll([
-        'researcherId', 'problemId', 'title', 'summary', 'amount', 'status',
-        'createdAt', 'updatedAt'
-      ]);
+        'status', 'deliverables', 'audit', 'createdAt', 'updatedAt',
+        'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
+        'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
+        'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit'
+      ]); // Required fields are checked by value below and in the write rules.
     }
 
     function hasEvaluationSchema(data) {
@@ -344,30 +344,33 @@ service cloud.firestore {
     }
 
     function hasValidAudit(data) {
-      return !data.keys().hasAny(['audit'])
-        || (data.audit is map
+      return !data.keys().hasAny(['audit']) || validAuditRecord(data.audit);
+    }
+
+    function validAuditRecord(audit) {
+      return (audit is map
           // keys().size() == 9, not hasOnly + hasAll on the same nine names. Those
           // two list comparisons cost enough that a posting carrying both an audit
           // receipt and two attachments exceeded Firestore's 1000-expression cap.
           // Equivalent: every one of the nine is checked by name below, so an
           // unknown key can only fit by displacing one, and that check then fails.
-          && data.audit.keys().size() == 9
-          && data.audit.schemaVersion == 1
-          && data.audit.chainId == 421614
-          && isBytes32(data.audit.entityId)
-          && isBytes32(data.audit.contentHash)
-          && data.audit.status in ['queued', 'submitted', 'pending', 'confirmed', 'failed']
-          && data.audit.transactionHash is string
-          && (data.audit.transactionHash == '' || isBytes32(data.audit.transactionHash))
-          && data.audit.blockNumber is int && data.audit.blockNumber >= 0
-          && data.audit.attemptCount is int
-          && data.audit.attemptCount >= 0 && data.audit.attemptCount <= 3
-          && data.audit.lastError is string && data.audit.lastError.size() <= 500
-          && (data.audit.status != 'queued'
-            || (data.audit.transactionHash == '' && data.audit.blockNumber == 0))
-          && (!(data.audit.status in ['submitted', 'pending', 'confirmed'])
-            || data.audit.transactionHash != '')
-          && (data.audit.status != 'confirmed' || data.audit.blockNumber > 0));
+          && audit.keys().size() == 9
+          && audit.schemaVersion == 1
+          && audit.chainId == 421614
+          && isBytes32(audit.entityId)
+          && isBytes32(audit.contentHash)
+          && audit.status in ['queued', 'submitted', 'pending', 'confirmed', 'failed']
+          && audit.transactionHash is string
+          && (audit.transactionHash == '' || isBytes32(audit.transactionHash))
+          && audit.blockNumber is int && audit.blockNumber >= 0
+          && audit.attemptCount is int
+          && audit.attemptCount >= 0 && audit.attemptCount <= 3
+          && audit.lastError is string && audit.lastError.size() <= 500
+          && (audit.status != 'queued'
+            || (audit.transactionHash == '' && audit.blockNumber == 0))
+          && (!(audit.status in ['submitted', 'pending', 'confirmed'])
+            || audit.transactionHash != '')
+          && (audit.status != 'confirmed' || audit.blockNumber > 0));
     }
 
     function stringListItemIsValid(items, index) {
@@ -684,6 +687,41 @@ service cloud.firestore {
         && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
     }
 
+    // QCDAO-59/60: the parent is checked at commit time, including when a
+    // client bypasses the form or two tabs submit concurrently.
+    function acceptsProposals(parent) {
+      return parent.status in ['submitted', 'open']
+        && parent.expiresAt > request.time
+        && parent.get('acceptedProposalId', '') == ''
+        && parent.get('acceptedSolutionId', '') == ''
+        && !parent.get('hasAcceptedSolution', false)
+        && !parent.get('moderated', false)
+        && !(parent.get('moderationStatus', '') in ['hidden', 'removed']);
+    }
+
+    function validSubmittedProposal(data, proposalId) {
+      let parent = get(/databases/$(database)/documents/problems/$(data.problemId)).data;
+      let slot = getAfter(/databases/$(database)/documents/problems/$(data.problemId)/proposalAuthors/$(request.auth.uid)).data;
+      return acceptsProposals(parent)
+        && data.postingOwnerId == parent.ownerId
+        && data.opportunityType == opportunityType(parent)
+        && data.currency == parent.currency
+        && data.amount > 0
+        && data.category in ['gate-model', 'quantum-inspired', 'quantum-annealing', 'hybrid', 'quantum-adjacent']
+        && isNonEmptyString(data.methodology, 4000)
+        && isNonEmptyString(data.suitability, 4000)
+        && isNonEmptyString(data.expectedOutcomes, 4000)
+        && isNonEmptyString(data.successCriteria, 4000)
+        && isNonEmptyString(data.timeline, 4000)
+        && isNonEmptyString(data.milestones, 4000)
+        && isNonEmptyString(data.team, 4000)
+        && (data.opportunityType != 'open-funding'
+          || (isNonEmptyString(data.proposedProblem, 4000)
+            && isNonEmptyString(data.relevance, 4000)
+            && isNonEmptyString(data.thesisFit, 4000)))
+        && slot.proposalId == proposalId;
+    }
+
     function validEvaluationStatus(status) {
       return status in ['draft', 'submitted', 'accepted'];
     }
@@ -803,29 +841,54 @@ service cloud.firestore {
         && validProblemTransition(resource.data.status, request.resource.data.status);
     }
     
+    match /problems/{problemId}/proposalAuthors/{authorId} {
+      allow read: if isActiveUser(request.auth.uid) && authorId == request.auth.uid;
+      function validSlot() {
+        let next = getAfter(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data;
+        return request.resource.data.keys().hasOnly(['proposalId'])
+          && next.researcherId == authorId && next.problemId == problemId
+          && next.status == 'submitted'
+          && next.updatedAt == request.time;
+      }
+      allow create: if isActiveUser(request.auth.uid) && authorId == request.auth.uid && validSlot();
+      allow update: if isActiveUser(request.auth.uid) && authorId == request.auth.uid
+        && get(/databases/$(database)/documents/proposals/$(resource.data.proposalId)).data.status == 'withdrawn'
+        && validSlot();
+    }
+
     match /proposals/{proposalId} {
-      allow read: if isActiveUser(request.auth.uid) && resource.data.researcherId == request.auth.uid;
-      allow delete: if isActiveUser(request.auth.uid) && resource.data.researcherId == request.auth.uid;
+      allow read: if isActiveUser(request.auth.uid)
+        && (resource.data.researcherId == request.auth.uid
+          || resource.data.get('postingOwnerId', '') == request.auth.uid);
+      allow delete: if isActiveUser(request.auth.uid)
+        && resource.data.researcherId == request.auth.uid && resource.data.status == 'draft';
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.researcherId == request.auth.uid
         && validProposal(request.resource.data)
-        && request.resource.data.status == 'draft'
+        && validAttachments(request.resource.data)
+        && (request.resource.data.status == 'draft'
+          || (request.resource.data.status == 'submitted' && validSubmittedProposal(request.resource.data, proposalId)))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId));
       allow update: if isActiveUser(request.auth.uid)
-        && resource != null
         && resource.data.researcherId == request.auth.uid
         && request.resource.data.researcherId == resource.data.researcherId
         && request.resource.data.problemId == resource.data.problemId
         && validProposal(request.resource.data)
+        && validAttachments(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
-        && validProposalTransition(resource.data.status, request.resource.data.status)
-        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId));
+        && ((resource.data.status == 'draft'
+            && (request.resource.data.status in ['draft', 'withdrawn']
+              || (request.resource.data.status == 'submitted' && validSubmittedProposal(request.resource.data, proposalId))))
+          || (resource.data.status != 'draft'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'audit', 'updatedAt'])
+            && (request.resource.data.status == resource.data.status
+              || (resource.data.status in ['submitted', 'under_review'] && request.resource.data.status == 'withdrawn'))));
     }
-    
+
     match /evaluations/{evaluationId} {
       allow read: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
       allow delete: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
