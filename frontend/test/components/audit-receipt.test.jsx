@@ -42,6 +42,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AuditReceipt", () => {
+  it("offers a start action for a queued receipt after a wallet disconnect", () => {
+    const start = vi.fn();
+    renderReceipt({ audit: receipt({ status: "queued", transactionHash: "", attemptCount: 0 }), onVerify: undefined, onRetry: start });
+    fireEvent.click(screen.getByRole("button", { name: "Start verification" }));
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("offers a resume action for a pending receipt", () => {
+    const resume = vi.fn();
+    renderReceipt({ audit: receipt({ status: "pending" }), onVerify: undefined, onRetry: resume });
+    fireEvent.click(screen.getByRole("button", { name: "Resume verification" }));
+    expect(resume).toHaveBeenCalledOnce();
+  });
+
   it("[QCDAO-77] renders a legible receipt and explorer link", async () => {
     renderReceipt();
     expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();

@@ -315,7 +315,7 @@ describe("storage rules: attachments follow the posting's visibility", () => {
 
   it("[BIT-OPD-137] refuses a signed-in wallet with no profile from downloading", async () => {
     // Membership gate: a SIWE token alone is not enough, a /users profile is.
-    const NO_PROFILE = `0x${"2".repeat(40)}`;
+    const NO_PROFILE = `0x${"21".repeat(20)}`;
     const storage = env.authenticatedContext(NO_PROFILE).storage();
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
   });
@@ -372,5 +372,32 @@ describe("storage rules: attachments follow the posting's visibility", () => {
   it("[BIT-OPD-141] still refuses another wallet from DELETING from a published posting", async () => {
     const storage = env.authenticatedContext(OTHER).storage();
     await assertFails(deleteObject(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));
+  });
+});
+
+// QCDAO-59: private proposal attachments, immutable once submitted.
+describe("proposal supporting PDFs", () => {
+  const proposalId = "storage-proposal-59";
+  const path = `proposals/${OWNER}/${proposalId}/support01.pdf`;
+  const metadata = pdfMetadata({ customMetadata: { problemId: proposalId } });
+  it("uploads before submission, then permits only the author and sponsor to read", async () => {
+    const author = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(author, path), PDF_BYTES, metadata));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), { researcherId: OWNER, postingOwnerId: OTHER, status: "submitted" }));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
+    await assertSucceeds(getBytes(ref(author, path)));
+    await assertFails(deleteObject(ref(author, path)));
+    await assertFails(uploadBytes(ref(author, `proposals/${OWNER}/${proposalId}/support02.pdf`), PDF_BYTES, metadata));
+    await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), path)));
+  });
+  it("refuses sponsor downloads against a draft that forges postingOwnerId", async () => {
+    const forgedId = "storage-forged-draft-59";
+    const forgedPath = `proposals/${OWNER}/${forgedId}/support01.pdf`;
+    const forgedMetadata = pdfMetadata({ customMetadata: { problemId: forgedId } });
+    await assertSucceeds(uploadBytes(ref(env.authenticatedContext(OWNER).storage(), forgedPath), PDF_BYTES, forgedMetadata));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", forgedId), { researcherId: OWNER, postingOwnerId: OTHER, status: "draft" }));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), forgedPath)));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), forgedPath)));
   });
 });

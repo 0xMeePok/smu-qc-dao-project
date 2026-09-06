@@ -81,6 +81,8 @@ export const ROUTES_CONFIG = [
     authRequired: true,
     showInNav: true,
   },
+  { key: "submit-proposal", path: "submit-proposal", label: "Submit proposal", allowedRoles: [ROLES.RESEARCHER], authRequired: true, showInNav: false },
+  { key: "proposal", path: "proposal", label: "Proposal", allowedRoles: [ROLES.RESEARCHER, ROLES.OWNER, ROLES.FUNDER], authRequired: true, showInNav: false },
   // Non-navigated or dynamic/utility routes:
   {
     key: "posting",

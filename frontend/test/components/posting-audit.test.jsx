@@ -67,8 +67,9 @@ describe("QCDAO-79 posting audit recovery", () => {
 
     expect(writes).toBe(1);
     expect(mocks.updates.map(({ status }) => status)).toEqual([
-      "queued", "submitted", "pending", "confirmed",
+      "queued", "submitted", "pending",
     ]);
+    expect(result.status).toBe("confirmed");
     expect(result.transactionHash).toBe(TX);
     expect(result.blockNumber).toBe(88);
     expect(result.contractAddress).toBeUndefined();
@@ -95,7 +96,8 @@ describe("QCDAO-79 posting audit recovery", () => {
 
     expect(writes).toBe(0);
     expect(waits).toBe(1);
-    expect(mocks.updates.map(({ status }) => status)).toEqual(["pending", "confirmed"]);
+    expect(mocks.updates.map(({ status }) => status)).toEqual(["pending"]);
+    expect(result.status).toBe("confirmed");
     expect(result.blockNumber).toBe(99);
   });
 

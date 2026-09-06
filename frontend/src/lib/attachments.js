@@ -38,8 +38,9 @@ export function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function attachmentPath({ ownerId, problemId, attachmentId }) {
-  return `problems/${String(ownerId).toLowerCase()}/${problemId}/${attachmentId}${ACCEPTED_EXTENSION}`;
+export function attachmentPath({ ownerId, problemId, attachmentId, scope = "problems" }) {
+  if (!["problems", "proposals"].includes(scope)) throw new Error("Invalid attachment scope.");
+  return `${scope}/${String(ownerId).toLowerCase()}/${problemId}/${attachmentId}${ACCEPTED_EXTENSION}`;
 }
 
 export function newAttachmentId() {
@@ -171,11 +172,11 @@ function requireStorage() {
  *   cancel()    aborts the transfer (scope item: cancel)
  *   done        resolves with the attachment, or rejects with "storage/canceled"
  */
-export function uploadAttachment({ file, ownerId, problemId, onProgress }) {
+export function uploadAttachment({ file, ownerId, problemId, onProgress, scope = "problems" }) {
   requireStorage();
 
   const attachmentId = newAttachmentId();
-  const path = attachmentPath({ ownerId, problemId, attachmentId });
+  const path = attachmentPath({ ownerId, problemId, attachmentId, scope });
 
   const attachment = {
     id: attachmentId,
@@ -219,11 +220,11 @@ export function uploadAttachment({ file, ownerId, problemId, onProgress }) {
  * cancelled upload can leave a path that was never completed. Failing there would
  * strand a row in the UI that the user cannot clear.
  */
-export async function deleteAttachment({ attachment, ownerId, problemId }) {
+export async function deleteAttachment({ attachment, ownerId, problemId, scope = "problems" }) {
   requireStorage();
   try {
     await deleteObject(storageRef(storage, attachmentPath({
-      ownerId, problemId, attachmentId: attachment.id,
+      ownerId, problemId, attachmentId: attachment.id, scope,
     })));
   } catch (error) {
     if (error?.code !== "storage/object-not-found") throw error;
@@ -238,10 +239,10 @@ export async function deleteAttachment({ attachment, ownerId, problemId }) {
  * and is evaluated against firebase/storage.rules on every request: any signed-in
  * wallet may read, only the owner may write or delete.
  */
-export async function downloadAttachment({ attachment, ownerId, problemId }) {
+export async function downloadAttachment({ attachment, ownerId, problemId, scope = "problems" }) {
   requireStorage();
   return getBlob(storageRef(storage, attachmentPath({
-    ownerId, problemId, attachmentId: attachment.id,
+    ownerId, problemId, attachmentId: attachment.id, scope,
   })));
 }
 

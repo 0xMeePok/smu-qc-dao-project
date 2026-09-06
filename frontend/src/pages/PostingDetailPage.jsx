@@ -1,3 +1,4 @@
+import { proposalBlockReason } from "../lib/proposalValidation.js";
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -249,6 +250,13 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <div><dt>Submitted</dt><dd>{formatInstant(posting.createdAt)}</dd></div>
             <div><dt>Reference</dt><dd><code>{posting.id}</code></dd></div>
           </dl>
+
+          {proposalBlockReason(posting) ? <p className="field-hint">{proposalBlockReason(posting)}</p> : (user?.roles ?? [user?.role]).includes("researcher") ? (
+            <button className="primary" type="button" onClick={() => onNavigate(`submit-proposal/${posting.id}`)}>Submit a proposal</button>
+          ) : !isAuthenticated ? (
+            <button className="primary" type="button" onClick={() => onNavigate(`login?redirect=${encodeURIComponent(`submit-proposal/${posting.id}`)}`)}>Sign in to submit a proposal</button>
+          ) : null}
+          {isOpenFunding && <p className="field-hint">Propose a problem and solution. The funder acts as the problem owner for selection.</p>}
 
           <div className="expiry-panel">
             <span className="eyebrow">{expired ? "Closed" : "Time remaining"}</span>

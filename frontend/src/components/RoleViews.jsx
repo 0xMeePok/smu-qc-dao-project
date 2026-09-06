@@ -1,3 +1,4 @@
+import { ProposalList } from "./ProposalList.jsx";
 import { useCallback, useEffect, useState } from "react";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
@@ -144,6 +145,8 @@ export function MyProblems({ onNavigate }) {
         )}
       </div>
 
+      <ProposalList received onNavigate={onNavigate} />
+
       {pendingDelete && (
         <Modal
           labelledBy="delete-draft-title"
@@ -174,67 +177,7 @@ export function MyProblems({ onNavigate }) {
 }
 
 export function ResearcherProposals({ onNavigate }) {
-  const { user } = useAuth();
-  const [data, setData] = useState([]);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function fetchData() {
-      if (!user?.id || !db) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const q = query(collection(db, "proposals"), where("researcherId", "==", user.id));
-        const querySnapshot = await getDocs(q);
-        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (err) {
-        setError(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, [user?.id]);
-
-  return (
-    <section className="page dashboard-page">
-      <div className="page-heading">
-        <div className="eyebrow-row">
-          <RoleBadge role="researcher" />
-          <span>Affiliation: {user?.org}</span>
-        </div>
-        <h1>My Research Proposals</h1>
-        <p>Track your submitted grant proposals, reviewer scoring outcomes, milestone deliverables, and verification escrow.</p>
-      </div>
-
-      <div className="card-table">
-        <div className="table-header">
-          <h3>Active Proposal Records</h3>
-          <button className="secondary small" type="button" onClick={() => onNavigate("discover")}>Browse Open Calls</button>
-        </div>
-        
-        {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
-        ) : error ? (
-          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
-             <strong>Error:</strong> {error.message}
-          </div>
-        ) : data.length === 0 ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No proposals found.</div>
-        ) : (
-          data.map(item => (
-            <div className="table-row" key={item.id}>
-              <div>
-                <strong>{item.title}</strong>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
-  );
+  return <section className="page dashboard-page"><div className="page-heading"><h1>My Research Proposals</h1><p>View your submissions, verification receipts and withdrawal history.</p></div><ProposalList onNavigate={onNavigate} /></section>;
 }
 
 export function EvaluatorQueue() {
@@ -335,6 +278,8 @@ export function FundingPortfolio({ onNavigate }) {
         <h1>Funding Commitments & Escrow</h1>
         <p>Oversee capital allocation, approve milestone disbursement tranches, and monitor portfolio performance.</p>
       </div>
+
+      <ProposalList received onNavigate={onNavigate} />
 
       <div className="card-table">
         <div className="table-header">

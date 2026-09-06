@@ -181,7 +181,7 @@ export async function createPosting({
   return (await findPosting(postingId)) ?? { id: postingId, ...record };
 }
 
-/** Persists one transition of the queued -> submitted/pending -> confirmed/failed receipt. */
+/** Persists one transition of the queued -> submitted/pending -> failed receipt. */
 export async function updatePostingAudit({ postingId, audit }) {
   requireFirebase();
   await updateDoc(postingRef(postingId), {
