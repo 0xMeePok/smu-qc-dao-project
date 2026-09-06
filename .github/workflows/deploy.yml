@@ -69,10 +69,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            firebase/functions/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --prefix frontend
+        # Shared audit modules resolve viem from their firebase/functions location.
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix firebase/functions --omit=dev
 
       - name: Frontend unit and session integration tests
         run: npm test --prefix frontend
@@ -166,10 +171,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            firebase/functions/package-lock.json
 
       - name: Install frontend dependencies
-        run: npm ci --prefix frontend
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix firebase/functions --omit=dev
       - name: Verify App Check is configured
         env:
           APP_CHECK_SITE_KEY: ${{ secrets.VITE_FIREBASE_APP_CHECK_SITE_KEY }}

@@ -432,38 +432,35 @@ service cloud.firestore {
     // id, so there is nothing here to forge and nothing to compare. That removed
     // the per-entry string concatenation, which was the most expensive part of
     // this check against Firestore's 1000-expression evaluation cap.
-    function attachmentEntry(item) {
+    function attachmentEntry(item, requireDigest) {
       let id = item.get('id', '');
       let size = item.get('size', 0);
       let name = item.get('name', '');
+      let fieldCount = item.keys().size();
       return item is map
         // New records carry sha256; four-field legacy posting records remain
         // readable and updateable during the rollout.
-        && item.keys().size() in [4, 5]
+        && (requireDigest ? fieldCount == 5 : fieldCount in [4, 5])
         && id is string && id.matches('^[A-Za-z0-9_-]{8,64}$')
         && name is string && name.size() > 0 && name.size() <= 200
         && size is number && size > 0 && size <= 10485760
         && item.get('contentType', '') == 'application/pdf'
-        && (item.keys().size() == 4 || isBytes32(item.get('sha256', '')));
+        && (fieldCount == 4 || isBytes32(item.get('sha256', '')));
     }
 
     // Two. Rules cannot loop, so every slot is unrolled and costs expressions
     // against Firestore's 1000-per-evaluation cap. Two is what still passes with an
     // audit receipt on the same document; at three, anchoring a posting fails.
     // Mirrored in lib/attachments.js.
-    function validAttachments(data) {
+    function validAttachments(data, requireDigest) {
+      // Enforce submission digests in this pass; traversing both entries again
+      // exceeds the expression budget for a complete open-funding proposal.
       let items = data.get('attachments', []);
+      let count = items.size();
       return items is list
-        && items.size() <= 2
-        && (items.size() < 1 || attachmentEntry(items[0]))
-        && (items.size() < 2 || attachmentEntry(items[1]));
-    }
-
-    function validProposalAttachmentDigests(data) {
-      let items = data.get('attachments', []);
-      return items is list
-        && (items.size() < 1 || items[0].keys().size() == 5)
-        && (items.size() < 2 || items[1].keys().size() == 5);
+        && count <= 2
+        && (count < 1 || attachmentEntry(items[0], requireDigest))
+        && (count < 2 || attachmentEntry(items[1], requireDigest));
     }
 
     function preservesKnownAuditTransactionHash(data) {
@@ -840,7 +837,7 @@ service cloud.firestore {
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
         && validProblem(request.resource.data)
-        && validAttachments(request.resource.data)
+        && validAttachments(request.resource.data, false)
         // QCDAO-48 posts straight to 'submitted'; 'draft' stays for anything that
         // saves before it is complete. Nothing else may be created directly - a
         // posting cannot start life already open, matched or funded.
@@ -859,7 +856,7 @@ service cloud.firestore {
         // The AuditRegistry kind is immutable, so its Firestore discriminator is too.
         && opportunityType(request.resource.data) == opportunityType(resource.data)
         && validProblem(request.resource.data)
-        && validAttachments(request.resource.data)
+        && validAttachments(request.resource.data, false)
         // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
         // let in_review, matched, funded, completed and cancelled take the draft
         // branch, so a posting could be blanked on its way through those states.
@@ -909,10 +906,9 @@ service cloud.firestore {
         && isWalletAddress(request.auth.uid)
         && request.resource.data.researcherId == request.auth.uid
         && validProposal(request.resource.data)
-        && validAttachments(request.resource.data)
+        && validAttachments(request.resource.data, request.resource.data.status == 'submitted')
         && (request.resource.data.status == 'draft'
           || (request.resource.data.status == 'submitted'
-            && validProposalAttachmentDigests(request.resource.data)
             && validSubmittedProposal(request.resource.data, proposalId)))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
@@ -928,13 +924,12 @@ service cloud.firestore {
         && request.resource.data.researcherId == resource.data.researcherId
         && request.resource.data.problemId == resource.data.problemId
         && validProposal(request.resource.data)
-        && validAttachments(request.resource.data)
+        && validAttachments(request.resource.data, resource.data.status == 'draft' && request.resource.data.status == 'submitted')
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && ((resource.data.status == 'draft'
             && (request.resource.data.status in ['draft', 'withdrawn']
               || (request.resource.data.status == 'submitted'
-                && validProposalAttachmentDigests(request.resource.data)
                 && validSubmittedProposal(request.resource.data, proposalId))))
           || (resource.data.status != 'draft'
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'audit', 'updatedAt'])

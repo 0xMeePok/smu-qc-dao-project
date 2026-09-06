@@ -31,10 +31,17 @@ function submit(db, id, data, withSlot = true) {
   return batch.commit();
 }
 describe("QCDAO-59/60 submitted proposals", () => {
-  it("atomically submits with two attachments and a queued verification receipt", async () => {
+  it("atomically submits with two attachments, then queues the verification receipt", async () => {
     const id = await parent();
-    const data = record(id, { attachments: ["file0001", "file0002"].map((id) => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })), audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "", blockNumber: 0, attemptCount: 0, lastError: "" } });
-    await assertSucceeds(submit(env.authenticatedContext(AUTHOR).firestore(), "proposal-full", data));
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const data = record(id, { attachments: ["file0001", "file0002"].map((id) => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })) });
+    await assertSucceeds(submit(db, "proposal-full", data));
+    // Match submitProposal followed by updateProposalReceipt: the wallet audit
+    // handoff starts only after the proposal and author slot commit successfully.
+    await assertSucceeds(updateDoc(doc(db, "proposals", "proposal-full"), {
+      audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "", blockNumber: 0, attemptCount: 0, lastError: "" },
+      updatedAt: serverTimestamp(),
+    }));
   });
   it("allows sponsor dashboard reads and denies unrelated wallets", async () => {
     const sponsor = env.authenticatedContext(SPONSOR).firestore();
@@ -80,6 +87,17 @@ describe("QCDAO-59/60 submitted proposals", () => {
     const attachment = { id: "digestfile", name: "support.pdf", contentType: "application/pdf", size: 200 };
     await assertFails(submit(db, "proposal-missing-digest", record(id, { attachments: [attachment] })));
     await assertFails(submit(db, "proposal-bad-digest", record(id, { attachments: [{ ...attachment, sha256: "bad" }] })));
+    const draft = record(id, { status: "draft", attachments: [attachment] });
+    delete draft.postingOwnerId;
+    await assertSucceeds(setDoc(doc(db, "proposals", "proposal-draft-digest"), draft));
+    const publish = (attachments) => {
+      const batch = writeBatch(db);
+      batch.update(doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() });
+      batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "proposal-draft-digest" });
+      return batch.commit();
+    };
+    await assertFails(publish([attachment]));
+    await assertSucceeds(publish([{ ...attachment, sha256: ATTACHMENT_DIGEST }]));
   });
   it("preserves the first known audit transaction hash", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
