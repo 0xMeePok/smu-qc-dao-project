@@ -252,15 +252,22 @@ export function SessionProvider({ children }) {
       setError(null);
       try {
         if (isFirebaseConfigured && auth.currentUser) {
-          // Invalidate server credentials first. Only after both server revocation
-          // and Firebase persistence removal succeed may the UI claim logout.
+          // Invalidate server credentials first. A failure here means the session
+          // is still live, so the UI must not claim logout.
           await revokeOwnSessions();
-          await signOut(auth);
         }
       } catch (caught) {
         const message = messageForFirebaseError(caught);
         setError(message);
         return { ok: false, message };
+      }
+
+      // Revocation succeeded, so the token is already dead server-side. Local
+      // teardown therefore runs even if signOut throws: bailing out here would
+      // leave the app "signed in" holding a token every rule refuses, which
+      // fails as an unexplained 403 on the next read or upload.
+      if (isFirebaseConfigured && auth.currentUser) {
+        await signOut(auth).catch(() => { });
       }
 
       await disconnectAsync().catch(() => { });

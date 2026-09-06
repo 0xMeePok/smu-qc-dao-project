@@ -39,7 +39,9 @@ serialization changes.
 
 ## Contract calls
 
-- Opportunities: `commitOpportunity(entityId, kind, contentHash, expiresAt)`
+- Opportunities: `commitOpportunity(entityId, kind, contentHash, expiresAt)`. Funded
+  business problems use kind `0`; QCDAO-51 open-funding calls use kind `1`, which
+  the contract records with the `Funder` actor role.
 - Proposals: `commitProposal(entityId, opportunityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
 - Proposal updates: `updateHashes(entityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
 
@@ -51,13 +53,14 @@ Evaluations are platform records and are not anchored by this contract.
 
 ## Receipt lifecycle and retries
 
-The application creates the Firestore record first, then keeps transaction
-delivery state there as `queued`, `submitted`, `pending`, `confirmed`, or
-`failed`. This state is only used to resume or retry a transaction. Every audit
-result shown in the frontend is read from the configured contract and compared
-with a freshly computed posting hash. A known transaction hash is only polled
-for its receipt and is never rebroadcast. Transient receipt reads are capped at
-three attempts. Posting use is not blocked if anchoring fails.
+Creation is chain-first: the application prepares the final Firestore content,
+asks the signed-in wallet to commit its deterministic hash, verifies the confirmed
+contract state, and only then writes the record. A failed or declined anchor leaves
+the form intact and does not publish unverifiable content. Recovery state uses
+`queued`, `submitted`, `pending`, `confirmed`, or `failed`; a known transaction
+hash is polled for its receipt and never rebroadcast. Every audit result shown in
+the frontend is read from the configured contract and compared with a freshly
+computed opportunity hash. Transient receipt reads are capped at three attempts.
 
 The current Arbitrum Sepolia deployment is
 `0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD` (transaction

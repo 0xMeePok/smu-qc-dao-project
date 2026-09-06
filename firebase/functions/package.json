@@ -11,8 +11,8 @@
   "scripts": {
     "serve": "firebase emulators:start --only functions,firestore,auth,storage",
     "deploy": "firebase deploy --only functions",
-    "test": "SIWE_ALLOWED_HOSTS=qc-dao-demo--test-cd-wm5z6dh8.web.app firebase emulators:exec --config ../firebase.json --only functions,firestore,auth,storage --project qc-dao-demo \"node --test test/*.test.mjs\"",
-    "test:attach": "node --test test/*.test.mjs",
+    "test": "SIWE_ALLOWED_HOSTS=qc-dao-demo--test-cd-wm5z6dh8.web.app firebase emulators:exec --config ../firebase.json --only functions,firestore,auth,storage --project qc-dao-demo \"node --test --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs\"",
+    "test:attach": "node --test --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs",
     "seed": "node scripts/mock_data.mjs"
   },
   "dependencies": {

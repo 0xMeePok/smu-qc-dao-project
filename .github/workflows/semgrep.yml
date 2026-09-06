@@ -1,0 +1,36 @@
+name: Semgrep
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # semgrep/semgrep:latest (2026-09-01). Pin by digest; do not follow a moving tag.
+      image: semgrep/semgrep@sha256:b94b53d02fd4a022f9eac4e2af1380f5c3c4c21400e79d3336bdff1d1db5e796
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Community Edition rules only. Do not set SEMGREP_APP_TOKEN in this job.
+      # Solidity rules live under p/smart-contracts; p/solidity is not a registry pack.
+      - name: Run Semgrep
+        env:
+          SEMGREP_RULES: p/javascript p/typescript p/react p/nodejs p/smart-contracts p/owasp-top-ten
+        run: semgrep ci --metrics=off --no-suppress-errors

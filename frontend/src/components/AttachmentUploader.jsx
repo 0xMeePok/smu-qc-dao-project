@@ -40,6 +40,7 @@ import {
 export function AttachmentUploader({
   ownerId,
   problemId,
+  scope = "problems",
   value = [],
   onChange,
   onPendingChange,
@@ -120,6 +121,7 @@ export function AttachmentUploader({
           file,
           ownerId,
           problemId,
+          scope,
           onProgress: (progress) => {
             const id = upload.attachment.id;
             setPending((rows) => rows.map((row) => (
@@ -159,7 +161,7 @@ export function AttachmentUploader({
     }
 
     if (inputRef.current) inputRef.current.value = "";
-  }, [commit, ownerId, problemId]);
+  }, [commit, ownerId, problemId, scope]);
 
   const cancelUpload = (row) => {
     try {
@@ -176,7 +178,7 @@ export function AttachmentUploader({
     // while it is still in the bucket.
     commit((current) => current.filter((item) => item.id !== attachment.id));
     try {
-      await deleteAttachment(attachment);
+      await deleteAttachment({ attachment, ownerId, problemId, scope });
     } catch (deleteError) {
       commit((current) => (
         current.some((item) => item.id === attachment.id) ? current : [...current, attachment]
@@ -188,7 +190,7 @@ export function AttachmentUploader({
   const download = async (attachment) => {
     setError(null);
     try {
-      const blob = await downloadAttachment(attachment);
+      const blob = await downloadAttachment({ attachment, ownerId, problemId, scope });
       saveBlobAs(blob, attachment.name);
     } catch (downloadError) {
       setError(messageForStorageError(downloadError));

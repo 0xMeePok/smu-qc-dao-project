@@ -25,7 +25,7 @@ fields are required versus optional, and why.
 npm test
 ```
 
-73 tests, no emulator or network needed. Covers field validation, the default role
+138 tests, no emulator or network needed. Covers field validation, the default role
 assigned at account creation, the whole-form validator, route-permission resolution,
 and the 15-minute idle session.
 
@@ -61,3 +61,22 @@ src/
 ├── App.jsx            # Hash router, marketplace pages, top bar
 └── main.jsx             # WagmiProvider -> QueryClientProvider -> SessionProvider -> App
 ```
+
+## Proposal submission (QCDAO-59 / QCDAO-60)
+
+Open a posting in Discover and choose **Submit a proposal**. Funded problems use
+an approach form; open funding calls additionally require a proposed problem,
+its relevance and fit with the funder's thesis. Submitted records appear in
+**My Proposals** and in the sponsor's **Proposals received** section. Authors can
+withdraw and submit a replacement while the opportunity remains open.
+
+Submissions are saved before wallet anchoring starts. Receipts support retrying a
+failed anchor or resuming a known transaction without broadcasting it again.
+The current posting flow creates revision 0; proposal anchors reference that
+initial revision. Future posting-revision work must extend this linkage.
+
+Deploy the updated `firebase/firestore.rules` and `firebase/storage.rules`
+alongside the frontend. Submission uses an atomic per-author slot at
+`problems/{postingId}/proposalAuthors/{uid}` and private supporting PDFs under
+`proposals/{uid}/{proposalId}/`. Submitted content and PDF bytes remain immutable;
+withdrawal preserves the original record. No new composite indexes are required.

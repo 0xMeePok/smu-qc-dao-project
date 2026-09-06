@@ -45,8 +45,10 @@ const FUNCTIONS_MESSAGES = {
 };
 
 const FIRESTORE_MESSAGES = {
+  // A revoked session denies every write and is invisible from the client, so it
+  // is named first: auth_time only advances on a fresh sign-in, never on refresh.
   "permission-denied":
-    "Your details were rejected by our security rules. Check every field and try again. If this wallet is already registered, sign in with it instead.",
+    "Your details were rejected by our security rules. If you signed out recently, sign out and sign in again - a revoked session blocks writes until you re-authenticate. Otherwise check every field, and if this wallet is already registered, sign in with it instead.",
   unavailable:
     "We could not reach the database. Check your internet connection and try again.",
   "deadline-exceeded": "The database took too long to respond. Please try again.",

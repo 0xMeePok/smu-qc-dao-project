@@ -9,9 +9,9 @@
     "build": "vite build",
     "sync:audit-registry": "node scripts/sync-audit-registry.mjs",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test test/*.test.js test/unit/*.test.js test/integration/*.test.js && vitest run",
-    "test:unit": "node --test test/unit/*.test.js",
-    "test:integration": "node --test test/integration/*.test.js"
+    "test": "node --test --test-reporter=../scripts/test-reporter.mjs test/*.test.js test/unit/*.test.js test/integration/*.test.js && vitest run",
+    "test:unit": "node --test --test-reporter=../scripts/test-reporter.mjs test/unit/*.test.js",
+    "test:integration": "node --test --test-reporter=../scripts/test-reporter.mjs test/integration/*.test.js"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.2",

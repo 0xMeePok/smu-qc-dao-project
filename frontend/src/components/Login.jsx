@@ -14,7 +14,11 @@ export function Login({ redirectTarget, onNavigate }) {
       // works from, rather than sending an administrator to the public home page.
       const landing = landingRouteFor(roles);
       let destination = redirectTarget || landing;
-      if (redirectTarget && !getRouteConfig(redirectTarget)) {
+      // Protected detail routes retain their suffix (for example QCDAO-51's
+      // create/open-funding) while still validating the top-level route against
+      // the route registry before navigating.
+      const redirectSection = redirectTarget?.split("/")[0];
+      if (redirectTarget && !getRouteConfig(redirectSection)) {
         destination = landing;
       }
       
@@ -62,4 +66,3 @@ export function Login({ redirectTarget, onNavigate }) {
     </section>
   );
 }
-

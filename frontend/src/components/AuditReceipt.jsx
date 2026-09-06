@@ -69,6 +69,7 @@ export function AuditReceipt({
   firebaseReference,
   onVerify,
   onRetry,
+  entityLabel = "Posting",
 }) {
   const [verification, setVerification] = useState(null);
   const [checking, setChecking] = useState(false);
@@ -153,7 +154,7 @@ export function AuditReceipt({
           <h2>{eventLabel}</h2>
         </div>
         <span className={`audit-state audit-state-${displayStatus}`}>
-          {STATUS_COPY[displayStatus] || displayStatus}
+          {displayStatus === "failed" ? `${entityLabel} saved; verification needs attention` : STATUS_COPY[displayStatus] || displayStatus}
         </span>
       </div>
 
@@ -189,8 +190,10 @@ export function AuditReceipt({
             {checking ? "Checking…" : "Check again"}
           </button>
         )}
-        {audit.status === "failed" && onRetry && audit.attemptCount < 3 && (
-          <button className="secondary" type="button" onClick={onRetry}>Retry anchoring</button>
+        {onRetry && audit.attemptCount < 3 && ["queued", "submitted", "pending", "failed"].includes(audit.status) && (
+          <button className="secondary" type="button" onClick={onRetry}>
+            {audit.status === "queued" ? "Start verification" : audit.status === "failed" ? "Retry anchoring" : "Resume verification"}
+          </button>
         )}
         {explorerUrl && (
           <a className="text-button audit-explorer-link" href={explorerUrl} target="_blank" rel="noreferrer">

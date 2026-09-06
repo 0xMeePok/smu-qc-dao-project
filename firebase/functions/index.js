@@ -4,6 +4,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { createPublicClient, http, verifyMessage } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { createSiweMessage, parseSiweMessage, validateSiweMessage } from "viem/siwe";
@@ -18,6 +19,7 @@ import {
   writeSessionCutoff,
 } from "./adminActions.js";
 import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
+import { affectedProblemIds, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 
 initializeApp();
 
@@ -46,6 +48,42 @@ const NONCE_MAX_INSTANCES = 10;
 // Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js and the Firestore
 // database location. Otherwise every sign-in crosses regions.
 const REGION = "asia-southeast1";
+
+async function syncOpportunityMetrics(event) {
+  const problemIds = affectedProblemIds(event);
+  await Promise.all(problemIds.map((problemId) => refreshOpportunityMetrics({
+    db,
+    problemId,
+    updatedAt: Timestamp.now(),
+  })));
+}
+
+async function syncProblemOpportunityMetrics(event) {
+  await refreshOpportunityMetrics({
+    db,
+    problemId: event.params.problemId,
+    updatedAt: Timestamp.now(),
+  });
+}
+
+// Proposal bodies stay private. These triggers publish only counts and aggregate
+// funding progress for the marketplace cards and posting detail page.
+export const syncProposalOpportunityMetrics = onDocumentWritten(
+  { document: "proposals/{proposalId}", region: REGION },
+  syncOpportunityMetrics,
+);
+
+export const syncFundingOpportunityMetrics = onDocumentWritten(
+  { document: "funding/{fundId}", region: REGION },
+  syncOpportunityMetrics,
+);
+
+// The requested amount is the denominator for funding progress. Rebuild when the
+// opportunity itself changes as well, and remove the projection when it is deleted.
+export const syncProblemMarketplaceMetrics = onDocumentWritten(
+  { document: "problems/{problemId}", region: REGION },
+  syncProblemOpportunityMetrics,
+);
 
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,

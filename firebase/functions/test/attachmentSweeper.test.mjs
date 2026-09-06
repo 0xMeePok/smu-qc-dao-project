@@ -61,12 +61,18 @@ describe("parseAttachmentPath", () => {
 });
 
 describe("collectReferencedPaths", () => {
-  it("[BUT-OPD-008] gathers every path a posting points at", () => {
+  // Records no longer store `path`, so it has to be rebuilt from the posting.
+  // Fixtures carrying `path` would pass while every real attachment was swept.
+  it("[BUT-OPD-008] rebuilds the path from the posting and attachment id", () => {
     const referenced = collectReferencedPaths([
-      { attachments: [{ path: "a" }, { path: "b" }] },
-      { attachments: [{ path: "c" }] },
+      { id: "post1", ownerId: OWNER, attachments: [{ id: "a1" }, { id: "a2" }] },
+      { id: "post2", ownerId: OWNER, attachments: [{ id: "b1" }] },
     ]);
-    assert.deepEqual([...referenced].sort(), ["a", "b", "c"]);
+    assert.deepEqual([...referenced].sort(), [
+      `problems/${OWNER}/post1/a1.pdf`,
+      `problems/${OWNER}/post1/a2.pdf`,
+      `problems/${OWNER}/post2/b1.pdf`,
+    ]);
   });
 
   it("[BUT-OPD-009] tolerates postings with no attachments, or malformed ones", () => {
@@ -74,10 +80,25 @@ describe("collectReferencedPaths", () => {
       {},
       { attachments: null },
       { attachments: "not-a-list" },
-      { attachments: [{}, { path: 42 }, { path: "good" }] },
+      { id: "post1", ownerId: OWNER, attachments: [{}, { id: null }, { id: "ok" }] },
       null,
     ]);
-    assert.deepEqual([...referenced], ["good"]);
+    assert.deepEqual([...referenced], [`problems/${OWNER}/post1/ok.pdf`]);
+  });
+
+  it("[BUT-OPD-020] still honours the legacy stored path", () => {
+    const referenced = collectReferencedPaths([
+      { id: "post1", ownerId: OWNER, attachments: [{ id: "a1", path: "legacy/a1.pdf" }] },
+    ]);
+    assert.ok(referenced.has("legacy/a1.pdf"));
+    assert.ok(referenced.has(`problems/${OWNER}/post1/a1.pdf`));
+  });
+
+  it("[BUT-OPD-021] uppercase ownerId still matches the lowercase object path", () => {
+    const referenced = collectReferencedPaths([
+      { id: "post1", ownerId: OWNER.toUpperCase(), attachments: [{ id: "a1" }] },
+    ]);
+    assert.ok(referenced.has(`problems/${OWNER}/post1/a1.pdf`));
   });
 });
 
@@ -201,7 +222,7 @@ describe("sweepOrphanedAttachments", () => {
     const orphan = livePath("p1", "orphan01");
     const { db, bucket, deleted, logger } = harness({
       files: [objectAt(keep), objectAt(orphan)],
-      postings: [{ attachments: [{ path: keep }] }],
+      postings: [{ id: "p1", ownerId: OWNER, attachments: [{ id: "keepme01" }] }],
     });
 
     const summary = await sweepOrphanedAttachments({ db, bucket, dryRun: false, now: NOW, logger });
@@ -235,7 +256,7 @@ describe("sweepOrphanedAttachments", () => {
       files: [objectAt(path)],
       postings: [],
       afterSnapshot(store) {
-        store.set("p1", { attachments: [{ path }] });
+        store.set("p1", { id: "p1", ownerId: OWNER, attachments: [{ id: "latepub01" }] });
       },
     });
 

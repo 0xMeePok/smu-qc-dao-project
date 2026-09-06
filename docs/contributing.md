@@ -87,6 +87,7 @@ Put one empty line between each part.
 
 1. Make one pull request upon completion of the feature.
 2. Make sure that all the tests pass before you ask for a review.
+3. Make sure **Semgrep** (rule-based SAST on the PR) and **Gitleaks** (secret scan on each push) have passed. Maintainers should mark both as required status checks on `main`.
 
 ### 5.2 Review
 

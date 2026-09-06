@@ -7,5 +7,6 @@ export default defineConfig({
     environment: "jsdom",
     include: ["test/components/**/*.test.jsx"],
     clearMocks: true,
+    reporters: ["./test/reporters/vitest-lines.mjs"],
   },
 });

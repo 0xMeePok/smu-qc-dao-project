@@ -37,6 +37,11 @@ describe("security deployment configuration", () => {
     // The rules file has to be declared, or `firebase deploy --only storage` is a
     // no-op and the bucket keeps whatever rules it had - most likely none.
     assert.equal(firebaseConfig.storage.rules, "storage.rules");
+    assert.equal(
+      firebaseConfig.storage.bucket,
+      "qcdao-a0c7a.firebasestorage.app",
+      "deploy must target the same bucket the web app uses, not *.appspot.com",
+    );
     assert.ok(fs.existsSync(new URL("../storage.rules", import.meta.url)));
 
     // Without this the uploader fails at runtime with an opaque CSP violation
