@@ -1,4 +1,5 @@
 import {
+  estimateFeesPerGas as wagmiEstimateFeesPerGas,
   readContract as wagmiReadContract,
   waitForTransactionReceipt as wagmiWaitForTransactionReceipt,
   writeContract as wagmiWriteContract,
@@ -9,13 +10,31 @@ import {
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
 import { wagmiConfig } from "./wagmi.js";
+import { isTransactionFeeTooLow } from "./errors.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
 import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, prepareOpportunityCommit, prepareProposalCommit, prepareProposalUpdate } from "../../../firebase/functions/auditCanonical.js";
 
 export function createWagmiAuditAdapters(config = wagmiConfig) {
   return {
-    writeContract: (request) => wagmiWriteContract(config, request),
+    writeContract: async (request) => {
+      const { maxFeePerGas, maxPriorityFeePerGas } = await wagmiEstimateFeesPerGas(config, {
+        chainId: request.chainId,
+        type: "eip1559",
+      });
+      if (typeof maxFeePerGas !== "bigint" || maxFeePerGas <= 0n
+          || typeof maxPriorityFeePerGas !== "bigint" || maxPriorityFeePerGas < 0n
+          || maxPriorityFeePerGas > maxFeePerGas) {
+        throw new Error("Unable to estimate network fees. Please try again shortly.");
+      }
+      // Leave room for base-fee changes while the wallet confirmation is open.
+      // This raises the spending cap, not the priority fee or gas units consumed.
+      return wagmiWriteContract(config, {
+        ...request,
+        maxFeePerGas: maxFeePerGas * 2n,
+        maxPriorityFeePerGas,
+      });
+    },
     waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
     readContract: (request) => wagmiReadContract(config, request),
   };
@@ -58,6 +77,8 @@ export function classifyAuditError(error, { attempt = 0, maxRetries = 0 } = {}) 
   let category = "unknown";
   if (code === 4001 || /userrejected|user rejected|denied transaction signature/.test(text)) {
     category = "user-rejected";
+  } else if (isTransactionFeeTooLow(error)) {
+    category = "fee-too-low";
   } else if (/contractfunctionreverted|execution reverted|revert|invalidinput|invalidstate|accessdenied/.test(text)) {
     category = "contract-reverted";
   } else if (/invalid address|missing or invalid|chain mismatch|unsupported chain|wrong network/.test(text)) {

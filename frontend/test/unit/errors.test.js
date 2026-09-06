@@ -3,6 +3,11 @@ import { describe, it } from "node:test";
 import { messageForFirebaseError, fieldForFirebaseError, OnboardingError } from "../../src/lib/errors.js";
 
 describe("Unit Tests: Error Messages & Mapping", () => {
+  it("explains a base-fee rejection even when wrapped as a contract revert", () => {
+    const error = { name: "ContractFunctionRevertedError", message: "commitOpportunity reverted",
+      cause: { message: "max fee per gas less than block base fee: maxFeePerGas: 211272000 baseFee: 212608000" } };
+    assert.match(messageForFirebaseError(error), /Network fees rose.*fresh fee estimate/);
+  });
   it("surfaces retryable session revocation failures without a misleading success", () => {
     const message = messageForFirebaseError({
       code: "functions/unavailable",

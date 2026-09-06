@@ -66,7 +66,18 @@ export class OnboardingError extends Error {
   }
 }
 
+export const TRANSACTION_FEE_TOO_LOW_MESSAGE =
+  "Network fees rose before the transaction was sent. Try again to request a fresh fee estimate, then confirm it in your wallet.";
+
+export function isTransactionFeeTooLow(error) {
+  // Wallet/RPC errors are often nested inside a ContractFunctionRevertedError.
+  const text = [error?.shortMessage, error?.reason, error?.message,
+    error?.cause?.message, error?.cause?.cause?.message].filter(Boolean).join(" ");
+  return /max fee per gas less than block base fee|fee cap.*(?:less than|below|too low)|maxFeePerGas.*(?:less than|below).*baseFeePerGas/i.test(text);
+}
+
 export function messageForFirebaseError(error) {
+  if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
   // Firebase's own SDKs always use string codes ("auth/xyz", "permission-denied").
   // This function is also the catch-all for the chain-switch step in signIn() and
   // for whatever a wallet extension throws, though - and EIP-1193 wallet errors

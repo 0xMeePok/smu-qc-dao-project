@@ -39,8 +39,17 @@ describe("proposal audit handoff", () => {
     expect(result.transactionHash).toBe(tx);
   });
   it("records a retryable failure when the wallet rejects without deleting the saved proposal", async () => {
-    await expect(anchorProposalAudit(record, { account, adapters: { writeContract: async () => { throw Object.assign(new Error("User rejected"), { code: 4001 }); }, readContract } })).rejects.toThrow();
+    await expect(anchorProposalAudit(record, { account, adapters: { writeContract: async () => { throw Object.assign(new Error("User rejected"), { code: 4001 }); }, readContract, waitForTransactionReceipt: vi.fn() } })).rejects.toThrow();
     expect(mocks.updates.at(-1).status).toBe("failed");
+    expect(mocks.updates.at(-1).transactionHash).toBe("");
+  });
+  it("explains a fee rejection without treating it as an opportunity-state revert", async () => {
+    await expect(anchorProposalAudit(record, { account, adapters: {
+      writeContract: async () => { throw new Error("commitProposal reverted: max fee per gas less than block base fee"); },
+      readContract, waitForTransactionReceipt: vi.fn(),
+    } })).rejects.toThrow();
+    expect(mocks.updates.at(-1).status).toBe("failed");
+    expect(mocks.updates.at(-1).lastError).toMatch(/Network fees rose.*fresh fee estimate/);
     expect(mocks.updates.at(-1).transactionHash).toBe("");
   });
   it("recovers a known transaction without rebroadcasting", async () => {
