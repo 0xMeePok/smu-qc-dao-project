@@ -201,9 +201,12 @@ service firebase.storage {
 
     // Proposal files are private to the submitting wallet and the sponsor.
     // Once submitted, the bytes and references remain immutable for review.
+    // Sponsor reads require a non-draft record so a forged draft
+    // `postingOwnerId` cannot open another member's download path.
     function proposalReader(proposalId, ownerId) {
       let proposal = attachmentRecord('proposals', proposalId);
       return proposal != null && proposal.data.researcherId == ownerId
+        && proposal.data.status != 'draft'
         && proposal.data.postingOwnerId == request.auth.uid;
     }
     match /proposals/{ownerId}/{proposalId}/{fileName} {

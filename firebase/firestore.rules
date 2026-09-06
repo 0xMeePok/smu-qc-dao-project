@@ -344,7 +344,12 @@ service cloud.firestore {
     }
 
     function hasValidAudit(data) {
-      return !data.keys().hasAny(['audit']) || validAuditRecord(data.audit);
+      // An already-stored receipt may stay as-is, including a legacy
+      // `confirmed` value. A changed audit must pass validAuditRecord, which
+      // rejects new client `confirmed` writes.
+      return !data.keys().hasAny(['audit'])
+        || (resource != null && resource.data.get('audit', {}) == data.audit)
+        || validAuditRecord(data.audit);
     }
 
     function validAuditRecord(audit) {
@@ -359,7 +364,12 @@ service cloud.firestore {
           && audit.chainId == 421614
           && isBytes32(audit.entityId)
           && isBytes32(audit.contentHash)
-          && audit.status in ['queued', 'submitted', 'pending', 'confirmed', 'failed']
+          // `confirmed` is not client-writable. Rules cannot prove a transaction
+          // exists on 421614 or that contentHash matches the record, so a
+          // researcher or sponsor who could set it would mint a forged receipt.
+          // queued/submitted/pending/failed stay writable so a known hash is
+          // never rebroadcast. The Admin SDK may still store `confirmed`.
+          && audit.status in ['queued', 'submitted', 'pending', 'failed']
           && audit.transactionHash is string
           && (audit.transactionHash == '' || isBytes32(audit.transactionHash))
           && audit.blockNumber is int && audit.blockNumber >= 0
@@ -368,9 +378,8 @@ service cloud.firestore {
           && audit.lastError is string && audit.lastError.size() <= 500
           && (audit.status != 'queued'
             || (audit.transactionHash == '' && audit.blockNumber == 0))
-          && (!(audit.status in ['submitted', 'pending', 'confirmed'])
-            || audit.transactionHash != '')
-          && (audit.status != 'confirmed' || audit.blockNumber > 0));
+          && (!(audit.status in ['submitted', 'pending'])
+            || audit.transactionHash != ''));
     }
 
     function stringListItemIsValid(items, index) {
@@ -674,6 +683,20 @@ service cloud.firestore {
         || (before == 'under_review' && after in ['accepted', 'rejected', 'withdrawn']);
     }
 
+    // postingOwnerId is the sponsor read ACL. validSubmittedProposal is the
+    // only path that binds a new value to problems/{id}.ownerId. A draft or
+    // draft-to-withdrawn write that carried a client-chosen wallet would
+    // appear in that member's `postingOwnerId` query (and grant Storage reads)
+    // without a per-author slot or an open parent. Existing values may stay
+    // so a submitted receipt or withdrawal cannot drop or swap the linkage.
+    function trustedPostingOwner(data) {
+      return !data.keys().hasAny(['postingOwnerId'])
+        || (isWalletAddress(data.postingOwnerId)
+          && (data.status == 'submitted'
+            || (resource != null
+              && resource.data.get('postingOwnerId', '') == data.postingOwnerId)));
+    }
+
     function validProposal(data) {
       return hasProposalSchema(data)
         && hasValidAudit(data)
@@ -683,6 +706,7 @@ service cloud.firestore {
         && isNonEmptyString(data.summary, 4000)
         && validAmount(data.amount)
         && validProposalStatus(data.status)
+        && trustedPostingOwner(data)
         && optionalString(data, 'deliverables', 4000)
         && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
     }
@@ -857,6 +881,9 @@ service cloud.firestore {
     }
 
     match /proposals/{proposalId} {
+      // Sponsor list queries filter only on postingOwnerId. Drafts are kept
+      // out of that inbox by trustedPostingOwner, which refuses a new value
+      // except on the submitted path that binds it to the parent owner.
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.researcherId == request.auth.uid
           || resource.data.get('postingOwnerId', '') == request.auth.uid);
@@ -872,6 +899,9 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId));
+      // Submitted proposals may update `audit` so a known transaction hash is
+      // never rebroadcast. `confirmed` is not client-writable; validProposal
+      // rejects it so a researcher cannot mint a sponsor-facing receipt.
       allow update: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
         && request.resource.data.researcherId == resource.data.researcherId

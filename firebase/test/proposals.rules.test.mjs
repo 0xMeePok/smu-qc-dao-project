@@ -79,4 +79,19 @@ describe("QCDAO-59/60 submitted proposals", () => {
     await assertFails(updateDoc(doc(db, "proposals", "proposal-full"), { status: "accepted", updatedAt: serverTimestamp() }));
     await assertSucceeds(updateDoc(doc(db, "proposals", "proposal-full"), { "audit.status": "failed", "audit.attemptCount": 1, "audit.lastError": "Network unavailable", updatedAt: serverTimestamp() }));
   });
+  it("rejects a draft that forges sponsor linkage or grants inbox / attachment ACL", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const id = await parent();
+    const privateDraft = record(id, { status: "draft" });
+    delete privateDraft.postingOwnerId;
+    await assertFails(setDoc(doc(db, "proposals", "forged-draft"), record(id, { status: "draft" })));
+    await assertFails(setDoc(doc(db, "proposals", "forged-draft-outsider"), record(id, { status: "draft", postingOwnerId: OUTSIDER })));
+    await assertSucceeds(setDoc(doc(db, "proposals", "private-draft"), privateDraft));
+    await assertSucceeds(getDoc(doc(db, "proposals", "private-draft")));
+    await assertFails(updateDoc(doc(db, "proposals", "private-draft"), { postingOwnerId: SPONSOR, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(db, "proposals", "private-draft"), { status: "withdrawn", postingOwnerId: SPONSOR, updatedAt: serverTimestamp() }));
+    const sponsor = env.authenticatedContext(SPONSOR).firestore();
+    await assertFails(getDoc(doc(sponsor, "proposals", "private-draft")));
+    await assertSucceeds(getDoc(doc(sponsor, "proposals", "proposal-full")));
+  });
 });

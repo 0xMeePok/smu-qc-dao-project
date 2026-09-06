@@ -49,7 +49,15 @@ function storedAudit(setup, opportunity) {
  * The contract, receipt state machine and recovery behaviour stay identical;
  * only the canonical payload, enum value and Firestore updater vary by kind.
  */
-export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, entityLabel, prepareCommit, commitAudit = commitOpportunityAudit, verifyAudit = verifyOpportunityAudit }) {
+export function createOpportunityAuditFlow({
+  kind,
+  payloadFor,
+  persistAudit,
+  entityLabel,
+  prepareCommit,
+  commitAudit = commitOpportunityAudit,
+  verifyAudit = verifyOpportunityAudit,
+}) {
   const prepare = (opportunity) => {
     const address = configuredAuditRegistryAddress();
     if (!address) return null;
@@ -111,6 +119,9 @@ export function createOpportunityAuditFlow({ kind, payloadFor, persistAudit, ent
       current = { ...current, ...patch };
       onChange?.(current);
       if (!persistReceipt) return;
+      // Firestore rules reject client `confirmed` writes — the contract is the
+      // verifier. Keep that status in memory; the outbox stays pending/failed.
+      if (current.status === "confirmed") return;
       try {
         await persistAudit({ recordId: opportunity.id, audit: current });
       } catch {

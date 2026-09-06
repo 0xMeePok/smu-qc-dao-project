@@ -391,4 +391,13 @@ describe("proposal supporting PDFs", () => {
     await assertFails(uploadBytes(ref(author, `proposals/${OWNER}/${proposalId}/support02.pdf`), PDF_BYTES, metadata));
     await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), path)));
   });
+  it("refuses sponsor downloads against a draft that forges postingOwnerId", async () => {
+    const forgedId = "storage-forged-draft-59";
+    const forgedPath = `proposals/${OWNER}/${forgedId}/support01.pdf`;
+    const forgedMetadata = pdfMetadata({ customMetadata: { problemId: forgedId } });
+    await assertSucceeds(uploadBytes(ref(env.authenticatedContext(OWNER).storage(), forgedPath), PDF_BYTES, forgedMetadata));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", forgedId), { researcherId: OWNER, postingOwnerId: OTHER, status: "draft" }));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), forgedPath)));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), forgedPath)));
+  });
 });

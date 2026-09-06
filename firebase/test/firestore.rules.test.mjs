@@ -720,7 +720,7 @@ describe("problems/{problemId}", () => {
 });
 
 describe("QCDAO-75..79 audit receipt state", () => {
-  it("accepts a queued receipt and its submitted, pending, and confirmed lifecycle", async () => {
+  it("accepts a queued receipt and its submitted, pending, and failed lifecycle", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "audit-flow"), baseProblem({
       audit: baseAudit(),
@@ -735,9 +735,15 @@ describe("QCDAO-75..79 audit receipt state", () => {
       audit: baseAudit({ status: "pending", transactionHash, attemptCount: 1 }),
       updatedAt: serverTimestamp(),
     }));
-    await assertSucceeds(updateDoc(doc(db, "problems", "audit-flow"), {
+    await assertFails(updateDoc(doc(db, "problems", "audit-flow"), {
       audit: baseAudit({
         status: "confirmed", transactionHash, blockNumber: 123456, attemptCount: 1,
+      }),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "audit-flow"), {
+      audit: baseAudit({
+        status: "failed", transactionHash, attemptCount: 1, lastError: "RPC unavailable",
       }),
       updatedAt: serverTimestamp(),
     }));
@@ -748,6 +754,92 @@ describe("QCDAO-75..79 audit receipt state", () => {
     await assertSucceeds(setDoc(doc(db, "proposals", "audit-proposal"), baseProposal({
       audit: baseAudit({ entityId: `0x${"4".repeat(64)}` }),
     })));
+  });
+
+  it("lets a researcher persist queued, submitted, pending, and failed proposal receipts", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const transactionHash = `0x${"3".repeat(64)}`;
+    await assertSucceeds(setDoc(doc(db, "proposals", "audit-outbox"), baseProposal({
+      audit: baseAudit({ entityId: `0x${"5".repeat(64)}` }),
+    })));
+    await assertSucceeds(updateDoc(doc(db, "proposals", "audit-outbox"), {
+      audit: baseAudit({
+        entityId: `0x${"5".repeat(64)}`,
+        status: "submitted",
+        transactionHash,
+        attemptCount: 1,
+      }),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "proposals", "audit-outbox"), {
+      audit: baseAudit({
+        entityId: `0x${"5".repeat(64)}`,
+        status: "pending",
+        transactionHash,
+        attemptCount: 1,
+      }),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "proposals", "audit-outbox"), {
+      audit: baseAudit({
+        entityId: `0x${"5".repeat(64)}`,
+        status: "failed",
+        transactionHash,
+        attemptCount: 1,
+        lastError: "RPC unavailable",
+      }),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("rejects a researcher-written confirmed proposal receipt", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const forged = baseAudit({
+      entityId: `0x${"6".repeat(64)}`,
+      status: "confirmed",
+      transactionHash: `0x${"3".repeat(64)}`,
+      blockNumber: 123456,
+      attemptCount: 1,
+    });
+    await assertFails(setDoc(doc(db, "proposals", "forged-confirmed-create"), baseProposal({
+      audit: forged,
+    })));
+
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "proposals", "forged-confirmed-update"), baseProposal({
+        status: "submitted",
+        audit: baseAudit({ entityId: `0x${"6".repeat(64)}` }),
+      }));
+    });
+    await assertFails(updateDoc(doc(db, "proposals", "forged-confirmed-update"), {
+      audit: forged,
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("lets a researcher withdraw a proposal that already has a confirmed receipt", async () => {
+    const confirmed = baseAudit({
+      entityId: `0x${"7".repeat(64)}`,
+      status: "confirmed",
+      transactionHash: `0x${"3".repeat(64)}`,
+      blockNumber: 99,
+      attemptCount: 1,
+    });
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "proposals", "legacy-confirmed"), baseProposal({
+        status: "submitted",
+        audit: confirmed,
+      }));
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(updateDoc(doc(db, "proposals", "legacy-confirmed"), {
+      status: "withdrawn",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "proposals", "legacy-confirmed"), {
+      audit: { ...confirmed, transactionHash: `0x${"8".repeat(64)}` },
+      updatedAt: serverTimestamp(),
+    }));
   });
 
   it("rejects contract receipts on platform-only evaluation records", async () => {
@@ -984,6 +1076,17 @@ describe("proposals/{proposalId}", () => {
     }));
     await assertFails(updateDoc(doc(db, "proposals", "prop_tr"), {
       status: "submitted",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("rejects a draft that sets an unauthenticated postingOwnerId", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "proposals", "forged-owner-draft"), baseProposal({
+      postingOwnerId: OTHER,
+    })));
+    await assertFails(updateDoc(doc(db, "proposals", "prop_tr"), {
+      postingOwnerId: OTHER,
       updatedAt: serverTimestamp(),
     }));
   });

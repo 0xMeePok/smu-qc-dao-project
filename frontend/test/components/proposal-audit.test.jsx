@@ -23,7 +23,8 @@ describe("proposal audit handoff", () => {
     const writeContract = vi.fn(async () => tx);
     const result = await anchorProposalAudit(record, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } });
     expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
-    expect(mocks.updates.map((audit) => audit.status)).toEqual(["queued", "submitted", "pending", "confirmed"]);
+    expect(mocks.updates.map((audit) => audit.status)).toEqual(["queued", "submitted", "pending"]);
+    expect(result.status).toBe("confirmed");
     expect(result.transactionHash).toBe(tx);
   });
   it("records a retryable failure when the wallet rejects without deleting the saved proposal", async () => {
@@ -35,6 +36,7 @@ describe("proposal audit handoff", () => {
     const writeContract = vi.fn();
     const result = await anchorProposalAudit({ ...record, audit: { ...proposalAuditReceipt(record), status: "pending", transactionHash: tx } }, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 99n }) } });
     expect(writeContract).not.toHaveBeenCalled();
+    expect(mocks.updates.map((audit) => audit.status)).not.toContain("confirmed");
     expect(result.status).toBe("confirmed");
   });
 });
