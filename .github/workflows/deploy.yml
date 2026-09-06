@@ -144,13 +144,14 @@ jobs:
       # storage:rules rides along for the same reason: QCDAO-58 attachments are
       # authorised by storage.rules, and hosting must never go live with an
       # uploader whose bucket rules are still the previous revision.
+      # --force acknowledges the retry policy on queueProposalAudit in CI.
       - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase
         run: |
           npx firebase deploy \
             --only firestore:rules,firestore:indexes,storage,functions \
             --project "$FIREBASE_PROJECT_ID" \
-            --non-interactive
+            --non-interactive --force
 
       - name: Remove credentials
         if: always()
