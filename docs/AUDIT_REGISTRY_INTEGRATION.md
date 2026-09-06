@@ -53,6 +53,15 @@ Evaluations are platform records and are not anchored by this contract.
 
 ## Receipt lifecycle and retries
 
+All application contract writes (opportunity publication, proposal submission,
+and proposal hash updates) request fresh Arbitrum Sepolia EIP-1559 fees before
+opening the wallet. The shared adapter doubles the estimated `maxFeePerGas`
+while preserving `maxPriorityFeePerGas`, allowing base-fee movement during wallet
+confirmation. This is a fee cap, not a fixed charge or an increased gas limit.
+Fee-estimation failure stops before wallet submission. A fee-cap rejection is
+shown with explicit retry guidance; the next user-initiated attempt estimates
+again. Transactions are never automatically rebroadcast to adjust fees.
+
 Opportunity creation is chain-first: the application prepares the final Firestore content,
 asks the signed-in wallet to commit its deterministic hash, verifies the confirmed
 contract state, and only then writes the record. A failed or declined anchor leaves

@@ -228,6 +228,9 @@ describe("AuditRegistry transaction lifecycle", () => {
       maxRetries: 3,
     });
     assert.equal(classifyAuditError({ code: 4001 }).retryable, false);
+    const feeError = classifyAuditError(new Error("commitOpportunity reverted: max fee per gas less than block base fee"), { maxRetries: 3 });
+    assert.equal(feeError.category, "fee-too-low");
+    assert.equal(feeError.retryable, false, "fee rejection must not automatically rebroadcast");
     assert.equal(
       classifyAuditError(new Error("execution reverted: InvalidState"), { maxRetries: 3 }).category,
       "contract-reverted",
