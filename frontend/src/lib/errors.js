@@ -76,6 +76,19 @@ export function isTransactionFeeTooLow(error) {
   return /max fee per gas less than block base fee|fee cap.*(?:less than|below|too low)|maxFeePerGas.*(?:less than|below).*baseFeePerGas/i.test(text);
 }
 
+export function auditErrorMessage(error) {
+  const rejected = error?.code === 4001 || /user rejected/i.test(error?.message ?? "");
+  if (rejected) return "The wallet transaction was declined. You can retry when ready.";
+  if (/wallet retry limit has been reached/i.test(error?.message ?? "")) {
+    return "The wallet retry limit has been reached. Ask an administrator to reset verification attempts.";
+  }
+  if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
+  if (/revert|invalidstate|invalidinput/i.test(error?.message ?? "")) {
+    return "The verification transaction reverted. Check the opportunity's status and revision before retrying.";
+  }
+  return "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
+}
+
 export function messageForFirebaseError(error) {
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
   // Firebase's own SDKs always use string codes ("auth/xyz", "permission-denied").
