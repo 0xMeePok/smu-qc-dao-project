@@ -26,6 +26,7 @@ import {
   readFundingOpportunityAudit,
 } from "../lib/fundingOpportunityAudit.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { opportunityStatusLabel } from "../config/workflowStatus.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
 import { shortenAddress } from "../lib/chain.js";
 
@@ -213,7 +214,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <span className="eyebrow">
               {isOpenFunding ? "Open funding opportunity" : "Funded business problem"}
             </span>
-            <span className="status-dot">{expired ? "expired" : posting.status}</span>
+            <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt })}</span>
           </div>
           <h1>{posting.title}</h1>
 
