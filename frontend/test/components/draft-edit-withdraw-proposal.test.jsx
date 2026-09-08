@@ -35,7 +35,9 @@ vi.mock("../../src/lib/proposalAudit.js", () => ({
   proposalAuditReceipt: (record) => record.audit ?? { status: "queued" },
   readProposalAudit: async () => ({ verified: true }),
 }));
-vi.mock("../../src/components/AttachmentUploader.jsx", () => ({ AttachmentUploader: () => <p>Attachments</p> }));
+vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
+  AttachmentUploader: ({ disabled }) => <p>{disabled ? "Attachments locked" : "Attachments"}</p>,
+}));
 vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet picker</p> }));
 import CreateProposalPage from "../../src/pages/CreateProposalPage.jsx";
 import ProposalDetailPage from "../../src/pages/ProposalDetailPage.jsx";
@@ -126,6 +128,8 @@ describe("correcting a proposal before it is evaluated", () => {
     expect(screen.getByLabelText("Proposal title").value).toBe("Saved routing study");
     // The author is told what the edit costs before they make it.
     expect(screen.getByText(/records the edit/)).toBeTruthy();
+    expect(screen.getByText(/Supporting PDFs cannot be changed after submission/)).toBeTruthy();
+    expect(screen.getByText("Attachments locked")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save as draft" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Delivery timeline"), { target: { value: "16 weeks instead of 12" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign and save changes" }));

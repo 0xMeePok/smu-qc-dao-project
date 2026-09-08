@@ -211,11 +211,22 @@ service firebase.storage {
         && proposal.data.postingOwnerId == request.auth.uid;
     }
 
+    // Drafts (and the pre-save path where no document exists yet) may gain and
+    // drop files. Submission is chain-first: commitProposal is mined before the
+    // Firestore row becomes `submitted`, so that status already means the
+    // attachment bytes are covered by an on-chain solution hash — even when the
+    // receipt has not been written yet, and even while it is only `pending`.
+    // Freezing later, at `confirmed`, would leave that window open. Create is
+    // already create-only (`resource == null`), but that is not enough:
+    // delete-then-upload of the same path would replace the PDF without
+    // touching Firestore `attachments[]` or the on-chain hashes. A text
+    // correction may still rewrite the attachment list in Firestore; it cannot
+    // swap the bytes behind an id the sponsor has already downloaded.
     function proposalAcceptsFileChanges(proposalId, ownerId) {
       let proposal = attachmentRecord('proposals', proposalId);
       return proposal == null
         || (proposal.data.researcherId == ownerId
-          && proposal.data.status in ['draft', 'submitted']);
+          && proposal.data.status == 'draft');
     }
     match /proposals/{ownerId}/{proposalId}/{fileName} {
       allow read: if isActiveMember() && (isWallet(ownerId) || proposalReader(proposalId, ownerId));

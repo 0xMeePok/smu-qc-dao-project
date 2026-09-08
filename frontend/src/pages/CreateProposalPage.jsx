@@ -326,7 +326,8 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
             <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} error={errors.amount}>
               {({ id, describedBy, invalid }) => <input id={id} type="number" min="0.000001" max="1000000000" step="any" required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
             </Field>
-            <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments} onChange={setAttachments} onPendingChange={setPending} disabled={disabled} />
+            {editing && <p className="field-hint">Supporting PDFs cannot be changed after submission. They stay as the files under review.</p>}
+            <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments} onChange={setAttachments} onPendingChange={setPending} disabled={disabled || editing} />
           </fieldset>
           <p className="field-hint">{editing
             ? "Your wallet signs the amendment first. The proposal is updated only after that transaction is confirmed on Arbitrum Sepolia, so the stored version always matches its on-chain record."
