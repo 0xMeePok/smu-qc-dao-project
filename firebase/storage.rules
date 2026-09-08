@@ -111,6 +111,14 @@ service firebase.storage {
         && posting.data.ownerId == ownerId;
     }
 
+    // A fresh id is always fine - uploadAttachment mints one per transfer. Reusing
+    // an id the posting still lists is the swap isReferencedFile exists to refuse.
+    function postingAcceptsNewFile(problemId, ownerId, fileName) {
+      let posting = attachmentRecord('problems', problemId);
+      return posting == null
+        || (posting.data.ownerId == ownerId && !isReferencedFile(posting, fileName));
+    }
+
     // PDF only, per the story. Two independent checks because they can disagree:
     // contentType is metadata the client supplies, and the object name is the path
     // it writes to. Requiring both closes the case where a caller uploads
@@ -157,6 +165,16 @@ service firebase.storage {
       return problemId.matches('^[A-Za-z0-9_-]{1,64}$');
     }
 
+    // Delete-then-upload at the SAME id swaps the bytes behind a digest the record
+    // (and the chain) already anchored, which `resource == null` alone does not stop.
+    // Two slots, mirroring validAttachments in firestore.rules. Takes the document
+    // the caller already read, so it costs no extra cross-service read.
+    function isReferencedFile(record, fileName) {
+      let items = record.data.get('attachments', []);
+      return (items.size() > 0 && fileName == items[0].get('id', '') + '.pdf')
+        || (items.size() > 1 && fileName == items[1].get('id', '') + '.pdf');
+    }
+
     match /problems/{ownerId}/{problemId}/{fileName} {
       // Published posting: any signed-in member may download, which is the point
       // of QCDAO-58 - a solution developer needs the technical context to
@@ -193,15 +211,16 @@ service firebase.storage {
         && isPostingId(problemId)
         && isPdf(fileName)
         && withinSizeCap()
-        && metadataIsHonest(problemId);
+        && metadataIsHonest(problemId)
+        && postingAcceptsNewFile(problemId, ownerId, fileName);
 
       // Remove-before-publish, and removal after the fact. Restricted to the
       // owner for the same reason writes are.
       allow delete: if isWallet(ownerId) && isActiveMember();
     }
 
-    // Proposal files are private to the submitting wallet and the sponsor.
-    // Once submitted, the bytes and references remain immutable for review.
+    // Proposal files are private to the submitting wallet and the sponsor. A
+    // correction may add or drop files; the bytes behind any one id never change.
     // Sponsor reads require a non-draft record so a forged draft
     // `postingOwnerId` cannot open another member's download path.
     function proposalReader(proposalId, ownerId) {
@@ -228,8 +247,11 @@ service firebase.storage {
         || (proposal.data.researcherId == ownerId
           && proposal.data.status == 'draft');
     }
+
     match /proposals/{ownerId}/{proposalId}/{fileName} {
       allow read: if isActiveMember() && (isWallet(ownerId) || proposalReader(proposalId, ownerId));
+      // Create takes the same gate as delete: submission freezes the prefix, so
+      // there is no window in which an id can be re-created with other bytes.
       allow create: if resource == null && isWallet(ownerId) && isActiveMember()
         && isPostingId(proposalId) && isPdf(fileName) && withinSizeCap()
         && metadataIsHonest(proposalId)

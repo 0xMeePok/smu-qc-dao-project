@@ -83,6 +83,7 @@ export const ROUTES_CONFIG = [
   },
   { key: "submit-proposal", path: "submit-proposal", label: "Submit proposal", allowedRoles: [ROLES.RESEARCHER], authRequired: true, showInNav: false },
   { key: "edit-proposal", path: "edit-proposal", label: "Edit proposal", allowedRoles: [ROLES.RESEARCHER], authRequired: true, showInNav: false },
+  { key: "edit-posting", path: "edit-posting", label: "Edit posting", allowedRoles: [ROLES.OWNER, ROLES.RESEARCHER, ROLES.FUNDER], authRequired: true, showInNav: false },
   { key: "create-funding", path: "create-funding", label: "Funding opportunity", allowedRoles: [ROLES.OWNER, ROLES.RESEARCHER, ROLES.FUNDER], authRequired: true, showInNav: false },
   { key: "proposal", path: "proposal", label: "Proposal", allowedRoles: [ROLES.RESEARCHER, ROLES.OWNER, ROLES.FUNDER], authRequired: true, showInNav: false },
   // Non-navigated or dynamic/utility routes:

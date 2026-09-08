@@ -7,7 +7,7 @@ immutable. Amounts are numbers from 0 through 1,000,000,000.
 
 | Collection | Required fields | Optional fields | Initial status |
 | --- | --- | --- | --- |
-| `problems` | Shared: `ownerId`, `organisation`, `title`, `amount`, `currency`, `categories`, `expiresAt`, `status`, `createdAt`, `updatedAt`; business problem: `summary`, `businessContext`, `currentApproach`, `currentLimitations`, `expectedOutcome`, `successCriteria`, `dataAvailability`; open funding: `opportunityType: "open-funding"`, `fundingThesis`, `eligibilityNotes`, `tags` | Both: `attachments`, `audit`; legacy drafts retain the older optional fields | `draft` or complete form submission as `submitted` |
+| `problems` | Shared: `ownerId`, `organisation`, `title`, `amount`, `currency`, `categories`, `expiresAt`, `status`, `createdAt`, `updatedAt`; business problem: `summary`, `businessContext`, `currentApproach`, `currentLimitations`, `expectedOutcome`, `successCriteria`, `dataAvailability`; open funding: `opportunityType: "open-funding"`, `fundingThesis`, `eligibilityNotes`, `tags` | Both: `attachments`, `audit`, `withdrawalReason`; legacy drafts retain the older optional fields | `draft` or complete form submission as `submitted` |
 | `proposals` | `researcherId`, `problemId`, `status`, `createdAt`, `updatedAt`; from `submitted` onwards also `title`, `summary`, `amount`, `postingOwnerId`, `opportunityType`, `category`, `currency`, and every approach field | `outcomes`, `deliverables`, `attachments`, `audit`, `withdrawalReason` | `draft` or complete form submission as `submitted` |
 | `evaluations` | `evaluatorId`, `proposalId`, `title`, `score`, `feedback`, `status`, `createdAt`, `updatedAt` | none | `draft` |
 | `funding` | `funderId`, `proposalId`, `problemId`, `title`, `amount`, `status`, `createdAt`, `updatedAt` | `tranches` | `pledged` |
@@ -79,6 +79,40 @@ Allowed status transitions:
 
 An update that leaves a status unchanged is permitted when its other fields remain
 valid. Terminal statuses cannot transition again from an untrusted client.
+
+## Withdrawing an opportunity (QCDAO-57)
+
+A problem owner or funder may withdraw their own live opportunity (`submitted`,
+`open`, or `in_review`) the same way a researcher withdraws a proposal: the
+wallet signs `withdrawOpportunity` first, then Firestore stores `status:
+cancelled` and the `withdrawalReason`. A declined transaction leaves the
+opportunity listed. Retrying after a successful anchor only repeats the
+Firestore write, with the anchored reason locked.
+
+Withdrawal requires a non-empty `withdrawalReason` of at most 1,000 characters.
+The reason is frozen once written. Discover still only lists `submitted` and
+`open`, so a withdrawn opportunity leaves the marketplace; members who already
+have access may still read it, including the reason. Existing proposals are not
+cascade-withdrawn — the chain simply refuses new commits against a withdrawn
+opportunity.
+
+## Correcting an opportunity (QCDAO-57)
+
+A problem owner or funder may correct their own live posting (`submitted` or
+`open`) the same way a researcher corrects a proposal: the wallet signs
+`updateOpportunity` first, then Firestore stores the new content and a pending
+audit receipt. Full content is allowed only while `opportunityMetrics.proposalCount`
+is zero. After the first proposal, the write may only touch `attachments`,
+`audit` and `updatedAt`.
+
+### `problems/{problemId}/revisions/{revisionId}`
+
+The post-publication edit trail for both problem statements and open funding
+calls. **Server-owned**: `recordOpportunityEdit` computes the diff with the
+Admin SDK, and no client may create, update or delete an entry. Each entry
+carries `changedFields`, `actor`, `at`, `previousStatus`, `status`, the content
+hash before and after, and `withdrawalReason` on a withdrawal. Draft saves are
+absent.
 
 ## Correcting and withdrawing a proposal (QCDAO-57)
 

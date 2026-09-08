@@ -23,7 +23,8 @@ export const OPPORTUNITY_STATUS_LABELS = {
   [OPPORTUNITY_STATUSES.MATCHED]: "Matched",
   [OPPORTUNITY_STATUSES.FUNDED]: "Funded",
   [OPPORTUNITY_STATUSES.COMPLETED]: "Completed",
-  [OPPORTUNITY_STATUSES.CANCELLED]: "Cancelled",
+  // The stored status stays `cancelled`; the word users act on is "withdraw".
+  [OPPORTUNITY_STATUSES.CANCELLED]: "Withdrawn",
 };
 
 /** Statuses that still accept responses, so a passed deadline is shown as Expired. */

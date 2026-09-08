@@ -40,6 +40,7 @@ function configuredReads(value = posting()) {
         expiresAt: prepared.args[3],
       };
     }
+    if (functionName === "opportunityRevisionCount") return 0n;
     if (functionName === "anchorCount") return 1n;
     if (functionName === "anchorAt") return { contentHash: prepared.contentHash };
     throw new Error(`unexpected read: ${functionName}`);

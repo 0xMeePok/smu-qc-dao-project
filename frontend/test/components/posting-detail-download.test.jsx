@@ -35,6 +35,7 @@ vi.mock("../../src/lib/firebase.js", () => ({
 }));
 vi.mock("../../src/lib/postings.js", () => ({
   findPosting: async () => mocks.posting,
+  listOpportunityRevisions: async () => [],
 }));
 vi.mock("../../src/lib/attachments.js", () => ({
   formatBytes: (n) => `${n} B`,

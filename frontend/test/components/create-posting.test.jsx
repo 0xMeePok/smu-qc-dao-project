@@ -31,6 +31,10 @@ vi.mock("../../src/lib/firebase.js", () => ({
 
 vi.mock("../../src/lib/postings.js", () => ({
   newPostingId: () => "posting123",
+  findPosting: async () => null,
+  updatePosting: vi.fn(),
+  saveDraft: vi.fn(),
+  publishDraft: vi.fn(),
   buildPostingDocument: ({ ownerId, organisation, form, attachments }) => ({
     ownerId,
     organisation,
@@ -255,7 +259,7 @@ describe("submit while an attachment is still uploading", () => {
     await waitFor(() => expect(typeof mocks.uploader.onPendingChange).toBe("function"));
     await act(async () => { mocks.uploader.onPendingChange(1); });
 
-    const submit = screen.getByRole("button", { name: /submit problem statement/i });
+    const submit = screen.getByRole("button", { name: /waiting for attachments/i });
     expect(submit.disabled).toBe(true);
 
     fireEvent.submit(document.querySelector("form"));
@@ -266,7 +270,7 @@ describe("submit while an attachment is still uploading", () => {
       mocks.uploader.onChange([DRAFT_ATTACHMENT]);
     });
 
-    expect(submit.disabled).toBe(false);
+    expect(screen.getByRole("button", { name: /submit problem statement/i }).disabled).toBe(false);
     fireEvent.submit(document.querySelector("form"));
 
     await waitFor(() => expect(mocks.created).toHaveLength(1));

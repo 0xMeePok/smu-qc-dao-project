@@ -470,6 +470,24 @@ describe("proposal supporting PDFs", () => {
     });
     await assertFails(uploadBytes(ref(author, draftPath), PDF_BYTES, draftMetadata));
   });
+  it("[BIT-OPD-181] refuses re-uploading a published posting's attachment at the same path", async () => {
+    const swapId = "storage-swap-posting-57";
+    const path = `problems/${OWNER}/${swapId}/support01.pdf`;
+    const metadata = pdfMetadata({ customMetadata: { problemId: swapId } });
+    const owner = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(owner, path), PDF_BYTES, metadata));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", swapId), {
+      ownerId: OWNER, status: "submitted",
+      attachments: [{
+        id: "support01", name: "support.pdf", size: PDF_BYTES.length,
+        contentType: "application/pdf", sha256: `0x${"4".repeat(64)}`,
+      }],
+    }));
+    await assertSucceeds(deleteObject(ref(owner, path)));
+    await assertFails(uploadBytes(ref(owner, path), PDF_BYTES, metadata));
+    await assertSucceeds(uploadBytes(ref(owner, `problems/${OWNER}/${swapId}/support09.pdf`), PDF_BYTES, metadata));
+  });
+
   it("refuses sponsor downloads against a draft that forges postingOwnerId", async () => {
     const forgedId = "storage-forged-draft-59";
     const forgedPath = `proposals/${OWNER}/${forgedId}/support01.pdf`;

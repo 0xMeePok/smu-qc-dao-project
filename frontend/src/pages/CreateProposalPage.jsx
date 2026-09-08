@@ -332,7 +332,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           <p className="field-hint">{editing
             ? "Your wallet signs the amendment first. The proposal is updated only after that transaction is confirmed on Arbitrum Sepolia, so the stored version always matches its on-chain record."
             : "Your wallet signs first. The proposal is saved only after that transaction is confirmed on Arbitrum Sepolia, so nothing enters evaluation unverified."}</p>
-          {auditProgress && <div className="detail-section"><AuditReceipt entityLabel="Proposal" audit={auditProgress} eventLabel={editing ? "Proposal updated" : "Proposal submitted"} actorRole="Researcher / solution developer" /></div>}
+          {auditProgress?.status === "confirmed" && <div className="detail-section"><AuditReceipt entityLabel="Proposal" audit={auditProgress} eventLabel={editing ? "Proposal updated" : "Proposal submitted"} actorRole="Researcher / solution developer" /></div>}
           <div className="form-actions">
             <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : editing ? "Sign and save changes" : "Sign and submit proposal"}</button>
             {!editing && <button className="secondary" type="button" disabled={disabled || pending} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>}

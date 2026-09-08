@@ -42,7 +42,7 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.equal(opportunityStatusLabel("in_review"), "In review");
     assert.equal(opportunityStatusLabel("submitted", { expiresAt: PAST, now: NOW }), "Expired");
     assert.equal(opportunityStatusLabel("funded", { expiresAt: PAST, now: NOW }), "Funded");
-    assert.equal(opportunityStatusLabel("cancelled", { expiresAt: PAST, now: NOW }), "Cancelled");
+    assert.equal(opportunityStatusLabel("cancelled", { expiresAt: PAST, now: NOW }), "Withdrawn");
   });
 
   it("[FUT-OPD-121] uses the same opportunity statuses firestore.rules will accept", () => {

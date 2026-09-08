@@ -83,10 +83,14 @@ export function auditErrorMessage(error) {
     return "The wallet retry limit has been reached. Ask an administrator to reset verification attempts.";
   }
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
-  if (/revert|invalidstate|invalidinput/i.test(error?.message ?? "")) {
+  const text = String(error?.message ?? "");
+  if (/already anchored|updateOpportunity, not a second commit|updateHashes, not a second commit|already been withdrawn|cannot be edited|cannot be amended|cannot be withdrawn|cannot be filed|each hash may only be used|not on the configured AuditRegistry|Connect the wallet that owns/i.test(text)) {
+    return text;
+  }
+  if (/revert|invalidstate|invalidinput/i.test(text)) {
     return "The verification transaction reverted. Check the opportunity's status and revision before retrying.";
   }
-  return "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
+  return text || "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
 export function messageForFirebaseError(error) {

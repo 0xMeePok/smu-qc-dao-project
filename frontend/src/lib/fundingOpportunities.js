@@ -1,6 +1,7 @@
 import {
   Timestamp,
   collection,
+  deleteField,
   doc,
   serverTimestamp,
   setDoc,
@@ -142,4 +143,20 @@ export async function updateFundingOpportunityAudit({ opportunityId, audit }) {
     audit: { ...audit },
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function updateFundingOpportunity({
+  opportunityId, ownerId, organisation, form, attachments = [], record: preparedRecord = null, audit = null,
+}) {
+  requireFirebase();
+  const built = preparedRecord
+    ? { ...preparedRecord }
+    : buildFundingOpportunityDocument({ ownerId, organisation, form, attachments });
+  const { createdAt, ...record } = built;
+  await updateDoc(fundingOpportunityRef(opportunityId), {
+    ...record,
+    audit: audit ? { ...audit } : deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+  return findPosting(opportunityId);
 }

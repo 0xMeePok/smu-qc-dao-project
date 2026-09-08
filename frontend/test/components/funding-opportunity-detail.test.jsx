@@ -36,6 +36,7 @@ vi.mock("../../src/lib/postings.js", () => ({
     createdAt: new Date("2026-09-04T00:00:00Z"),
     expiresAt: new Date("2026-12-03T00:00:00Z"),
   }),
+  listOpportunityRevisions: async () => [],
 }));
 
 vi.mock("../../src/lib/postingAudit.js", () => ({

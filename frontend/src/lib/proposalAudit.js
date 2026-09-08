@@ -1,15 +1,43 @@
 import { configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
-import { commitProposalAudit, prepareProposalWithdrawal, readProposalIsAnchored, updateProposalAudit, verifyProposalAudit, withdrawProposalAudit } from "./auditRegistry.js";
+import { commitProposalAudit, prepareProposalWithdrawal, readOpportunityRevisionIndex, readProposalHashes, readProposalIsAnchored, updateProposalAudit, verifyProposalAudit, withdrawProposalAudit } from "./auditRegistry.js";
 import { findProposal, updateProposalReceipt } from "./proposals.js";
 
 export { proposalAuditPayload } from "../../../firebase/functions/proposalAuditPayload.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
-import { asProposalUpdate } from "../../../firebase/functions/auditCanonical.js";
+import { asProposalUpdate, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
 
 async function anchorProposal(prepared, options) {
-  return await readProposalIsAnchored(prepared.entityId, options)
-    ? updateProposalAudit(asProposalUpdate(prepared), options)
-    : commitProposalAudit(prepared, options);
+  let operation = prepared;
+  try {
+    operation = withOpportunityRevisionIndex(
+      prepared,
+      await readOpportunityRevisionIndex(prepared.opportunityId, options),
+    );
+  } catch {
+    // Missing parent: commitProposal / updateHashes will revert with a mapped error.
+  }
+  if (!await readProposalIsAnchored(operation.entityId, options)) {
+    return commitProposalAudit(operation, options);
+  }
+  await assertAmendmentIsNew(operation, options);
+  return updateProposalAudit(asProposalUpdate(operation), options);
+}
+
+/**
+ * Mirrors writeOpportunityAudit: compare against what is stored BEFORE the wallet
+ * opens. AuditRegistry records each REVISION once, so only a write that moves
+ * neither hash is refused - and it reverted as a bare InvalidInput after the
+ * author had already confirmed the transaction.
+ */
+async function assertAmendmentIsNew(operation, options) {
+  const stored = await readProposalHashes(operation.entityId, options);
+  if (stored.matches(stored.proposalHash, operation.proposalHash)
+    && stored.matches(stored.solutionHash, operation.solutionHash)) {
+    throw new Error(
+      "This proposal is already anchored on Arbitrum Sepolia exactly as it stands. "
+      + "Change something before signing again.",
+    );
+  }
 }
 
 const flow = createOpportunityAuditFlow({

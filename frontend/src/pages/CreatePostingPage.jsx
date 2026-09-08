@@ -20,9 +20,10 @@ import {
   newPostingId,
   publishDraft,
   saveDraft,
+  updatePosting,
 } from "../lib/postings.js";
 import { deleteAttachment } from "../lib/attachments.js";
-import { messageForFirebaseError } from "../lib/errors.js";
+import { auditErrorMessage, messageForFirebaseError } from "../lib/errors.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { formatInstant, toDate } from "../lib/datetime.js";
@@ -30,7 +31,9 @@ import {
   anchorPostingAudit,
   postingAuditReceipt,
   readPostingAudit,
+  receiptForWrite,
 } from "../lib/postingAudit.js";
+import { canEditOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 
 /**
@@ -86,9 +89,9 @@ function DraftStatus({ savedAt, saving }) {
   );
 }
 
-function Section({ step, legend, hint, children }) {
+function Section({ step, legend, hint, disabled, children }) {
   return (
-    <fieldset className="field-group">
+    <fieldset className="field-group" disabled={disabled}>
       <legend>{step}. {legend}</legend>
       {hint && <p className="field-hint">{hint}</p>}
       {children}
@@ -158,13 +161,15 @@ function formFromPosting(posting) {
   };
 }
 
-export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
+export default function CreatePostingPage({ postingId: resumeId, editPostingId, onNavigate }) {
   const { address, profile } = useSession();
   const { address: connectedAddress, isConnected } = useAccount();
 
   // Reserved up front: attachments are uploaded while the form is still being
   // filled in, and this id is part of their storage path.
-  const [postingId, setPostingId] = useState(() => resumeId ?? newPostingId());
+  const [postingId, setPostingId] = useState(() => editPostingId ?? resumeId ?? newPostingId());
+  const [existing, setExisting] = useState(null);
+  const [editBlocked, setEditBlocked] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachments, setAttachments] = useState([]);
   const [pendingCount, setPendingCount] = useState(0);
@@ -179,7 +184,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   const [savingDraft, setSavingDraft] = useState(false);
   // Keeps the form inert until a resumed draft has loaded, so typing cannot be
   // overwritten by the load and a save cannot run with draftExists still false.
-  const [loadingDraft, setLoadingDraft] = useState(Boolean(resumeId));
+  const [loadingDraft, setLoadingDraft] = useState(Boolean(resumeId || editPostingId));
   // Snapshot of the last saved state; null until the draft is first saved.
   const [baseline, setBaseline] = useState(null);
   // Attachments the saved draft already references, so discard leaves them alone.
@@ -195,21 +200,41 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   };
 
   const organisation = profile?.organisation ?? "";
+  const editing = Boolean(editPostingId);
+  const materialLocked = editing && materialFieldsLocked(existing);
   // The one hash that means "still this posting". Matches parseHash in App.jsx.
-  const createHash = resumeId ? `#/create/${resumeId}` : "#/create";
+  const createHash = editPostingId
+    ? `#/edit-posting/${editPostingId}`
+    : resumeId ? `#/create/${resumeId}` : "#/create";
 
   useEffect(() => {
-    if (!resumeId) return undefined;
+    if (!resumeId && !editPostingId) return undefined;
     let cancelled = false;
 
-    findPosting(resumeId)
+    findPosting(editPostingId ?? resumeId)
       .then((posting) => {
-        if (cancelled || !posting) return;
+        if (cancelled) return;
+        if (!posting) {
+          if (editPostingId) setEditBlocked("This posting could not be found or you do not have access.");
+          return;
+        }
+        if (editPostingId) {
+          if (!canEditOpportunity(posting, address)) {
+            setEditBlocked(posting.status === "draft"
+              ? "Resume this posting from My Problems — drafts are not edited here."
+              : `This posting can no longer be edited. Its status is ${posting.status}.`);
+            return;
+          }
+          setExisting(posting);
+        } else if (posting.status && posting.status !== "draft") {
+          setEditBlocked("This posting is already published. Open it from My Problems to edit.");
+          return;
+        }
         const loadedForm = formFromPosting(posting);
         const loadedAttachments = posting.attachments ?? [];
         setForm(loadedForm);
         setAttachments(loadedAttachments);
-        setDraftExists(true);
+        if (!editPostingId) setDraftExists(true);
         setSavedAt(posting.updatedAt ?? null);
         setBaseline(snapshotOf(loadedForm, loadedAttachments));
         savedAttachmentIds.current = new Set(loadedAttachments.map((item) => item.id));
@@ -218,7 +243,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
       .finally(() => { if (!cancelled) setLoadingDraft(false); });
 
     return () => { cancelled = true; };
-  }, [resumeId]);
+  }, [resumeId, editPostingId, address]);
 
   // Unsaved work, not "any work". With a saved baseline this is a comparison
   // against it, so saving a draft - or resuming one and changing nothing - leaves
@@ -235,12 +260,13 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
 
   const { leaveTarget, setLeaveTarget, goTo } = useDraftGuard({
     isDirty,
-    active: !published,
+    active: !published && !editing,
     ownHashes: [createHash],
     onNavigate,
   });
 
   const persistDraft = async () => {
+    if (editing) return false;
     setSubmitError(null);
     setSavingDraft(true);
     try {
@@ -263,8 +289,11 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   // Same UTC-to-the-second format the posting will be stored and displayed in, so
   // what the form promises and what the detail page shows cannot disagree.
   const expiryPreview = useMemo(
-    () => formatInstant(expiryDateFrom(form.expiryDays)),
-    [form.expiryDays],
+    () => formatInstant(expiryDateFrom(
+      form.expiryDays,
+      editing ? (toDate(existing?.createdAt) ?? new Date()) : new Date(),
+    )),
+    [form.expiryDays, editing, existing?.createdAt],
   );
 
   // Keeps only digits, so separators from a pasted "1,000,000" are stripped rather
@@ -338,6 +367,10 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
         organisation,
         form,
         attachments,
+        ...(editing ? {
+          status: existing?.status ?? "submitted",
+          now: toDate(existing?.createdAt) ?? new Date(),
+        } : {}),
       });
       pendingRecordRef.current = record;
 
@@ -354,7 +387,12 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
         },
       });
 
-      const posting = draftExists
+      const posting = editing
+        ? await updatePosting({
+          postingId, ownerId: address, organisation, form, attachments, record,
+          audit: receiptForWrite(audit),
+        })
+        : draftExists
         ? await publishDraft({
           // The anchored record, not a rebuild: rebuilding derives a fresh
           // expiresAt that would no longer match the confirmed hash.
@@ -378,7 +416,9 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
         setAuditProgress(null);
         pendingRecordRef.current = null;
       }
-      setSubmitError(messageForFirebaseError(error));
+      setSubmitError(latestAudit?.transactionHash
+        ? messageForFirebaseError(error)
+        : auditErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
@@ -451,15 +491,28 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     if (resumeId) goTo("#/create");
   };
 
+  if (editBlocked) {
+    return (
+      <section className="page empty">
+        <h1>Posting unavailable</h1>
+        <p role="alert">{editBlocked}</p>
+        <button className="secondary" type="button" onClick={() => onNavigate(editPostingId ? `posting/${editPostingId}` : "my-problems")}>
+          {editPostingId ? "View posting" : "My problems"}
+        </button>
+      </section>
+    );
+  }
+
   if (published) {
     return (
       <section className="page confirmation-page">
         <div className="success-banner confirmation-card" role="status">
-          <span className="eyebrow">Posting submitted</span>
+          <span className="eyebrow">{editing ? "Posting updated" : "Posting submitted"}</span>
           <h1>{published.title}</h1>
           <p>
-            Your funded problem statement is live. Solution developers can now find it
-            and propose quantum or quantum-adjacent approaches.
+            {editing
+              ? "Your changes are live. The new content hash is anchored on Arbitrum Sepolia beside the original."
+              : "Your funded problem statement is live. Solution developers can now find it and propose quantum or quantum-adjacent approaches."}
           </p>
           <dl className="confirmation-facts">
             <div><dt>Reference</dt><dd><code>{published.id}</code></dd></div>
@@ -481,7 +534,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
           </dl>
           <AuditReceipt
             audit={postingAuditReceipt(published)}
-            eventLabel="Funded problem statement submitted"
+            eventLabel={editing ? "Funded problem statement updated" : "Funded problem statement submitted"}
             actorRole="Problem owner"
             firebaseReference={`problems/${published.id}`}
             onVerify={() => readPostingAudit(published)}
@@ -494,8 +547,8 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             >
               View the posting
             </button>
-            <button className="secondary" type="button" onClick={startAnother}>
-              Post another problem
+            <button className="secondary" type="button" onClick={editing ? () => onNavigate("my-problems") : startAnother}>
+              {editing ? "Back to my problems" : "Post another problem"}
             </button>
           </div>
         </div>
@@ -505,20 +558,30 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
 
   return (
     <section className="page create-page" ref={formTop}>
+      {editing && (
+        <button className="back" type="button" onClick={() => onNavigate(`posting/${postingId}`)}>
+          Back to posting
+        </button>
+      )}
       <div className="page-heading">
         <span className="eyebrow">Funded business problem statement</span>
-        <h1>Post a problem</h1>
+        <h1>{editing ? "Edit your problem statement" : "Post a problem"}</h1>
         <p>
-          Describe the problem in enough detail that a solution developer in another
-          organisation can judge whether they can help, without needing a call first.
+          {editing
+            ? (materialLocked
+              ? "A proposal has already been received, so the funded ask is locked. You can still replace supporting documents."
+              : "Correct the posting while it is still open and no proposal has been received. Your wallet signs updateOpportunity first; Firestore is updated after that transaction is mined.")
+            : "Describe the problem in enough detail that a solution developer in another organisation can judge whether they can help, without needing a call first."}
         </p>
       </div>
 
+      {!editing && (
       <OpportunityTypeSwitch
         activeType="business-problem"
         onNavigate={switchOpportunityType}
         disabled={submitting}
       />
+      )}
 
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>
@@ -530,7 +593,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             disabled={loadingDraft}
             style={{ border: 0, margin: 0, padding: 0, minInlineSize: "auto" }}
           >
-          <Section step="1" legend="The problem" hint="What is going wrong, and in what business context.">
+          <Section step="1" legend="The problem" hint="What is going wrong, and in what business context." disabled={materialLocked}>
             <TextField
               id="title" label="Title" value={form.title} onChange={update} error={errors.title}
               placeholder="e.g. Route optimisation for cold-chain delivery under demand spikes"
@@ -547,7 +610,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             />
           </Section>
 
-          <Section step="2" legend="What you do today" hint="Solution developers need to know what they are improving on.">
+          <Section step="2" legend="What you do today" hint="Solution developers need to know what they are improving on." disabled={materialLocked}>
             <TextField
               id="currentApproach" label="Current approach" rows={3}
               value={form.currentApproach} onChange={update} error={errors.currentApproach}
@@ -559,7 +622,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             />
           </Section>
 
-          <Section step="3" legend="What success looks like">
+          <Section step="3" legend="What success looks like" disabled={materialLocked}>
             <TextField
               id="expectedOutcome" label="Expected outcome" rows={3}
               value={form.expectedOutcome} onChange={update} error={errors.expectedOutcome}
@@ -580,6 +643,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             step="4"
             legend="Technology areas"
             hint={`Which fields could help? Pick up to ${MAX_CATEGORIES}. Describe the problem, not the technique - proposers choose the approach.`}
+            disabled={materialLocked}
           >
             <div className={`category-grid ${errors.categories ? "field-invalid" : ""}`} role="group">
               {POSTING_CATEGORIES.map((category) => {
@@ -609,7 +673,7 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             )}
           </Section>
 
-          <Section step="5" legend="Funding and timing">
+          <Section step="5" legend="Funding and timing" disabled={materialLocked}>
             <div className="funding-row">
               {/*
                 Deliberately NOT type="number". A focused number input steps its own
@@ -661,10 +725,29 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             />
           </Section>
 
+          {editing && (
+            <p className="field-hint">
+              Your wallet signs updateOpportunity first. The posting is updated only after that transaction is confirmed on Arbitrum Sepolia.
+            </p>
+          )}
+          {auditProgress?.status === "confirmed" && (
+            <div className="detail-section">
+              <AuditReceipt
+                audit={auditProgress}
+                eventLabel={editing ? "Funded problem statement updated" : "Funded problem statement submitted"}
+                actorRole="Problem owner"
+              />
+            </div>
+          )}
           <div className="form-actions">
             <button className="primary" type="submit" disabled={submitting || pendingCount > 0}>
-              {submitting ? "Submitting…" : "Submit problem statement"}
+              {submitting
+                ? (auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
+                : pendingCount > 0
+                  ? "Waiting for attachments…"
+                  : editing ? "Sign and save changes" : "Submit problem statement"}
             </button>
+            {!editing && (
             <button
               className="secondary"
               type="button"
@@ -673,16 +756,17 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
             >
               {savingDraft ? "Saving…" : "Save as draft"}
             </button>
+            )}
             <button
               className="secondary" type="button" disabled={submitting}
-              onClick={cancel}
+              onClick={editing ? () => onNavigate(`posting/${postingId}`) : cancel}
             >
               Cancel
             </button>
           </div>
           </fieldset>
 
-          <DraftStatus savedAt={savedAt} saving={savingDraft} />
+          {!editing && <DraftStatus savedAt={savedAt} saving={savingDraft} />}
 
           {leaveTarget && (
             <LeaveDraftPrompt
