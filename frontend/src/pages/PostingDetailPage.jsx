@@ -195,8 +195,13 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     ? fundingOpportunityAuditReceipt(posting)
     : postingAuditReceipt(posting);
   const proposalCount = Number(posting.proposalCount ?? 0);
+  const requestedAmount = Number(posting.amount);
   const fundedAmount = Number(posting.fundedAmount ?? 0);
   const fundingProgressPercent = Number(posting.fundingProgressPercent ?? 0);
+  const requestedLabel = Number.isFinite(requestedAmount)
+    ? `${posting.currency} ${requestedAmount.toLocaleString()}`
+    : "—";
+  const committedLabel = `${posting.currency} ${fundedAmount.toLocaleString()}`;
 
   return (
     <section className="page detail-page">
@@ -272,14 +277,14 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         </article>
 
         <aside className="context-panel">
-          <span className="eyebrow">{isOpenFunding ? "Indicative funding" : "Funding"}</span>
-          <strong>{posting.currency} {Number(posting.amount).toLocaleString()}</strong>
+          <span className="eyebrow">{isOpenFunding ? "Indicative funding" : "Funding requirement"}</span>
+          <strong>{requestedLabel}</strong>
           <div className="detail-funding-progress">
             <span className="funding-progress" aria-label={`${fundingProgressPercent}% funded`}>
               <span style={{ width: `${fundingProgressPercent}%` }} />
             </span>
             <small>
-              {posting.currency} {fundedAmount.toLocaleString()} committed · {fundingProgressPercent}%
+              {committedLabel} committed of {requestedLabel} · {fundingProgressPercent}% funded
             </small>
           </div>
           <dl>
