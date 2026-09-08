@@ -17,12 +17,14 @@ const record = { id: "proposal123", problemId: "problem123", researcherId: accou
 const prepared = prepareProposalCommit({ recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { methodology: record.methodology, attachments: [] } });
 function readContract({ functionName }) {
   if (functionName === "getProposal") return { researcher: account, opportunityId: prepared.opportunityId, opportunityRevisionIndex: 0, proposalHash: prepared.proposalHash, solutionHash: prepared.solutionHash };
+  if (functionName === "revisionCount") return mocks.revisions;
   if (functionName === "anchorCount") return 1n;
   if (functionName === "anchorAt") return { contentHash: prepared.anchorHash };
   throw new Error(`Unexpected read: ${functionName}`);
 }
 beforeEach(() => {
   mocks.updates = [];
+  mocks.revisions = 0n;
   mocks.failedStatuses.clear();
 });
 describe("proposal audit handoff", () => {
@@ -37,6 +39,20 @@ describe("proposal audit handoff", () => {
     expect(mocks.updates.map((audit) => audit.status)).toEqual(["queued", "submitted", "pending", "confirmed"]);
     expect(result.status).toBe("confirmed");
     expect(result.transactionHash).toBe(tx);
+  });
+  it("QCDAO-57 amends an already-anchored proposal instead of committing it twice", async () => {
+    // commitProposal reverts once the entity id is taken, so a corrected
+    // proposal has to go to updateHashes - which appends a revision beside the
+    // original rather than replacing it. The chain is what decides, because a
+    // dropped or never-saved receipt would make Firestore the wrong source.
+    mocks.revisions = 1n;
+    const writeContract = vi.fn(async () => tx);
+    const result = await anchorProposalAudit(record, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 91n }) } });
+    const call = writeContract.mock.calls[0][0];
+    expect(call.functionName).toBe("updateHashes");
+    // The same hashes either way; only the call that carries them differs.
+    expect(call.args).toEqual([prepared.entityId, prepared.proposalHash, prepared.solutionHash, 0]);
+    expect(result.status).toBe("confirmed");
   });
   it("records a retryable failure when the wallet rejects without deleting the saved proposal", async () => {
     await expect(anchorProposalAudit(record, { account, adapters: { writeContract: async () => { throw Object.assign(new Error("User rejected"), { code: 4001 }); }, readContract, waitForTransactionReceipt: vi.fn() } })).rejects.toThrow();

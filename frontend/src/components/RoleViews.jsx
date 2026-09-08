@@ -5,6 +5,7 @@ import { db } from "../lib/firebase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Modal } from "./Modal.jsx";
 import { POSTING_STATUS_DRAFT, deletePosting, listOwnPostings } from "../lib/postings.js";
+import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ROLE_LABELS } from "../config/roles.js";
 
@@ -82,7 +83,9 @@ export function MyProblems({ onNavigate }) {
           <button
             className="text-button"
             type="button"
-            onClick={() => onNavigate(isDraft ? `create/${item.id}` : `posting/${item.id}`)}
+            onClick={() => onNavigate(isDraft
+              ? (item.opportunityType === OPEN_FUNDING_TYPE ? `create-funding/${item.id}` : `create/${item.id}`)
+              : `posting/${item.id}`)}
           >
             {isDraft ? "Resume editing" : "View"}
           </button>

@@ -4,7 +4,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { createPublicClient, http, verifyMessage } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { createSiweMessage, parseSiweMessage, validateSiweMessage } from "viem/siwe";
@@ -22,6 +22,7 @@ import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectedProblemIds, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
+import { recordProposalRevision } from "./proposalRevisions.js";
 
 initializeApp();
 
@@ -461,6 +462,20 @@ export const queueProposalAudit = onDocumentWritten(
     const after = event.data?.after;
     if (!after?.exists) return;
     await enqueueProposalAudit({ db, record: { ...after.data(), id: after.id }, now: Timestamp.now() });
+  },
+);
+
+export const recordProposalEdit = onDocumentUpdated(
+  { document: "proposals/{proposalId}", region: REGION, retry: true, maxInstances: 10 },
+  async (event) => {
+    await recordProposalRevision({
+      db,
+      proposalId: event.params.proposalId,
+      eventId: event.id,
+      before: event.data?.before?.data(),
+      after: event.data?.after?.data(),
+      at: Timestamp.now(),
+    });
   },
 );
 

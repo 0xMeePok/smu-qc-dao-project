@@ -49,3 +49,31 @@ describe("QCDAO-59/60 proposals", () => {
     assert.equal(attachmentPath({ ownerId: "0xABC", problemId: "proposal1", attachmentId: "file1234", scope: "proposals" }), "proposals/0xabc/proposal1/file1234.pdf");
   });
 });
+
+describe("QCDAO-57 draft, edit and withdraw", () => {
+  it("saves a barely-started draft without inventing values for the empty fields", () => {
+    const record = buildProposalDocument({ researcherId: "0xABC", posting, form: { title: " Routing, first pass " }, status: "draft" });
+    assert.equal(record.status, "draft");
+    assert.equal(record.title, "Routing, first pass");
+    assert.equal(record.methodology, "");
+    assert.equal(record.category, "");
+    // Absent rather than NaN: firestore.rules bounds the amount on every path,
+    // and a draft that has not reached the funding question has no answer yet.
+    assert.equal(record.amount, 0);
+    assert.equal(record.researcherId, "0xabc");
+    assert.equal(record.problemId, posting.id);
+  });
+  it("keeps a draft out of the sponsor's inbox by omitting the linkage entirely", () => {
+    // postingOwnerId is both the sponsor's read ACL and their dashboard filter.
+    // A draft that carried it would appear in their queue before it was sent.
+    const draft = buildProposalDocument({ researcherId: "0xABC", posting, form, status: "draft" });
+    assert.ok(!("postingOwnerId" in draft));
+    assert.equal(buildProposalDocument({ researcherId: "0xABC", posting, form }).postingOwnerId, posting.ownerId);
+  });
+  it("holds a draft to the same validation as a submission once it is sent", () => {
+    // Saving is unvalidated; submitting is not. The same form that saves fine as
+    // a draft has to answer for every field on the way out.
+    assert.ok(Object.keys(validateProposal({ title: "Routing, first pass" }, posting)).length > 1);
+    assert.deepEqual(validateProposal(form, posting), {});
+  });
+});

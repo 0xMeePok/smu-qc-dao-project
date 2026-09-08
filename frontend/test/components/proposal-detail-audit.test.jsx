@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ connected: false, anchor: vi.fn(), find: vi.fn
 const account = `0x${"a".repeat(40)}`;
 vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}` } }) }));
-vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.find(...args), withdrawProposal: vi.fn() }));
+vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.find(...args), withdrawProposal: vi.fn(), listProposalRevisions: async () => [] }));
 vi.mock("../../src/lib/proposalAudit.js", () => ({
   anchorProposalAudit: (...args) => mocks.anchor(...args), proposalAuditReceipt: (record) => record.audit,
   readProposalAudit: async () => ({ verified: true }),

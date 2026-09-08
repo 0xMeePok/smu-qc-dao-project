@@ -78,3 +78,30 @@ describe("QCDAO-121 preview hosts", () => {
     );
   });
 });
+
+describe("QCDAO-57 local development origins", () => {
+  const emulator = { FUNCTIONS_EMULATOR: "true", GCLOUD_PROJECT: "qc-dao-demo" };
+
+  it("issues a nonce on both local ways of running the app", () => {
+    // 5173 is `npm run dev`; 5000 is the Hosting emulator serving the built
+    // bundle. Sign-in is the first thing anyone does, so a port that is not
+    // listed here makes the whole app look broken.
+    for (const host of ["localhost:5173", "127.0.0.1:5173", "localhost:5000", "127.0.0.1:5000"]) {
+      assert.equal(resolveDomain(requestWithOrigin(`http://${host}`), emulator), host);
+    }
+  });
+
+  it("keeps every one of them out of production", () => {
+    // The emulator guard is the only thing holding these back. Without it a
+    // forged `Origin: http://127.0.0.1:5000` would be handed a signable message.
+    for (const host of ["localhost:5173", "127.0.0.1:5173", "localhost:5000", "127.0.0.1:5000"]) {
+      assertPermissionDenied(() => resolveDomain(requestWithOrigin(`http://${host}`), production));
+      assertPermissionDenied(() => resolveDomain(requestWithOrigin(`https://${host}`), production));
+    }
+  });
+
+  it("still refuses an unlisted local port and plain http elsewhere", () => {
+    assertPermissionDenied(() => resolveDomain(requestWithOrigin("http://127.0.0.1:9999"), emulator));
+    assertPermissionDenied(() => resolveDomain(requestWithOrigin("http://evil.example:5000"), emulator));
+  });
+});

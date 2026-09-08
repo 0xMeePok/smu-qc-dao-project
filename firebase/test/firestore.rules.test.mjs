@@ -834,6 +834,7 @@ describe("QCDAO-75..79 audit receipt state", () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(updateDoc(doc(db, "proposals", "legacy-confirmed"), {
       status: "withdrawn",
+      withdrawalReason: "Withdrawn while the receipt is already confirmed.",
       updatedAt: serverTimestamp(),
     }));
     await assertFails(updateDoc(doc(db, "proposals", "legacy-confirmed"), {
@@ -1588,14 +1589,71 @@ describe("problems/{problemId} open funding opportunity", () => {
     }
   });
 
-  it("[QCDAO-51] rejects problem-specific fields and attachments", async () => {
+  it("[QCDAO-57] saves an unfinished open-funding draft and holds it to the full shape on publish", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_funding_draft"), {
+      opportunityType: "open-funding", ownerId: ADDRESS, status: "draft",
+      title: "Open call, first pass",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_funding_empty"), {
+      opportunityType: "open-funding", ownerId: ADDRESS, status: "draft",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    // Still bounded, so a draft cannot be used as free storage, and still the
+    // open-funding shape - no fixed-problem fields sneaking in through it.
+    await assertFails(setDoc(doc(db, "problems", "q57_funding_huge"), {
+      opportunityType: "open-funding", ownerId: ADDRESS, status: "draft",
+      fundingThesis: "x".repeat(4001),
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(db, "problems", "q57_funding_problem_field"), {
+      opportunityType: "open-funding", ownerId: ADDRESS, status: "draft",
+      summary: "A fixed problem should not be part of this entity.",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    // Publishing is where the contract applies in full.
+    await assertFails(updateDoc(doc(db, "problems", "q57_funding_draft"), {
+      status: "submitted", updatedAt: serverTimestamp(),
+    }));
+    const { createdAt, ...complete } = openFunding();
+    await assertSucceeds(updateDoc(doc(db, "problems", "q57_funding_draft"), {
+      ...complete, updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[QCDAO-51] rejects problem-specific fields", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertFails(setDoc(doc(db, "problems", "q51_problem"), openFunding({
       summary: "A fixed problem should not be part of this entity.",
     })));
-    await assertFails(setDoc(doc(db, "problems", "q51_attachment"), openFunding({
+  });
+
+  it("[QCDAO-57] carries supporting attachments, held to the same entry rules", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const file = (id) => ({
+      id, name: "terms.pdf", contentType: "application/pdf", size: 2048,
+      sha256: `0x${"7".repeat(64)}`,
+    });
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_funding_files"), openFunding({
+      attachments: [file("fundfile0001"), file("fundfile0002")],
+    })));
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_funding_nofiles"), openFunding({
       attachments: [],
     })));
+    // The same two-entry cap and entry shape every opportunity kind is held to.
+    await assertFails(setDoc(doc(db, "problems", "q57_funding_three"), openFunding({
+      attachments: [file("fundfile0001"), file("fundfile0002"), file("fundfile0003")],
+    })));
+    await assertFails(setDoc(doc(db, "problems", "q57_funding_bad"), openFunding({
+      attachments: [{ ...file("fundfile0004"), contentType: "text/html" }],
+    })));
+    // A draft may collect files before the rest of the form is finished.
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_funding_draft_files"), {
+      opportunityType: "open-funding", ownerId: ADDRESS, status: "draft",
+      attachments: [file("fundfile0005")],
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
   });
 
   it("[QCDAO-51] validates and de-duplicates discovery tags", async () => {

@@ -68,6 +68,17 @@ smu-qc-dao-project/
 - [Firebase CLI](https://firebase.google.com/docs/cli) (`npm install -g firebase-tools`) —
   only needed if you're redeploying rules/functions or running emulators, not for
   ordinary frontend work against the live backend
+- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`) — needed
+  for preview-channel deploys (`npm run deploy:preview`) and Storage bucket
+  CORS/lifecycle. On macOS:
+
+  ```bash
+  brew install --cask google-cloud-sdk
+  gcloud auth login
+  gcloud config set project qcdao-a0c7a
+  ```
+
+  Skip this unless you are deploying a preview or changing the production bucket.
 - Java — needed by the Firestore emulator (local emulators **and** the rules test suite)
 - A browser wallet (MetaMask is the simplest) with Arbitrum Sepolia testnet ETH from
   a faucet, for deploying/interacting with the QFT contract
@@ -148,6 +159,46 @@ App: http://localhost:5173/
 
 To skip emulators and use the shared production backend, omit
 `VITE_FIREBASE_USE_EMULATORS=true` and only run terminal 2.
+
+### 4b. (Alternative) One terminal, on the Hosting emulator
+
+Serves the built app the way Firebase Hosting will, so you get the real rewrites
+and security headers instead of Vite's dev server:
+
+```bash
+cd firebase
+npm run emulate
+```
+
+App: http://127.0.0.1:5000/ — emulator UI still on http://127.0.0.1:4000. The
+script builds the frontend with `VITE_FIREBASE_USE_EMULATORS=true` first, so it
+points at the emulators rather than the shared project.
+
+Sample data is not seeded automatically here. Once the emulators are up, in a
+second terminal:
+
+```bash
+cd firebase/functions && npm run seed
+```
+
+**Why it needs its own config.** The Hosting emulator serves the `headers` block
+from `firebase.json` verbatim, and the production CSP's `connect-src` names only
+deployed Google endpoints. Served locally, that policy blocks every call to the
+Firestore, Auth, Functions and Storage emulators: the page loads, nothing works,
+and the only clue is a `Refused to connect` line in the browser console. So
+`npm run emulate` generates `firebase.local.json` from `firebase.json` first —
+same config, with localhost added to `connect-src` and `upgrade-insecure-requests`
+and HSTS dropped, both of which would otherwise force the emulator URLs to https.
+
+That file is generated on every run and gitignored. It trusts localhost, so it
+must never be deployed; `firebase.json` stays untouched and is what deploys.
+
+**Rebuild before deploying by hand.** This leaves an emulator-pointing bundle in
+`firebase/public`, which is Hosting's deploy directory. CI builds fresh, so
+deploys from GitHub Actions are unaffected, but a manual
+`firebase deploy --only hosting` straight after this would ship a build that
+talks to 127.0.0.1. Run `npm run build` in `frontend/` with
+`VITE_FIREBASE_USE_EMULATORS=false` first.
 
 ### 5. (Optional) Deploy the QFT token
 
@@ -243,7 +294,22 @@ VITE_FIREBASE_USE_EMULATORS=false npm run build --prefix frontend \
 ```
 
 To try a change on a real URL without touching the live site, deploy a preview
-channel — see [`firebase/README.md`](firebase/README.md#preview-channels).
+channel. The script calls `gcloud` to keep Storage CORS in line with live
+preview origins, so install and authenticate the Google Cloud CLI first
+(see [Prerequisites](#prerequisites)):
+
+```bash
+cd firebase && npm run deploy:preview -- --backend
+```
+
+That gives you `https://qcdao-a0c7a--prod-twin-<hash>.web.app` on real Firebase
+Hosting. Add `--backend` whenever the branch changes `firestore.rules`,
+`storage.rules` or `functions/`: rules are project-global, so without it the
+channel serves your new frontend against the rules that are already live, and the
+feature looks broken rather than undeployed. See
+[`firebase/README.md`](firebase/README.md#preview-channels) for the three gates
+that each fail closed — one of them, the reCAPTCHA domain, you have to add by
+hand in the Firebase console.
 
 ## Pull request security review
 

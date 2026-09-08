@@ -397,9 +397,78 @@ describe("proposal supporting PDFs", () => {
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), { researcherId: OWNER, postingOwnerId: OTHER, status: "submitted" }));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
     await assertSucceeds(getBytes(ref(author, path)));
+    // Submitted freezes the prefix: no delete, no extra upload, no overwrite.
     await assertFails(deleteObject(ref(author, path)));
-    await assertFails(uploadBytes(ref(author, `proposals/${OWNER}/${proposalId}/support02.pdf`), PDF_BYTES, metadata));
+    await assertFails(uploadBytes(ref(author, `proposals/${OWNER}/${proposalId}/support02.pdf`), PDF_BYTES, pdfMetadata({ customMetadata: { problemId: proposalId } })));
+    await assertFails(uploadBytes(ref(author, path), PDF_BYTES, metadata));
     await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), path)));
+  });
+  it("[QCDAO-57] serves open-funding attachments on the same posting path", async () => {
+    // Open funding lives in `problems`, so storage.rules already covers it -
+    // asserted rather than assumed, because the read rule keys off status and
+    // owner and had only ever been exercised against business problems.
+    const fundingId = "storage-open-funding-57";
+    const fundingPath = `problems/${OWNER}/${fundingId}/support01.pdf`;
+    const fundingMetadata = pdfMetadata({ customMetadata: { problemId: fundingId } });
+    const owner = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(owner, fundingPath), PDF_BYTES, fundingMetadata));
+    // Draft: private to the funder who is still writing the call.
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", fundingId), {
+      opportunityType: "open-funding", ownerId: OWNER, status: "draft",
+    }));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), fundingPath)));
+    await assertSucceeds(getBytes(ref(owner, fundingPath)));
+    // Published: any signed-in member may read the terms they are responding to.
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", fundingId), {
+      opportunityType: "open-funding", ownerId: OWNER, status: "submitted",
+    }));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), fundingPath)));
+    await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), fundingPath)));
+  });
+
+  it("[QCDAO-57] lets a draft gain files across sittings and freezes them once submitted", async () => {
+    const draftId = "storage-draft-57";
+    const draftPath = `proposals/${OWNER}/${draftId}/support01.pdf`;
+    const secondPath = `proposals/${OWNER}/${draftId}/support02.pdf`;
+    const draftMetadata = pdfMetadata({ customMetadata: { problemId: draftId } });
+    const author = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(author, draftPath), PDF_BYTES, draftMetadata));
+    // The first save used to freeze the attachments, so a draft could never gain
+    // the file its author came back for. That is the whole point of a draft.
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), { researcherId: OWNER, postingOwnerId: OTHER, status: "draft" }));
+    await assertSucceeds(uploadBytes(ref(author, secondPath), PDF_BYTES, draftMetadata));
+    await assertSucceeds(deleteObject(ref(author, secondPath)));
+    // Another wallet never gets to write into this author's proposal folder.
+    await assertFails(uploadBytes(ref(env.authenticatedContext(OTHER).storage(), secondPath), PDF_BYTES, draftMetadata));
+    // Submit is chain-first: `submitted` with no receipt is already hashed on
+    // chain. Pending and confirmed receipts must not reopen the prefix either.
+    // Delete-then-upload of the same path would replace the bytes while
+    // Firestore still names this object and the on-chain hash still covers it.
+    const submitted = {
+      researcherId: OWNER, postingOwnerId: OTHER, status: "submitted",
+      attachments: [{ id: "support01", sha256: `0x${"4".repeat(64)}` }],
+    };
+    async function assertFrozen() {
+      await assertFails(deleteObject(ref(author, draftPath)));
+      await assertFails(uploadBytes(ref(author, secondPath), PDF_BYTES, draftMetadata));
+      await assertFails(uploadBytes(ref(author, draftPath), new TextEncoder().encode("%PDF- swapped"), draftMetadata));
+    }
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), submitted));
+    await assertFrozen();
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), {
+      ...submitted, audit: { status: "pending", transactionHash: `0x${"b".repeat(64)}` },
+    }));
+    await assertFrozen();
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), {
+      ...submitted, audit: { status: "confirmed", transactionHash: `0x${"c".repeat(64)}` },
+    }));
+    await assertFrozen();
+    // Even if the object is already gone (admin/sweeper), recreate at the
+    // referenced path is refused so a confirmed receipt cannot be silently retargeted.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await deleteObject(ref(ctx.storage(), draftPath));
+    });
+    await assertFails(uploadBytes(ref(author, draftPath), PDF_BYTES, draftMetadata));
   });
   it("refuses sponsor downloads against a draft that forges postingOwnerId", async () => {
     const forgedId = "storage-forged-draft-59";

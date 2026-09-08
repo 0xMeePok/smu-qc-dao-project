@@ -13,7 +13,14 @@ import { wagmiConfig } from "./wagmi.js";
 import { isTransactionFeeTooLow } from "./errors.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
-import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, prepareOpportunityCommit, prepareProposalCommit, prepareProposalUpdate } from "../../../firebase/functions/auditCanonical.js";
+import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, prepareOpportunityCommit, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal } from "../../../firebase/functions/auditCanonical.js";
+
+// Arbitrum has no priority auction, so estimateFeesPerGas legitimately returns a
+// zero tip on Sepolia - and MetaMask then refuses to send, with "Priority fee must
+// be greater than 0" in its own advanced-fee dialog. The transaction is fine; the
+// wallet's validation is not satisfied by a zero. 0.01 gwei is the smallest value
+// that clears it: at ~200k gas it costs about 2e-6 ETH of testnet funds.
+const MIN_PRIORITY_FEE_WEI = 10_000_000n;
 
 export function createWagmiAuditAdapters(config = wagmiConfig) {
   return {
@@ -29,10 +36,16 @@ export function createWagmiAuditAdapters(config = wagmiConfig) {
       }
       // Leave room for base-fee changes while the wallet confirmation is open.
       // This raises the spending cap, not the priority fee or gas units consumed.
+      const feeCap = maxFeePerGas * 2n;
+      // Never above the cap: a tip larger than the total fee is an invalid
+      // transaction, which matters on a chain whose base fee is itself tiny.
+      const priorityFee = maxPriorityFeePerGas > 0n
+        ? maxPriorityFeePerGas
+        : (MIN_PRIORITY_FEE_WEI < feeCap ? MIN_PRIORITY_FEE_WEI : feeCap);
       return wagmiWriteContract(config, {
         ...request,
-        maxFeePerGas: maxFeePerGas * 2n,
-        maxPriorityFeePerGas,
+        maxFeePerGas: feeCap,
+        maxPriorityFeePerGas: priorityFee,
       });
     },
     waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
@@ -247,6 +260,13 @@ export function updateProposalAudit(input, options) {
   );
 }
 
+export function withdrawProposalAudit(input, options) {
+  return executePreparedAudit(
+    preparedFor(input, prepareProposalWithdrawal, "withdrawProposal"),
+    options,
+  );
+}
+
 function tupleField(value, name, index) {
   return value?.[name] ?? value?.[index];
 }
@@ -273,6 +293,16 @@ async function readWithRetries(functionName, args, options) {
     options.maxReadRetries ?? 2,
     options.onRetry,
   );
+}
+
+export async function readProposalIsAnchored(proposalId, options = {}) {
+  const entityId = assertBytes32(proposalId, "Proposal id");
+  try {
+    return BigInt(await readWithRetries("revisionCount", [entityId], options)) > 0n;
+  } catch (error) {
+    if (/invalidinput|revert/i.test(error?.message ?? "")) return false;
+    throw error;
+  }
 }
 
 export async function readOpportunityRevisionIndex(opportunityId, options = {}) {
