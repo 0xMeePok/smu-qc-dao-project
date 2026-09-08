@@ -26,6 +26,8 @@ import {
   readFundingOpportunityAudit,
 } from "../lib/fundingOpportunityAudit.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { findPublicProfileByAddress } from "../lib/profile.js";
+import { shortenAddress } from "../lib/chain.js";
 
 /**
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
@@ -47,6 +49,29 @@ function Detail({ heading, children }) {
   );
 }
 
+function PosterIdentity({ ownerId, organisation, poster, onNavigate }) {
+  if (!ownerId) return null;
+  const name = String(poster?.fullName ?? "").trim();
+  const org = String(poster?.organisation ?? organisation ?? "").trim();
+  const primary = name || org || shortenAddress(ownerId);
+  const secondary = name ? org : org ? shortenAddress(ownerId) : "";
+  return (
+    <div>
+      <dt>Posted by</dt>
+      <dd>
+        <button
+          className="profile-link poster-identity"
+          type="button"
+          onClick={() => onNavigate(`profile/${ownerId}`)}
+        >
+          <span>{primary}</span>
+          {secondary ? <small>{secondary}</small> : null}
+        </button>
+      </dd>
+    </div>
+  );
+}
+
 export default function PostingDetailPage({ postingId, onNavigate }) {
   const { isAuthenticated, user } = useAuth();
   const { address: connectedAddress, isConnected } = useAccount();
@@ -55,6 +80,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
+  const [poster, setPoster] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +94,16 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
     return () => { cancelled = true; };
   }, [postingId]);
+
+  useEffect(() => {
+    setPoster(null);
+    if (!posting?.ownerId) return undefined;
+    let cancelled = false;
+    findPublicProfileByAddress(posting.ownerId)
+      .then((found) => { if (!cancelled) setPoster(found); })
+      .catch(() => { if (!cancelled) setPoster(null); });
+    return () => { cancelled = true; };
+  }, [posting?.ownerId]);
 
   const download = async (attachment) => {
     setError(null);
@@ -246,7 +282,12 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             </small>
           </div>
           <dl>
-            <div><dt>Posted by</dt><dd>{posting.organisation}</dd></div>
+            <PosterIdentity
+              ownerId={posting.ownerId}
+              organisation={posting.organisation}
+              poster={poster}
+              onNavigate={onNavigate}
+            />
             <div>
               <dt>Proposals received</dt>
               <dd>{proposalCount} {proposalCount === 1 ? "proposal" : "proposals"}</dd>
