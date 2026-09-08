@@ -30,6 +30,11 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [confirm, setConfirm] = useState(false);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState("");
+  // Survives a Firestore write that failed after the chain already accepted the
+  // withdrawal, so retrying finishes the record instead of sending a second
+  // withdrawProposal that would revert — and so the anchored reason cannot be
+  // edited into something the receipt no longer describes.
+  const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
   const started = useRef(false);
   const anchorInFlight = useRef(new Set());
   const activeProposalId = useRef(proposalId);
@@ -37,7 +42,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setProposal(null); setError(""); setConfirm(false);
-    setReason(""); setReasonError("");
+    setReason(""); setReasonError(""); setAnchoredWithdrawal(null);
     setAuditBusy(anchorInFlight.current.has(proposalId)); started.current = false;
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
@@ -72,27 +77,34 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     return () => { active = false; clearInterval(timer); };
   }, [proposalId, Boolean(proposal), auditBusy, proposal?.audit?.status]);
   const withdraw = async () => {
-    const withdrawalReason = reason.trim();
-    if (withdrawalReason.length < 2) { setReasonError("Give a reason for withdrawing this proposal."); return; }
-    if (withdrawalReason.length > 1000) { setReasonError("Use 1,000 characters or fewer."); return; }
-    if (!isConnected || address?.toLowerCase() !== proposal.researcherId) {
-      setReasonError("Connect the wallet that submitted this proposal to sign the withdrawal.");
-      return;
+    const withdrawalReason = (anchoredWithdrawal?.reason ?? reason).trim();
+    if (!anchoredWithdrawal) {
+      if (withdrawalReason.length < 2) { setReasonError("Give a reason for withdrawing this proposal."); return; }
+      if (withdrawalReason.length > 1000) { setReasonError("Use 1,000 characters or fewer."); return; }
+      if (!isConnected || address?.toLowerCase() !== proposal.researcherId) {
+        setReasonError("Connect the wallet that submitted this proposal to sign the withdrawal.");
+        return;
+      }
     }
     setWithdrawing(true); setError(""); setReasonError("");
-    let anchored = false;
+    let anchored = anchoredWithdrawal;
     try {
-      await anchorProposalWithdrawal(proposal, { account: address, reason: withdrawalReason });
-      anchored = true;
-      await withdrawProposal(proposalId, withdrawalReason);
-      setProposal((old) => ({ ...old, status: "withdrawn", withdrawalReason }));
+      if (!anchored) {
+        await anchorProposalWithdrawal(proposal, { account: address, reason: withdrawalReason });
+        anchored = { reason: withdrawalReason };
+        setAnchoredWithdrawal(anchored);
+        setReason(withdrawalReason);
+      }
+      await withdrawProposal(proposalId, anchored.reason);
+      setProposal((old) => ({ ...old, status: "withdrawn", withdrawalReason: anchored.reason }));
       setConfirm(false);
+      setAnchoredWithdrawal(null);
     }
     catch (err) {
       setError(anchored
-        ? `The withdrawal was recorded on Arbitrum Sepolia, but saving it failed. ${messageForProposalError(err)} Confirm the withdrawal again with the same reason to finish it.`
+        ? `The withdrawal was recorded on Arbitrum Sepolia, but saving it failed. ${messageForProposalError(err)} Finish saving it with the same reason — you will not be asked to sign again.`
         : auditErrorMessage(err));
-      setConfirm(false);
+      if (!anchored) setConfirm(false);
     }
     finally { setWithdrawing(false); }
   };
@@ -107,7 +119,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   return <section className="page detail-page">
     <button className="back" onClick={() => onNavigate(owns ? "proposals" : "funding")}>{owns ? "Back to my proposals" : "Back to funding portfolio"}</button>
     {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. Your submission is saved and verified on Arbitrum Sepolia.</p>}
-    {error && <p className="error-banner" role="alert">{error}</p>}
+    {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
     <div className="detail-layout"><article className="detail-main"><span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span><h1>{proposal.title}</h1><p className="lead">{proposal.summary}</p>
       {isOpenFunding && <p>The funder acts as the problem owner for selection. This proposal follows the same evaluation, selection and approval process as proposals for funded problems.</p>}
       {[...PROPOSAL_FIELDS.slice(2), ...(isOpenFunding ? PROBLEM_FRAMING_FIELDS : [])].map(([key, label]) => proposal[key] && <div className="detail-section" key={key}><h2>{label}</h2><p className="proposal-text">{proposal[key]}</p></div>)}
@@ -129,10 +141,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       <h2 id="withdraw-proposal-title">Withdraw this proposal?</h2>
       <p id="withdraw-proposal-desc">It leaves evaluation and selection immediately. You can submit a new proposal while the opportunity remains open.</p>
       <Field htmlFor="withdrawal-reason" label="Why are you withdrawing?" error={reasonError} hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to the sponsor. It cannot be changed afterwards.">
-        {({ id, describedBy, invalid }) => <textarea id={id} rows={3} value={reason} maxLength={1000} disabled={withdrawing} aria-describedby={describedBy} aria-invalid={invalid} onChange={(event) => { setReason(event.target.value); setReasonError(""); }} />}
+        {({ id, describedBy, invalid }) => <textarea id={id} rows={3} value={anchoredWithdrawal?.reason ?? reason} maxLength={1000} disabled={withdrawing || Boolean(anchoredWithdrawal)} aria-describedby={describedBy} aria-invalid={invalid} onChange={(event) => { if (anchoredWithdrawal) return; setReason(event.target.value); setReasonError(""); }} />}
       </Field>
-      <p className="field-hint">Your wallet signs the withdrawal before it takes effect. If you decline, the proposal stays in evaluation exactly as it is.</p>
-      <div className="modal-actions"><button className="secondary" disabled={withdrawing} onClick={() => setConfirm(false)}>Keep proposal</button><button className="danger-btn" disabled={withdrawing} onClick={withdraw}>{withdrawing ? "Waiting for your wallet…" : "Sign and withdraw"}</button></div>
+      {error && anchoredWithdrawal ? <p className="error-banner" role="alert">{error}</p> : null}
+      <p className="field-hint">{anchoredWithdrawal
+        ? "The withdrawal is already signed on Arbitrum Sepolia. Saving it does not need another signature."
+        : "Your wallet signs the withdrawal before it takes effect. If you decline, the proposal stays in evaluation exactly as it is."}</p>
+      <div className="modal-actions"><button className="secondary" disabled={withdrawing || Boolean(anchoredWithdrawal)} onClick={() => setConfirm(false)}>Keep proposal</button><button className="danger-btn" disabled={withdrawing} onClick={withdraw}>{withdrawing ? (anchoredWithdrawal ? "Saving…" : "Waiting for your wallet…") : (anchoredWithdrawal ? "Finish saving withdrawal" : "Sign and withdraw")}</button></div>
     </Modal>}
   </section>;
 }

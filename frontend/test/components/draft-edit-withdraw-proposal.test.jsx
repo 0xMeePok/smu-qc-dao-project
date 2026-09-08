@@ -141,6 +141,15 @@ describe("correcting a proposal before it is evaluated", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/locked once evaluation begins/);
   });
 
+  it("says the proposal is unavailable when an edit cannot be loaded", async () => {
+    mocks.find.mockResolvedValue(null);
+    render(<CreateProposalPage proposalId="proposal1" onNavigate={mocks.navigate} />);
+    expect(await screen.findByRole("heading", { name: "Proposal unavailable" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/could not be found or you do not have access/);
+    fireEvent.click(screen.getByRole("button", { name: "My proposals" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("proposals");
+  });
+
   it("offers the edit only while the proposal is still submitted", async () => {
     render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
     expect(await screen.findByRole("button", { name: "Edit proposal" })).toBeTruthy();
@@ -277,6 +286,26 @@ describe("nothing is written before the transaction confirms", () => {
     // The exact words that were hashed are the words that get stored.
     expect(mocks.anchorWithdrawal.mock.calls[0][1].reason).toBe("The costing was wrong.");
     expect(mocks.withdraw).toHaveBeenCalledWith("proposal1", "The costing was wrong.");
+  });
+
+  it("retries only the Firestore write when the chain already accepted the withdrawal", async () => {
+    mocks.withdraw.mockRejectedValueOnce(new Error("Network unavailable"));
+    render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw proposal" }));
+    await screen.findByRole("heading", { name: "Withdraw this proposal?" });
+    fireEvent.change(screen.getByLabelText("Why are you withdrawing?"), { target: { value: "The costing was wrong." } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and withdraw" }));
+    expect(await screen.findByText(/will not be asked to sign again/)).toBeTruthy();
+    expect(mocks.anchorWithdrawal).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Why are you withdrawing?").disabled).toBe(true);
+    expect(screen.getByLabelText("Why are you withdrawing?").value).toBe("The costing was wrong.");
+    fireEvent.change(screen.getByLabelText("Why are you withdrawing?"), { target: { value: "A different reason." } });
+    expect(screen.getByLabelText("Why are you withdrawing?").value).toBe("The costing was wrong.");
+    fireEvent.click(screen.getByRole("button", { name: "Finish saving withdrawal" }));
+    await waitFor(() => expect(mocks.withdraw).toHaveBeenCalledTimes(2));
+    expect(mocks.anchorWithdrawal).toHaveBeenCalledTimes(1);
+    expect(mocks.withdraw.mock.calls[1]).toEqual(["proposal1", "The costing was wrong."]);
+    expect(await screen.findByText("The costing was wrong.")).toBeTruthy();
   });
 
   it("will not sign a withdrawal from the wrong wallet", async () => {

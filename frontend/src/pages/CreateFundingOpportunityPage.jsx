@@ -188,8 +188,11 @@ export default function CreateFundingOpportunityPage({ resumeId = null, onNaviga
     onNavigate,
   });
 
-  // No validation gate: saving half a form is the point of a draft.
+  // No validation gate: saving half a form is the point of a draft. In-flight
+  // uploads are not in `attachments` yet, so a save while they are pending
+  // would persist a draft that omits files the user just selected.
   const persistDraft = async () => {
+    if (pendingCount > 0) return false;
     setSubmitError(null);
     setSavingDraft(true);
     try {
@@ -542,7 +545,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, onNaviga
             <button className="primary" type="submit" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0}>
               {submitting ? "Submitting…" : pendingCount > 0 ? "Waiting for attachments…" : "Submit funding opportunity"}
             </button>
-            <button className="secondary" type="button" disabled={submitting || savingDraft || loadingDraft} onClick={persistDraft}>
+            <button className="secondary" type="button" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0} onClick={persistDraft}>
               {savingDraft ? "Saving…" : "Save as draft"}
             </button>
             <button className="secondary" type="button" disabled={submitting || savingDraft} onClick={cancel}>

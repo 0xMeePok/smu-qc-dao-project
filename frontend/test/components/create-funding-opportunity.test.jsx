@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   resumed: null,
   saveDraft: vi.fn(),
   navigate: vi.fn(),
+  uploader: { onPendingChange: null },
 }));
 
 vi.mock("wagmi", () => ({
@@ -81,6 +82,13 @@ vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
   ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));
 
+vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
+  AttachmentUploader: ({ onPendingChange }) => {
+    mocks.uploader.onPendingChange = onPendingChange;
+    return <div data-testid="uploader" />;
+  },
+}));
+
 const { default: CreateFundingOpportunityPage } = await import(
   "../../src/pages/CreateFundingOpportunityPage.jsx"
 );
@@ -103,6 +111,7 @@ beforeEach(() => {
   mocks.events = [];
   mocks.resumed = null;
   mocks.navigate.mockReset();
+  mocks.uploader.onPendingChange = null;
   mocks.saveDraft.mockReset().mockResolvedValue({ id: "funding123", status: "draft", updatedAt: new Date("2026-09-08T10:00:00Z") });
 });
 afterEach(cleanup);
@@ -217,6 +226,16 @@ describe("QCDAO-57 open-funding drafts", () => {
     expect(mocks.navigate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save as draft and leave" }));
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("discover"));
+  });
+
+  it("does not save a draft while an attachment is still uploading", async () => {
+    await start();
+    await waitFor(() => expect(typeof mocks.uploader.onPendingChange).toBe("function"));
+    await act(async () => { mocks.uploader.onPendingChange(1); });
+    const save = screen.getByRole("button", { name: "Save as draft" });
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(mocks.saveDraft).not.toHaveBeenCalled();
   });
 
   it("resumes a saved draft and publishes it in place", async () => {

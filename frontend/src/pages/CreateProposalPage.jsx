@@ -282,8 +282,11 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   // written, so a second attempt here would either revert on a taken id or
   // append a pointless on-chain revision.
   if (submitted) return <ProposalDetailPage proposalId={proposalId} onNavigate={onNavigate} justSubmitted />;
-  if (loading) return <section className="page empty" role="status">Loading opportunity…</section>;
-  if (!posting) return <section className="page empty"><h1>Opportunity unavailable</h1><p role="alert">{error || "This opportunity could not be found."}</p><button className="secondary" onClick={() => onNavigate("discover")}>Browse opportunities</button></section>;
+  if (loading) return <section className="page empty" role="status">{editProposalId ? "Loading proposal…" : "Loading opportunity…"}</section>;
+  if (!posting) {
+    const missingProposal = Boolean(editProposalId);
+    return <section className="page empty"><h1>{missingProposal ? "Proposal unavailable" : "Opportunity unavailable"}</h1><p role="alert">{error || (missingProposal ? "This proposal could not be found or you do not have access." : "This opportunity could not be found.")}</p><button className="secondary" onClick={() => onNavigate(missingProposal ? "proposals" : "discover")}>{missingProposal ? "My proposals" : "Browse opportunities"}</button></section>;
+  }
   // Nothing may be edited once evaluation begins; firestore.rules enforces the
   // same boundary, so a stale tab cannot write past it either.
   if (editProposalId && record && !["draft", "submitted"].includes(record.status)) {
