@@ -171,6 +171,42 @@ export async function listProposals(field, uid) {
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
 }
 
+function proposalTime(value) {
+  return value?.toMillis?.() || (value instanceof Date ? value.getTime() : 0);
+}
+
+/**
+ * Proposals on one posting that the signed-in wallet is allowed to read.
+ * Poster: submitted inbox (`postingOwnerId`). Author: their own rows, including drafts.
+ * Anyone else gets an empty list; the public count lives on opportunityMetrics.
+ */
+export async function listProposalsForPosting({ problemId, viewerId, postingOwnerId }) {
+  requireFirebase();
+  const uid = String(viewerId ?? "").toLowerCase();
+  const owner = String(postingOwnerId ?? "").toLowerCase();
+  if (!problemId || !uid) return [];
+
+  const proposals = collection(db, "proposals");
+  const reads = [
+    getDocs(query(proposals, where("problemId", "==", problemId), where("researcherId", "==", uid))),
+  ];
+  if (uid === owner) {
+    reads.push(getDocs(query(
+      proposals,
+      where("problemId", "==", problemId),
+      where("postingOwnerId", "==", uid),
+    )));
+  }
+
+  const byId = new Map();
+  for (const snapshot of await Promise.all(reads)) {
+    for (const item of snapshot.docs) {
+      byId.set(item.id, { id: item.id, ...item.data() });
+    }
+  }
+  return [...byId.values()].sort((left, right) => proposalTime(right.createdAt) - proposalTime(left.createdAt));
+}
+
 export async function listProposalRevisions(proposalId, { field = "researcherId", uid }) {
   requireFirebase();
   const snapshot = await getDocs(query(revisionsRef(proposalId), where(field, "==", String(uid).toLowerCase())));

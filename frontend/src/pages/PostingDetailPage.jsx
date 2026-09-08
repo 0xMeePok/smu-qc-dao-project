@@ -14,6 +14,7 @@ import { categoryLabel } from "../config/postingCategories.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
+import { PostingProposals } from "../components/PostingProposals.jsx";
 import { formatInstant, isExpired } from "../lib/datetime.js";
 import {
   anchorPostingAudit,
@@ -291,6 +292,14 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               </ul>
             </div>
           )}
+
+          <PostingProposals
+            posting={posting}
+            viewerId={user?.id}
+            isPoster={ownsPosting}
+            proposalCount={proposalCount}
+            onNavigate={onNavigate}
+          />
 
           <AuditReceipt
             audit={audit}

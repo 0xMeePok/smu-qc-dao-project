@@ -161,6 +161,22 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "amount", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "proposals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "problemId", "order": "ASCENDING" },
+        { "fieldPath": "researcherId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "proposals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "problemId", "order": "ASCENDING" },
+        { "fieldPath": "postingOwnerId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
