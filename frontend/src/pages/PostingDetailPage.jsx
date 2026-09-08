@@ -27,6 +27,7 @@ import {
 } from "../lib/fundingOpportunityAudit.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { opportunityStatusLabel } from "../config/workflowStatus.js";
+import { postingActions } from "../lib/postingActions.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
 import { shortenAddress } from "../lib/chain.js";
 
@@ -47,6 +48,35 @@ function Detail({ heading, children }) {
       <h2>{heading}</h2>
       <p>{text}</p>
     </div>
+  );
+}
+
+function ActionBar({ posting, user, isAuthenticated, onNavigate }) {
+  const actions = postingActions(posting, user, { isAuthenticated });
+  const blocked = proposalBlockReason(posting);
+  const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
+  if (!actions.length && !blocked) return null;
+  return (
+    <>
+      {blocked ? <p className="field-hint">{blocked}</p> : null}
+      {actions.length > 0 && (
+        <div className="context-panel-actions">
+          {actions.map((action) => (
+            <button
+              key={action.id}
+              className={action.kind === "primary" ? "primary" : "secondary"}
+              type="button"
+              onClick={() => onNavigate(action.route)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {isOpenFunding && !blocked ? (
+        <p className="field-hint">Propose a problem and solution. The funder acts as the problem owner for selection.</p>
+      ) : null}
+    </>
   );
 }
 
@@ -302,12 +332,12 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <div><dt>Reference</dt><dd><code>{posting.id}</code></dd></div>
           </dl>
 
-          {proposalBlockReason(posting) ? <p className="field-hint">{proposalBlockReason(posting)}</p> : (user?.roles ?? [user?.role]).includes("researcher") ? (
-            <button className="primary" type="button" onClick={() => onNavigate(`submit-proposal/${posting.id}`)}>Submit a proposal</button>
-          ) : !isAuthenticated ? (
-            <button className="primary" type="button" onClick={() => onNavigate(`login?redirect=${encodeURIComponent(`submit-proposal/${posting.id}`)}`)}>Sign in to submit a proposal</button>
-          ) : null}
-          {isOpenFunding && <p className="field-hint">Propose a problem and solution. The funder acts as the problem owner for selection.</p>}
+          <ActionBar
+            posting={posting}
+            user={user}
+            isAuthenticated={isAuthenticated}
+            onNavigate={onNavigate}
+          />
 
           <div className="expiry-panel">
             <span className="eyebrow">{expired ? "Closed" : "Time remaining"}</span>

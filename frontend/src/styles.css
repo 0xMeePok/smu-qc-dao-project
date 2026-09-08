@@ -452,6 +452,10 @@ h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.022em; line
   gap: 8px;
   margin-top: 16px;
 }
+.context-panel-actions > .primary,
+.context-panel-actions > .secondary {
+  width: 100%;
+}
 
 /* BUTTONS & GENERAL UTILITIES */
 .primary, .secondary, .text-button, .back {
