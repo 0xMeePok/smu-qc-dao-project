@@ -82,6 +82,31 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
     const result = await verifyMinedProposal(record, clientFor(record));
     assert.equal(result.status, "confirmed"); assert.equal(result.blockNumber, 88);
   });
+  it("QCDAO-57 confirms a corrected proposal re-anchored through updateHashes", async () => {
+    const record = fixture();
+    const expected = prepareStoredProposal(record);
+    const client = clientFor(record);
+    // A corrected proposal keeps its entity id, so its second anchoring is an
+    // amendment. Both calls carry the same hashes for the same stored record;
+    // refusing the amendment would leave a corrected proposal unconfirmable.
+    const amended = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
+      input: encodeFunctionData({ abi: registry.abi, functionName: "updateHashes",
+        args: [expected.entityId, expected.proposalHash, expected.solutionHash, expected.expectedOpportunityRevisionIndex] }) }) };
+    const result = await verifyMinedProposal(record, amended);
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.contentHash, expected.contentHash);
+    // Still pinned to this record: an amendment carrying another proposal's
+    // hashes is a mismatch, exactly as a commit would be.
+    const forged = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
+      input: encodeFunctionData({ abi: registry.abi, functionName: "updateHashes",
+        args: [expected.entityId, `0x${"9".repeat(64)}`, expected.solutionHash, 0] }) }) };
+    await assert.rejects(verifyMinedProposal(record, forged), /Mismatch/);
+    // A call that is neither is not a way to confirm anything.
+    const unrelated = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
+      input: encodeFunctionData({ abi: registry.abi, functionName: "withdrawProposal",
+        args: [expected.entityId, expected.contentHash] }) }) };
+    await assert.rejects(verifyMinedProposal(record, unrelated), /Mismatch/);
+  });
   it("detects changed content and attachments instead of trusting receipt hashes", async () => {
     const record = fixture();
     for (const patch of [{ title: "Tamper" }, { attachments: [{ id: "pdf", name: "changed.pdf" }] }]) {

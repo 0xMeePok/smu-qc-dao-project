@@ -2757,3 +2757,36 @@ footer > p { margin: 0 auto 0 0; }
   .topbar .signout-btn { min-height: 44px; flex-shrink: 0; }
   .topbar .account-controls .wallet-button { width: 100%; min-height: 44px; justify-content: center; }
 }
+
+/* QCDAO-57 - the post-submission edit trail on a proposal. */
+.revision-trail {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  border-left: 2px solid var(--line);
+}
+
+.revision-trail li {
+  padding: 0 0 14px 14px;
+  position: relative;
+}
+
+.revision-trail li::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+}
+
+.revision-trail li:last-child {
+  padding-bottom: 0;
+}
+
+.revision-trail p {
+  margin: 0 0 2px;
+  font-size: 13px;
+}

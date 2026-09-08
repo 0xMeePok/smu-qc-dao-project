@@ -3,17 +3,22 @@ import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findProposal, withdrawProposal } from "../lib/proposals.js";
-import { anchorProposalAudit, proposalAuditReceipt, readProposalAudit } from "../lib/proposalAudit.js";
+import { anchorProposalAudit, anchorProposalWithdrawal, proposalAuditReceipt, readProposalAudit } from "../lib/proposalAudit.js";
 import { auditErrorMessage } from "../lib/errors.js";
 import { downloadAttachment, saveBlobAs } from "../lib/attachments.js";
 import { formatInstant } from "../lib/datetime.js";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { Modal } from "../components/Modal.jsx";
+import { Field } from "../components/Field.jsx";
+import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 
-export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false }) {
+// `justSubmitted` only shows the confirmation banner. Anchoring is done before
+// the record is written now, so this page never starts one on its own; the retry
+// control below is for a receipt that was left in flight.
+export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false }) {
   const { user } = useAuth();
   const { address, isConnected } = useAccount();
   const [proposal, setProposal] = useState(null);
@@ -23,6 +28,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [withdrawing, setWithdrawing] = useState(false);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [reason, setReason] = useState("");
+  const [reasonError, setReasonError] = useState("");
   const started = useRef(false);
   const anchorInFlight = useRef(new Set());
   const activeProposalId = useRef(proposalId);
@@ -30,6 +37,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setProposal(null); setError(""); setConfirm(false);
+    setReason(""); setReasonError("");
     setAuditBusy(anchorInFlight.current.has(proposalId)); started.current = false;
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
@@ -64,9 +72,28 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     return () => { active = false; clearInterval(timer); };
   }, [proposalId, Boolean(proposal), auditBusy, proposal?.audit?.status]);
   const withdraw = async () => {
-    setWithdrawing(true); setError("");
-    try { await withdrawProposal(proposalId); setProposal((old) => ({ ...old, status: "withdrawn" })); setConfirm(false); }
-    catch (err) { setError(messageForProposalError(err)); }
+    const withdrawalReason = reason.trim();
+    if (withdrawalReason.length < 2) { setReasonError("Give a reason for withdrawing this proposal."); return; }
+    if (withdrawalReason.length > 1000) { setReasonError("Use 1,000 characters or fewer."); return; }
+    if (!isConnected || address?.toLowerCase() !== proposal.researcherId) {
+      setReasonError("Connect the wallet that submitted this proposal to sign the withdrawal.");
+      return;
+    }
+    setWithdrawing(true); setError(""); setReasonError("");
+    let anchored = false;
+    try {
+      await anchorProposalWithdrawal(proposal, { account: address, reason: withdrawalReason });
+      anchored = true;
+      await withdrawProposal(proposalId, withdrawalReason);
+      setProposal((old) => ({ ...old, status: "withdrawn", withdrawalReason }));
+      setConfirm(false);
+    }
+    catch (err) {
+      setError(anchored
+        ? `The withdrawal was recorded on Arbitrum Sepolia, but saving it failed. ${messageForProposalError(err)} Confirm the withdrawal again with the same reason to finish it.`
+        : auditErrorMessage(err));
+      setConfirm(false);
+    }
     finally { setWithdrawing(false); }
   };
   const download = async (attachment) => {
@@ -76,21 +103,36 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   if (loading) return <section className="page empty" role="status">Loading proposal…</section>;
   if (!proposal) return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p><button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
   const isOpenFunding = proposal.opportunityType === OPEN_FUNDING_TYPE;
+  const sponsors = Boolean(user?.id && proposal.postingOwnerId === user.id.toLowerCase());
   return <section className="page detail-page">
     <button className="back" onClick={() => onNavigate(owns ? "proposals" : "funding")}>{owns ? "Back to my proposals" : "Back to funding portfolio"}</button>
-    {autoAnchor && <p className="proposal-success" role="status">Proposal submitted successfully. Your submission is saved.</p>}
+    {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. Your submission is saved and verified on Arbitrum Sepolia.</p>}
     {error && <p className="error-banner" role="alert">{error}</p>}
     <div className="detail-layout"><article className="detail-main"><span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span><h1>{proposal.title}</h1><p className="lead">{proposal.summary}</p>
       {isOpenFunding && <p>The funder acts as the problem owner for selection. This proposal follows the same evaluation, selection and approval process as proposals for funded problems.</p>}
       {[...PROPOSAL_FIELDS.slice(2), ...(isOpenFunding ? PROBLEM_FRAMING_FIELDS : [])].map(([key, label]) => proposal[key] && <div className="detail-section" key={key}><h2>{label}</h2><p className="proposal-text">{proposal[key]}</p></div>)}
       {proposal.attachments?.length > 0 && <div className="detail-section"><h2>Supporting attachments</h2>{proposal.attachments.map((item) => <p key={item.id}><button className="text-button" onClick={() => download(item)}>Download {item.name}</button></p>)}</div>}
+      {proposal.status === "withdrawn" && proposal.withdrawalReason && <div className="detail-section"><h2>Withdrawal reason</h2><p className="proposal-text">{proposal.withdrawalReason}</p></div>}
+      {(owns || sponsors) && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
       {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
     </article><aside className="context-panel"><span className="status-dot">{proposal.status}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
+      {/* Editable only while `submitted`. `under_review` means an evaluator has
+          the proposal open, and firestore.rules refuses a content write from
+          that point on. */}
+      {owns && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
       {owns && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
       {owns && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(`submit-proposal/${proposal.problemId}`)}>Submit a replacement</button>}
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
-    {confirm && <Modal labelledBy="withdraw-proposal-title" onDismiss={() => { if (!withdrawing) setConfirm(false); }}><h2 id="withdraw-proposal-title">Withdraw this proposal?</h2><p>It will leave consideration. You can submit a new proposal while the opportunity remains open.</p><div className="modal-actions"><button className="secondary" disabled={withdrawing} onClick={() => setConfirm(false)}>Keep proposal</button><button className="danger-btn" disabled={withdrawing} onClick={withdraw}>{withdrawing ? "Withdrawing…" : "Confirm withdrawal"}</button></div></Modal>}
+    {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
+      <h2 id="withdraw-proposal-title">Withdraw this proposal?</h2>
+      <p id="withdraw-proposal-desc">It leaves evaluation and selection immediately. You can submit a new proposal while the opportunity remains open.</p>
+      <Field htmlFor="withdrawal-reason" label="Why are you withdrawing?" error={reasonError} hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to the sponsor. It cannot be changed afterwards.">
+        {({ id, describedBy, invalid }) => <textarea id={id} rows={3} value={reason} maxLength={1000} disabled={withdrawing} aria-describedby={describedBy} aria-invalid={invalid} onChange={(event) => { setReason(event.target.value); setReasonError(""); }} />}
+      </Field>
+      <p className="field-hint">Your wallet signs the withdrawal before it takes effect. If you decline, the proposal stays in evaluation exactly as it is.</p>
+      <div className="modal-actions"><button className="secondary" disabled={withdrawing} onClick={() => setConfirm(false)}>Keep proposal</button><button className="danger-btn" disabled={withdrawing} onClick={withdraw}>{withdrawing ? "Waiting for your wallet…" : "Sign and withdraw"}</button></div>
+    </Modal>}
   </section>;
 }

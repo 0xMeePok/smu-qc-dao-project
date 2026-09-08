@@ -210,14 +210,21 @@ service firebase.storage {
         && proposal.data.status != 'draft'
         && proposal.data.postingOwnerId == request.auth.uid;
     }
+
+    function proposalAcceptsFileChanges(proposalId, ownerId) {
+      let proposal = attachmentRecord('proposals', proposalId);
+      return proposal == null
+        || (proposal.data.researcherId == ownerId
+          && proposal.data.status in ['draft', 'submitted']);
+    }
     match /proposals/{ownerId}/{proposalId}/{fileName} {
       allow read: if isActiveMember() && (isWallet(ownerId) || proposalReader(proposalId, ownerId));
       allow create: if resource == null && isWallet(ownerId) && isActiveMember()
         && isPostingId(proposalId) && isPdf(fileName) && withinSizeCap()
         && metadataIsHonest(proposalId)
-        && attachmentRecord('proposals', proposalId) == null;
+        && proposalAcceptsFileChanges(proposalId, ownerId);
       allow delete: if isWallet(ownerId) && isActiveMember()
-        && attachmentRecord('proposals', proposalId) == null;
+        && proposalAcceptsFileChanges(proposalId, ownerId);
     }
 
     // Deny everything not matched above, including any legacy path.

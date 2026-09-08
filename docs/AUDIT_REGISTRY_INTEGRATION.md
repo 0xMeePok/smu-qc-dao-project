@@ -107,10 +107,50 @@ non-zero EVM address before any contract request is made.
 
 ## Proposal implementation (QCDAO-59/60 + QCDAO-75–79)
 
-The chain-first publication behavior above applies to opportunities. Proposal
-submission is **Firestore first**: the saved confirmation appears immediately,
-then the researcher wallet signs `commitProposal`. Navigation, withdrawal and
-other workflow actions remain available while confirmation is pending or failed.
+Proposals are **chain first**, like opportunities. QCDAO-57 changed this: they
+were Firestore first, which meant a proposal could sit in evaluation before it
+had been anchored or paid for, and an edit landed on the record before the
+amendment was signed. Every proposal write now signs first.
+
+| Action | Contract call | Written to Firestore |
+| --- | --- | --- |
+| Submit | `commitProposal` | after the transaction is mined and verified |
+| Correct | `updateHashes` | after the transaction is mined and verified |
+| Withdraw | `withdrawProposal` | after the transaction is mined |
+| Save draft | none | immediately — a draft is private and unevaluated |
+
+The record that is hashed is the record that is written; it is built once and
+passed through, never rebuilt in between. A declined or failed transaction
+changes nothing, which is the point of the ordering.
+
+`confirmed` remains a server attestation that no browser may write, so a
+transaction this client watched being mined is stored as `pending` carrying its
+real hash, and `confirmProposalAudit` promotes it. The queued audit job means the
+server still promotes it if the tab closes first.
+
+The one asymmetry with opportunities: a proposal's Firestore write can be refused
+after a successful anchor, because the rules re-check the parent opportunity and
+the one-proposal-per-author slot at write time. The author is told the
+transaction succeeded and that resubmitting reuses the same anchor, rather than
+being shown a bare write error.
+
+### Corrections (QCDAO-57)
+
+A proposal corrected before evaluation keeps its entity id, so its second
+anchoring is an amendment: `commitProposal` reverts once the id is taken, and
+`updateHashes` appends a revision beside the original instead of replacing it.
+Both calls carry the same hashes for the same stored record, so
+`verifyProposalAudit` and the trusted server confirmation accept either.
+
+Which call to make is read from the registry (`revisionCount`), never inferred
+from Firestore: the correction drops the stored receipt, because the hash it
+attests to no longer describes the record, and a dropped or never-saved receipt
+would otherwise send the wrong call.
+
+The correction path is `frontend/src/lib/proposalAudit.js`. Off-chain, the same
+edit is written to `proposals/{id}/revisions` by a Cloud Functions trigger with
+the changed fields, the actor and the timestamp, so the on- and off-chain records
+of one edit can be reconciled through the content hashes the entry carries.
 
 ### Reproducing proposal hashes
 

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
-import { Modal } from "../components/Modal.jsx";
+import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
+import { useDraftGuard } from "../lib/draftGuard.js";
 import { useSession } from "../context/SessionContext.jsx";
 import {
   CURRENCIES,
@@ -179,16 +180,12 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
   // Keeps the form inert until a resumed draft has loaded, so typing cannot be
   // overwritten by the load and a save cannot run with draftExists still false.
   const [loadingDraft, setLoadingDraft] = useState(Boolean(resumeId));
-  // Where the user was heading when the unsaved-work prompt interrupted them.
-  const [leaveTarget, setLeaveTarget] = useState(null);
   // Snapshot of the last saved state; null until the draft is first saved.
   const [baseline, setBaseline] = useState(null);
   // Attachments the saved draft already references, so discard leaves them alone.
   const savedAttachmentIds = useRef(new Set());
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const formTop = useRef(null);
-  const allowNavigation = useRef(false);
-  const currentHash = useRef(typeof window === "undefined" ? "" : window.location.hash);
   const pendingCountRef = useRef(0);
   const pendingRecordRef = useRef(null);
 
@@ -236,42 +233,12 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     return snapshotOf(form, attachments) !== baseline;
   }, [form, attachments, baseline]);
 
-  // Hash routing means a nav click mutates location.hash directly, so leaving is
-  // intercepted here rather than by a router guard: revert the hash, then ask.
-  useEffect(() => {
-    if (!isDirty || published) return undefined;
-
-    const warnOnUnload = (event) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-
-    const interceptHash = () => {
-      const next = window.location.hash;
-      if (allowNavigation.current) {
-        allowNavigation.current = false;
-        currentHash.current = next;
-        return;
-      }
-      // Only a create URL for THIS posting is a no-op. Waving through every
-      // "#/create*" let a switch to another draft skip the prompt and discard
-      // whatever was unsaved here.
-      if (next === currentHash.current || next === createHash) {
-        currentHash.current = next;
-        return;
-      }
-      allowNavigation.current = true;
-      window.location.hash = currentHash.current;
-      setLeaveTarget(next);
-    };
-
-    window.addEventListener("beforeunload", warnOnUnload);
-    window.addEventListener("hashchange", interceptHash);
-    return () => {
-      window.removeEventListener("beforeunload", warnOnUnload);
-      window.removeEventListener("hashchange", interceptHash);
-    };
-  }, [isDirty, published, createHash]);
+  const { leaveTarget, setLeaveTarget, goTo } = useDraftGuard({
+    isDirty,
+    active: !published,
+    ownHashes: [createHash],
+    onNavigate,
+  });
 
   const persistDraft = async () => {
     setSubmitError(null);
@@ -415,19 +382,6 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  // A hash captured by the interceptor is navigated to directly; a route id goes
-  // through onNavigate.
-  const goTo = (target) => {
-    // Set BEFORE either branch: onNavigate changes the hash as well, so leaving
-    // it unset let the interceptor revert the move and reopen the leave prompt.
-    allowNavigation.current = true;
-    if (typeof target === "string" && target.startsWith("#")) {
-      window.location.hash = target;
-      return;
-    }
-    onNavigate(target ?? "discover");
   };
 
   /**
@@ -731,33 +685,15 @@ export default function CreatePostingPage({ postingId: resumeId, onNavigate }) {
           <DraftStatus savedAt={savedAt} saving={savingDraft} />
 
           {leaveTarget && (
-            <Modal
-              labelledBy="leave-draft-title"
-              describedBy="leave-draft-desc"
-              onDismiss={() => setLeaveTarget(null)}
-            >
-              <div className="modal-head">
-                <div>
-                  <h2 id="leave-draft-title">Save this as a draft?</h2>
-                  <p id="leave-draft-desc">
-                    {draftExists
-                      ? "You have changes that are not in the saved draft. Discarding rolls back to the last save."
-                      : "You have unsaved work on this problem statement. Save it as a draft and you can pick it up from My Problems later."}
-                  </p>
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button className="secondary" type="button" disabled={savingDraft} onClick={() => setLeaveTarget(null)}>
-                  Keep editing
-                </button>
-                <button className="secondary" type="button" disabled={savingDraft} onClick={discardAndLeave}>
-                  {draftExists ? "Discard changes" : "Discard and leave"}
-                </button>
-                <button className="primary" type="button" disabled={savingDraft} onClick={saveThenLeave}>
-                  {savingDraft ? "Saving…" : "Save as draft and leave"}
-                </button>
-              </div>
-            </Modal>
+            <LeaveDraftPrompt
+              draftExists={draftExists}
+              saving={savingDraft}
+              entityLabel="problem statement"
+              resumeLocation="My Problems"
+              onKeepEditing={() => setLeaveTarget(null)}
+              onDiscard={discardAndLeave}
+              onSave={saveThenLeave}
+            />
           )}
 
           {submitError && (

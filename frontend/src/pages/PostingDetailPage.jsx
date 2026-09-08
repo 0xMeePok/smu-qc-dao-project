@@ -194,7 +194,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             </>
           )}
 
-          {!isOpenFunding && posting.attachments.length > 0 && (
+          {posting.attachments.length > 0 && (
             <div className="detail-section">
               <h2>Supporting documents</h2>
               <ul className="attachment-list">

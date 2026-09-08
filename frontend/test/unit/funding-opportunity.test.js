@@ -85,8 +85,25 @@ describe("[QCDAO-51] open-funding form model", () => {
     assert.deepEqual(record.tags, ["Quantum", "Optimisation"]);
     for (const field of [
       "summary", "businessContext", "currentApproach", "currentLimitations",
-      "expectedOutcome", "successCriteria", "dataAvailability", "attachments",
+      "expectedOutcome", "successCriteria", "dataAvailability",
     ]) assert.equal(field in record, false, `${field} must not be stored`);
+    assert.deepEqual(record.attachments, []);
+  });
+
+  it("[QCDAO-57] stores supporting attachments in the reference shape", () => {
+    const record = buildFundingOpportunityDocument({
+      ownerId: OWNER,
+      organisation: "SMU",
+      form: completeForm(),
+      attachments: [{
+        id: "fundfile0001", name: "terms.pdf", size: 2048,
+        contentType: "application/pdf", sha256: `0x${"7".repeat(64)}`,
+      }],
+      now: new Date("2026-09-04T00:00:00Z"),
+    });
+    assert.equal(record.attachments.length, 1);
+    assert.equal(record.attachments[0].id, "fundfile0001");
+    assert.equal(record.attachments[0].sha256, `0x${"7".repeat(64)}`);
   });
 });
 
@@ -111,6 +128,42 @@ describe("[QCDAO-51] AuditRegistry mapping", () => {
     assert.equal(setup.prepared.functionName, "commitOpportunity");
     assert.equal(setup.prepared.args[1], OPPORTUNITY_KIND.OPEN_FUNDING);
     assert.equal(setup.prepared.args[3], BigInt(expiresAt.getTime() / 1000));
+  });
+
+  it("[QCDAO-57] anchors attachments without changing already-anchored hashes", () => {
+    const expiresAt = new Date("2026-12-03T00:00:00Z");
+    const opportunity = {
+      id: "funding-123", ...completeForm(), ownerId: OWNER, organisation: "SMU",
+      amount: 250000, tags: ["Quantum"], expiresAt,
+    };
+    const withoutFiles = fundingOpportunityAuditPayload(opportunity);
+    assert.equal("attachments" in withoutFiles, false);
+    assert.equal(
+      "attachments" in fundingOpportunityAuditPayload({ ...opportunity, attachments: [] }),
+      false,
+    );
+    assert.equal(
+      prepareFundingOpportunityAudit({ ...opportunity, attachments: [] }).prepared.contentHash,
+      prepareFundingOpportunityAudit(opportunity).prepared.contentHash,
+    );
+
+    // One that does carry files anchors them, and a changed file changes the hash.
+    const file = (id, size = 2048) => ({
+      id, name: "terms.pdf", size, contentType: "application/pdf",
+      sha256: `0x${"7".repeat(64)}`,
+    });
+    const withFiles = fundingOpportunityAuditPayload({
+      ...opportunity, attachments: [file("bbb2"), file("aaa1")],
+    });
+    // Sorted, so the order they were uploaded in cannot change the hash.
+    assert.deepEqual(withFiles.attachments.map((item) => item.id), ["aaa1", "bbb2"]);
+    // The digest is not part of the payload; the reference is.
+    assert.equal("sha256" in withFiles.attachments[0], false);
+    const hashOf = (attachments) =>
+      prepareFundingOpportunityAudit({ ...opportunity, attachments }).prepared.contentHash;
+    assert.notEqual(hashOf([file("aaa1")]), withoutFiles && hashOf([]));
+    assert.notEqual(hashOf([file("aaa1")]), hashOf([file("aaa1", 4096)]));
+    assert.equal(hashOf([file("bbb2"), file("aaa1")]), hashOf([file("aaa1"), file("bbb2")]));
   });
 });
 

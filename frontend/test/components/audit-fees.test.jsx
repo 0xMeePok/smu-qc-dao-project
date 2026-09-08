@@ -42,11 +42,46 @@ it("does not ask the wallet to submit if fee estimation fails or is invalid", as
 
 it("leaves wallet rejection to the user and refreshes fees on an explicit retry", async () => {
   const adapter = createWagmiAuditAdapters(config);
-  mocks.estimate.mockResolvedValueOnce({ maxFeePerGas: 100n, maxPriorityFeePerGas: 0n });
+  mocks.estimate.mockResolvedValueOnce({ maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 5_000n });
   mocks.write.mockRejectedValueOnce(Object.assign(new Error("User rejected"), { code: 4001 }));
   await expect(adapter.writeContract(request)).rejects.toMatchObject({ code: 4001 });
   expect(mocks.write).toHaveBeenCalledTimes(1);
-  mocks.estimate.mockResolvedValueOnce({ maxFeePerGas: 150n, maxPriorityFeePerGas: 0n });
+  mocks.estimate.mockResolvedValueOnce({ maxFeePerGas: 3_000_000_000n, maxPriorityFeePerGas: 5_000n });
   await adapter.writeContract(request);
-  expect(mocks.write).toHaveBeenLastCalledWith(config, { ...request, maxFeePerGas: 300n, maxPriorityFeePerGas: 0n });
+  expect(mocks.write).toHaveBeenLastCalledWith(config, {
+    ...request, maxFeePerGas: 6_000_000_000n, maxPriorityFeePerGas: 5_000n,
+  });
+});
+
+// Arbitrum has no priority auction, so a zero tip is a normal estimate there -
+// and MetaMask refuses to send one, with "Priority fee must be greater than 0"
+// in its advanced-fee dialog. Sending the zero straight through stalled every
+// audit write behind a wallet error that looked like a broken contract call.
+it("never hands the wallet a zero priority fee", async () => {
+  const adapter = createWagmiAuditAdapters(config);
+  mocks.estimate.mockResolvedValueOnce({ maxFeePerGas: 606_672_000n, maxPriorityFeePerGas: 0n });
+  await adapter.writeContract(request);
+  const sent = mocks.write.mock.calls[0][1];
+  expect(sent.maxPriorityFeePerGas).toBeGreaterThan(0n);
+  // A tip above the total cap is an invalid transaction, and this chain's base
+  // fee is small enough that the floor could otherwise exceed it.
+  expect(sent.maxPriorityFeePerGas).toBeLessThanOrEqual(sent.maxFeePerGas);
+  // Still negligible: well under a thousandth of the fee cap at this base fee.
+  expect(sent.maxPriorityFeePerGas).toBeLessThan(sent.maxFeePerGas / 100n);
+});
+
+it("clamps the floor rather than exceeding a tiny fee cap", async () => {
+  const adapter = createWagmiAuditAdapters(config);
+  mocks.estimate.mockResolvedValueOnce({ maxFeePerGas: 100n, maxPriorityFeePerGas: 0n });
+  await adapter.writeContract(request);
+  const sent = mocks.write.mock.calls[0][1];
+  expect(sent.maxPriorityFeePerGas).toBe(200n);
+  expect(sent.maxFeePerGas).toBe(200n);
+});
+
+it("does not inflate a priority fee the network actually asked for", async () => {
+  const adapter = createWagmiAuditAdapters(config);
+  mocks.estimate.mockResolvedValueOnce({ maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 1_000n });
+  await adapter.writeContract(request);
+  expect(mocks.write.mock.calls[0][1].maxPriorityFeePerGas).toBe(1_000n);
 });

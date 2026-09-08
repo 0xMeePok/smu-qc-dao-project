@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
+import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
@@ -17,10 +18,17 @@ import { useSession } from "../context/SessionContext.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import {
+  FUNDING_STATUS_DRAFT,
   buildFundingOpportunityDocument,
   createFundingOpportunity,
   newFundingOpportunityId,
+  publishFundingDraft,
+  saveFundingDraft,
 } from "../lib/fundingOpportunities.js";
+import { findPosting } from "../lib/postings.js";
+import { deleteAttachment } from "../lib/attachments.js";
+import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
+import { useDraftGuard } from "../lib/draftGuard.js";
 import {
   anchorFundingOpportunityAudit,
   fundingOpportunityAuditReceipt,
@@ -71,11 +79,64 @@ function TextField({ id, label, hint, error, rows, value, onChange, ...rest }) {
   );
 }
 
-export default function CreateFundingOpportunityPage({ onNavigate }) {
+function abandonDraftAttachments(items, ownerId, opportunityId) {
+  return Promise.allSettled(items.map((attachment) => deleteAttachment({
+    attachment, ownerId, problemId: opportunityId,
+  })));
+}
+
+/** What "unchanged since the last save" means, for the leave prompt. */
+function snapshotOf(form, attachments) {
+  return JSON.stringify({
+    ...form,
+    categories: [...form.categories].sort(),
+    attachments: attachments.map((item) => item.id).sort(),
+  });
+}
+
+function formFromOpportunity(opportunity) {
+  return {
+    ...EMPTY_FORM,
+    title: opportunity.title ?? "",
+    fundingThesis: opportunity.fundingThesis ?? "",
+    eligibilityNotes: opportunity.eligibilityNotes ?? "",
+    categories: Array.isArray(opportunity.categories) ? opportunity.categories : [],
+    amount: opportunity.amount ? String(opportunity.amount) : "",
+    currency: opportunity.currency ?? EMPTY_FORM.currency,
+    expiryDays: expiryWindowFor(opportunity.expiresAt) ?? EMPTY_FORM.expiryDays,
+  };
+}
+
+/**
+ * Maps a stored expiry back to the window that produced it, so resuming a draft
+ * shows the choice that was made rather than silently re-deriving a new one.
+ */
+function expiryWindowFor(expiresAt) {
+  const stored = expiresAt?.toDate?.() ?? (expiresAt ? new Date(expiresAt) : null);
+  if (!stored || Number.isNaN(stored.getTime())) return null;
+  let best = null;
+  for (const { value } of EXPIRY_WINDOWS) {
+    const distance = Math.abs(expiryDateFrom(value).getTime() - stored.getTime());
+    if (best === null || distance < best.distance) best = { value, distance };
+  }
+  return best?.value ?? null;
+}
+
+export default function CreateFundingOpportunityPage({ resumeId = null, onNavigate }) {
   const { address, profile } = useSession();
   const { address: connectedAddress, isConnected } = useAccount();
-  const [opportunityId, setOpportunityId] = useState(() => newFundingOpportunityId());
+  const [opportunityId, setOpportunityId] = useState(() => resumeId ?? newFundingOpportunityId());
   const [form, setForm] = useState(EMPTY_FORM);
+  const [attachments, setAttachments] = useState([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const savedAttachmentIds = useRef(new Set());
+  const [draftExists, setDraftExists] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+  // Keeps the form inert until a resumed draft has loaded, so typing cannot be
+  // overwritten by the load and a save cannot run with draftExists still false.
+  const [loadingDraft, setLoadingDraft] = useState(Boolean(resumeId));
+  const [baseline, setBaseline] = useState(null);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -85,6 +146,96 @@ export default function CreateFundingOpportunityPage({ onNavigate }) {
   const pendingRecordRef = useRef(null);
   const formTop = useRef(null);
   const organisation = profile?.organisation ?? "";
+  const ownHash = resumeId ? `#/create-funding/${resumeId}` : "#/create/open-funding";
+
+  useEffect(() => {
+    if (!resumeId) return undefined;
+    let cancelled = false;
+    findPosting(resumeId)
+      .then((opportunity) => {
+        if (cancelled || !opportunity) return;
+        const loaded = formFromOpportunity(opportunity);
+        const loadedAttachments = opportunity.attachments ?? [];
+        setForm(loaded);
+        setAttachments(loadedAttachments);
+        setDraftExists(true);
+        setSavedAt(opportunity.updatedAt ?? null);
+        setBaseline(snapshotOf(loaded, loadedAttachments));
+        savedAttachmentIds.current = new Set(loadedAttachments.map((item) => item.id));
+      })
+      .catch((error) => { if (!cancelled) setSubmitError(messageForFirebaseError(error)); })
+      .finally(() => { if (!cancelled) setLoadingDraft(false); });
+    return () => { cancelled = true; };
+  }, [resumeId]);
+
+  // Unsaved work, not "any work". Against a saved baseline this is a comparison,
+  // so saving a draft - or resuming one and changing nothing - leaves the form
+  // clean and the prompt stays out of the way.
+  const isDirty = useMemo(() => {
+    if (baseline === null) {
+      return ["title", "fundingThesis", "eligibilityNotes", "amount"]
+        .some((key) => String(form[key] ?? "").trim().length > 0)
+        || form.categories.length > 0
+        || attachments.length > 0;
+    }
+    return snapshotOf(form, attachments) !== baseline;
+  }, [form, attachments, baseline]);
+
+  const { leaveTarget, setLeaveTarget, goTo } = useDraftGuard({
+    isDirty,
+    active: !published,
+    ownHashes: [ownHash],
+    onNavigate,
+  });
+
+  // No validation gate: saving half a form is the point of a draft.
+  const persistDraft = async () => {
+    setSubmitError(null);
+    setSavingDraft(true);
+    try {
+      const saved = await saveFundingDraft({
+        opportunityId, ownerId: address, organisation, form, attachments, exists: draftExists,
+      });
+      setDraftExists(true);
+      setSavedAt(saved?.updatedAt ?? new Date());
+      setBaseline(snapshotOf(form, attachments));
+      savedAttachmentIds.current = new Set(attachments.map((item) => item.id));
+      return true;
+    } catch (error) {
+      setSubmitError(messageForFirebaseError(error));
+      return false;
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const saveThenLeave = async () => {
+    const target = leaveTarget;
+    // Leaving on a rejected save would discard the very work the prompt offered
+    // to keep, so the dialog stays open and persistDraft reports the reason.
+    if (!await persistDraft()) return;
+    setLeaveTarget(null);
+    goTo(target);
+  };
+
+  /**
+   * Leaves without keeping the current edits. Files the saved draft already
+   * references are kept - deleting those would gut the draft the user chose to
+   * keep. With no saved draft nothing was persisted, so everything goes.
+   */
+  const discardAndLeave = async () => {
+    const target = leaveTarget;
+    setLeaveTarget(null);
+    const unsaved = attachments.filter((item) => !savedAttachmentIds.current.has(item.id));
+    setAttachments([]);
+    await abandonDraftAttachments(unsaved, address, opportunityId);
+    goTo(target);
+  };
+
+  const cancel = () => {
+    if (isDirty) { setLeaveTarget("discover"); return; }
+    goTo("discover");
+  };
 
   const expiryPreview = useMemo(
     () => formatInstant(expiryDateFrom(form.expiryDays)),
@@ -152,6 +303,7 @@ export default function CreateFundingOpportunityPage({ onNavigate }) {
         ownerId: address,
         organisation,
         form,
+        attachments,
       });
       pendingRecordRef.current = record;
 
@@ -168,13 +320,20 @@ export default function CreateFundingOpportunityPage({ onNavigate }) {
         },
       });
 
-      const opportunity = await createFundingOpportunity({
-        opportunityId,
-        ownerId: address,
-        organisation,
-        form,
-        record,
-      });
+      const opportunity = draftExists
+        ? await publishFundingDraft({
+          // The anchored record, not a rebuild: rebuilding derives a fresh
+          // expiresAt that would no longer match the confirmed hash.
+          opportunityId, ownerId: address, organisation, form, attachments, record,
+        })
+        : await createFundingOpportunity({
+          opportunityId,
+          ownerId: address,
+          organisation,
+          form,
+          attachments,
+          record,
+        });
       setPublished({ ...opportunity, audit });
       setAuditProgress(null);
       pendingRecordRef.current = null;
@@ -368,14 +527,46 @@ export default function CreateFundingOpportunityPage({ onNavigate }) {
             </div>
           </Section>
 
+          <Section step="4" legend="Supporting material" hint="Optional. Terms, scope notes or an application pack, as PDFs.">
+            <AttachmentUploader
+              ownerId={address}
+              problemId={opportunityId}
+              value={attachments}
+              onChange={setAttachments}
+              onPendingChange={(count) => setPendingCount(Number(count) || 0)}
+              disabled={submitting || savingDraft || loadingDraft}
+            />
+          </Section>
+
           <div className="form-actions">
-            <button className="primary" type="submit" disabled={submitting}>
-              {submitting ? "Submitting…" : "Submit funding opportunity"}
+            <button className="primary" type="submit" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0}>
+              {submitting ? "Submitting…" : pendingCount > 0 ? "Waiting for attachments…" : "Submit funding opportunity"}
             </button>
-            <button className="secondary" type="button" disabled={submitting} onClick={() => onNavigate("discover")}>
+            <button className="secondary" type="button" disabled={submitting || savingDraft || loadingDraft} onClick={persistDraft}>
+              {savingDraft ? "Saving…" : "Save as draft"}
+            </button>
+            <button className="secondary" type="button" disabled={submitting || savingDraft} onClick={cancel}>
               Cancel
             </button>
           </div>
+
+          {savingDraft
+            ? <p className="draft-status" role="status">Saving draft…</p>
+            : savedAt
+              ? <p className="draft-status" role="status">Draft saved <strong>{formatInstant(savedAt)}</strong>. Only you can see it.</p>
+              : <p className="draft-status muted" role="status">Not saved yet. Save as draft to keep this and finish later.</p>}
+
+          {leaveTarget && (
+            <LeaveDraftPrompt
+              draftExists={draftExists}
+              saving={savingDraft}
+              entityLabel="funding opportunity"
+              resumeLocation="My Problems"
+              onKeepEditing={() => setLeaveTarget(null)}
+              onDiscard={discardAndLeave}
+              onSave={saveThenLeave}
+            />
+          )}
 
           {submitError ? (
             <p className="attachment-error" role="alert">

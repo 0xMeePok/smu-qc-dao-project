@@ -65,8 +65,15 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
     throw new Error("The transaction is not final yet; confirmation will be checked again.");
   }
   const decoded = decodeFunctionData({ abi: registry.abi, data: transaction.input });
-  if (decoded.functionName !== "commitProposal" || decoded.args.length !== expected.args.length
-      || decoded.args.some((arg, index) => !same(arg, expected.args[index]))) {
+  const expectedArgs = {
+    commitProposal: expected.args,
+    updateHashes: [
+      expected.entityId, expected.proposalHash, expected.solutionHash,
+      expected.expectedOpportunityRevisionIndex,
+    ],
+  }[decoded.functionName];
+  if (!expectedArgs || decoded.args.length !== expectedArgs.length
+      || decoded.args.some((arg, index) => !same(arg, expectedArgs[index]))) {
     throw new Error("Mismatch detected: the stored proposal differs from the submitted transaction.");
   }
   await verifyAttachmentBytes(record, readAttachment);

@@ -280,14 +280,28 @@ The service account needs `Firebase Hosting Admin`, `Firebase Rules Admin`,
 Deploy the current build to a temporary real URL without touching the live site:
 
 ```bash
-npm run deploy:preview             # channel "prod-twin", expires in 7 days
+npm run deploy:preview                       # channel "prod-twin", expires in 7 days
 npm run deploy:preview -- staging --expires 1d
+npm run deploy:preview -- --backend          # also push rules, indexes and functions
 ```
 
 You get `https://<project>--<channel>-<hash>.web.app`, served by real Firebase Hosting
 and talking to the **real deployed backend**. The script builds with `VITE_FIREBASE_USE_EMULATORS=false` (a shell variable
 outranks `.env`, so your local emulator setup is untouched), refuses to deploy a
 bundle that still points at the emulators, then reconciles the backend.
+
+**`--backend` when your branch changes the backend.** Firestore and Storage rules
+are project-global — there is no per-channel copy — so a preview channel always
+runs against whatever rules are currently live. Deploy a branch that adds a
+status, a field or a collection and the channel will serve the new frontend
+against the old rules, which reads as the feature being broken rather than
+undeployed. `--backend` deploys `firestore:rules`, `firestore:indexes` and
+`storage` before the channel, and forces the functions deploy that is otherwise
+skipped when the SIWE allow-list has not changed — which is what would leave a
+newly added trigger unshipped on a repeat deploy to an existing channel.
+
+It is opt-in because it writes to the **shared** project for everyone, not just
+your channel. Without it the script says so rather than leaving you to guess.
 
 Three things gate a preview, and each fails closed:
 

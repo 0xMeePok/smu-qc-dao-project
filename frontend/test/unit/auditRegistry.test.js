@@ -20,6 +20,7 @@ import {
   prepareOpportunityCommit,
   prepareProposalCommit,
   prepareProposalUpdate,
+  prepareProposalWithdrawal,
   proposalEntityId,
   readOpportunityRevisionIndex,
   updateProposalAudit,
@@ -168,6 +169,25 @@ describe("AuditRegistry argument preparation", () => {
       update.solutionHash,
       3,
     ]);
+  });
+
+  it("QCDAO-57 commits to the withdrawal reason without publishing it", () => {
+    const withdrawal = (reason, researcherId = "0xABCdef0000000000000000000000000000000000") =>
+      prepareProposalWithdrawal({ recordId: "proposal-123", researcherId, reason });
+    const stated = withdrawal("The costing was wrong.");
+    assert.equal(stated.functionName, "withdrawProposal");
+    assert.deepEqual(stated.args, [stated.entityId, stated.contentHash]);
+    // AuditRegistry.withdrawProposal rejects a zero evidence hash.
+    assert.match(stated.contentHash, /^0x[0-9a-f]{64}$/);
+    assert.notEqual(stated.contentHash, `0x${"0".repeat(64)}`);
+    // The reason is the disputed part, so a reworded one is a different hash and
+    // cannot be passed off as what was originally given.
+    assert.notEqual(withdrawal("A more flattering reason.").contentHash, stated.contentHash);
+    // Wallet casing is not part of the claim.
+    assert.equal(withdrawal("The costing was wrong.", "0xabcdef0000000000000000000000000000000000").contentHash, stated.contentHash);
+    // The same proposal always anchors under the same entity id.
+    assert.equal(stated.entityId, proposalEntityId("proposal-123"));
+    assert.throws(() => withdrawal("   "), /reason is required/);
   });
 });
 

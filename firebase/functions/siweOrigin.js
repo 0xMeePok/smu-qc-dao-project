@@ -9,7 +9,15 @@ const SIWE_DOMAIN_FALLBACK = "smu-qc-dao";
 // Dev origins are allowed ONLY under the emulator. Allow-listing localhost in
 // production would reopen the hole: an attacker would forge `Origin:
 // localhost:5173` and be handed a signable message again.
-const DEV_HOSTS = ["localhost:5173", "127.0.0.1:5173"];
+//
+// 5173 is Vite's dev server; 5000 is the Hosting emulator, which serves the built
+// bundle the way Firebase will. Both are local ways to run the same app, so
+// sign-in has to work on both - on 5000 alone this refused every nonce with a
+// 403 that looked like a broken deployment rather than a missing port.
+const DEV_HOSTS = [
+  "localhost:5173", "127.0.0.1:5173",
+  "localhost:5000", "127.0.0.1:5000",
+];
 
 function emulatorActive(env = process.env) {
   return env.FUNCTIONS_EMULATOR === "true";
