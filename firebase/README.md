@@ -277,6 +277,15 @@ The service account needs `Firebase Hosting Admin`, `Firebase Rules Admin`,
 <a id="preview-channels"></a>
 ### Preview channels
 
+The script calls `gcloud storage buckets describe` to keep bucket CORS in line
+with live preview origins. Install and authenticate once, then deploy:
+
+```bash
+brew install --cask google-cloud-sdk   # macOS; skip if `gcloud` is already on PATH
+gcloud auth login
+gcloud config set project qcdao-a0c7a
+```
+
 Deploy the current build to a temporary real URL without touching the live site:
 
 ```bash
@@ -453,7 +462,9 @@ Create the bucket in **production mode**, not test mode. Test mode is
 already holds real user data. The first deploy replaces the rules either way, but
 production mode fails safe if that deploy is delayed.
 
-Then, **once per project**, from `firebase/`:
+Then, **once per project**, from `firebase/`. These commands need the
+[Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`brew install --cask google-cloud-sdk`,
+then `gcloud auth login` and `gcloud config set project qcdao-a0c7a`):
 
 ```bash
 # 1. CORS. getBlob() and resumable uploads are cross-origin XHRs.

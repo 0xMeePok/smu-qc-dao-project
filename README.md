@@ -68,6 +68,17 @@ smu-qc-dao-project/
 - [Firebase CLI](https://firebase.google.com/docs/cli) (`npm install -g firebase-tools`) —
   only needed if you're redeploying rules/functions or running emulators, not for
   ordinary frontend work against the live backend
+- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`) — needed
+  for preview-channel deploys (`npm run deploy:preview`) and Storage bucket
+  CORS/lifecycle. On macOS:
+
+  ```bash
+  brew install --cask google-cloud-sdk
+  gcloud auth login
+  gcloud config set project qcdao-a0c7a
+  ```
+
+  Skip this unless you are deploying a preview or changing the production bucket.
 - Java — needed by the Firestore emulator (local emulators **and** the rules test suite)
 - A browser wallet (MetaMask is the simplest) with Arbitrum Sepolia testnet ETH from
   a faucet, for deploying/interacting with the QFT contract
@@ -283,7 +294,9 @@ VITE_FIREBASE_USE_EMULATORS=false npm run build --prefix frontend \
 ```
 
 To try a change on a real URL without touching the live site, deploy a preview
-channel:
+channel. The script calls `gcloud` to keep Storage CORS in line with live
+preview origins, so install and authenticate the Google Cloud CLI first
+(see [Prerequisites](#prerequisites)):
 
 ```bash
 cd firebase && npm run deploy:preview -- --backend

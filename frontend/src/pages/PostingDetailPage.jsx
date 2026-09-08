@@ -37,11 +37,12 @@ import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
  */
 
 function Detail({ heading, children }) {
-  if (!children) return null;
+  const text = String(children ?? "").trim();
+  if (!text) return null;
   return (
     <div className="detail-section">
       <h2>{heading}</h2>
-      <p>{children}</p>
+      <p>{text}</p>
     </div>
   );
 }
@@ -179,18 +180,21 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <span className="status-dot">{expired ? "expired" : posting.status}</span>
           </div>
           <h1>{posting.title}</h1>
-          <p className="lead">{isOpenFunding ? posting.fundingThesis : posting.summary}</p>
 
           {isOpenFunding ? (
-            <Detail heading="Eligibility">{posting.eligibilityNotes}</Detail>
+            <>
+              <Detail heading="Funding thesis and areas of interest">{posting.fundingThesis}</Detail>
+              <Detail heading="Eligibility notes">{posting.eligibilityNotes}</Detail>
+            </>
           ) : (
             <>
+              <Detail heading="Problem description">{posting.summary}</Detail>
               <Detail heading="Business context">{posting.businessContext}</Detail>
               <Detail heading="Current approach">{posting.currentApproach}</Detail>
               <Detail heading="Limitations of that approach">{posting.currentLimitations}</Detail>
               <Detail heading="Expected outcome">{posting.expectedOutcome}</Detail>
               <Detail heading="Success criteria">{posting.successCriteria}</Detail>
-              <Detail heading="Data availability">{posting.dataAvailability}</Detail>
+              <Detail heading="Relevant data availability">{posting.dataAvailability}</Detail>
             </>
           )}
 
@@ -265,7 +269,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
           {posting.categories.length > 0 && (
             <>
-              <span className="eyebrow">Approaches of interest</span>
+              <span className="eyebrow">Technology areas</span>
               <div className="tag-list">
                 {posting.categories.map((value) => (
                   <span className="tag-chip static" key={value}>{categoryLabel(value)}</span>
@@ -276,7 +280,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
           {isOpenFunding && posting.tags.length > 0 && (
             <>
-              <span className="eyebrow">Tags</span>
+              <span className="eyebrow">Discovery tags</span>
               <div className="tag-list">
                 {posting.tags.map((tag) => (
                   <span className="tag-chip static" key={tag}>{tag}</span>
