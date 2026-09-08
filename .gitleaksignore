@@ -1,0 +1,9 @@
+# Ignore REDACTED placeholders in env example
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/.env.example:generic-api-key:3
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/.env.example:generic-api-key:4
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/.env.example:generic-api-key:5
+
+# Ignore REDACTED placeholders in API tests
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:12
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:13
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:14
