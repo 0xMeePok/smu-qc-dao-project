@@ -1574,6 +1574,26 @@ describe("problems/{problemId} open funding opportunity", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "q51_ok"), openFunding()));
   });
 
+  it("[QCDAO-57] refuses a non-owner the funding edit and withdraw write shapes", async () => {
+    // updateFundingOpportunity and withdrawPosting key the write on the document
+    // id alone; canEditOpportunity is UX. These are the exact payloads they send.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_owner"), openFunding()));
+    const other = env.authenticatedContext(OTHER).firestore();
+    const { createdAt, ...edit } = openFunding({ title: "Hijacked funding call" });
+    await assertFails(updateDoc(doc(other, "problems", "q57_owner"), {
+      ...edit, updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(other, "problems", "q57_owner"), {
+      status: "cancelled", withdrawalReason: "Not my call.", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(other, "problems", "q57_owner")));
+    // The owner's own withdrawal still goes through.
+    await assertSucceeds(updateDoc(doc(db, "problems", "q57_owner"), {
+      status: "cancelled", withdrawalReason: "Programme closed.", updatedAt: serverTimestamp(),
+    }));
+  });
+
   it("[QCDAO-51] requires every open-funding field", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     for (const field of [
@@ -2192,6 +2212,27 @@ describe("problems/{problemId} full client payload", () => {
     await assertFails(edit({ createdAt: serverTimestamp() }));
     // A real correction still goes through.
     await assertSucceeds(edit({ title: "Corrected title" }));
+  });
+
+  const auditMap = () => ({ schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+    contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "",
+    blockNumber: 0, attemptCount: 0, lastError: "" });
+
+  it("[QCDAO-57] keeps a published posting's receipt from being erased by an edit", async () => {
+    // hasValidAudit passes an ABSENT map, so an edit could drop the receipt and
+    // leave nothing pointing at the anchor. Replacing it stays allowed.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "rf1_c"), clientPayload("rf1_c", 0, { audit: auditMap() })));
+    await assertFails(updateDoc(doc(db, "problems", "rf1_c"), {
+      audit: deleteField(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "rf1_c"), {
+      title: "Corrected", audit: deleteField(), updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "rf1_c"), {
+      audit: { ...auditMap(), status: "submitted", transactionHash: `0x${"3".repeat(64)}` },
+      updatedAt: serverTimestamp(),
+    }));
   });
 
   it("[BIT-P50-18] still refuses an attachment path in another wallet's folder", async () => {

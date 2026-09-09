@@ -751,6 +751,10 @@ service cloud.firestore {
       let changed = after.diff(before).affectedKeys();
       return validOpportunityWithdrawal(before, after)
         && hasValidAudit(after)
+        // A stored receipt is the record's on-chain linkage. It may be REPLACED by
+        // a re-anchor, never dropped: hasValidAudit passes an absent map, so an
+        // edit could otherwise erase the receipt and leave nothing pointing at it.
+        && (!before.keys().hasAny(['audit']) || after.keys().hasAny(['audit']))
         && (changed.hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason'])
           ? validProblemStatus(after.status)
           : (changed.hasOnly([
@@ -960,6 +964,10 @@ service cloud.firestore {
         // correction made before any anchoring attempt has nothing to carry.
         && after.get('audit', {}).get('status', 'queued') != 'confirmed'
         && hasValidAudit(after)
+        // A correction may replace the receipt, never drop it. An absent one still
+        // passes when the stored record never carried one - a correction made
+        // before any anchoring attempt has nothing to preserve.
+        && (!before.keys().hasAny(['audit']) || after.keys().hasAny(['audit']))
         // The opportunity must still be open. AuditRegistry's updateHashes
         // refuses to append a revision against a closed one, so allowing the
         // Firestore write would strand the record with no way to re-anchor it.
