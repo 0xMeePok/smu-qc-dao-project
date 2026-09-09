@@ -113,10 +113,28 @@ service firebase.storage {
 
     // A fresh id is always fine - uploadAttachment mints one per transfer. Reusing
     // an id the posting still lists is the swap isReferencedFile exists to refuse.
+    // That check is not enough on its own: an owner could unlink the id from
+    // Firestore, delete the object, and recreate different bytes at the same
+    // path. Delete is therefore frozen once the posting leaves draft (below).
+    // Combined, listed ids cannot be rewritten and unlisted published ids cannot
+    // be removed from the bucket by the owner, so the marketplace URL stays bound
+    // to the original object.
     function postingAcceptsNewFile(problemId, ownerId, fileName) {
       let posting = attachmentRecord('problems', problemId);
       return posting == null
         || (posting.data.ownerId == ownerId && !isReferencedFile(posting, fileName));
+    }
+
+    // Remove-before-publish (and the pre-save path where no document exists yet)
+    // may still drop objects. Once the posting has been published, those bytes
+    // are what reviewers already downloaded and what the opportunity hash named
+    // by id/name/size/type. Owner delete stays closed for every non-draft status
+    // so unlinking attachments[] cannot reopen the path for a silent swap.
+    function postingAllowsFileRemoval(problemId, ownerId) {
+      let posting = attachmentRecord('problems', problemId);
+      return posting == null
+        || (posting.data.ownerId == ownerId
+          && posting.data.get('status', '') == 'draft');
     }
 
     // PDF only, per the story. Two independent checks because they can disagree:
@@ -197,7 +215,7 @@ service firebase.storage {
       //
       // Nothing legitimate is lost: uploadAttachment() mints a fresh id for every
       // transfer, so the client never writes the same path twice. Replacing a file
-      // is delete-then-upload, which leaves the posting record visibly changed.
+      // on a draft is delete-then-upload. After publication the object stays.
       //
       // `resource == null` is doing the real work here, NOT the absence of an
       // `update` rule. Storage classifies an overwrite of an existing object as a
@@ -214,9 +232,13 @@ service firebase.storage {
         && metadataIsHonest(problemId)
         && postingAcceptsNewFile(problemId, ownerId, fileName);
 
-      // Remove-before-publish, and removal after the fact. Restricted to the
-      // owner for the same reason writes are.
-      allow delete: if isWallet(ownerId) && isActiveMember();
+      // Remove-before-publish only. Restricted to the owner for the same reason
+      // writes are. Published objects stay in the bucket even after the owner
+      // unlinks them from attachments[] - otherwise delete-then-upload at the
+      // same {id}.pdf would replace the bytes behind a stable marketplace URL
+      // and an unchanged opportunity hash.
+      allow delete: if isWallet(ownerId) && isActiveMember()
+        && postingAllowsFileRemoval(problemId, ownerId);
     }
 
     // Proposal files are private to the submitting wallet and the sponsor. A

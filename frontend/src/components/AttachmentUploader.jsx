@@ -46,6 +46,7 @@ export function AttachmentUploader({
   onChange,
   onPendingChange,
   disabled = false,
+  retainStoredBytes = false,
 }) {
   // In-flight uploads, keyed by attachment id. Separate from `value` because a
   // transfer that is still running - or cancelled - must never be written to the
@@ -180,6 +181,10 @@ export function AttachmentUploader({
     // the delete turns out to be refused - the row must never claim a file is gone
     // while it is still in the bucket.
     commit((current) => current.filter((item) => item.id !== attachment.id));
+    // Published marketplace files stay in Storage: owner delete is frozen so the
+    // same {id}.pdf cannot be recreated with different bytes. Unlink the listing
+    // only; drafts still delete the object (remove-before-publish).
+    if (retainStoredBytes) return;
     try {
       await deleteAttachment({ attachment, ownerId, problemId, scope });
     } catch (deleteError) {

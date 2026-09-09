@@ -722,6 +722,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               onChange={setAttachments}
               onPendingChange={updatePendingCount}
               disabled={submitting}
+              retainStoredBytes={editing}
             />
           </Section>
 

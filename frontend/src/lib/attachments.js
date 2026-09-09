@@ -234,8 +234,10 @@ export function uploadAttachment({ file, ownerId, problemId, sha256: contentDige
 }
 
 /**
- * Deletes the stored object. Used both for remove-before-publish and for removing
- * an attachment from a saved posting.
+ * Deletes the stored object. Used for remove-before-publish on drafts.
+ * Published marketplace files must stay in the bucket: storage.rules refuse
+ * owner delete once the posting leaves draft, so the same {id}.pdf cannot be
+ * recreated with different bytes behind an unchanged opportunity hash.
  *
  * A missing object is treated as success: the goal is "this file is gone", and a
  * cancelled upload can leave a path that was never completed. Failing there would

@@ -1949,6 +1949,17 @@ describe("problems/{problemId} drafts", () => {
     await assertSucceeds(deleteDoc(doc(env.authenticatedContext(ADDRESS).firestore(), "problems", "d50_delete")));
   });
 
+  it("refuses the owner deleting a published posting", async () => {
+    // A missing problems/{id} row makes storage.rules treat the prefix as
+    // pre-save, which would re-open owner delete and recreate of {id}.pdf.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_keep_published"), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d50_keep_published"), {
+      ...completeFields(), status: "submitted", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(db, "problems", "d50_keep_published")));
+  });
+
   it("[BIT-P50-11] refuses to move createdAt on a later draft save", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "d50_created"), emptyDraft()));

@@ -602,6 +602,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
               onChange={setAttachments}
               onPendingChange={(count) => setPendingCount(Number(count) || 0)}
               disabled={submitting || savingDraft || loadingDraft}
+              retainStoredBytes={editing}
             />
           </Section>
 

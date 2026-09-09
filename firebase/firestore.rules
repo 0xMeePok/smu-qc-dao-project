@@ -1065,7 +1065,12 @@ service cloud.firestore {
         && (resource.data.ownerId == request.auth.uid
           || (resource.data.status in ['submitted', 'open', 'cancelled']
             && hasCompletedProfile(request.auth.uid)));
-      allow delete: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
+      // Drafts only. Deleting a published document would make storage.rules
+      // treat the prefix as pre-save again (posting == null), which re-opens
+      // owner delete and recreate of the same {id}.pdf behind an on-chain hash.
+      allow delete: if isActiveUser(request.auth.uid)
+        && resource.data.ownerId == request.auth.uid
+        && resource.data.status == 'draft';
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
