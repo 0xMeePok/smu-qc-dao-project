@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, collection, query, where, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, serverTimestamp } from "firebase/firestore";
 
 const ADDRESS = `0x${"a".repeat(40)}`;
 const OTHER = `0x${"b".repeat(40)}`;
@@ -2217,6 +2217,39 @@ describe("problems/{problemId} full client payload", () => {
   const auditMap = () => ({ schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
     contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "",
     blockNumber: 0, attemptCount: 0, lastError: "" });
+
+  it("[QCDAO-57] serves the revision trail to the filters the client actually sends", async () => {
+    // Both branches of the revisions rule test resource.data, so an UNFILTERED
+    // list cannot be proven safe and Firestore refuses it. listOpportunityRevisions
+    // must carry the matching filter; this is what caught it being unfiltered.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const fdb = ctx.firestore();
+      await setDoc(doc(fdb, "problems", "rf_trail"), baseProblem({ status: "open" }));
+      await setDoc(doc(fdb, "problems", "rf_trail", "revisions", "r1"), {
+        ownerId: ADDRESS, actor: ADDRESS, changedFields: ["title"],
+        previousStatus: "submitted", status: "open",
+      });
+      await setDoc(doc(fdb, "problems", "rf_trail", "revisions", "r2"), {
+        ownerId: ADDRESS, actor: ADDRESS, changedFields: [],
+        previousStatus: "open", status: "matched",
+      });
+    });
+    const trail = (db) => collection(db, "problems", "rf_trail", "revisions");
+    const owner = env.authenticatedContext(ADDRESS).firestore();
+    const member = env.authenticatedContext(OTHER).firestore();
+    // Unfiltered is refused for both - the shape that broke the page.
+    await assertFails(getDocs(trail(owner)));
+    await assertFails(getDocs(trail(member)));
+    // Owner filter returns the whole trail, including statuses members cannot see.
+    const mine = await assertSucceeds(getDocs(query(trail(owner), where("ownerId", "==", ADDRESS))));
+    assert.equal(mine.size, 2);
+    // Member filter returns only the member-readable statuses.
+    const visible = await assertSucceeds(getDocs(query(trail(member),
+      where("status", "in", ["submitted", "open", "cancelled"]))));
+    assert.equal(visible.size, 1);
+    // A member may not widen it to a status the posting itself hides.
+    await assertFails(getDocs(query(trail(member), where("status", "in", ["open", "matched"]))));
+  });
 
   it("[QCDAO-57] keeps a published posting's receipt from being erased by an edit", async () => {
     // hasValidAudit passes an ABSENT map, so an edit could drop the receipt and

@@ -33,7 +33,7 @@ function summary(entry) {
   return "Edited after submission";
 }
 
-export function OpportunityRevisionTrail({ postingId }) {
+export function OpportunityRevisionTrail({ postingId, uid, isOwner = false }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -41,12 +41,12 @@ export function OpportunityRevisionTrail({ postingId }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError("");
-    listOpportunityRevisions(postingId)
+    listOpportunityRevisions(postingId, { uid, isOwner })
       .then((records) => { if (!cancelled) setEntries(records); })
       .catch((err) => { if (!cancelled) setError(messageForFirebaseError(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [postingId]);
+  }, [postingId, uid, isOwner]);
 
   if (loading) return <div className="detail-section"><h2>Edit history</h2><p role="status">Loading edit history…</p></div>;
   if (error) return <div className="detail-section"><h2>Edit history</h2><p className="error-banner" role="alert">{error}</p></div>;
