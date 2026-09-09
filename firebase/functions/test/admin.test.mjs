@@ -415,11 +415,22 @@ describe("proposal audit recovery access", () => {
   it("lets an admin inspect jobs and reset only the author's wallet attempts", async () => {
     const id = "audit-admin-reset-fixture";
     const audit = { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "failed", transactionHash: "", blockNumber: 0, attemptCount: 3, lastError: "Wallet declined" };
+    await db.collection("problems").doc("audit-parent").set({
+      ownerId: user1Address,
+      organisation: "SMU",
+      title: "Parent cooling problem",
+      status: "submitted",
+      summary: "Reduce campus cooling cost",
+    });
     await db.collection("proposals").doc(id).set({ researcherId: user1Address, problemId: "audit-parent", title: "Saved proposal", status: "submitted", audit });
     await db.collection("proposalAuditJobs").doc(id).set({ proposalId: id, title: "Saved proposal", researcherId: user1Address, status: "waiting-wallet", attemptCount: 0, transactionHash: "", lastError: "", updatedAt: Timestamp.now(), nextAttemptAt: Timestamp.now() });
     const list = await call("adminListProposalAudits", {}, { token: adminToken });
     assert.ok(Array.isArray(list.result?.items), JSON.stringify(list));
-    assert.ok(list.result.items.some((item) => item.id === id));
+    const listed = list.result.items.find((item) => item.id === id);
+    assert.ok(listed);
+    assert.equal(listed.opportunity?.id, "audit-parent");
+    assert.equal(listed.opportunity?.title, "Parent cooling problem");
+    assert.equal(listed.opportunity?.opportunityType, null);
     const reset = await call("adminRetryProposalAudit", { proposalId: id }, { token: adminToken });
     assert.match(reset.result?.message || "", /researcher/);
     const saved = (await db.collection("proposals").doc(id).get()).data();

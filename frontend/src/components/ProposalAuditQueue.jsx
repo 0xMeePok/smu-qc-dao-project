@@ -3,14 +3,55 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase.js";
 import { AuditReceipt } from "./AuditReceipt.jsx";
 import { formatInstant } from "../lib/datetime.js";
+import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { postingAuditReceipt, readPostingAudit } from "../lib/postingAudit.js";
+import {
+  fundingOpportunityAuditReceipt,
+  readFundingOpportunityAudit,
+} from "../lib/fundingOpportunityAudit.js";
 
 const LABELS = { "waiting-wallet": "Waiting for researcher wallet", pending: "Confirmation pending", failed: "Needs attention", confirmed: "Confirmed" };
+
+function opportunityForAudit(opportunity) {
+  if (!opportunity) return null;
+  return {
+    ...opportunity,
+    expiresAt: opportunity.expiresAt ? new Date(opportunity.expiresAt) : opportunity.expiresAt,
+  };
+}
+
+function ListingReceipt({ opportunity }) {
+  const record = opportunityForAudit(opportunity);
+  const isOpenFunding = record.opportunityType === OPEN_FUNDING_TYPE;
+  let receipt = record.audit;
+  try {
+    receipt = (isOpenFunding
+      ? fundingOpportunityAuditReceipt(record)
+      : postingAuditReceipt(record)) || record.audit;
+  } catch {
+    receipt = record.audit;
+  }
+  return (
+    <AuditReceipt
+      audit={receipt || record.audit}
+      entityLabel={isOpenFunding ? "Funding opportunity" : "Posting"}
+      eventLabel={isOpenFunding
+        ? "Open funding opportunity submitted"
+        : "Funded problem statement submitted"}
+      actorRole={isOpenFunding ? "Funder" : "Problem owner"}
+      firebaseReference={`problems/${record.id}`}
+      onVerify={() => (isOpenFunding ? readFundingOpportunityAudit(record) : readPostingAudit(record))}
+    />
+  );
+}
+
 export function ProposalAuditQueue() {
   const [items, setItems] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
-  const [expanded, setExpanded] = useState(null);
+  const [expandedProposal, setExpandedProposal] = useState(null);
+  const [expandedListing, setExpandedListing] = useState(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const request = useRef(0);
@@ -47,14 +88,29 @@ export function ProposalAuditQueue() {
     {items.map((item) => <article className="audit-item-card" key={item.id}>
       <h3>{item.title}</h3><p><strong>{LABELS[item.status] || item.status}</strong> · {item.attemptCount}/3 confirmation attempts</p>
       <p className="audit-reference">proposals/{item.id}</p>
+      {item.opportunity
+        ? (
+          <p>
+            <strong>Responds to</strong> {item.opportunity.title || "Untitled"}
+            {" · "}
+            {item.opportunity.opportunityType === OPEN_FUNDING_TYPE ? "Open funding" : "Problem statement"}
+            {" · "}
+            <code>problems/{item.opportunity.id}</code>
+          </p>
+        )
+        : <p>Parent listing is no longer available.</p>}
       <p>Updated {formatInstant(item.updatedAt)}{item.status === "pending" ? ` · Next check ${formatInstant(item.nextAttemptAt)}` : ""}</p>
       {item.lastError && <p role="status">{item.lastError}</p>}
       <div className="form-actions">
-        <button type="button" className="secondary" onClick={() => setExpanded(expanded === item.id ? null : item.id)}>{expanded === item.id ? "Hide receipt" : "View receipt"}</button>
+        <button type="button" className="secondary" onClick={() => setExpandedProposal(expandedProposal === item.id ? null : item.id)}>{expandedProposal === item.id ? "Hide receipt" : "View receipt"}</button>
+        {item.opportunity && (
+          <button type="button" className="secondary" onClick={() => setExpandedListing(expandedListing === item.id ? null : item.id)}>{expandedListing === item.id ? "Hide listing receipt" : "View listing receipt"}</button>
+        )}
         {item.status !== "confirmed" && <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => retry(item)}>{busy === item.id ? "Checking…" : item.transactionHash ? "Retry confirmation" : "Reset wallet attempts"}</button>}
       </div>
-      {expanded === item.id && <AuditReceipt audit={item.audit} entityLabel="Proposal" eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${item.id}`}
+      {expandedProposal === item.id && <AuditReceipt audit={item.audit} entityLabel="Proposal" eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${item.id}`}
         onVerify={async () => (await httpsCallable(functions, "adminVerifyProposalAudit")({ proposalId: item.id })).data} />}
+      {expandedListing === item.id && item.opportunity && <ListingReceipt opportunity={item.opportunity} />}
     </article>)}
     {cursor && <button type="button" className="secondary" disabled={loading} onClick={() => load(cursor)}>Load more receipts</button>}
   </section>;
