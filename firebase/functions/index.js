@@ -572,9 +572,22 @@ export const confirmProposalAudit = onCall({ region: REGION, maxInstances: 5 }, 
   catch (error) { throw new HttpsError("unavailable", error.message); }
 });
 
+const PROPOSAL_AUDIT_STATUSES = new Set(["failed", "waiting-wallet", "pending", "confirmed"]);
+const PROPOSAL_AUDIT_ATTENTION = ["failed", "waiting-wallet"];
+
 export const adminListProposalAudits = onCall({ region: REGION }, async (request) => {
   await requireAdmin(request);
-  let query = db.collection(AUDIT_JOBS).orderBy("updatedAt", "desc");
+  const status = request.data?.status;
+  let query = db.collection(AUDIT_JOBS);
+  if (status === "attention") {
+    query = query.where("status", "in", PROPOSAL_AUDIT_ATTENTION);
+  } else if (status && status !== "all") {
+    if (!PROPOSAL_AUDIT_STATUSES.has(status)) {
+      throw new HttpsError("invalid-argument", "Invalid verification status filter.");
+    }
+    query = query.where("status", "==", status);
+  }
+  query = query.orderBy("updatedAt", "desc");
   const cursor = request.data?.cursor;
   if (cursor) {
     if (typeof cursor !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(cursor)) throw new HttpsError("invalid-argument", "Invalid page cursor.");

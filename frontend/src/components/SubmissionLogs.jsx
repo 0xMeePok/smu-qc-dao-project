@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   getDocs,
@@ -19,6 +19,7 @@ import {
   readFundingOpportunityAudit,
 } from "../lib/fundingOpportunityAudit.js";
 import { AuditReceipt } from "./AuditReceipt.jsx";
+import { AuditDetailPane } from "./AuditDetailPane.jsx";
 
 const PAGE_SIZE = 25;
 const MAX_FILTER_SCANS = 8;
@@ -165,7 +166,8 @@ function SubmissionLogs({ kind }) {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [expanded, setExpanded] = useState(null);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
   const cursorRef = useRef(null);
   const request = useRef(0);
 
@@ -176,7 +178,7 @@ function SubmissionLogs({ kind }) {
       setLoading(true);
       setItems([]);
       setHasMore(false);
-      setExpanded(null);
+      setSelected(null);
       cursorRef.current = null;
     }
     setError("");
@@ -216,6 +218,15 @@ function SubmissionLogs({ kind }) {
     return () => { ++request.current; };
   }, [statusFilter, kind]);
 
+  const visibleItems = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return items;
+    return items.filter((item) => (
+      (item.title || "").toLowerCase().includes(needle)
+      || (item.organisation || "").toLowerCase().includes(needle)
+    ));
+  }, [items, search]);
+
   return (
     <section aria-label={variant.label} className="submission-logs">
       <div className="page-heading">
@@ -224,18 +235,29 @@ function SubmissionLogs({ kind }) {
         <p>{variant.description}</p>
       </div>
 
-      <div className="submission-log-controls">
-        <select
-          className="audit-filter-select"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          aria-label="Filter by status"
-        >
-          <option value="all">All statuses</option>
-          <option value="submitted">Submitted</option>
-          <option value="open">Open</option>
-          <option value="cancelled">Withdrawn</option>
-        </select>
+      <div className="table-controls-bar audit-toolbar-sticky">
+        <div className="search-filter-group">
+          <div className="search-box">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search title or organisation…"
+              aria-label="Search title or organisation"
+            />
+          </div>
+          <select
+            className="audit-filter-select"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Filter by status"
+          >
+            <option value="all">All statuses</option>
+            <option value="submitted">Submitted</option>
+            <option value="open">Open</option>
+            <option value="cancelled">Withdrawn</option>
+          </select>
+        </div>
         <button
           type="button"
           className="secondary small"
@@ -251,104 +273,75 @@ function SubmissionLogs({ kind }) {
       {!loading && !error && items.length === 0 && (
         <p className="submission-log-empty">{variant.empty}</p>
       )}
+      {!loading && items.length > 0 && visibleItems.length === 0 && (
+        <p className="submission-log-empty">No listings match the current search.</p>
+      )}
 
-      {!loading && items.length > 0 && (
-        <div className="audit-list">
-          {items.map((item) => {
-            const isExpanded = expanded === item.id;
-            return (
-              <article className="audit-item-card submission-log-card" key={item.id}>
-                <div className="audit-card-top">
-                  <div className="audit-tag-row">
-                    <div className="submission-log-badges">
-                      <StatusBadge status={item.status} />
-                      <AuditStatusBadge audit={item.audit} />
-                    </div>
-                    <span className="audit-timestamp">{formatInstant(item.createdAt)}</span>
-                  </div>
-                </div>
-
-                <div className="audit-card-body">
-                  <h3 className="submission-log-title">{item.title || "Untitled"}</h3>
-
-                  <div className="submission-log-meta">
-                    <span>
-                      <strong>Organisation:</strong> {item.organisation || "—"}
-                    </span>
-                    <span>
-                      <strong>Owner:</strong>{" "}
-                      <code>{shortenAddress(item.ownerId)}</code>
-                    </span>
-                    <span>
-                      <strong>{variant.fundingLabel}:</strong>{" "}
-                      {formatAmount(item.amount, item.currency)}
-                    </span>
-                  </div>
-
-                  {kind === "posting" && item.summary && (
-                    <p className="submission-log-preview truncated-preview">{item.summary}</p>
-                  )}
-                  {kind === "funding" && item.fundingThesis && (
-                    <p className="submission-log-preview truncated-preview">{item.fundingThesis}</p>
-                  )}
-                  {kind === "funding" && item.eligibilityNotes && (
-                    <p className="submission-log-preview truncated-preview">
-                      <strong>Eligibility:</strong> {item.eligibilityNotes}
-                    </p>
-                  )}
-
-                  <div className="submission-log-meta">
-                    {kind === "posting" && item.categories?.length > 0 && (
-                      <span>
-                        <strong>Categories:</strong>{" "}
-                        {item.categories.map(categoryLabel).join(", ")}
-                      </span>
-                    )}
-                    {kind === "funding" && item.tags?.length > 0 && (
-                      <span>
-                        <strong>Tags:</strong> {item.tags.join(", ")}
-                      </span>
-                    )}
-                    <span>
-                      <strong>Attachments:</strong> {item.attachments?.length || 0}
-                    </span>
-                    <span>
-                      <strong>Updated:</strong> {formatInstant(item.updatedAt)}
-                    </span>
-                  </div>
-
-                  {item.expiresAt && (
-                    <p className="submission-log-expiry">
-                      <strong>Closes:</strong> {formatInstant(item.expiresAt)}
-                    </p>
-                  )}
-                </div>
-
-                <div className="submission-log-footer">
-                  <code className="audit-reference">problems/{item.id}</code>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => setExpanded(isExpanded ? null : item.id)}
-                  >
-                    {isExpanded ? "Hide receipt" : "View receipt"}
+      {!loading && visibleItems.length > 0 && (
+        <table className="audit-nav-table">
+          <thead>
+            <tr>
+              <th scope="col">Status</th>
+              <th scope="col">Title</th>
+              <th scope="col">Organisation</th>
+              <th scope="col">Audit</th>
+              <th scope="col">Submitted</th>
+              <th scope="col"><span className="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleItems.map((item) => (
+              <tr className="audit-nav-row" key={item.id}>
+                <td><StatusBadge status={item.status} /></td>
+                <td>
+                  <strong>{item.title || "Untitled"}</strong>
+                  <div className="table-row-meta"><code>problems/{item.id}</code></div>
+                </td>
+                <td>{item.organisation || "—"}</td>
+                <td><AuditStatusBadge audit={item.audit} /></td>
+                <td>{formatInstant(item.createdAt)}</td>
+                <td>
+                  <button type="button" className="secondary small" onClick={() => setSelected(item)}>
+                    View receipt
                   </button>
-                </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
-                {isExpanded && (
-                  <AuditReceipt
-                    audit={receiptFor(item, variant)}
-                    entityLabel={variant.entityLabel}
-                    eventLabel={variant.eventLabel}
-                    actorRole={variant.actorRole}
-                    firebaseReference={`problems/${item.id}`}
-                    onVerify={() => variant.readAudit(item)}
-                  />
-                )}
-              </article>
-            );
-          })}
-        </div>
+      {selected && (
+        <AuditDetailPane title={selected.title || "Untitled"} onClose={() => setSelected(null)}>
+          <div className="submission-log-meta">
+            <span><strong>Organisation:</strong> {selected.organisation || "—"}</span>
+            <span><strong>Owner:</strong> <code>{shortenAddress(selected.ownerId)}</code></span>
+            <span><strong>{variant.fundingLabel}:</strong> {formatAmount(selected.amount, selected.currency)}</span>
+            <span><strong>Attachments:</strong> {selected.attachments?.length || 0}</span>
+            {kind === "posting" && selected.categories?.length > 0 && (
+              <span><strong>Categories:</strong> {selected.categories.map(categoryLabel).join(", ")}</span>
+            )}
+            {kind === "funding" && selected.tags?.length > 0 && (
+              <span><strong>Tags:</strong> {selected.tags.join(", ")}</span>
+            )}
+            {selected.expiresAt && (
+              <span><strong>Closes:</strong> {formatInstant(selected.expiresAt)}</span>
+            )}
+          </div>
+          {kind === "posting" && selected.summary && <p className="submission-log-preview">{selected.summary}</p>}
+          {kind === "funding" && selected.fundingThesis && <p className="submission-log-preview">{selected.fundingThesis}</p>}
+          {kind === "funding" && selected.eligibilityNotes && (
+            <p className="submission-log-preview"><strong>Eligibility:</strong> {selected.eligibilityNotes}</p>
+          )}
+          <AuditReceipt
+            audit={receiptFor(selected, variant)}
+            entityLabel={variant.entityLabel}
+            eventLabel={variant.eventLabel}
+            actorRole={variant.actorRole}
+            firebaseReference={`problems/${selected.id}`}
+            onVerify={() => variant.readAudit(selected)}
+          />
+        </AuditDetailPane>
       )}
 
       {hasMore && !loading && (

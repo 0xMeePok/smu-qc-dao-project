@@ -431,6 +431,10 @@ describe("proposal audit recovery access", () => {
     assert.equal(listed.opportunity?.id, "audit-parent");
     assert.equal(listed.opportunity?.title, "Parent cooling problem");
     assert.equal(listed.opportunity?.opportunityType, null);
+    const attention = await call("adminListProposalAudits", { status: "attention" }, { token: adminToken });
+    assert.ok(attention.result.items.some((item) => item.id === id));
+    const invalid = await call("adminListProposalAudits", { status: "hacked" }, { token: adminToken });
+    assert.equal(invalid.error?.status, "INVALID_ARGUMENT");
     const reset = await call("adminRetryProposalAudit", { proposalId: id }, { token: adminToken });
     assert.match(reset.result?.message || "", /researcher/);
     const saved = (await db.collection("proposals").doc(id).get()).data();

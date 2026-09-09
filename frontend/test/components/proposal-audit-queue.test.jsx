@@ -40,31 +40,39 @@ const item = {
   opportunity,
 };
 beforeEach(() => mocks.call.mockReset());
-it("shows the queue, expands a receipt, detects mismatch, and retries confirmation", async () => {
+it("groups by parent listing, opens a receipt pane, detects mismatch, and retries confirmation", async () => {
   mocks.call.mockImplementation(async (name) => ({ data: name === "adminListProposalAudits" ? { items: [item], cursor: null }
     : name === "adminVerifyProposalAudit" ? { verified: false } : { message: "Verification confirmed and receipt saved." } }));
   render(<ProposalAuditQueue />);
   expect(await screen.findByText("Quantum routing")).toBeTruthy();
-  expect(screen.getByText(/Responds to/)).toBeTruthy();
-  expect(screen.getByText(/Campus cooling/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "View receipt" }));
+  expect(screen.getByRole("heading", { name: /Campus cooling/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View receipts" }));
   expect(await screen.findByText(/Mismatch detected/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Retry confirmation" }));
   expect(await screen.findByText("Verification confirmed and receipt saved.")).toBeTruthy();
   expect(mocks.call).toHaveBeenCalledWith("adminRetryProposalAudit", { proposalId: "proposal1" });
 });
-it("expands the parent listing audit receipt", async () => {
+it("opens the parent listing audit receipt in the pane", async () => {
   mocks.call.mockResolvedValue({ data: { items: [item], cursor: null } });
   render(<ProposalAuditQueue />);
-  fireEvent.click(await screen.findByRole("button", { name: "View listing receipt" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View receipts" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Listing receipt" }));
   expect((await screen.findAllByText("Funded problem statement submitted")).length).toBeGreaterThan(0);
-  expect(screen.getAllByText("problems/audit-parent").length).toBeGreaterThan(0);
 });
 it("explains when the parent listing is missing", async () => {
   mocks.call.mockResolvedValue({ data: { items: [{ ...item, opportunity: null }], cursor: null } });
   render(<ProposalAuditQueue />);
   expect(await screen.findByText("Parent listing is no longer available.")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "View listing receipt" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "View receipts" }));
+  expect(screen.queryByRole("tab", { name: "Listing receipt" })).toBeNull();
+});
+it("requests a status filter from the server", async () => {
+  mocks.call.mockResolvedValue({ data: { items: [item], cursor: null } });
+  render(<ProposalAuditQueue />);
+  await screen.findByText("Quantum routing");
+  fireEvent.change(screen.getByLabelText("Filter by verification status"), { target: { value: "attention" } });
+  expect(await screen.findByText("Quantum routing")).toBeTruthy();
+  expect(mocks.call).toHaveBeenCalledWith("adminListProposalAudits", { cursor: null, status: "attention" });
 });
 it("shows retryable loading errors and the empty state after refresh", async () => {
   mocks.call.mockRejectedValueOnce(new Error("Network unavailable")).mockResolvedValue({ data: { items: [], cursor: null } });
