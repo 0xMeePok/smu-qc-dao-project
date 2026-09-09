@@ -35,6 +35,53 @@ const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_PER_SOURCE = 100;
 const RATE_LIMIT_GLOBAL = 1000;
 
+function isoTimestamp(value) {
+  if (value == null || value === "") return null;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  if (typeof value === "string") return value;
+  return null;
+}
+
+function attachmentMetadata(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.map((item) => ({
+    id: item?.id ?? "",
+    name: item?.name ?? "",
+    size: Number(item?.size ?? 0),
+    contentType: item?.contentType || "application/pdf",
+  }));
+}
+
+/** Parent listing fields the admin proposal queue needs to render and re-hash an audit receipt. */
+function serializeOpportunityForAdmin(id, data) {
+  if (!data) return null;
+  return {
+    id,
+    ownerId: data.ownerId || "",
+    organisation: data.organisation || "",
+    title: data.title || "",
+    status: data.status || "",
+    opportunityType: data.opportunityType || null,
+    businessContext: data.businessContext || "",
+    summary: data.summary || "",
+    currentApproach: data.currentApproach || "",
+    currentLimitations: data.currentLimitations || "",
+    expectedOutcome: data.expectedOutcome || "",
+    successCriteria: data.successCriteria || "",
+    dataAvailability: data.dataAvailability || "",
+    fundingThesis: data.fundingThesis || "",
+    eligibilityNotes: data.eligibilityNotes || "",
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    amount: data.amount ?? null,
+    currency: data.currency || "",
+    expiresAt: isoTimestamp(data.expiresAt),
+    attachments: attachmentMetadata(data.attachments),
+    audit: data.audit || null,
+  };
+}
+
 // There is deliberately no per-address cooldown any more. It was an attempt to limit
 // how often a pending nonce could be overwritten; getSiweNonce now never overwrites
 // one at all, so repeat calls for an address are harmless AND cheaper than before -
@@ -525,9 +572,22 @@ export const confirmProposalAudit = onCall({ region: REGION, maxInstances: 5 }, 
   catch (error) { throw new HttpsError("unavailable", error.message); }
 });
 
+const PROPOSAL_AUDIT_STATUSES = new Set(["failed", "waiting-wallet", "pending", "confirmed"]);
+const PROPOSAL_AUDIT_ATTENTION = ["failed", "waiting-wallet"];
+
 export const adminListProposalAudits = onCall({ region: REGION }, async (request) => {
   await requireAdmin(request);
-  let query = db.collection(AUDIT_JOBS).orderBy("updatedAt", "desc");
+  const status = request.data?.status;
+  let query = db.collection(AUDIT_JOBS);
+  if (status === "attention") {
+    query = query.where("status", "in", PROPOSAL_AUDIT_ATTENTION);
+  } else if (status && status !== "all") {
+    if (!PROPOSAL_AUDIT_STATUSES.has(status)) {
+      throw new HttpsError("invalid-argument", "Invalid verification status filter.");
+    }
+    query = query.where("status", "==", status);
+  }
+  query = query.orderBy("updatedAt", "desc");
   const cursor = request.data?.cursor;
   if (cursor) {
     if (typeof cursor !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(cursor)) throw new HttpsError("invalid-argument", "Invalid page cursor.");
@@ -540,15 +600,29 @@ export const adminListProposalAudits = onCall({ region: REGION }, async (request
   const items = await Promise.all(rows.map(async (row) => {
     const { leaseUntil, ...job } = row.data();
     const proposal = await db.collection("proposals").doc(row.id).get();
-    let audit = proposal.data()?.audit || null;
+    const proposalData = proposal.data();
+    let audit = proposalData?.audit || null;
     if (proposal.exists) {
       try {
-        const prepared = prepareStoredProposal({ ...proposal.data(), id: row.id });
+        const prepared = prepareStoredProposal({ ...proposalData, id: row.id });
         audit = { schemaVersion: 1, chainId: 421614, status: "queued", attemptCount: 0, ...audit,
           entityId: prepared.entityId, contentHash: prepared.contentHash, solutionHash: prepared.solutionHash };
       } catch { audit = null; }
     }
-    return { ...job, id: row.id, audit, updatedAt: job.updatedAt.toDate().toISOString(), nextAttemptAt: job.nextAttemptAt.toDate().toISOString() };
+    let opportunity = null;
+    const problemId = typeof proposalData?.problemId === "string" ? proposalData.problemId : "";
+    if (problemId) {
+      const parent = await db.collection("problems").doc(problemId).get();
+      opportunity = parent.exists ? serializeOpportunityForAdmin(parent.id, parent.data()) : null;
+    }
+    return {
+      ...job,
+      id: row.id,
+      audit,
+      opportunity,
+      updatedAt: job.updatedAt.toDate().toISOString(),
+      nextAttemptAt: job.nextAttemptAt.toDate().toISOString(),
+    };
   }));
   return { items, cursor: page.size > 25 ? rows.at(-1).id : null };
 });

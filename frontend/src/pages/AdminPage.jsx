@@ -8,11 +8,13 @@ import { RoleChangeModal } from "../components/RoleChangeModal.jsx";
 import { SuspendUserModal } from "../components/SuspendUserModal.jsx";
 import { AdminAudit } from "../components/RoleViews.jsx";
 import { ProposalAuditQueue } from "../components/ProposalAuditQueue.jsx";
+import { PostingSubmissionLogs } from "../components/PostingSubmissionLogs.jsx";
+import { FundingSubmissionLogs } from "../components/FundingSubmissionLogs.jsx";
 
 export default function AdminPage() {
   const { isSignedIn, isChecking, profile, address } = useSession();
 
-  const [activeTab, setActiveTab] = useState("users"); // "users" | "audits"
+  const [activeTab, setActiveTab] = useState("users"); // "users" | "proposals" | "postings" | "funding" | "audits"
   const [users, setUsers] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -129,11 +131,13 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div className="admin-tabs-nav" role="tablist">
+      <div className="admin-tabs-nav" role="tablist" aria-label="Administrator sections">
         <button
           type="button"
+          id="admin-tab-users"
           role="tab"
           aria-selected={activeTab === "users"}
+          aria-controls="admin-panel-users"
           className={`admin-tab-btn ${activeTab === "users" ? "active" : ""}`}
           onClick={() => setActiveTab("users")}
         >
@@ -141,8 +145,43 @@ export default function AdminPage() {
         </button>
         <button
           type="button"
+          id="admin-tab-proposals"
+          role="tab"
+          aria-selected={activeTab === "proposals"}
+          aria-controls="admin-panel-proposals"
+          className={`admin-tab-btn ${activeTab === "proposals" ? "active" : ""}`}
+          onClick={() => setActiveTab("proposals")}
+        >
+          Proposal Audit Trail
+        </button>
+        <button
+          type="button"
+          id="admin-tab-postings"
+          role="tab"
+          aria-selected={activeTab === "postings"}
+          aria-controls="admin-panel-postings"
+          className={`admin-tab-btn ${activeTab === "postings" ? "active" : ""}`}
+          onClick={() => setActiveTab("postings")}
+        >
+          Problem Statement Logs
+        </button>
+        <button
+          type="button"
+          id="admin-tab-funding"
+          role="tab"
+          aria-selected={activeTab === "funding"}
+          aria-controls="admin-panel-funding"
+          className={`admin-tab-btn ${activeTab === "funding" ? "active" : ""}`}
+          onClick={() => setActiveTab("funding")}
+        >
+          Open Funding Logs
+        </button>
+        <button
+          type="button"
+          id="admin-tab-audits"
           role="tab"
           aria-selected={activeTab === "audits"}
+          aria-controls="admin-panel-audits"
           className={`admin-tab-btn ${activeTab === "audits" ? "active" : ""}`}
           onClick={() => setActiveTab("audits")}
         >
@@ -151,32 +190,72 @@ export default function AdminPage() {
       </div>
 
       <div className="admin-tab-content">
-        {activeTab === "users" ? (
-          <UserManagementTable
-            users={users}
-            loading={loading}
-            isFetching={isFetching}
-            error={error}
-            search={search}
-            onSearchChange={setSearch}
-            roleFilter={roleFilter}
-            onRoleFilterChange={(val) => {
-              setRoleFilter(val);
-              setPage(1);
-            }}
-            orgFilter={orgFilter}
-            onOrgFilterChange={setOrgFilter}
-            page={page}
-            totalPages={totalPages}
-            onPageChange={setPage}
-            totalUsers={totalUsers}
-            onChangeRole={(u) => setRoleChangeTarget(u)}
-            onToggleSuspend={(u) => setSuspendTarget(u)}
-            onRefresh={loadUsers}
-            currentAdminAddress={address}
-          />
-        ) : (
-          <><ProposalAuditQueue /><AdminAudit /></>
+        {activeTab === "users" && (
+          <div
+            id="admin-panel-users"
+            role="tabpanel"
+            aria-labelledby="admin-tab-users"
+          >
+            <UserManagementTable
+              users={users}
+              loading={loading}
+              isFetching={isFetching}
+              error={error}
+              search={search}
+              onSearchChange={setSearch}
+              roleFilter={roleFilter}
+              onRoleFilterChange={(val) => {
+                setRoleFilter(val);
+                setPage(1);
+              }}
+              orgFilter={orgFilter}
+              onOrgFilterChange={setOrgFilter}
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              totalUsers={totalUsers}
+              onChangeRole={(u) => setRoleChangeTarget(u)}
+              onToggleSuspend={(u) => setSuspendTarget(u)}
+              onRefresh={loadUsers}
+              currentAdminAddress={address}
+            />
+          </div>
+        )}
+        {activeTab === "proposals" && (
+          <div
+            id="admin-panel-proposals"
+            role="tabpanel"
+            aria-labelledby="admin-tab-proposals"
+          >
+            <ProposalAuditQueue />
+          </div>
+        )}
+        {activeTab === "postings" && (
+          <div
+            id="admin-panel-postings"
+            role="tabpanel"
+            aria-labelledby="admin-tab-postings"
+          >
+            <PostingSubmissionLogs />
+          </div>
+        )}
+        {activeTab === "funding" && (
+          <div
+            id="admin-panel-funding"
+            role="tabpanel"
+            aria-labelledby="admin-tab-funding"
+          >
+            <FundingSubmissionLogs />
+          </div>
+        )}
+        {activeTab === "audits" && (
+          <div
+            id="admin-panel-audits"
+            role="tabpanel"
+            aria-labelledby="admin-tab-audits"
+          >
+            <AdminAudit />
+          </div>
         )}
       </div>
 

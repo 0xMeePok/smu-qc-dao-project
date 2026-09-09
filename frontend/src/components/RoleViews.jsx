@@ -1,6 +1,6 @@
 import { ProposalList } from "./ProposalList.jsx";
-import { useCallback, useEffect, useState } from "react";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { collection, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Modal } from "./Modal.jsx";
@@ -327,42 +327,48 @@ export function AdminAudit() {
   const [data, setData] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [filterType, setFilterType] = useState("all");
+  const cursorRef = useRef(null);
+  const PAGE_SIZE = 25;
 
-  const fetchAudits = async () => {
+  const fetchAudits = async ({ append = false } = {}) => {
     if (!user?.id || !db) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (append) setLoadingMore(true);
+    else {
+      setLoading(true);
+      setData([]);
+      cursorRef.current = null;
+      setHasMore(false);
+    }
     setError(null);
     try {
-      const querySnapshot = await getDocs(collection(db, "audits"));
+      const constraints = [];
+      if (filterType === "role_change") constraints.push(where("type", "==", "role_change"));
+      if (filterType === "suspension") constraints.push(where("type", "==", "suspension_change"));
+      constraints.push(orderBy("timestamp", "desc"));
+      if (append && cursorRef.current) constraints.push(startAfter(cursorRef.current));
+      constraints.push(limit(PAGE_SIZE));
+      const querySnapshot = await getDocs(query(collection(db, "audits"), ...constraints));
       const items = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      // Sort by timestamp descending if available
-      items.sort((a, b) => {
-        const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
-        const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
-        return tB - tA;
-      });
-      setData(items);
+      cursorRef.current = querySnapshot.docs[querySnapshot.docs.length - 1] || null;
+      setHasMore(querySnapshot.docs.length === PAGE_SIZE);
+      setData((current) => append ? [...current, ...items] : items);
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
     fetchAudits();
-  }, [user?.id]);
-
-  const filteredData = data.filter((item) => {
-    if (filterType === "all") return true;
-    if (filterType === "role_change") return item.type === "role_change" || item.action === "ROLE_CHANGE";
-    if (filterType === "suspension") return item.type === "suspension_change" || item.action?.includes("SUSPEND");
-    return true;
-  });
+  }, [user?.id, filterType]);
 
   return (
     <div className="card-table">
@@ -378,11 +384,11 @@ export function AdminAudit() {
             onChange={(e) => setFilterType(e.target.value)}
             aria-label="Filter audit log entries"
           >
-            <option value="all">All Events ({data.length})</option>
+            <option value="all">All Events</option>
             <option value="role_change">Role Changes</option>
             <option value="suspension">Suspensions & Reinstatements</option>
           </select>
-          <button className="secondary small" type="button" onClick={fetchAudits} title="Refresh Audit Log">
+          <button className="secondary small" type="button" onClick={() => fetchAudits()} title="Refresh Audit Log">
             ↻ Refresh
           </button>
         </div>
@@ -394,94 +400,75 @@ export function AdminAudit() {
         <div className="error-banner" style={{ padding: "1.5rem", margin: "1rem" }}>
           <strong>Error loading audit log:</strong> {error.message}
         </div>
-      ) : filteredData.length === 0 ? (
+      ) : data.length === 0 ? (
         <div style={{ padding: "2.5rem", textAlign: "center", color: "#888" }}>
           No audit events found for the selected filter.
         </div>
       ) : (
-        <div className="audit-list">
-          {filteredData.map((item) => {
+        <>
+        <table className="audit-nav-table">
+          <thead>
+            <tr>
+              <th scope="col">Event</th>
+              <th scope="col">Summary</th>
+              <th scope="col">When</th>
+            </tr>
+          </thead>
+          <tbody>
+          {data.map((item) => {
             const isRoleChange = item.type === "role_change" || item.action === "ROLE_CHANGE";
             const isSuspension = item.type === "suspension_change" || item.action?.includes("SUSPEND");
             const dateStr = item.timestamp?.toDate
-              ? item.timestamp.toDate().toLocaleString()
+              ? formatInstant(item.timestamp)
               : item.createdAt?.toDate
-              ? item.createdAt.toDate().toLocaleString()
+              ? formatInstant(item.createdAt)
               : "Recent";
+            const eventLabel = isRoleChange
+              ? "ROLE TRANSITION"
+              : isSuspension
+                ? item.newState
+                  ? "ACCOUNT SUSPENDED"
+                  : "ACCOUNT REINSTATED"
+                : item.action || "SYSTEM EVENT";
+            const summary = isRoleChange
+              ? `${item.actorName || item.actor} → ${item.targetName || item.targetAddress}`
+              : isSuspension
+                ? `${item.actorName || item.actor} ${item.newState ? "suspended" : "reinstated"} ${item.targetName || item.targetAddress}`
+                : (item.title || item.action || "Audit Record");
 
             return (
-              <div className="audit-item-card" key={item.id}>
-                <div className="audit-card-top">
-                  <div className="audit-tag-row">
-                    <span
-                      className={`audit-type-badge ${
-                        isRoleChange
-                          ? "badge-role-change"
-                          : isSuspension
+              <tr className="audit-nav-row" key={item.id}>
+                <td>
+                  <span
+                    className={`audit-type-badge ${
+                      isRoleChange
+                        ? "badge-role-change"
+                        : isSuspension
                           ? "badge-suspension"
                           : "badge-system"
-                      }`}
-                    >
-                      {isRoleChange
-                        ? "ROLE TRANSITION"
-                        : isSuspension
-                        ? item.newState
-                          ? "ACCOUNT SUSPENDED"
-                          : "ACCOUNT REINSTATED"
-                        : item.action || "SYSTEM EVENT"}
-                    </span>
-                    <span className="audit-timestamp">{dateStr}</span>
-                  </div>
-                </div>
-
-                <div className="audit-card-body">
-                  {isRoleChange && (
-                    <div className="audit-details">
-                      <p className="audit-statement">
-                        Admin <strong>{item.actorName || item.actor}</strong> modified role assignment for{" "}
-                        <strong>{item.targetName || item.targetAddress}</strong>:
-                      </p>
-                      <div className="audit-transition-pill">
-                        <span>{item.previousRole === 1 ? "Administrator (1)" : "User (0)"}</span>
-                        <span className="arrow">→</span>
-                        <strong>{item.newRole === 1 ? "Administrator (1)" : "User (0)"}</strong>
-                      </div>
-                    </div>
-                  )}
-
-                  {isSuspension && (
-                    <div className="audit-details">
-                      <p className="audit-statement">
-                        Admin <strong>{item.actorName || item.actor}</strong> {item.newState ? "suspended" : "reinstated"}{" "}
-                        account <strong>{item.targetName || item.targetAddress}</strong>.
-                      </p>
-                    </div>
-                  )}
-
-                  {!isRoleChange && !isSuspension && (
-                    <div className="audit-details">
-                      <strong>{item.title || item.action || "Audit Record"}</strong>
-                    </div>
-                  )}
-
-                  {item.reason && (
-                    <div className="audit-reason-box">
-                      <span className="reason-label">Written Reason:</span>
-                      <span className="reason-text">"{item.reason}"</span>
-                    </div>
-                  )}
-
-                  <div className="audit-meta-row">
-                    <small>Actor: <code>{item.actor}</code></small>
-                    {item.targetAddress && (
-                      <small>Target: <code>{item.targetAddress}</code></small>
-                    )}
-                  </div>
-                </div>
-              </div>
+                    }`}
+                  >
+                    {eventLabel}
+                  </span>
+                </td>
+                <td>
+                  {summary}
+                  {item.reason && <div className="table-row-meta">{item.reason}</div>}
+                </td>
+                <td>{dateStr}</td>
+              </tr>
             );
           })}
-        </div>
+          </tbody>
+        </table>
+        {hasMore && (
+          <div className="submission-log-more">
+            <button className="secondary" type="button" disabled={loadingMore} onClick={() => fetchAudits({ append: true })}>
+              {loadingMore ? "Loading more…" : "Load more"}
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );
