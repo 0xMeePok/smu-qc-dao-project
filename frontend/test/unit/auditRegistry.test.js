@@ -18,13 +18,17 @@ import {
   hashAuditPayload,
   opportunityEntityId,
   prepareOpportunityCommit,
+  prepareOpportunityUpdate,
+  prepareOpportunityWithdrawal,
   prepareProposalCommit,
   prepareProposalUpdate,
+  prepareProposalWithdrawal,
   proposalEntityId,
   readOpportunityRevisionIndex,
   updateProposalAudit,
   verifyOpportunityAudit,
   verifyProposalAudit,
+  writeOpportunityAudit,
 } from "../../src/lib/auditRegistry.js";
 
 const CONTRACT = DEFAULT_AUDIT_REGISTRY_ADDRESS;
@@ -45,19 +49,20 @@ function unused() {
 describe("AuditRegistry canonical hash scheme", () => {
   it("uses the existing fixed-hash AuditRegistry write signatures", () => {
     const writes = AUDIT_REGISTRY_ABI.filter((entry) =>
-      ["commitOpportunity", "commitProposal"].includes(entry.name));
+      ["commitOpportunity", "updateOpportunity", "withdrawOpportunity",
+        "commitProposal", "updateHashes", "withdrawProposal"].includes(entry.name));
     assert.equal(AUDIT_REGISTRY_CHAIN_ID, 421614);
     assert.match(DEFAULT_AUDIT_REGISTRY_ADDRESS, /^0x[0-9a-fA-F]{40}$/);
     assert.notEqual(DEFAULT_AUDIT_REGISTRY_ADDRESS.toLowerCase(), `0x${"0".repeat(40)}`);
     assert.equal(AUDIT_REGISTRY_ADDRESS, DEFAULT_AUDIT_REGISTRY_ADDRESS);
     assert.equal(AUDIT_HASH_SCHEME, 1);
-    assert.equal(writes.length, 2);
+    assert.equal(writes.length, 6);
     assert.equal(writes.find((entry) => entry.name === "commitOpportunity").inputs.length, 4);
+    assert.equal(writes.find((entry) => entry.name === "updateOpportunity").inputs.length, 3);
+    assert.equal(writes.find((entry) => entry.name === "withdrawOpportunity").inputs.length, 2);
     assert.equal(writes.find((entry) => entry.name === "commitProposal").inputs.length, 5);
-    assert.equal(
-      AUDIT_REGISTRY_ABI.find((entry) => entry.name === "updateHashes").inputs.length,
-      4,
-    );
+    assert.equal(writes.find((entry) => entry.name === "updateHashes").inputs.length, 4);
+    assert.equal(writes.find((entry) => entry.name === "withdrawProposal").inputs.length, 2);
     assert.equal(AUDIT_REGISTRY_ABI.some((entry) =>
       ["recordEvaluation", "evaluationAt", "evaluationCount"].includes(entry.name)), false);
   });
@@ -126,6 +131,21 @@ describe("AuditRegistry argument preparation", () => {
     assert.equal(prepared.args.length, 4);
   });
 
+  it("maps an already-anchored opportunity onto updateOpportunity", () => {
+    const update = prepareOpportunityUpdate({
+      recordId: "posting-123",
+      payload: OPPORTUNITY_PAYLOAD,
+      kind: "business-problem",
+      expiresAt: new Date("2026-12-01T00:00:00Z"),
+    });
+    assert.equal(update.functionName, "updateOpportunity");
+    assert.deepEqual(update.args, [
+      opportunityEntityId("posting-123"),
+      update.contentHash,
+      1_796_083_200n,
+    ]);
+  });
+
   it("prepares separate proposal and solution hashes", () => {
     const proposal = prepareProposalCommit({
       recordId: "proposal-123",
@@ -168,6 +188,39 @@ describe("AuditRegistry argument preparation", () => {
       update.solutionHash,
       3,
     ]);
+  });
+
+  it("QCDAO-57 commits to the withdrawal reason without publishing it", () => {
+    const withdrawal = (reason, researcherId = "0xABCdef0000000000000000000000000000000000") =>
+      prepareProposalWithdrawal({ recordId: "proposal-123", researcherId, reason });
+    const stated = withdrawal("The costing was wrong.");
+    assert.equal(stated.functionName, "withdrawProposal");
+    assert.deepEqual(stated.args, [stated.entityId, stated.contentHash]);
+    // AuditRegistry.withdrawProposal rejects a zero evidence hash.
+    assert.match(stated.contentHash, /^0x[0-9a-f]{64}$/);
+    assert.notEqual(stated.contentHash, `0x${"0".repeat(64)}`);
+    // The reason is the disputed part, so a reworded one is a different hash and
+    // cannot be passed off as what was originally given.
+    assert.notEqual(withdrawal("A more flattering reason.").contentHash, stated.contentHash);
+    // Wallet casing is not part of the claim.
+    assert.equal(withdrawal("The costing was wrong.", "0xabcdef0000000000000000000000000000000000").contentHash, stated.contentHash);
+    // The same proposal always anchors under the same entity id.
+    assert.equal(stated.entityId, proposalEntityId("proposal-123"));
+    assert.throws(() => withdrawal("   "), /reason is required/);
+  });
+
+  it("QCDAO-57 commits to the opportunity withdrawal reason without publishing it", () => {
+    const withdrawal = (reason, ownerId = "0xABCdef0000000000000000000000000000000000") =>
+      prepareOpportunityWithdrawal({ recordId: "posting-123", ownerId, reason });
+    const stated = withdrawal("The budget was withdrawn.");
+    assert.equal(stated.functionName, "withdrawOpportunity");
+    assert.deepEqual(stated.args, [stated.entityId, stated.contentHash]);
+    assert.match(stated.contentHash, /^0x[0-9a-f]{64}$/);
+    assert.notEqual(stated.contentHash, `0x${"0".repeat(64)}`);
+    assert.notEqual(withdrawal("A more flattering reason.").contentHash, stated.contentHash);
+    assert.equal(withdrawal("The budget was withdrawn.", "0xabcdef0000000000000000000000000000000000").contentHash, stated.contentHash);
+    assert.equal(stated.entityId, opportunityEntityId("posting-123"));
+    assert.throws(() => withdrawal("   "), /reason is required/);
   });
 });
 
@@ -214,6 +267,89 @@ describe("AuditRegistry transaction lifecycle", () => {
     assert.deepEqual(statuses, ["queued", "submitted", "pending", "pending", "pending", "confirmed"]);
     assert.equal(result.transactionHash, TX_HASH);
     assert.equal(result.blockNumber, 99n);
+  });
+
+  it("edits a live opportunity with updateOpportunity instead of a second commit", async () => {
+    const prepared = prepareOpportunityCommit({
+      recordId: "posting-123",
+      payload: OPPORTUNITY_PAYLOAD,
+      kind: 0,
+      expiresAt: 1_796_083_200,
+    });
+    const calls = [];
+    const result = await writeOpportunityAudit(prepared, {
+      address: CONTRACT,
+      account: ACCOUNT,
+      adapters: {
+        writeContract: async (request) => {
+          calls.push(request.functionName);
+          return TX_HASH;
+        },
+        waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 12n }),
+        readContract: async ({ functionName }) => {
+          if (functionName === "opportunityRevisionCount") return 1n;
+          if (functionName === "getOpportunity") {
+            return { contentHash: `0x${"9".repeat(64)}` };
+          }
+          return unused();
+        },
+      },
+    });
+    assert.deepEqual(calls, ["updateOpportunity"]);
+    assert.equal(result.transactionHash, TX_HASH);
+  });
+
+  it("publishes a new opportunity with commitOpportunity", async () => {
+    const prepared = prepareOpportunityCommit({
+      recordId: "posting-123",
+      payload: OPPORTUNITY_PAYLOAD,
+      kind: 0,
+      expiresAt: 1_796_083_200,
+    });
+    const calls = [];
+    await writeOpportunityAudit(prepared, {
+      address: CONTRACT,
+      account: ACCOUNT,
+      adapters: {
+        writeContract: async (request) => {
+          calls.push(request.functionName);
+          return TX_HASH;
+        },
+        waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 8n }),
+        readContract: async ({ functionName }) => {
+          if (functionName === "opportunityRevisionCount") return 0n;
+          return unused();
+        },
+      },
+    });
+    assert.deepEqual(calls, ["commitOpportunity"]);
+  });
+
+  it("refuses a no-op updateOpportunity instead of opening the wallet", async () => {
+    const prepared = prepareOpportunityCommit({
+      recordId: "posting-123",
+      payload: OPPORTUNITY_PAYLOAD,
+      kind: 0,
+      expiresAt: 1_796_083_200,
+    });
+    await assert.rejects(
+      writeOpportunityAudit(prepared, {
+        address: CONTRACT,
+        account: ACCOUNT,
+        adapters: {
+          writeContract: unused,
+          waitForTransactionReceipt: unused,
+          readContract: async ({ functionName }) => {
+            if (functionName === "opportunityRevisionCount") return 1n;
+            if (functionName === "getOpportunity") {
+              return { contentHash: prepared.contentHash };
+            }
+            return unused();
+          },
+        },
+      }),
+      /already anchored/,
+    );
   });
 
   it("caps transient retries and never retries a rejection or revert", () => {

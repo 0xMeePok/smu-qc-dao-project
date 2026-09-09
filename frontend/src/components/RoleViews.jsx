@@ -5,6 +5,7 @@ import { db } from "../lib/firebase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Modal } from "./Modal.jsx";
 import { POSTING_STATUS_DRAFT, deletePosting, listOwnPostings } from "../lib/postings.js";
+import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ROLE_LABELS } from "../config/roles.js";
 
@@ -79,13 +80,25 @@ export function MyProblems({ onNavigate }) {
         </div>
         <div className="table-row-actions">
           {isDraft && <span className="draft-badge">Draft</span>}
+          {item.status === "cancelled" && <span className="draft-badge">Withdrawn</span>}
           <button
             className="text-button"
             type="button"
-            onClick={() => onNavigate(isDraft ? `create/${item.id}` : `posting/${item.id}`)}
+            onClick={() => onNavigate(isDraft
+              ? (item.opportunityType === OPEN_FUNDING_TYPE ? `create-funding/${item.id}` : `create/${item.id}`)
+              : `posting/${item.id}`)}
           >
             {isDraft ? "Resume editing" : "View"}
           </button>
+          {!isDraft && ["submitted", "open"].includes(item.status) && (
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => onNavigate(`edit-posting/${item.id}`)}
+            >
+              Edit
+            </button>
+          )}
           {isDraft && (
             <button
               className="text-button danger-text"
@@ -212,13 +225,13 @@ export function EvaluatorQueue() {
           <RoleBadge role="evaluator" />
           <span>Panel: {user?.org}</span>
         </div>
-        <h1>Evaluation & Peer Review Queue</h1>
-        <p>Conduct double-blind technical assessments, assign criterion scores, and sign review hashes for on-chain anchoring.</p>
+        <h1>Evaluation queue</h1>
+        <p>Review assigned submissions, assign criterion scores, and record your evaluation.</p>
       </div>
 
       <div className="card-table">
         <div className="table-header">
-          <h3>Assigned Blind Submissions</h3>
+          <h3>Assigned submissions</h3>
         </div>
         
         {loading ? (

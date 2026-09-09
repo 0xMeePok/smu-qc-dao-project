@@ -43,6 +43,7 @@ jobs:
             "${IMAGE}" \
             detect \
               --source=/repo \
+              --gitleaks-ignore-path=/repo/.gitleaksignore \
               --verbose \
               --redact \
               --exit-code=1 \

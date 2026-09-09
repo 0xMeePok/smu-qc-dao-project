@@ -1,6 +1,7 @@
 import {
   estimateFeesPerGas as wagmiEstimateFeesPerGas,
   readContract as wagmiReadContract,
+  simulateContract as wagmiSimulateContract,
   waitForTransactionReceipt as wagmiWaitForTransactionReceipt,
   writeContract as wagmiWriteContract,
 } from "wagmi/actions";
@@ -13,7 +14,75 @@ import { wagmiConfig } from "./wagmi.js";
 import { isTransactionFeeTooLow } from "./errors.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
-import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, prepareOpportunityCommit, prepareProposalCommit, prepareProposalUpdate } from "../../../firebase/functions/auditCanonical.js";
+import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, asOpportunityUpdate, prepareOpportunityCommit, prepareOpportunityUpdate, prepareOpportunityWithdrawal, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal } from "../../../firebase/functions/auditCanonical.js";
+
+// Arbitrum has no priority auction, so estimateFeesPerGas legitimately returns a
+// zero tip on Sepolia - and MetaMask then refuses to send, with "Priority fee must
+// be greater than 0" in its own advanced-fee dialog. The transaction is fine; the
+// wallet's validation is not satisfied by a zero. 0.01 gwei is the smallest value
+// that clears it: at ~200k gas it costs about 2e-6 ETH of testnet funds.
+const MIN_PRIORITY_FEE_WEI = 10_000_000n;
+
+function revertErrorName(error) {
+  const named = error?.cause?.data?.errorName
+    ?? error?.data?.errorName
+    ?? error?.cause?.cause?.data?.errorName;
+  if (named) return String(named);
+  const text = [error?.shortMessage, error?.message, error?.cause?.message]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (/accessdenied/.test(text)) return "AccessDenied";
+  if (/invalidstate/.test(text)) return "InvalidState";
+  if (/invalidinput/.test(text)) return "InvalidInput";
+  return "";
+}
+
+export function auditRevertMessage(functionName, errorName) {
+  if (errorName === "AccessDenied") {
+    return "Connect the wallet that owns this record on Arbitrum Sepolia.";
+  }
+  const messages = {
+    commitOpportunity: {
+      InvalidInput: "This opportunity is already on-chain. An edit must call updateOpportunity, not a second commit.",
+    },
+    updateOpportunity: {
+      InvalidInput: "The registry refused this edit. The opportunity may not exist on this contract, or this exact content was already anchored.",
+      InvalidState: "This opportunity cannot be edited: it has been withdrawn or has expired.",
+    },
+    withdrawOpportunity: {
+      InvalidInput: "This opportunity is not on the configured AuditRegistry, so it cannot be withdrawn on-chain.",
+      InvalidState: "This opportunity has already been withdrawn on-chain.",
+    },
+    commitProposal: {
+      InvalidInput: "This proposal is already on-chain. An edit must call updateHashes, not a second commit.",
+      InvalidState: "This proposal cannot be filed: the opportunity is closed, expired, or the revision changed.",
+    },
+    updateHashes: {
+      InvalidInput: "The registry refused this amendment. This exact revision is already anchored, so change something before signing again.",
+      InvalidState: "This proposal cannot be amended: the opportunity is closed, expired, or was updated after you opened the form.",
+    },
+    withdrawProposal: {
+      InvalidInput: "This proposal is not on the configured AuditRegistry, so it cannot be withdrawn on-chain.",
+      InvalidState: "This proposal has already been withdrawn on-chain.",
+    },
+  };
+  return messages[functionName]?.[errorName]
+    ?? (errorName === "InvalidState"
+      ? "The registry rejected this transaction because the record is not in a state that allows it."
+      : errorName === "InvalidInput"
+        ? "The registry rejected this transaction. The record may not exist on this contract."
+        : "The verification transaction would revert. No wallet confirmation was opened.");
+}
+
+export function decorateAuditRevert(error, functionName) {
+  const errorName = revertErrorName(error);
+  const wrapped = new Error(auditRevertMessage(functionName, errorName));
+  wrapped.cause = error;
+  wrapped.auditErrorName = errorName;
+  wrapped.auditFunctionName = functionName;
+  return wrapped;
+}
 
 export function createWagmiAuditAdapters(config = wagmiConfig) {
   return {
@@ -29,10 +98,33 @@ export function createWagmiAuditAdapters(config = wagmiConfig) {
       }
       // Leave room for base-fee changes while the wallet confirmation is open.
       // This raises the spending cap, not the priority fee or gas units consumed.
+      const feeCap = maxFeePerGas * 2n;
+      // Never above the cap: a tip larger than the total fee is an invalid
+      // transaction, which matters on a chain whose base fee is itself tiny.
+      const priorityFee = maxPriorityFeePerGas > 0n
+        ? maxPriorityFeePerGas
+        : (MIN_PRIORITY_FEE_WEI < feeCap ? MIN_PRIORITY_FEE_WEI : feeCap);
+      // Simulate before the wallet opens. A reverting call on Arbitrum does not
+      // fail estimateGas cleanly — the node returns a block-sized gas limit, and
+      // MetaMask prices that as thousands of ETH. The registry write that should
+      // run is still writeContract; simulation only refuses a call that cannot
+      // succeed (wrong function for the id, wrong wallet, reused hash, expired).
+      try {
+        await wagmiSimulateContract(config, {
+          address: request.address,
+          abi: request.abi,
+          functionName: request.functionName,
+          args: request.args,
+          account: request.account,
+          chainId: request.chainId,
+        });
+      } catch (error) {
+        throw decorateAuditRevert(error, request.functionName);
+      }
       return wagmiWriteContract(config, {
         ...request,
-        maxFeePerGas: maxFeePerGas * 2n,
-        maxPriorityFeePerGas,
+        maxFeePerGas: feeCap,
+        maxPriorityFeePerGas: priorityFee,
       });
     },
     waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
@@ -233,6 +325,37 @@ export function commitOpportunityAudit(input, options) {
   );
 }
 
+export function updateOpportunityAudit(input, options) {
+  return executePreparedAudit(
+    preparedFor(input, prepareOpportunityUpdate, "updateOpportunity"),
+    options,
+  );
+}
+
+/**
+ * First publication is commitOpportunity. A later edit of the same entity id is
+ * updateOpportunity — sending commit again reverts InvalidInput (id taken) and
+ * is what made MetaMask show a multi-million-dollar gas estimate.
+ */
+export async function writeOpportunityAudit(input, options = {}) {
+  const prepared = preparedFor(input, prepareOpportunityCommit, "commitOpportunity");
+  if (await readOpportunityIsAnchored(prepared.entityId, options)) {
+    const actual = await readWithRetries("getOpportunity", [prepared.entityId], options);
+    if (sameHex(tupleField(actual, "contentHash", 2), prepared.contentHash)) {
+      throw new Error("This content is already anchored on Arbitrum Sepolia. Change the posting before signing again.");
+    }
+    return executePreparedAudit(asOpportunityUpdate(prepared), options);
+  }
+  return executePreparedAudit(prepared, options);
+}
+
+export function withdrawOpportunityAudit(input, options) {
+  return executePreparedAudit(
+    preparedFor(input, prepareOpportunityWithdrawal, "withdrawOpportunity"),
+    options,
+  );
+}
+
 export function commitProposalAudit(input, options) {
   return executePreparedAudit(
     preparedFor(input, prepareProposalCommit, "commitProposal"),
@@ -243,6 +366,13 @@ export function commitProposalAudit(input, options) {
 export function updateProposalAudit(input, options) {
   return executePreparedAudit(
     preparedFor(input, prepareProposalUpdate, "updateHashes"),
+    options,
+  );
+}
+
+export function withdrawProposalAudit(input, options) {
+  return executePreparedAudit(
+    preparedFor(input, prepareProposalWithdrawal, "withdrawProposal"),
     options,
   );
 }
@@ -273,6 +403,37 @@ async function readWithRetries(functionName, args, options) {
     options.maxReadRetries ?? 2,
     options.onRetry,
   );
+}
+
+export async function readProposalIsAnchored(proposalId, options = {}) {
+  const entityId = assertBytes32(proposalId, "Proposal id");
+  try {
+    return BigInt(await readWithRetries("revisionCount", [entityId], options)) > 0n;
+  } catch (error) {
+    if (/invalidinput|revert/i.test(error?.message ?? "")) return false;
+    throw error;
+  }
+}
+
+export async function readOpportunityIsAnchored(opportunityId, options = {}) {
+  const entityId = assertBytes32(opportunityId, "Opportunity id");
+  try {
+    return BigInt(await readWithRetries("opportunityRevisionCount", [entityId], options)) > 0n;
+  } catch (error) {
+    if (/invalidinput|revert/i.test(error?.message ?? "")) return false;
+    throw error;
+  }
+}
+
+/** The hashes the registry currently holds, so an amendment can be checked before the wallet opens. */
+export async function readProposalHashes(proposalId, options = {}) {
+  const entityId = assertBytes32(proposalId, "Proposal id");
+  const actual = await readWithRetries("getProposal", [entityId], options);
+  return {
+    proposalHash: String(tupleField(actual, "proposalHash", 4) ?? ""),
+    solutionHash: String(tupleField(actual, "solutionHash", 5) ?? ""),
+    matches: (left, right) => sameHex(left, right),
+  };
 }
 
 export async function readOpportunityRevisionIndex(opportunityId, options = {}) {

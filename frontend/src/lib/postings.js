@@ -1,6 +1,7 @@
 import {
   Timestamp,
   collection,
+  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -32,6 +33,7 @@ import { expiryDateFrom } from "../config/postingCategories.js";
 
 export const POSTING_STATUS_SUBMITTED = "submitted";
 export const POSTING_STATUS_DRAFT = "draft";
+export const POSTING_STATUS_CANCELLED = "cancelled";
 
 /** Reserves a posting id without writing anything. Call before the first upload. */
 export function newPostingId() {
@@ -281,6 +283,59 @@ export async function publishDraft({
   const { createdAt, ...record } = built;
   await updateDoc(postingRef(postingId), record);
   return findPosting(postingId);
+}
+
+/** Removes a live opportunity from the marketplace after its on-chain withdrawal. */
+export async function withdrawPosting(id, reason) {
+  requireFirebase();
+  const withdrawalReason = String(reason ?? "").trim();
+  if (withdrawalReason.length < 2) throw new Error("Give a reason for withdrawing this opportunity.");
+  if (withdrawalReason.length > 1000) throw new Error("Use 1,000 characters or fewer.");
+  await updateDoc(postingRef(id), {
+    status: POSTING_STATUS_CANCELLED,
+    withdrawalReason,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Chain-first correction. `record` is the document that was hashed; it must be
+ * reused rather than rebuilt so expiresAt and status stay the ones that were
+ * anchored. `createdAt` is immutable.
+ */
+export async function updatePosting({
+  postingId, ownerId, organisation, form, attachments = [], record: preparedRecord = null, audit = null,
+}) {
+  requireFirebase();
+  const built = preparedRecord
+    ? { ...preparedRecord }
+    : buildPostingDocument({ ownerId, organisation, form, attachments });
+  const { createdAt, ...record } = built;
+  await updateDoc(postingRef(postingId), {
+    ...record,
+    audit: audit ? { ...audit } : deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+  return findPosting(postingId);
+}
+
+/**
+ * The revisions rule gives the owner every entry and other members only the
+ * statuses at which the posting itself is readable. Both branches test
+ * `resource.data`, so an unfiltered list cannot be proven safe and Firestore
+ * refuses it outright - the query has to carry the matching filter.
+ */
+export const MEMBER_READABLE_REVISION_STATUSES = ["submitted", "open", "cancelled"];
+
+export async function listOpportunityRevisions(postingId, { uid, isOwner = false } = {}) {
+  requireFirebase();
+  const constraint = isOwner
+    ? where("ownerId", "==", String(uid ?? "").toLowerCase())
+    : where("status", "in", MEMBER_READABLE_REVISION_STATUSES);
+  const snapshot = await getDocs(query(collection(db, "problems", postingId, "revisions"), constraint));
+  return snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort((a, b) => (b.at?.toMillis?.() || 0) - (a.at?.toMillis?.() || 0));
 }
 
 /** Every posting this wallet owns, drafts included, newest first. */

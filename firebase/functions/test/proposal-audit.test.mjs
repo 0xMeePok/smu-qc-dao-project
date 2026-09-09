@@ -56,16 +56,40 @@ function store(record) {
 
 describe("QCDAO-75 proposal golden vectors", () => {
   it("keeps frontend and server deployment manifests in sync", () => assert.deepEqual(registry, frontendRegistry));
-  for (const [type, proposalHash, anchorHash] of [
-    ["business-problem", "0xc11114c067b8fdd034585e139b7f94f0a32fc679134e460812a51474cb4fe51b", "0x6d82c2af4687964318a5605e0656f5d0af8d28d3fac979b1f0cc141423526094"],
-    ["open-funding", "0x8e517189ffb6b93a87e62c00b2e7da3d23197293a41e7579da17e95671533f53", "0x6dfbff480faeafce0ee6b4649e980948d0ad3a83e599f2259cffe8b0a29dda74"],
+  // solutionHash and anchorHash were re-pinned when the solution payload widened
+  // from {methodology, attachments} to the whole record. proposalHash is unchanged.
+  // Proposals anchored before that change no longer reproduce their solutionHash.
+  for (const [type, proposalHash, solutionHash, anchorHash] of [
+    ["business-problem",
+      "0xc11114c067b8fdd034585e139b7f94f0a32fc679134e460812a51474cb4fe51b",
+      "0xf0843423a325700dfed5b373da5e516f7737532304ee9fa0ca793b7f813a9e39",
+      "0x61fc8098318ca3466d9e7826646884a6b7d01d268d83a6545cd26e4d828ba232"],
+    ["open-funding",
+      "0x8e517189ffb6b93a87e62c00b2e7da3d23197293a41e7579da17e95671533f53",
+      "0xa700e69b064420371b72f7a88dc9c38c9290c21c0b1d7ca2d6f548738686ee54",
+      "0x3cc9405555645722500e67427201971a9ee02e20bfdf2a777b4cb453916853a4"],
   ]) it(`reproduces ${type} v1 hashes`, () => {
     const record = fixture(type), prepared = prepareStoredProposal(record);
     assert.equal(prepared.proposalHash, proposalHash);
-    assert.equal(prepared.solutionHash, "0x391f4fc0d062179dd35eefb29335de8980febcb17a0e22c61f6c07d0f4da366f");
+    assert.equal(prepared.solutionHash, solutionHash);
     assert.equal(prepared.anchorHash, anchorHash);
     assert.equal(prepareStoredProposal({ ...record, status: "withdrawn", updatedAt: Timestamp.now() }).proposalHash, proposalHash);
     assert.notEqual(prepareStoredProposal({ ...record, amount: 1200.26 }).proposalHash, proposalHash);
+  });
+  it("separates the two opportunity types by solution hash", () => {
+    // The old {methodology, attachments} slice gave both types the same hash.
+    assert.notEqual(
+      prepareStoredProposal(fixture("business-problem")).solutionHash,
+      prepareStoredProposal(fixture("open-funding")).solutionHash,
+    );
+  });
+  it("moves the solution hash when any field moves, so an amendment is never a replay", () => {
+    // AuditRegistry records each hash once per proposal; attachments are frozen
+    // after submission, so a title-only edit has to move this hash too.
+    const base = prepareStoredProposal(fixture());
+    const edited = prepareStoredProposal({ ...fixture(), title: "Quantum routing, corrected" });
+    assert.notEqual(edited.solutionHash, base.solutionHash);
+    assert.notEqual(edited.proposalHash, base.proposalHash);
   });
   it("binds the solution hash to attachment bytes", () => {
     const attachment = { id: "attachment01", name: "evidence.pdf", size: 200, contentType: "application/pdf",
@@ -81,6 +105,31 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
     const record = fixture(type);
     const result = await verifyMinedProposal(record, clientFor(record));
     assert.equal(result.status, "confirmed"); assert.equal(result.blockNumber, 88);
+  });
+  it("QCDAO-57 confirms a corrected proposal re-anchored through updateHashes", async () => {
+    const record = fixture();
+    const expected = prepareStoredProposal(record);
+    const client = clientFor(record);
+    // A corrected proposal keeps its entity id, so its second anchoring is an
+    // amendment. Both calls carry the same hashes for the same stored record;
+    // refusing the amendment would leave a corrected proposal unconfirmable.
+    const amended = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
+      input: encodeFunctionData({ abi: registry.abi, functionName: "updateHashes",
+        args: [expected.entityId, expected.proposalHash, expected.solutionHash, expected.expectedOpportunityRevisionIndex] }) }) };
+    const result = await verifyMinedProposal(record, amended);
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.contentHash, expected.contentHash);
+    // Still pinned to this record: an amendment carrying another proposal's
+    // hashes is a mismatch, exactly as a commit would be.
+    const forged = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
+      input: encodeFunctionData({ abi: registry.abi, functionName: "updateHashes",
+        args: [expected.entityId, `0x${"9".repeat(64)}`, expected.solutionHash, 0] }) }) };
+    await assert.rejects(verifyMinedProposal(record, forged), /Mismatch/);
+    // A call that is neither is not a way to confirm anything.
+    const unrelated = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
+      input: encodeFunctionData({ abi: registry.abi, functionName: "withdrawProposal",
+        args: [expected.entityId, expected.contentHash] }) }) };
+    await assert.rejects(verifyMinedProposal(record, unrelated), /Mismatch/);
   });
   it("detects changed content and attachments instead of trusting receipt hashes", async () => {
     const record = fixture();

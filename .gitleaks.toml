@@ -1,0 +1,14 @@
+title = "QCDAO"
+
+# Keep the default rule set and carve out the known false positives below.
+# .gitleaksignore fingerprints are commit-SHA specific; this allowlist applies
+# to every commit that still contains those example files.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public Arbitrum Sepolia token addresses in faucet examples and tests, not live secrets"
+paths = [
+  '''(^|/)contracts/stable-faucet/site/\.env\.example$''',
+  '''(^|/)contracts/stable-faucet/site/tests/api\.test\.ts$''',
+]

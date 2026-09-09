@@ -245,17 +245,113 @@ export function prepareProposalCommit({
   });
 }
 
-export function prepareProposalUpdate(input) {
-  const proposal = prepareProposalCommit(input);
+export function asProposalUpdate(operation) {
   return prepared({
-    ...proposal,
+    ...operation,
     functionName: "updateHashes",
     args: [
-      proposal.entityId,
-      proposal.proposalHash,
-      proposal.solutionHash,
-      proposal.expectedOpportunityRevisionIndex,
+      operation.entityId,
+      operation.proposalHash,
+      operation.solutionHash,
+      operation.expectedOpportunityRevisionIndex,
     ],
+  });
+}
+
+export function prepareProposalUpdate(input) {
+  return asProposalUpdate(prepareProposalCommit(input));
+}
+
+export function asOpportunityUpdate(operation) {
+  return prepared({
+    ...operation,
+    functionName: "updateOpportunity",
+    args: [operation.entityId, operation.contentHash, operation.args[3]],
+  });
+}
+
+export function prepareOpportunityUpdate(input) {
+  return asOpportunityUpdate(prepareOpportunityCommit(input));
+}
+
+/** Last argument of commitProposal / updateHashes is the viewed opportunity revision. */
+export function withOpportunityRevisionIndex(operation, revisionIndex) {
+  const index = Number(revisionIndex);
+  if (!Number.isInteger(index) || index < 0 || index > 4_294_967_295) {
+    throw new TypeError("Expected opportunity revision index must fit uint32.");
+  }
+  return prepared({
+    ...operation,
+    expectedOpportunityRevisionIndex: index,
+    args: [...operation.args.slice(0, -1), index],
+  });
+}
+
+export function prepareOpportunityWithdrawal({
+  recordId,
+  ownerId,
+  reason,
+  hashScheme = AUDIT_HASH_SCHEME,
+}) {
+  const entityId = opportunityEntityId(recordId, { hashScheme });
+  const text = String(reason ?? "").trim();
+  if (!text) throw new TypeError("A withdrawal reason is required.");
+  const canonicalPayload = canonicalizeAuditPayload(
+    AUDIT_ENTITY_TYPE.OPPORTUNITY,
+    {
+      document: "withdrawal",
+      value: {
+        recordId: String(recordId ?? "").trim(),
+        ownerId: String(ownerId ?? "").trim().toLowerCase(),
+        reason: text,
+      },
+    },
+    { hashScheme },
+  );
+  const evidenceHash = keccak256(stringToHex(canonicalPayload));
+  return prepared({
+    entityType: AUDIT_ENTITY_TYPE.OPPORTUNITY,
+    entityId,
+    contentHash: evidenceHash,
+    anchorHash: evidenceHash,
+    canonicalPayload,
+    hashScheme,
+    functionName: "withdrawOpportunity",
+    args: [entityId, evidenceHash],
+  });
+}
+
+export function prepareProposalWithdrawal({
+  recordId,
+  researcherId,
+  reason,
+  hashScheme = AUDIT_HASH_SCHEME,
+}) {
+  const entityId = proposalEntityId(recordId, { hashScheme });
+  const text = String(reason ?? "").trim();
+  if (!text) throw new TypeError("A withdrawal reason is required.");
+  const canonicalPayload = canonicalizeAuditPayload(
+    AUDIT_ENTITY_TYPE.PROPOSAL,
+    {
+      document: "withdrawal",
+      value: {
+        recordId: String(recordId ?? "").trim(),
+        researcherId: String(researcherId ?? "").trim().toLowerCase(),
+        reason: text,
+      },
+    },
+    { hashScheme },
+  );
+  const evidenceHash = keccak256(stringToHex(canonicalPayload));
+  return prepared({
+    entityType: AUDIT_ENTITY_TYPE.PROPOSAL,
+    entityId,
+    contentHash: evidenceHash,
+    anchorHash: evidenceHash,
+    canonicalPayload,
+    hashScheme,
+    functionName: "withdrawProposal",
+    args: [entityId, evidenceHash],
   });
 }
 

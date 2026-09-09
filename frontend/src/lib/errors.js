@@ -83,10 +83,20 @@ export function auditErrorMessage(error) {
     return "The wallet retry limit has been reached. Ask an administrator to reset verification attempts.";
   }
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
-  if (/revert|invalidstate|invalidinput/i.test(error?.message ?? "")) {
+  const text = String(error?.message ?? "");
+  // These phrases are OUR OWN copy, written by auditRevertMessage and the
+  // pre-flight checks, so echoing them is showing a reviewed message back.
+  if (/already anchored|updateOpportunity, not a second commit|updateHashes, not a second commit|already been withdrawn|cannot be edited|cannot be amended|cannot be withdrawn|cannot be filed|not on the configured AuditRegistry|Connect the wallet that owns/i.test(text)) {
+    return text;
+  }
+  if (/revert|invalidstate|invalidinput/i.test(text)) {
     return "The verification transaction reverted. Check the opportunity's status and revision before retrying.";
   }
-  return "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
+  // Deliberately the underlying text: a transient RPC or wallet failure is the
+  // user's cue to retry, and a generic string leaves them with nothing to act on.
+  // Nothing secret is exposed - the registry address ships in the client bundle
+  // and revert data is public chain state. See create-posting.test.jsx QCDAO-79.
+  return text || "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
 export function messageForFirebaseError(error) {

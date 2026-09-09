@@ -1,11 +1,15 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auditShouldFail: false,
   connectedAddress: `0x${"a".repeat(40)}`,
   events: [],
+  resumed: null,
+  saveDraft: vi.fn(),
+  navigate: vi.fn(),
+  uploader: { onPendingChange: null },
 }));
 
 vi.mock("wagmi", () => ({
@@ -42,11 +46,21 @@ vi.mock("../../src/lib/fundingOpportunities.js", () => ({
     mocks.events.push("firestore");
     return { id: args.opportunityId, ...args.record };
   },
+  updateFundingOpportunity: vi.fn(),
+  FUNDING_STATUS_DRAFT: "draft",
+  saveFundingDraft: (...args) => mocks.saveDraft(...args),
+  publishFundingDraft: async (args) => {
+    mocks.events.push("firestore");
+    return { id: args.opportunityId, ...args.record };
+  },
 }));
+
+vi.mock("../../src/lib/postings.js", () => ({ findPosting: async () => mocks.resumed }));
 
 vi.mock("../../src/lib/fundingOpportunityAudit.js", () => ({
   fundingOpportunityAuditReceipt: (opportunity) => opportunity.audit ?? null,
   readFundingOpportunityAudit: async () => ({ verified: true }),
+  receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
   anchorFundingOpportunityAudit: async (_opportunity, options) => {
     mocks.events.push("audit");
     if (mocks.auditShouldFail) throw new Error("RPC unavailable");
@@ -70,6 +84,13 @@ vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
   ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));
 
+vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
+  AttachmentUploader: ({ onPendingChange }) => {
+    mocks.uploader.onPendingChange = onPendingChange;
+    return <div data-testid="uploader" />;
+  },
+}));
+
 const { default: CreateFundingOpportunityPage } = await import(
   "../../src/pages/CreateFundingOpportunityPage.jsx"
 );
@@ -90,6 +111,10 @@ beforeEach(() => {
   mocks.auditShouldFail = false;
   mocks.connectedAddress = `0x${"a".repeat(40)}`;
   mocks.events = [];
+  mocks.resumed = null;
+  mocks.navigate.mockReset();
+  mocks.uploader.onPendingChange = null;
+  mocks.saveDraft.mockReset().mockResolvedValue({ id: "funding123", status: "draft", updatedAt: new Date("2026-09-08T10:00:00Z") });
 });
 afterEach(cleanup);
 
@@ -148,5 +173,85 @@ describe("[QCDAO-51] create open funding", () => {
 
     expect((await screen.findByRole("dialog")).textContent).toContain("Reconnect wallet");
     expect(mocks.events).toEqual([]);
+  });
+});
+
+describe("QCDAO-57 open-funding drafts", () => {
+  const start = async (props = {}) => {
+    render(<CreateFundingOpportunityPage onNavigate={mocks.navigate} {...props} />);
+    await screen.findByRole("button", { name: "Save as draft" });
+  };
+  const typeTitle = (value) =>
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value } });
+
+  it("saves an unfinished funding form without demanding the missing fields", async () => {
+    await start();
+    typeTitle("Open call, first pass");
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+    await waitFor(() => expect(mocks.saveDraft).toHaveBeenCalledTimes(1));
+    const [call] = mocks.saveDraft.mock.calls[0];
+    expect(call.form.title).toBe("Open call, first pass");
+    expect(call.exists).toBe(false);
+    // Nothing was anchored or published: a draft is private and unverified.
+    expect(mocks.events).toEqual([]);
+    expect(await screen.findByText(/Draft saved/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+    await waitFor(() => expect(mocks.saveDraft).toHaveBeenCalledTimes(2));
+    expect(mocks.saveDraft.mock.calls[1][0].exists).toBe(true);
+  });
+
+  it("offers to save when leaving with unsaved work", async () => {
+    await start();
+    typeTitle("Half an idea");
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(screen.getByText(/save this as a draft/i)).toBeTruthy();
+    expect(screen.getByText(/pick it up from My Problems later/i)).toBeTruthy();
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the form was never touched", async () => {
+    await start();
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(screen.queryByText(/save this as a draft/i)).toBeNull();
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("discover"));
+  });
+
+  it("saves then leaves, and stays put if the save fails", async () => {
+    mocks.saveDraft.mockRejectedValueOnce(new Error("Network unavailable"));
+    await start();
+    typeTitle("Half an idea");
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft and leave" }));
+    await waitFor(() => expect(mocks.saveDraft).toHaveBeenCalled());
+    // Leaving on a rejected save would discard the work the prompt offered to keep.
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft and leave" }));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("discover"));
+  });
+
+  it("does not save a draft while an attachment is still uploading", async () => {
+    await start();
+    await waitFor(() => expect(typeof mocks.uploader.onPendingChange).toBe("function"));
+    await act(async () => { mocks.uploader.onPendingChange(1); });
+    const save = screen.getByRole("button", { name: "Save as draft" });
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(mocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it("resumes a saved draft and publishes it in place", async () => {
+    mocks.resumed = {
+      id: "funding-draft-1", opportunityType: "open-funding", status: "draft",
+      title: "Open call, first pass", fundingThesis: "Fund resilient supply chains.",
+      eligibilityNotes: "Universities may apply.", categories: ["quantum"],
+      amount: 250000, currency: "USDC", updatedAt: new Date("2026-09-08T10:00:00Z"),
+    };
+    await start({ resumeId: "funding-draft-1" });
+    await waitFor(() => expect(screen.getByLabelText("Title").value).toBe("Open call, first pass"));
+    expect(screen.getByText(/Draft saved/)).toBeTruthy();
+    // Resuming and changing nothing is not unsaved work.
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(screen.queryByText(/save this as a draft/i)).toBeNull();
   });
 });

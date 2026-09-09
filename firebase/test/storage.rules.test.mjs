@@ -212,10 +212,11 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-OPD-128] allows delete-then-upload, so replacing a file is still possible", async () => {
-    // Immutability must not become "you can never fix a wrong upload". The
-    // supported path is removal followed by a new attachment, which changes the
-    // posting record visibly.
+  it("[BIT-OPD-128] allows delete-then-upload on a draft, so replacing a file is still possible", async () => {
+    // Immutability must not become "you can never fix a wrong upload" before
+    // publication. The supported draft path is removal followed by a new
+    // attachment. After publish, the object itself is frozen (see the
+    // unlink-then-recreate case below).
     const path = objectPath(OWNER, POSTING, "replaceme.pdf");
     const storage = env.authenticatedContext(OWNER).storage();
 
@@ -266,6 +267,27 @@ describe("storage rules: reading and removing an attachment", () => {
     });
     const storage = env.authenticatedContext(SUSPENDED).storage();
     await assertFails(getBytes(ref(storage, suspendedPath)));
+  });
+
+  it("lets the owner replace a file while the posting is still a draft", async () => {
+    const draftId = "storage-draft-replace";
+    const path = `problems/${OWNER}/${draftId}/support01.pdf`;
+    const metadata = pdfMetadata({ customMetadata: { problemId: draftId } });
+    const owner = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(owner, path), PDF_BYTES, metadata));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", draftId), {
+      ownerId: OWNER, status: "draft",
+      attachments: [{ id: "support01", name: "support.pdf", size: PDF_BYTES.length, contentType: "application/pdf" }],
+    }));
+    await assertSucceeds(deleteObject(ref(owner, path)));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", draftId), {
+      ownerId: OWNER, status: "draft", attachments: [],
+    }));
+    await assertSucceeds(uploadBytes(
+      ref(owner, path),
+      new TextEncoder().encode("%PDF- replacement while still a draft"),
+      metadata,
+    ));
   });
 
   it("[BIT-OPD-133] lets the owner delete their own attachment (remove-before-publish)", async () => {
@@ -397,10 +419,109 @@ describe("proposal supporting PDFs", () => {
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), { researcherId: OWNER, postingOwnerId: OTHER, status: "submitted" }));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
     await assertSucceeds(getBytes(ref(author, path)));
+    // Submitted freezes the prefix: no delete, no extra upload, no overwrite.
     await assertFails(deleteObject(ref(author, path)));
-    await assertFails(uploadBytes(ref(author, `proposals/${OWNER}/${proposalId}/support02.pdf`), PDF_BYTES, metadata));
+    await assertFails(uploadBytes(ref(author, `proposals/${OWNER}/${proposalId}/support02.pdf`), PDF_BYTES, pdfMetadata({ customMetadata: { problemId: proposalId } })));
+    await assertFails(uploadBytes(ref(author, path), PDF_BYTES, metadata));
     await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), path)));
   });
+  it("[QCDAO-57] serves open-funding attachments on the same posting path", async () => {
+    // Open funding lives in `problems`, so storage.rules already covers it -
+    // asserted rather than assumed, because the read rule keys off status and
+    // owner and had only ever been exercised against business problems.
+    const fundingId = "storage-open-funding-57";
+    const fundingPath = `problems/${OWNER}/${fundingId}/support01.pdf`;
+    const fundingMetadata = pdfMetadata({ customMetadata: { problemId: fundingId } });
+    const owner = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(owner, fundingPath), PDF_BYTES, fundingMetadata));
+    // Draft: private to the funder who is still writing the call.
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", fundingId), {
+      opportunityType: "open-funding", ownerId: OWNER, status: "draft",
+    }));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), fundingPath)));
+    await assertSucceeds(getBytes(ref(owner, fundingPath)));
+    // Published: any signed-in member may read the terms they are responding to.
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", fundingId), {
+      opportunityType: "open-funding", ownerId: OWNER, status: "submitted",
+    }));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), fundingPath)));
+    await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), fundingPath)));
+  });
+
+  it("[QCDAO-57] lets a draft gain files across sittings and freezes them once submitted", async () => {
+    const draftId = "storage-draft-57";
+    const draftPath = `proposals/${OWNER}/${draftId}/support01.pdf`;
+    const secondPath = `proposals/${OWNER}/${draftId}/support02.pdf`;
+    const draftMetadata = pdfMetadata({ customMetadata: { problemId: draftId } });
+    const author = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(author, draftPath), PDF_BYTES, draftMetadata));
+    // The first save used to freeze the attachments, so a draft could never gain
+    // the file its author came back for. That is the whole point of a draft.
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), { researcherId: OWNER, postingOwnerId: OTHER, status: "draft" }));
+    await assertSucceeds(uploadBytes(ref(author, secondPath), PDF_BYTES, draftMetadata));
+    await assertSucceeds(deleteObject(ref(author, secondPath)));
+    // Another wallet never gets to write into this author's proposal folder.
+    await assertFails(uploadBytes(ref(env.authenticatedContext(OTHER).storage(), secondPath), PDF_BYTES, draftMetadata));
+    // Submit is chain-first: `submitted` with no receipt is already hashed on
+    // chain. Pending and confirmed receipts must not reopen the prefix either.
+    // Delete-then-upload of the same path would replace the bytes while
+    // Firestore still names this object and the on-chain hash still covers it.
+    const submitted = {
+      researcherId: OWNER, postingOwnerId: OTHER, status: "submitted",
+      attachments: [{ id: "support01", sha256: `0x${"4".repeat(64)}` }],
+    };
+    async function assertFrozen() {
+      await assertFails(deleteObject(ref(author, draftPath)));
+      await assertFails(uploadBytes(ref(author, secondPath), PDF_BYTES, draftMetadata));
+      await assertFails(uploadBytes(ref(author, draftPath), new TextEncoder().encode("%PDF- swapped"), draftMetadata));
+    }
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), submitted));
+    await assertFrozen();
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), {
+      ...submitted, audit: { status: "pending", transactionHash: `0x${"b".repeat(64)}` },
+    }));
+    await assertFrozen();
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), {
+      ...submitted, audit: { status: "confirmed", transactionHash: `0x${"c".repeat(64)}` },
+    }));
+    await assertFrozen();
+    // Even if the object is already gone (admin/sweeper), recreate at the
+    // referenced path is refused so a confirmed receipt cannot be silently retargeted.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await deleteObject(ref(ctx.storage(), draftPath));
+    });
+    await assertFails(uploadBytes(ref(author, draftPath), PDF_BYTES, draftMetadata));
+  });
+  it("[BIT-OPD-181] refuses re-uploading a published posting's attachment at the same path", async () => {
+    const swapId = "storage-swap-posting-57";
+    const path = `problems/${OWNER}/${swapId}/support01.pdf`;
+    const metadata = pdfMetadata({ customMetadata: { problemId: swapId } });
+    const owner = env.authenticatedContext(OWNER).storage();
+    await assertSucceeds(uploadBytes(ref(owner, path), PDF_BYTES, metadata));
+    const listed = {
+      ownerId: OWNER, status: "submitted",
+      attachments: [{
+        id: "support01", name: "support.pdf", size: PDF_BYTES.length,
+        contentType: "application/pdf", sha256: `0x${"4".repeat(64)}`,
+      }],
+    };
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", swapId), listed));
+    // Owner delete stays closed after publication, including after the listing
+    // is cleared. Otherwise unlink → delete → upload at {id}.pdf would replace
+    // the bytes behind an unchanged opportunity hash.
+    await assertFails(deleteObject(ref(owner, path)));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", swapId), {
+      ...listed, attachments: [],
+    }));
+    await assertFails(deleteObject(ref(owner, path)));
+    await assertFails(uploadBytes(
+      ref(owner, path),
+      new TextEncoder().encode("%PDF- swapped bytes at the same size"),
+      metadata,
+    ));
+    await assertSucceeds(uploadBytes(ref(owner, `problems/${OWNER}/${swapId}/support09.pdf`), PDF_BYTES, metadata));
+  });
+
   it("refuses sponsor downloads against a draft that forges postingOwnerId", async () => {
     const forgedId = "storage-forged-draft-59";
     const forgedPath = `proposals/${OWNER}/${forgedId}/support01.pdf`;

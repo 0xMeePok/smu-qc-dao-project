@@ -91,6 +91,14 @@ describe("drafts on the owner's workspace", () => {
     expect(onNavigate).toHaveBeenCalledWith("posting/live1");
   });
 
+  it("opens a published posting on the edit form", async () => {
+    const onNavigate = vi.fn();
+    render(<MyProblems onNavigate={onNavigate} />);
+    await waitFor(() => expect(screen.getByText("Cold-chain routing")).toBeTruthy());
+    fireEvent.click(screen.getByText("Edit"));
+    expect(onNavigate).toHaveBeenCalledWith("edit-posting/live1");
+  });
+
   it("[FIT-P50-17] offers delete on drafts only", async () => {
     render(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Cold-chain routing")).toBeTruthy());

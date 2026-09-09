@@ -452,6 +452,10 @@ h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.022em; line
   gap: 8px;
   margin-top: 16px;
 }
+.context-panel-actions > .primary,
+.context-panel-actions > .secondary {
+  width: 100%;
+}
 
 /* BUTTONS & GENERAL UTILITIES */
 .primary, .secondary, .text-button, .back {
@@ -568,7 +572,9 @@ main { display: block; min-height: calc(100vh - var(--header-height) - 140px); }
 .lead { margin: 0 0 28px; color: var(--muted); font-size: 17px; line-height: 1.62; }
 .detail-section { padding-block: 24px; border-top: 1px solid var(--line); }
 .detail-section h2 { margin: 0 0 10px; font-size: 18px; }
-.detail-section p { max-width: 76ch; color: var(--muted); }
+.detail-section p { max-width: 76ch; color: var(--muted); white-space: pre-wrap; }
+.detail-section .card-table { margin-top: 12px; }
+.detail-section .table-empty { padding: 12px 0 0; text-align: left; }
 .context-panel { position: sticky; top: calc(var(--header-height) + 20px); min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-xs); }
 .context-panel > strong { display: block; margin: 10px 0 18px; font-size: 24px; letter-spacing: -0.03em; }
 .context-panel dl { margin: 0; }
@@ -644,6 +650,19 @@ main { display: block; min-height: calc(100vh - var(--header-height) - 140px); }
 .profile-form-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 .profile-link { padding: 0; border: 0; background: transparent; color: var(--brand); font-size: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .profile-link:hover { color: var(--brand-strong); }
+.poster-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: 14px;
+  text-align: left;
+  white-space: normal;
+  text-decoration: none;
+}
+.poster-identity span { text-decoration: underline; text-underline-offset: 3px; }
+.poster-identity small { color: var(--muted); font-size: 12px; font-weight: 500; }
+.poster-identity:hover span { color: var(--brand-strong); }
 .table-row-meta { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 
 /* INPUTS & FORM CONTROLS */
@@ -2767,4 +2786,37 @@ footer > p { margin: 0 auto 0 0; }
   .topbar .user-name { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
   .topbar .signout-btn { min-height: 44px; flex-shrink: 0; }
   .topbar .account-controls .wallet-button { width: 100%; min-height: 44px; justify-content: center; }
+}
+
+/* QCDAO-57 - the post-submission edit trail on a proposal. */
+.revision-trail {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  border-left: 2px solid var(--line);
+}
+
+.revision-trail li {
+  padding: 0 0 14px 14px;
+  position: relative;
+}
+
+.revision-trail li::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+}
+
+.revision-trail li:last-child {
+  padding-bottom: 0;
+}
+
+.revision-trail p {
+  margin: 0 0 2px;
+  font-size: 13px;
 }

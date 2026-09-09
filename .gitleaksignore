@@ -1,0 +1,16 @@
+
+# Public Arbitrum Sepolia token addresses in faucet examples/tests.
+# CI --redact prints these as REDACTED; they are not secret placeholders.
+# Global (no-SHA) fingerprints cover every later commit that still has the line.
+contracts/stable-faucet/site/.env.example:generic-api-key:3
+contracts/stable-faucet/site/.env.example:generic-api-key:4
+contracts/stable-faucet/site/.env.example:generic-api-key:5
+contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:12
+contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:13
+contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:14
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/.env.example:generic-api-key:3
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/.env.example:generic-api-key:4
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/.env.example:generic-api-key:5
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:12
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:13
+ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:14

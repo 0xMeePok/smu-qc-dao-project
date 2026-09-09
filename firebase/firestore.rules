@@ -299,17 +299,18 @@ service cloud.firestore {
         // QCDAO-51 - open funding without a fixed problem statement.
         'opportunityType', 'fundingThesis', 'eligibilityNotes', 'tags',
         'categories', 'currency', 'expiresAt',
-        'attachments', 'audit', 'createdAt', 'updatedAt'
+        'attachments', 'audit', 'createdAt', 'updatedAt', 'withdrawalReason'
       ]);
     }
 
     function hasProposalSchema(data) {
       return data.keys().hasOnly([
-        'researcherId', 'problemId', 'title', 'summary', 'outcomes', 'amount',
-        'status', 'deliverables', 'audit', 'createdAt', 'updatedAt',
+        'researcherId', 'problemId', 'title', 'summary', 'amount',
+        'status', 'audit', 'createdAt', 'updatedAt',
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
         'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
-        'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit'
+        'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit',
+        'withdrawalReason'
       ]); // Required fields are checked by value below and in the write rules.
     }
 
@@ -602,23 +603,25 @@ service cloud.firestore {
           == get(/databases/$(database)/documents/users/$(data.ownerId)).data.organisation;
     }
 
-    // Funding is the starting point here: there must be no fixed problem fields
-    // or posting attachments masquerading as a QCDAO-48 problem statement.
-    function validOpenFunding(data) {
-      return data.keys().hasOnly([
-          'opportunityType', 'ownerId', 'organisation', 'title',
-          'fundingThesis', 'eligibilityNotes', 'categories', 'tags',
-          'amount', 'currency', 'expiresAt', 'status', 'audit',
-          'createdAt', 'updatedAt'
+    function openFundingDraftIsBounded(data) {
+      return optionalString(data, 'title', 160)
+        && optionalString(data, 'fundingThesis', 4000)
+        && optionalString(data, 'eligibilityNotes', 4000)
+        && optionalString(data, 'organisation', 120)
+        && validAmount(data.get('amount', 0))
+        && validCurrency(data.get('currency', 'USDT'))
+        && validCategories(data.get('categories', []))
+        // validFundingTags demands at least one tag, so an unfinished form that
+        // has not reached them yet has to short-circuit.
+        && (data.get('tags', []).size() == 0 || validFundingTags(data.get('tags', [])))
+        && data.get('expiresAt', request.time) is timestamp;
+    }
+
+    function completeOpenFunding(data) {
+      return data.keys().hasAll([
+          'organisation', 'title', 'fundingThesis', 'eligibilityNotes',
+          'categories', 'tags', 'amount', 'currency', 'expiresAt'
         ])
-        && data.keys().hasAll([
-          'opportunityType', 'ownerId', 'organisation', 'title',
-          'fundingThesis', 'eligibilityNotes', 'categories', 'tags',
-          'amount', 'currency', 'expiresAt', 'status', 'createdAt', 'updatedAt'
-        ])
-        && data.opportunityType == 'open-funding'
-        && hasValidAudit(data)
-        && isWalletAddress(data.ownerId)
         && isNonEmptyString(data.title, 160)
         && isNonEmptyString(data.fundingThesis, 4000)
         && isNonEmptyString(data.eligibilityNotes, 4000)
@@ -627,9 +630,29 @@ service cloud.firestore {
         && validAmount(data.amount) && data.amount > 0
         && validCurrency(data.currency)
         && data.expiresAt is timestamp
-        && validProblemStatus(data.status)
         && data.organisation
           == get(/databases/$(database)/documents/users/$(data.ownerId)).data.organisation;
+    }
+
+    // Funding is the starting point here: there must be no fixed problem fields
+    // masquerading as a QCDAO-48 problem statement.
+    function validOpenFunding(data) {
+      return data.keys().hasOnly([
+          'opportunityType', 'ownerId', 'organisation', 'title',
+          'fundingThesis', 'eligibilityNotes', 'categories', 'tags',
+          'amount', 'currency', 'expiresAt', 'status', 'audit',
+          'attachments', 'createdAt', 'updatedAt', 'withdrawalReason'
+        ])
+        // Only what identifies the record. Everything else is required by
+        // completeOpenFunding on the paths that leave `draft`.
+        && data.keys().hasAll(['opportunityType', 'ownerId', 'status', 'createdAt', 'updatedAt'])
+        && data.opportunityType == 'open-funding'
+        && hasValidAudit(data)
+        && isWalletAddress(data.ownerId)
+        && validProblemStatus(data.status)
+        && (data.status == 'draft'
+          ? openFundingDraftIsBounded(data)
+          : completeOpenFunding(data));
     }
 
     function validMarketplaceOpportunity(data) {
@@ -645,12 +668,107 @@ service cloud.firestore {
 
     function validProblemTransition(before, after) {
       return before == after
-        || (before == 'draft' && after in ['submitted', 'open', 'cancelled'])
+        // NOT 'cancelled': that status is member-readable, and a draft has never
+        // been published. Discarding a draft is a delete.
+        || (before == 'draft' && after in ['submitted', 'open'])
         || (before == 'submitted' && after in ['open', 'in_review', 'cancelled'])
         || (before == 'open' && after in ['in_review', 'matched', 'cancelled'])
         || (before == 'in_review' && after in ['open', 'matched', 'cancelled'])
         || (before == 'matched' && after in ['funded', 'completed', 'cancelled'])
         || (before == 'funded' && after in ['completed', 'cancelled']);
+    }
+
+    // A withdrawal carries the owner's reason. Required on the way in - members
+    // who already proposed still read the opportunity, and the chain holds a hash
+    // of these exact words - and frozen after, so the stated reason cannot be
+    // rewritten once the record is disputed.
+    function validOpportunityWithdrawal(before, after) {
+      return after.status == 'cancelled' && before.status != 'cancelled'
+        ? isNonEmptyString(after.get('withdrawalReason', ''), 1000)
+        : after.get('withdrawalReason', '') == before.get('withdrawalReason', '');
+    }
+
+    // Content edits after the first proposal may only touch supporting files.
+    // The funded ask (title, amount, expiry, body text) is what researchers
+    // already responded to. Workflow writes (withdraw, receipt) are not edits.
+    function opportunityProposalCount(problemId) {
+      return exists(/databases/$(database)/documents/opportunityMetrics/$(problemId))
+        ? get(/databases/$(database)/documents/opportunityMetrics/$(problemId)).data.get('proposalCount', 0)
+        : 0;
+    }
+
+    function opportunityEditIsAllowed(before, after, problemId) {
+      return after.diff(before).affectedKeys()
+          .hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason'])
+        || after.diff(before).affectedKeys().hasOnly(['attachments', 'audit', 'updatedAt'])
+        || opportunityProposalCount(problemId) == 0;
+    }
+
+    // Draft writes only. A draft has no audience - nothing has been proposed
+    // against it and no reason published - so it only needs the reason bounded.
+    // Paying for the diff here as well crossed the 1000-expression cap, and
+    // publishing a draft rewrites nearly every key.
+    function opportunityWriteIsAllowed(before, after, problemId) {
+      return after.get('withdrawalReason', '').size() <= 1000;
+    }
+
+    // Only the fields this write actually moved. Everything else was validated
+    // when it was stored and affectedKeys proves it has not moved, so re-deriving
+    // it is pure cost - and that cost is what denied editing a published posting
+    // carrying attachments, well inside Firestore's 1000-expression cap.
+    function editedString(changed, after, field, maxLength) {
+      return !changed.hasAny([field]) || isNonEmptyString(after.get(field, ''), maxLength);
+    }
+
+    function editedOpportunityIsValid(changed, after) {
+      return (opportunityType(after) == 'open-funding'
+          ? (editedString(changed, after, 'title', 160)
+            && editedString(changed, after, 'fundingThesis', 4000)
+            && editedString(changed, after, 'eligibilityNotes', 4000)
+            && (!changed.hasAny(['tags']) || validFundingTags(after.get('tags', []))))
+          : (editedString(changed, after, 'title', 160)
+            && editedString(changed, after, 'summary', 4000)
+            && editedString(changed, after, 'businessContext', 4000)
+            && editedString(changed, after, 'currentApproach', 4000)
+            && editedString(changed, after, 'currentLimitations', 4000)
+            && editedString(changed, after, 'expectedOutcome', 4000)
+            && editedString(changed, after, 'successCriteria', 4000)
+            && editedString(changed, after, 'dataAvailability', 4000)))
+        && (!changed.hasAny(['categories'])
+          || (validCategories(after.get('categories', []))
+            && after.get('categories', []).size() >= 1))
+        && (!changed.hasAny(['amount']) || (validAmount(after.amount) && after.amount > 0))
+        && (!changed.hasAny(['currency']) || validCurrency(after.currency))
+        && (!changed.hasAny(['expiresAt']) || after.expiresAt is timestamp)
+        && (!changed.hasAny(['attachments']) || validAttachments(after, false))
+        && (!changed.hasAny(['status']) || validProblemStatus(after.status));
+    }
+
+    // The whole update contract for a record that is no longer a draft. One diff,
+    // bound once. ownerId, organisation, opportunityType and createdAt are absent
+    // from every key list here, so they are immutable by omission.
+    function validOpportunityUpdate(before, after, problemId) {
+      let changed = after.diff(before).affectedKeys();
+      return validOpportunityWithdrawal(before, after)
+        && hasValidAudit(after)
+        // A stored receipt is the record's on-chain linkage. It may be REPLACED by
+        // a re-anchor, never dropped: hasValidAudit passes an absent map, so an
+        // edit could otherwise erase the receipt and leave nothing pointing at it.
+        && (!before.keys().hasAny(['audit']) || after.keys().hasAny(['audit']))
+        && (changed.hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason'])
+          ? validProblemStatus(after.status)
+          : (changed.hasOnly([
+              'title', 'summary', 'businessContext', 'currentApproach',
+              'currentLimitations', 'expectedOutcome', 'successCriteria',
+              'dataAvailability', 'fundingThesis', 'eligibilityNotes',
+              'categories', 'tags', 'amount', 'currency', 'expiresAt',
+              'status', 'attachments', 'audit', 'updatedAt'
+            ])
+            // Supporting files stay editable after the first proposal; the funded
+            // ask that researchers already responded to does not.
+            && (changed.hasOnly(['attachments', 'audit', 'updatedAt'])
+              || opportunityProposalCount(problemId) == 0)
+            && editedOpportunityIsValid(changed, after)));
     }
 
     function validProblem(data) {
@@ -708,18 +826,49 @@ service cloud.firestore {
               && resource.data.get('postingOwnerId', '') == data.postingOwnerId)));
     }
 
+    function draftProposalTextIsBounded(data) {
+      return optionalString(data, 'title', 160)
+        && optionalString(data, 'summary', 4000)
+        && optionalString(data, 'methodology', 4000)
+        && optionalString(data, 'suitability', 4000)
+        && optionalString(data, 'expectedOutcomes', 4000)
+        && optionalString(data, 'successCriteria', 4000)
+        && optionalString(data, 'timeline', 4000)
+        && optionalString(data, 'milestones', 4000)
+        && optionalString(data, 'team', 4000)
+        && optionalString(data, 'proposedProblem', 4000)
+        && optionalString(data, 'relevance', 4000)
+        && optionalString(data, 'thesisFit', 4000)
+        && optionalString(data, 'category', 80);
+    }
+
     function validProposal(data) {
       return hasProposalSchema(data)
         && hasValidAudit(data)
         && isWalletAddress(data.researcherId)
         && isNonEmptyString(data.problemId, 128)
+        && (data.status == 'draft'
+          ? draftProposalTextIsBounded(data)
+          : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)))
+        // A draft may not have reached the funding question yet. Absent falls
+        // back to zero, which is bounded here and rejected by
+        // validSubmittedProposal's `amount > 0` on every path that leaves draft.
+        && validAmount(data.get('amount', 0))
+        && validProposalStatus(data.status)
+        && trustedPostingOwner(data)
+        && optionalString(data, 'withdrawalReason', 1000);
+    }
+
+    function validProposalSubmission(data, proposalId) {
+      return hasProposalSchema(data)
+        && hasValidAudit(data)
+        && isNonEmptyString(data.problemId, 128)
         && isNonEmptyString(data.title, 160)
         && isNonEmptyString(data.summary, 4000)
         && validAmount(data.amount)
-        && validProposalStatus(data.status)
-        && trustedPostingOwner(data)
-        && optionalString(data, 'deliverables', 4000)
-        && (!data.keys().hasAny(['outcomes']) || stringListIsValid(data.outcomes));
+        && optionalString(data, 'withdrawalReason', 1000)
+        && validAttachments(data, true)
+        && validSubmittedProposal(data, proposalId);
     }
 
     // QCDAO-59/60: the parent is checked at commit time, including when a
@@ -755,6 +904,98 @@ service cloud.firestore {
             && isNonEmptyString(data.relevance, 4000)
             && isNonEmptyString(data.thesisFit, 4000)))
         && slot.proposalId == proposalId;
+    }
+
+    function proposalWorkflowWrite(before, after) {
+      return after.diff(before).affectedKeys()
+        .hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason']);
+    }
+
+    // A withdrawal carries the author's reason. It is required on the way in -
+    // the sponsor reads it on a proposal they can no longer score, and the
+    // revision trail records why the work left evaluation - and frozen after,
+    // so the stated reason cannot be rewritten once the record is disputed.
+    function validProposalWithdrawal(before, after) {
+      return after.status == 'withdrawn' && before.status != 'withdrawn'
+        ? isNonEmptyString(after.get('withdrawalReason', ''), 1000)
+        : after.get('withdrawalReason', '') == before.get('withdrawalReason', '');
+    }
+
+    // The receipt guards that apply to every write EXCEPT a correction, which
+    // necessarily invalidates the content hash the receipt describes.
+    // preservesKnownAuditTransactionHash stops a known hash being rebroadcast;
+    // the second clause stops a confirmed receipt being edited at all, since
+    // `confirmed` is a server attestation the client cannot re-earn.
+    function preservesProposalReceipt(before, after) {
+      return preservesKnownAuditTransactionHash(after)
+        && (before.get('audit', {}).get('status', '') != 'confirmed'
+          || after.get('audit', {}) == before.audit);
+    }
+
+    // The fields a correction may touch. Deliberately checked as a DIFF rather
+    // than through hasProposalSchema: hasOnly compares every key it is handed
+    // against every name in the list, and a correction changes two or three keys
+    // on a document that has twenty-six. The stored record already satisfied the
+    // schema when it was written, so bounding the change bounds the result - and
+    // that difference is what keeps an open-funding correction carrying two
+    // attachments inside Firestore's 1000-expression cap. Everything absent here
+    // is immutable by omission: researcherId, problemId, postingOwnerId,
+    // opportunityType, currency, status, createdAt and withdrawalReason.
+    function correctionTouchesOnlyContent(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+        'title', 'summary', 'category', 'amount', 'attachments',
+        'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
+        'timeline', 'milestones', 'team', 'proposedProblem', 'relevance',
+        'thesisFit', 'audit', 'updatedAt'
+      ]);
+    }
+
+    function validProposalCorrection(before, after) {
+      return before.status == 'submitted'
+        && after.status == 'submitted'
+        && correctionTouchesOnlyContent(before, after)
+        // The content hash has moved, so the receipt that was stored no longer
+        // describes this record and may not survive the write. Anything still in
+        // flight is fine - including `pending` carrying the hash of the
+        // updateHashes amendment the author has just had mined, which is how a
+        // correction arrives now that the chain is written first. What is refused
+        // is a `confirmed` receipt, because that is a server attestation about
+        // content this edit has just replaced. An absent receipt passes too: a
+        // correction made before any anchoring attempt has nothing to carry.
+        && after.get('audit', {}).get('status', 'queued') != 'confirmed'
+        && hasValidAudit(after)
+        // A correction may replace the receipt, never drop it. An absent one still
+        // passes when the stored record never carried one - a correction made
+        // before any anchoring attempt has nothing to preserve.
+        && (!before.keys().hasAny(['audit']) || after.keys().hasAny(['audit']))
+        // The opportunity must still be open. AuditRegistry's updateHashes
+        // refuses to append a revision against a closed one, so allowing the
+        // Firestore write would strand the record with no way to re-anchor it.
+        && acceptsProposals(get(/databases/$(database)/documents/problems/$(after.problemId)).data)
+        // Deliberately NOT validSubmittedProposal. That helper re-derives the
+        // sponsor, the opportunity type and the currency from the parent and
+        // re-reads the author slot, and correctionTouchesOnlyContent has already
+        // made all four immutable - they still hold from submission. Paying for
+        // them again is what crosses the 1000-expression cap here.
+        && isNonEmptyString(after.title, 160)
+        && isNonEmptyString(after.summary, 4000)
+        && validAmount(after.amount) && after.amount > 0
+        && after.category in ['gate-model', 'quantum-inspired', 'quantum-annealing', 'hybrid', 'quantum-adjacent']
+        && isNonEmptyString(after.methodology, 4000)
+        && isNonEmptyString(after.suitability, 4000)
+        && isNonEmptyString(after.expectedOutcomes, 4000)
+        && isNonEmptyString(after.successCriteria, 4000)
+        && isNonEmptyString(after.timeline, 4000)
+        && isNonEmptyString(after.milestones, 4000)
+        && isNonEmptyString(after.team, 4000)
+        && (after.opportunityType != 'open-funding'
+          || (isNonEmptyString(after.proposedProblem, 4000)
+            && isNonEmptyString(after.relevance, 4000)
+            && isNonEmptyString(after.thesisFit, 4000)))
+        // Unchanged attachments were validated when they were attached. Every
+        // proposal that reached `submitted` carried digests, so a replaced list
+        // is held to that standard, not the four-field legacy shape.
+        && (after.attachments == before.attachments || validAttachments(after, true));
     }
 
     function validEvaluationStatus(status) {
@@ -830,12 +1071,19 @@ service cloud.firestore {
       // also matches the posting detail route, which has always required one.
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.ownerId == request.auth.uid
-          || (resource.data.status in ['submitted', 'open']
+          || (resource.data.status in ['submitted', 'open', 'cancelled']
             && hasCompletedProfile(request.auth.uid)));
-      allow delete: if isActiveUser(request.auth.uid) && resource.data.ownerId == request.auth.uid;
+      // Drafts only. Deleting a published document would make storage.rules
+      // treat the prefix as pre-save again (posting == null), which re-opens
+      // owner delete and recreate of the same {id}.pdf behind an on-chain hash.
+      allow delete: if isActiveUser(request.auth.uid)
+        && resource.data.ownerId == request.auth.uid
+        && resource.data.status == 'draft';
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
+        // Nothing has been withdrawn yet, so a reason may only be an empty seed.
+        && request.resource.data.get('withdrawalReason', '') == ''
         && validProblem(request.resource.data)
         && validAttachments(request.resource.data, false)
         // QCDAO-48 posts straight to 'submitted'; 'draft' stays for anything that
@@ -855,25 +1103,37 @@ service cloud.firestore {
         && request.resource.data.ownerId == resource.data.ownerId
         // The AuditRegistry kind is immutable, so its Firestore discriminator is too.
         && opportunityType(request.resource.data) == opportunityType(resource.data)
-        && validProblem(request.resource.data)
-        && validAttachments(request.resource.data, false)
-        // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
-        // let in_review, matched, funded, completed and cancelled take the draft
-        // branch, so a posting could be blanked on its way through those states.
-        // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
-        // let in_review, matched, funded, completed and cancelled skip the
-        // contract, so a posting could be blanked passing through those states.
-        // Bounds and types still apply to a draft - validProblem does that.
-        && (request.resource.data.status == 'draft'
-          || validMarketplaceOpportunity(request.resource.data))
-        // Publishing a draft needs a live expiry. A draft can sit past its own
-        // deadline, and it must not go to the marketplace already closed.
-        && (resource.data.status != 'draft'
-          || !isMarketplaceVisible(request.resource.data.status)
-          || request.resource.data.expiresAt > request.time)
+        // A draft is not key-bounded, so it still pays the whole-document scan.
+        // A published record already passed it, so its write validates the DIFF -
+        // see validOpportunityUpdate.
+        && (resource.data.status == 'draft'
+          ? (opportunityWriteIsAllowed(resource.data, request.resource.data, problemId)
+            && validProblem(request.resource.data)
+            && validAttachments(request.resource.data, false)
+            // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
+            // let in_review, matched, funded, completed and cancelled skip the
+            // contract, so a posting could be blanked passing through those states.
+            && (request.resource.data.status == 'draft'
+              || validMarketplaceOpportunity(request.resource.data))
+            // Publishing a draft needs a live expiry. A draft can sit past its own
+            // deadline, and it must not go to the marketplace already closed.
+            && (!isMarketplaceVisible(request.resource.data.status)
+              || request.resource.data.expiresAt > request.time))
+          : validOpportunityUpdate(resource.data, request.resource.data, problemId))
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validProblemTransition(resource.data.status, request.resource.data.status);
+    }
+
+    match /problems/{problemId}/revisions/{revisionId} {
+      // Server-owned edit trail. Copied ownerId and status let this mirror the
+      // parent read rule without a lookup: a member sees the trail only for the
+      // statuses at which they can see the posting itself.
+      allow read: if isActiveUser(request.auth.uid)
+        && (resource.data.ownerId == request.auth.uid
+          || (resource.data.get('status', '') in ['submitted', 'open', 'cancelled']
+            && hasCompletedProfile(request.auth.uid)));
+      allow write: if false;
     }
     
     match /problems/{problemId}/proposalAuthors/{authorId} {
@@ -905,36 +1165,62 @@ service cloud.firestore {
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.researcherId == request.auth.uid
-        && validProposal(request.resource.data)
-        && validAttachments(request.resource.data, request.resource.data.status == 'submitted')
-        && (request.resource.data.status == 'draft'
-          || (request.resource.data.status == 'submitted'
-            && validSubmittedProposal(request.resource.data, proposalId)))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
-        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId));
+        // Two mutually exclusive shapes, so a create pays for one of them. See
+        // validProposalSubmission for why the submitted path is not validProposal.
+        && (request.resource.data.status == 'draft'
+          ? (validProposal(request.resource.data)
+            && validAttachments(request.resource.data, false)
+            && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId)))
+          : (request.resource.data.status == 'submitted'
+            && validProposalSubmission(request.resource.data, proposalId)));
       // Submitted proposals may update `audit` so a known transaction hash is
       // never rebroadcast. `confirmed` is not client-writable; validProposal
       // rejects it so a researcher cannot mint a sponsor-facing receipt.
       allow update: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
-        && preservesKnownAuditTransactionHash(request.resource.data)
-        && (resource.data.get('audit', {}).get('status', '') != 'confirmed'
-          || request.resource.data.get('audit', {}) == resource.data.audit)
         && request.resource.data.researcherId == resource.data.researcherId
         && request.resource.data.problemId == resource.data.problemId
-        && validProposal(request.resource.data)
-        && validAttachments(request.resource.data, resource.data.status == 'draft' && request.resource.data.status == 'submitted')
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
-        && ((resource.data.status == 'draft'
+        && validProposalWithdrawal(resource.data, request.resource.data)
+        // Three mutually exclusive shapes, and each write pays for only its own.
+        // The content checks in particular are NOT hoisted out: re-validating an
+        // untouched document on a withdrawal - twenty-seven schema keys, every
+        // text bound and both attachment entries - is what pushed withdrawing a
+        // two-attachment proposal past Firestore's 1000-expression cap. The
+        // workflow branch is safe without them because proposalWorkflowWrite has
+        // already proved that nothing outside those four keys moved.
+        && (resource.data.status == 'draft'
+          ? (validProposal(request.resource.data)
+            && validAttachments(request.resource.data, request.resource.data.status == 'submitted')
+            && preservesProposalReceipt(resource.data, request.resource.data)
             && (request.resource.data.status in ['draft', 'withdrawn']
               || (request.resource.data.status == 'submitted'
                 && validSubmittedProposal(request.resource.data, proposalId))))
-          || (resource.data.status != 'draft'
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'audit', 'updatedAt'])
-            && (request.resource.data.status == resource.data.status
-              || (resource.data.status in ['submitted', 'under_review'] && request.resource.data.status == 'withdrawn'))));
+          : (proposalWorkflowWrite(resource.data, request.resource.data)
+            // Only the two fields this write may actually move are checked.
+            // withdrawalReason is bounded by validProposalWithdrawal above.
+            ? (hasValidAudit(request.resource.data)
+              && validProposalStatus(request.resource.data.status)
+              && preservesProposalReceipt(resource.data, request.resource.data)
+              && (request.resource.data.status == resource.data.status
+                || (resource.data.status in ['submitted', 'under_review']
+                  && request.resource.data.status == 'withdrawn')))
+            // A correction validates its own shape; see validProposalCorrection.
+            : validProposalCorrection(resource.data, request.resource.data)));
+    }
+
+    match /proposals/{proposalId}/revisions/{revisionId} {
+      // Both parties are copied onto every entry by the trigger that writes it,
+      // so reading a trail costs no document lookups and a long history stays
+      // inside Firestore's per-query document-access limit. Queries must carry
+      // the matching equality filter; see listProposalRevisions.
+      allow read: if isActiveUser(request.auth.uid)
+        && (resource.data.researcherId == request.auth.uid
+          || resource.data.get('postingOwnerId', '') == request.auth.uid);
+      allow write: if false;
     }
 
     match /evaluations/{evaluationId} {
