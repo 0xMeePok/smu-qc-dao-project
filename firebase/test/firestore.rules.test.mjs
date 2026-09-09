@@ -1574,6 +1574,26 @@ describe("problems/{problemId} open funding opportunity", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "q51_ok"), openFunding()));
   });
 
+  it("[QCDAO-57] refuses a non-owner the funding edit and withdraw write shapes", async () => {
+    // updateFundingOpportunity and withdrawPosting key the write on the document
+    // id alone; canEditOpportunity is UX. These are the exact payloads they send.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_owner"), openFunding()));
+    const other = env.authenticatedContext(OTHER).firestore();
+    const { createdAt, ...edit } = openFunding({ title: "Hijacked funding call" });
+    await assertFails(updateDoc(doc(other, "problems", "q57_owner"), {
+      ...edit, updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(other, "problems", "q57_owner"), {
+      status: "cancelled", withdrawalReason: "Not my call.", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(other, "problems", "q57_owner")));
+    // The owner's own withdrawal still goes through.
+    await assertSucceeds(updateDoc(doc(db, "problems", "q57_owner"), {
+      status: "cancelled", withdrawalReason: "Programme closed.", updatedAt: serverTimestamp(),
+    }));
+  });
+
   it("[QCDAO-51] requires every open-funding field", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     for (const field of [
@@ -1685,6 +1705,19 @@ describe("problems/{problemId} open funding opportunity", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "q51_kind"), openFunding()));
     await assertFails(updateDoc(doc(db, "problems", "q51_kind"), {
       opportunityType: "business-problem",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("withdraws an open-funding call with a frozen reason", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q57_fund_withdraw"), openFunding()));
+    await assertFails(updateDoc(doc(db, "problems", "q57_fund_withdraw"), {
+      status: "cancelled", updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "q57_fund_withdraw"), {
+      status: "cancelled",
+      withdrawalReason: "The programme closed.",
       updatedAt: serverTimestamp(),
     }));
   });
@@ -1936,6 +1969,17 @@ describe("problems/{problemId} drafts", () => {
     await assertSucceeds(deleteDoc(doc(env.authenticatedContext(ADDRESS).firestore(), "problems", "d50_delete")));
   });
 
+  it("refuses the owner deleting a published posting", async () => {
+    // A missing problems/{id} row makes storage.rules treat the prefix as
+    // pre-save, which would re-open owner delete and recreate of {id}.pdf.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d50_keep_published"), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d50_keep_published"), {
+      ...completeFields(), status: "submitted", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(db, "problems", "d50_keep_published")));
+  });
+
   it("[BIT-P50-11] refuses to move createdAt on a later draft save", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "d50_created"), emptyDraft()));
@@ -1969,6 +2013,107 @@ describe("problems/{problemId} drafts", () => {
   it("[BIT-P50-12] refuses an unauthenticated draft save", async () => {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(setDoc(doc(db, "problems", "d50_anon"), emptyDraft()));
+  });
+
+  it("withdraws a published posting with a frozen reason, and refuses a reasonless cancel", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER, {
+        organisation: "Another Lab",
+      }));
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d57_withdraw"), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d57_withdraw"), {
+      ...completeFields(), status: "submitted", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "d57_withdraw"), {
+      status: "cancelled", updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d57_withdraw"), {
+      status: "cancelled",
+      withdrawalReason: "The budget was withdrawn.",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "d57_withdraw"), {
+      withdrawalReason: "A more flattering reason.",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(getDoc(doc(env.authenticatedContext(OTHER).firestore(), "problems", "d57_withdraw")));
+  });
+
+  it("[QCDAO-57] refuses withdrawing a draft, which would publish it to every member", async () => {
+    // `cancelled` is member-readable. A draft never was, so draft -> cancelled
+    // would hand an unpublished posting's competitive detail to the marketplace.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d57_draft_withdraw"), emptyDraft()));
+    await assertFails(updateDoc(doc(db, "problems", "d57_draft_withdraw"), {
+      ...completeFields(), status: "cancelled",
+      withdrawalReason: "Changed my mind before publishing.",
+      updatedAt: serverTimestamp(),
+    }));
+    // Discarding a draft is a delete, and that still works.
+    await assertSucceeds(deleteDoc(doc(db, "problems", "d57_draft_withdraw")));
+  });
+
+  it("[QCDAO-57] refuses a withdrawal reason that arrives before there is anything to withdraw", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "d57_seeded_reason"), {
+      ...emptyDraft(), withdrawalReason: "Seeded at create.",
+    }));
+    await assertSucceeds(setDoc(doc(db, "problems", "d57_seeded_reason"), emptyDraft()));
+    // Nor may a draft grow an unbounded one on the way to being published.
+    await assertFails(updateDoc(doc(db, "problems", "d57_seeded_reason"), {
+      withdrawalReason: "x".repeat(1001), updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[QCDAO-57] serves a revision entry only for the statuses that expose the posting itself", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "problems", "d57_trail"), baseProblem({ status: "matched" }));
+      await setDoc(doc(db, "problems", "d57_trail", "revisions", "r_open"), {
+        ownerId: ADDRESS, actor: ADDRESS, changedFields: ["title"],
+        previousStatus: "submitted", status: "open",
+      });
+      await setDoc(doc(db, "problems", "d57_trail", "revisions", "r_matched"), {
+        ownerId: ADDRESS, actor: ADDRESS, changedFields: [],
+        previousStatus: "open", status: "matched",
+      });
+    });
+    const other = env.authenticatedContext(OTHER).firestore();
+    await assertSucceeds(getDoc(doc(other, "problems", "d57_trail", "revisions", "r_open")));
+    // `matched` is not a status the parent read rule exposes, so its trail entry
+    // must not leak the deal's progress either.
+    await assertFails(getDoc(doc(other, "problems", "d57_trail", "revisions", "r_matched")));
+    const owner = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(getDoc(doc(owner, "problems", "d57_trail", "revisions", "r_matched")));
+    await assertFails(setDoc(doc(owner, "problems", "d57_trail", "revisions", "r_forged"), { ownerId: ADDRESS }));
+  });
+
+  it("locks material fields after the first proposal and still allows attachment edits", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "d57_edit"), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d57_edit"), {
+      ...completeFields(), status: "submitted", updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d57_edit"), {
+      title: "Corrected before any proposal", updatedAt: serverTimestamp(),
+    }));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "opportunityMetrics", "d57_edit"), {
+        problemId: "d57_edit",
+        proposalCount: 1,
+        fundedAmount: 0,
+        fundingProgressPercent: 0,
+        updatedAt: new Date(),
+      });
+    });
+    await assertFails(updateDoc(doc(db, "problems", "d57_edit"), {
+      title: "Changed after a proposal arrived", updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "d57_edit"), {
+      attachments: [], updatedAt: serverTimestamp(),
+    }));
   });
 });
 
@@ -2036,6 +2181,58 @@ describe("problems/{problemId} full client payload", () => {
 
     const { createdAt, ...update } = clientPayload("full_pub", 2);
     await assertSucceeds(updateDoc(doc(db, "problems", "full_pub"), update));
+  });
+
+  it("[QCDAO-57] edits a published business problem carrying two attachments", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "probe_edit"), clientPayload("probe_edit", 2)));
+    const { createdAt, ...edit } = clientPayload("probe_edit", 2, { title: "Corrected title" });
+    await assertSucceeds(updateDoc(doc(db, "problems", "probe_edit"), edit));
+  });
+
+  it("[QCDAO-57] holds the published contract when an edit validates only its diff", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "probe_guard"), clientPayload("probe_guard", 2)));
+    const edit = (fields) => updateDoc(doc(db, "problems", "probe_guard"), {
+      ...fields, updatedAt: serverTimestamp(),
+    });
+    // Blanking is what validFundedPosting used to stop on this path.
+    await assertFails(edit({ title: "" }));
+    await assertFails(edit({ summary: "" }));
+    await assertFails(edit({ dataAvailability: "" }));
+    await assertFails(edit({ amount: 0 }));
+    await assertFails(edit({ categories: [] }));
+    await assertFails(edit({ currency: "DOGE" }));
+    // hasProblemSchema used to catch this; affectedKeys().hasOnly does now.
+    await assertFails(edit({ injectedKey: "hack" }));
+    // Immutable by omission from every key list in validOpportunityUpdate.
+    await assertFails(edit({ ownerId: OTHER }));
+    await assertFails(edit({ organisation: "Someone Else Ltd" }));
+    await assertFails(edit({ opportunityType: "open-funding" }));
+    await assertFails(edit({ createdAt: serverTimestamp() }));
+    // A real correction still goes through.
+    await assertSucceeds(edit({ title: "Corrected title" }));
+  });
+
+  const auditMap = () => ({ schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+    contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "",
+    blockNumber: 0, attemptCount: 0, lastError: "" });
+
+  it("[QCDAO-57] keeps a published posting's receipt from being erased by an edit", async () => {
+    // hasValidAudit passes an ABSENT map, so an edit could drop the receipt and
+    // leave nothing pointing at the anchor. Replacing it stays allowed.
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "rf1_c"), clientPayload("rf1_c", 0, { audit: auditMap() })));
+    await assertFails(updateDoc(doc(db, "problems", "rf1_c"), {
+      audit: deleteField(), updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "rf1_c"), {
+      title: "Corrected", audit: deleteField(), updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "rf1_c"), {
+      audit: { ...auditMap(), status: "submitted", transactionHash: `0x${"3".repeat(64)}` },
+      updatedAt: serverTimestamp(),
+    }));
   });
 
   it("[BIT-P50-18] still refuses an attachment path in another wallet's folder", async () => {

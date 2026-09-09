@@ -28,6 +28,7 @@ import {
 import AdminPage from "./pages/AdminPage.jsx";
 import CreatePostingPage from "./pages/CreatePostingPage.jsx";
 import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
+import OpportunityEditPage from "./pages/OpportunityEditPage.jsx";
 import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { listPublishedPostings } from "./lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
@@ -116,7 +117,7 @@ function WorkspacesDropdown({ route, workspaceRoutes }) {
   const workspaceDescriptions = {
     "my-problems": "Manage owned challenges & proposals",
     "proposals": "Track grant proposals & deliverables",
-    "evaluations": "Conduct blind evaluations & scoring",
+    "evaluations": "Conduct evaluations & scoring",
     "funding": "Oversee capital & escrow releases",
   };
 
@@ -797,6 +798,12 @@ function AppContent() {
         : section === "edit-proposal" ? <CreateProposalPage key={`edit-${id}-${user?.id}`} proposalId={id} onNavigate={go} />
         : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} onNavigate={go} />}
     </RouteGuard>;
+  } else if (section === "edit-posting") {
+    pageComponent = (
+      <RouteGuard targetRoute={fullPath} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
+        <OpportunityEditPage key={`edit-posting-${id}-${user?.id}`} postingId={id} onNavigate={go} />
+      </RouteGuard>
+    );
   } else if (section === "create-funding") {
     // Resuming an open-funding draft. Keyed on the id for the same reason
     // CreatePostingPage is: the opportunity id is seeded once, so without a

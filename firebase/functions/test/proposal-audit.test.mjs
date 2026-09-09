@@ -56,16 +56,40 @@ function store(record) {
 
 describe("QCDAO-75 proposal golden vectors", () => {
   it("keeps frontend and server deployment manifests in sync", () => assert.deepEqual(registry, frontendRegistry));
-  for (const [type, proposalHash, anchorHash] of [
-    ["business-problem", "0xc11114c067b8fdd034585e139b7f94f0a32fc679134e460812a51474cb4fe51b", "0x6d82c2af4687964318a5605e0656f5d0af8d28d3fac979b1f0cc141423526094"],
-    ["open-funding", "0x8e517189ffb6b93a87e62c00b2e7da3d23197293a41e7579da17e95671533f53", "0x6dfbff480faeafce0ee6b4649e980948d0ad3a83e599f2259cffe8b0a29dda74"],
+  // solutionHash and anchorHash were re-pinned when the solution payload widened
+  // from {methodology, attachments} to the whole record. proposalHash is unchanged.
+  // Proposals anchored before that change no longer reproduce their solutionHash.
+  for (const [type, proposalHash, solutionHash, anchorHash] of [
+    ["business-problem",
+      "0xc11114c067b8fdd034585e139b7f94f0a32fc679134e460812a51474cb4fe51b",
+      "0xf0843423a325700dfed5b373da5e516f7737532304ee9fa0ca793b7f813a9e39",
+      "0x61fc8098318ca3466d9e7826646884a6b7d01d268d83a6545cd26e4d828ba232"],
+    ["open-funding",
+      "0x8e517189ffb6b93a87e62c00b2e7da3d23197293a41e7579da17e95671533f53",
+      "0xa700e69b064420371b72f7a88dc9c38c9290c21c0b1d7ca2d6f548738686ee54",
+      "0x3cc9405555645722500e67427201971a9ee02e20bfdf2a777b4cb453916853a4"],
   ]) it(`reproduces ${type} v1 hashes`, () => {
     const record = fixture(type), prepared = prepareStoredProposal(record);
     assert.equal(prepared.proposalHash, proposalHash);
-    assert.equal(prepared.solutionHash, "0x391f4fc0d062179dd35eefb29335de8980febcb17a0e22c61f6c07d0f4da366f");
+    assert.equal(prepared.solutionHash, solutionHash);
     assert.equal(prepared.anchorHash, anchorHash);
     assert.equal(prepareStoredProposal({ ...record, status: "withdrawn", updatedAt: Timestamp.now() }).proposalHash, proposalHash);
     assert.notEqual(prepareStoredProposal({ ...record, amount: 1200.26 }).proposalHash, proposalHash);
+  });
+  it("separates the two opportunity types by solution hash", () => {
+    // The old {methodology, attachments} slice gave both types the same hash.
+    assert.notEqual(
+      prepareStoredProposal(fixture("business-problem")).solutionHash,
+      prepareStoredProposal(fixture("open-funding")).solutionHash,
+    );
+  });
+  it("moves the solution hash when any field moves, so an amendment is never a replay", () => {
+    // AuditRegistry records each hash once per proposal; attachments are frozen
+    // after submission, so a title-only edit has to move this hash too.
+    const base = prepareStoredProposal(fixture());
+    const edited = prepareStoredProposal({ ...fixture(), title: "Quantum routing, corrected" });
+    assert.notEqual(edited.solutionHash, base.solutionHash);
+    assert.notEqual(edited.proposalHash, base.proposalHash);
   });
   it("binds the solution hash to attachment bytes", () => {
     const attachment = { id: "attachment01", name: "evidence.pdf", size: 200, contentType: "application/pdf",

@@ -81,7 +81,9 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     if (!anchoredWithdrawal) {
       if (withdrawalReason.length < 2) { setReasonError("Give a reason for withdrawing this proposal."); return; }
       if (withdrawalReason.length > 1000) { setReasonError("Use 1,000 characters or fewer."); return; }
-      if (!isConnected || address?.toLowerCase() !== proposal.researcherId) {
+      // Both sides lowercased: comparing against a stored value that is not
+      // already lowercase told the author to connect the wallet they were on.
+      if (!isConnected || address?.toLowerCase() !== proposal.researcherId?.toLowerCase()) {
         setReasonError("Connect the wallet that submitted this proposal to sign the withdrawal.");
         return;
       }

@@ -20,7 +20,7 @@ export const ROLE_DESCRIPTIONS = {
   [ROLES.GUEST]: "Public visitor exploring opportunities and open calls.",
   [ROLES.OWNER]: "Enterprise / problem owner defining challenges and reviewing proposals.",
   [ROLES.RESEARCHER]: "Academic / scientific lead preparing and submitting proposals.",
-  [ROLES.EVALUATOR]: "Technical reviewer conducting double-blind evaluations and scoring.",
+  [ROLES.EVALUATOR]: "Technical reviewer conducting evaluations and scoring.",
   [ROLES.FUNDER]: "Capital allocator funding vetted quantum research initiatives.",
   [ROLES.ADMIN]: "Platform governor overseeing system registries and on-chain audit trails.",
 };

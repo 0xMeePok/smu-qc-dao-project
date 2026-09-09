@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ updates: [], find: vi.fn(), failedStatuses: new Set() }));
+const mocks = vi.hoisted(() => ({ updates: [], find: vi.fn(), failedStatuses: new Set(), stored: null }));
 vi.mock("../../src/lib/proposals.js", () => ({
   findProposal: (...args) => mocks.find(...args),
   updateProposalReceipt: async ({ audit }) => {
@@ -14,10 +14,13 @@ import { prepareProposalCommit } from "../../src/lib/auditRegistry.js";
 const account = `0x${"a".repeat(40)}`;
 const tx = `0x${"3".repeat(64)}`;
 const record = { id: "proposal123", problemId: "problem123", researcherId: account, title: "Annealing", methodology: "Benchmark routing", attachments: [] };
-const prepared = prepareProposalCommit({ recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { methodology: record.methodology, attachments: [] } });
+const prepared = prepareProposalCommit({ recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { ...proposalAuditPayload(record), attachments: [] } });
 function readContract({ functionName }) {
-  if (functionName === "getProposal") return { researcher: account, opportunityId: prepared.opportunityId, opportunityRevisionIndex: 0, proposalHash: prepared.proposalHash, solutionHash: prepared.solutionHash };
+  // Defaults to the record's own hashes so verification reads match. An amendment
+  // sets mocks.stored to the PRE-edit hashes, which is what the chain holds.
+  if (functionName === "getProposal") return { researcher: account, opportunityId: prepared.opportunityId, opportunityRevisionIndex: 0, ...(mocks.stored ?? { proposalHash: prepared.proposalHash, solutionHash: prepared.solutionHash }) };
   if (functionName === "revisionCount") return mocks.revisions;
+  if (functionName === "opportunityRevisionCount") return 1n;
   if (functionName === "anchorCount") return 1n;
   if (functionName === "anchorAt") return { contentHash: prepared.anchorHash };
   throw new Error(`Unexpected read: ${functionName}`);
@@ -25,6 +28,7 @@ function readContract({ functionName }) {
 beforeEach(() => {
   mocks.updates = [];
   mocks.revisions = 0n;
+  mocks.stored = null;
   mocks.failedStatuses.clear();
 });
 describe("proposal audit handoff", () => {
@@ -46,13 +50,39 @@ describe("proposal audit handoff", () => {
     // original rather than replacing it. The chain is what decides, because a
     // dropped or never-saved receipt would make Firestore the wrong source.
     mocks.revisions = 1n;
-    const writeContract = vi.fn(async () => tx);
+    // The chain holds the version before this edit.
+    mocks.stored = { proposalHash: `0x${"9".repeat(64)}`, solutionHash: `0x${"8".repeat(64)}` };
+    // updateHashes landing is what moves the chain onto the edited hashes.
+    const writeContract = vi.fn(async () => { mocks.stored = null; return tx; });
     const result = await anchorProposalAudit(record, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 91n }) } });
     const call = writeContract.mock.calls[0][0];
     expect(call.functionName).toBe("updateHashes");
     // The same hashes either way; only the call that carries them differs.
     expect(call.args).toEqual([prepared.entityId, prepared.proposalHash, prepared.solutionHash, 0]);
     expect(result.status).toBe("confirmed");
+  });
+  it("[QCDAO-57] refuses a replayed revision before opening the wallet", async () => {
+    // AuditRegistry records each revision once, so a write that moves neither hash
+    // reverts. Catching it here costs no wallet confirmation.
+    mocks.revisions = 1n;
+    const writeContract = vi.fn(async () => tx);
+    await expect(anchorProposalAudit(record, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: vi.fn() } }))
+      .rejects.toThrow(/already anchored .* exactly as it stands/s);
+    expect(writeContract).not.toHaveBeenCalled();
+  });
+
+  it("[QCDAO-57] moves both hashes when only the title is corrected", async () => {
+    // AuditRegistry records each hash once per proposal and supporting files are
+    // frozen after submission, so the solution payload covers the whole record -
+    // otherwise correcting a title reused solutionHash and the amendment reverted.
+    const corrected = prepareProposalCommit({
+      recordId: record.id, opportunityRecordId: record.problemId,
+      expectedOpportunityRevisionIndex: 0,
+      proposalPayload: proposalAuditPayload({ ...record, title: "Annealing, corrected" }),
+      solutionPayload: { ...proposalAuditPayload({ ...record, title: "Annealing, corrected" }), attachments: [] },
+    });
+    expect(corrected.proposalHash).not.toBe(prepared.proposalHash);
+    expect(corrected.solutionHash).not.toBe(prepared.solutionHash);
   });
   it("records a retryable failure when the wallet rejects without deleting the saved proposal", async () => {
     await expect(anchorProposalAudit(record, { account, adapters: { writeContract: async () => { throw Object.assign(new Error("User rejected"), { code: 4001 }); }, readContract, waitForTransactionReceipt: vi.fn() } })).rejects.toThrow();

@@ -43,6 +43,46 @@ describe("QCDAO-59/60 submitted proposals", () => {
       updatedAt: serverTimestamp(),
     }));
   });
+  it("[QCDAO-57] corrects a submitted proposal the way updateProposal writes it", async () => {
+    const id = await parent();
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const files = ["file0011", "file0012"].map((fid) => ({ id: fid, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST }));
+    await assertSucceeds(submit(db, "probe-correct", record(id, { attachments: files })));
+    // The real client write: updateProposal sends the whole record plus the
+    // receipt for the amendment it just anchored, in ONE update.
+    await assertSucceeds(updateDoc(doc(db, "proposals", "probe-correct"), {
+      ...(({ createdAt, ...rest }) => rest)(record(id, { attachments: files, title: "Annealing routing, corrected" })),
+      audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 0, attemptCount: 0, lastError: "" },
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[QCDAO-57] withdraws a submitted proposal carrying two attachments", async () => {
+    const id = await parent();
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const files = ["file0021", "file0022"].map((fid) => ({ id: fid, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST }));
+    await assertSucceeds(submit(db, "probe-withdraw", record(id, { attachments: files })));
+    await assertSucceeds(updateDoc(doc(db, "proposals", "probe-withdraw"), {
+      status: "withdrawn", withdrawalReason: "Team unavailable.", updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[QCDAO-57] corrects an open-funding proposal, the heaviest correction shape", async () => {
+    const id = await parent({ opportunityType: "open-funding" });
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const files = ["file0031", "file0032"].map((fid) => ({ id: fid, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST }));
+    await assertSucceeds(submit(db, "probe-of", record(id, {
+      opportunityType: "open-funding", attachments: files,
+      proposedProblem: "A routing problem worth funding", relevance: "Fits the stated thesis", thesisFit: "Directly on thesis",
+    })));
+    await assertSucceeds(updateDoc(doc(db, "proposals", "probe-of"), {
+      ...(({ createdAt, ...rest }) => rest)(record(id, { opportunityType: "open-funding", attachments: files, title: "Open funding, corrected",
+        proposedProblem: "A routing problem worth funding", relevance: "Fits the stated thesis", thesisFit: "Directly on thesis" })),
+      audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 0, attemptCount: 0, lastError: "" },
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
   it("allows sponsor dashboard reads and denies unrelated wallets", async () => {
     const sponsor = env.authenticatedContext(SPONSOR).firestore();
     await assertSucceeds(getDoc(doc(sponsor, "proposals", "proposal-full")));

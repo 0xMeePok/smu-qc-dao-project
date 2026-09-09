@@ -41,7 +41,11 @@ serialization changes.
 
 - Opportunities: `commitOpportunity(entityId, kind, contentHash, expiresAt)`. Funded
   business problems use kind `0`; QCDAO-51 open-funding calls use kind `1`, which
-  the contract records with the `Funder` actor role.
+  the contract records with the `Funder` actor role. An edit of a live posting is
+  `updateOpportunity(entityId, contentHash, expiresAt)` — never a second
+  `commitOpportunity`, which reverts because the id is taken. Withdrawal is
+  `withdrawOpportunity(entityId, evidenceHash)` after the owner signs a hash of
+  the exact reason; Firestore then stores `cancelled` and `withdrawalReason`.
 - Proposals: `commitProposal(entityId, opportunityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
 - Proposal updates: `updateHashes(entityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
 
@@ -104,6 +108,37 @@ npm run sync:audit-registry -- \
 To keep the checked-in ABI and change only the address for one environment, set
 `VITE_AUDIT_REGISTRY_ADDRESS`. The environment override is validated as a
 non-zero EVM address before any contract request is made.
+
+## Opportunity withdrawal (QCDAO-57)
+
+Problem statements and open funding calls withdraw the same way as proposals:
+chain first. `prepareOpportunityWithdrawal` hashes `{ recordId, ownerId, reason }`
+and the owner wallet signs `withdrawOpportunity`. Firestore then writes
+`status: cancelled` and the frozen `withdrawalReason`. A declined signature
+changes nothing; a Firestore failure after a mined transaction retries only the
+write, with the anchored reason locked.
+
+| Action | Contract call | Written to Firestore |
+| --- | --- | --- |
+| Submit | `commitOpportunity` | after the transaction is mined and verified |
+| Correct | `updateOpportunity` | after the transaction is mined and verified |
+| Withdraw | `withdrawOpportunity` | after the transaction is mined |
+| Save draft | none | immediately — a draft is private |
+
+A correction keeps the same entity id. `commitOpportunity` reverts once that id
+is taken, which is what produced multi-million-dollar gas estimates in the
+wallet: Arbitrum returns a block-sized limit for a reverting call. The client
+reads `opportunityRevisionCount` and calls `updateOpportunity` when the
+opportunity already exists. The wallet is not opened until that call simulates
+successfully.
+
+Full content may be edited while status is `submitted` or `open` and no proposal
+has been received. After the first proposal, only supporting attachments may
+change — the funded ask is what researchers already responded to.
+
+Every post-publication edit and withdrawal is written to
+`problems/{id}/revisions` by `recordOpportunityEdit`, with the actor, changed
+fields, content hashes, timestamp and (on withdrawal) the stated reason.
 
 ## Proposal implementation (QCDAO-59/60 + QCDAO-75–79)
 

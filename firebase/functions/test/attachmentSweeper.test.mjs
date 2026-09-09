@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_GRACE_MS,
   MAX_DELETES_PER_RUN,
+  collectImmutableProblemIds,
   collectReferencedPaths,
   parseAttachmentPath,
   planSweep,
@@ -102,6 +103,19 @@ describe("collectReferencedPaths", () => {
   });
 });
 
+describe("collectImmutableProblemIds", () => {
+  it("treats every non-draft posting as frozen, including after attachments are unlinked", () => {
+    assert.deepEqual([...collectImmutableProblemIds([
+      { id: "draft1", status: "draft" },
+      { id: "live1", status: "submitted", attachments: [] },
+      { id: "live2", status: "open" },
+      { id: "gone1", status: "cancelled" },
+      { attachments: [{ id: "orphan" }] },
+      null,
+    ])].sort(), ["gone1", "live1", "live2"]);
+  });
+});
+
 describe("planSweep", () => {
   it("[BUT-OPD-010] deletes an old object that no posting references", () => {
     const plan = planSweep({
@@ -155,6 +169,18 @@ describe("planSweep", () => {
     });
     assert.deepEqual(plan.deletions, []);
     assert.deepEqual(plan.skipped, [{ path: livePath(), reason: "unknown-age" }]);
+  });
+
+  it("NEVER deletes an unreferenced object under a published posting", () => {
+    const path = livePath("live1", "unlinked1");
+    const plan = planSweep({
+      objects: [objectAt(path)],
+      referencedPaths: new Set(),
+      immutableProblemIds: new Set(["live1"]),
+      now: NOW,
+    });
+    assert.deepEqual(plan.deletions, []);
+    assert.deepEqual(plan.skipped, [{ path, reason: "published-posting" }]);
   });
 
   it("[BUT-OPD-015] caps a runaway plan rather than emptying the bucket in one pass", () => {
@@ -222,7 +248,7 @@ describe("sweepOrphanedAttachments", () => {
     const orphan = livePath("p1", "orphan01");
     const { db, bucket, deleted, logger } = harness({
       files: [objectAt(keep), objectAt(orphan)],
-      postings: [{ id: "p1", ownerId: OWNER, attachments: [{ id: "keepme01" }] }],
+      postings: [{ id: "p1", ownerId: OWNER, status: "draft", attachments: [{ id: "keepme01" }] }],
     });
 
     const summary = await sweepOrphanedAttachments({ db, bucket, dryRun: false, now: NOW, logger });
@@ -265,5 +291,19 @@ describe("sweepOrphanedAttachments", () => {
     assert.deepEqual(deleted, []);
     assert.equal(summary.orphans, 1);
     assert.equal(summary.deleted, 0);
+  });
+
+  it("does not delete an unlinked file on a published posting", async () => {
+    const path = livePath("live1", "unlinked1");
+    const { db, bucket, deleted, logger } = harness({
+      files: [objectAt(path)],
+      postings: [{ id: "live1", ownerId: OWNER, status: "submitted", attachments: [] }],
+    });
+
+    const summary = await sweepOrphanedAttachments({ db, bucket, dryRun: false, now: NOW, logger });
+
+    assert.deepEqual(deleted, []);
+    assert.equal(summary.deleted, 0);
+    assert.equal(summary.orphans, 0);
   });
 });

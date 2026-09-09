@@ -328,6 +328,33 @@ describe("AttachmentUploader", () => {
     expect(screen.queryByText("spec.pdf")).toBeNull();
   });
 
+  it("unlinks a published attachment without deleting the stored object", async () => {
+    const attachment = {
+      id: "abc123xy",
+      name: "spec.pdf",
+      size: 2048,
+      contentType: "application/pdf",
+    };
+    function PublishedHarness() {
+      const [value, setValue] = React.useState([attachment]);
+      return (
+        <AttachmentUploader
+          ownerId={OWNER}
+          problemId={POSTING}
+          value={value}
+          onChange={setValue}
+          retainStoredBytes
+        />
+      );
+    }
+    render(<PublishedHarness />);
+
+    await act(async () => { fireEvent.click(screen.getByText("Remove")); });
+
+    await waitFor(() => expect(screen.queryByText("spec.pdf")).toBeNull());
+    expect(mocks.deleted).toEqual([]);
+  });
+
   it("[FIT-OPD-028] restores the row when the delete is refused", async () => {
     mocks.deleteShouldFail = true;
     const attachment = {

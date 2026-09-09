@@ -46,6 +46,7 @@ vi.mock("../../src/lib/fundingOpportunities.js", () => ({
     mocks.events.push("firestore");
     return { id: args.opportunityId, ...args.record };
   },
+  updateFundingOpportunity: vi.fn(),
   FUNDING_STATUS_DRAFT: "draft",
   saveFundingDraft: (...args) => mocks.saveDraft(...args),
   publishFundingDraft: async (args) => {
@@ -59,6 +60,7 @@ vi.mock("../../src/lib/postings.js", () => ({ findPosting: async () => mocks.res
 vi.mock("../../src/lib/fundingOpportunityAudit.js", () => ({
   fundingOpportunityAuditReceipt: (opportunity) => opportunity.audit ?? null,
   readFundingOpportunityAudit: async () => ({ verified: true }),
+  receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
   anchorFundingOpportunityAudit: async (_opportunity, options) => {
     mocks.events.push("audit");
     if (mocks.auditShouldFail) throw new Error("RPC unavailable");

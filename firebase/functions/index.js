@@ -23,6 +23,7 @@ import { affectedProblemIds, refreshOpportunityMetrics } from "./opportunityMetr
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { recordProposalRevision } from "./proposalRevisions.js";
+import { recordOpportunityRevision } from "./opportunityRevisions.js";
 
 initializeApp();
 
@@ -471,6 +472,20 @@ export const recordProposalEdit = onDocumentUpdated(
     await recordProposalRevision({
       db,
       proposalId: event.params.proposalId,
+      eventId: event.id,
+      before: event.data?.before?.data(),
+      after: event.data?.after?.data(),
+      at: Timestamp.now(),
+    });
+  },
+);
+
+export const recordOpportunityEdit = onDocumentUpdated(
+  { document: "problems/{problemId}", region: REGION, retry: true, maxInstances: 10 },
+  async (event) => {
+    await recordOpportunityRevision({
+      db,
+      recordId: event.params.problemId,
       eventId: event.id,
       before: event.data?.before?.data(),
       after: event.data?.after?.data(),

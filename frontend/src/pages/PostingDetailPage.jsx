@@ -2,21 +2,24 @@ import { proposalBlockReason } from "../lib/proposalValidation.js";
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
-import { findPosting } from "../lib/postings.js";
+import { findPosting, withdrawPosting } from "../lib/postings.js";
 import {
   downloadAttachment,
   formatBytes,
   messageForStorageError,
   saveBlobAs,
 } from "../lib/attachments.js";
-import { messageForFirebaseError } from "../lib/errors.js";
+import { auditErrorMessage, messageForFirebaseError } from "../lib/errors.js";
 import { categoryLabel } from "../config/postingCategories.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { PostingProposals } from "../components/PostingProposals.jsx";
+import { Modal } from "../components/Modal.jsx";
+import { Field } from "../components/Field.jsx";
 import { formatInstant, isExpired } from "../lib/datetime.js";
 import {
+  anchorOpportunityWithdrawal,
   anchorPostingAudit,
   postingAuditReceipt,
   readPostingAudit,
@@ -31,6 +34,8 @@ import { opportunityStatusLabel } from "../config/workflowStatus.js";
 import { postingActions } from "../lib/postingActions.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
 import { shortenAddress } from "../lib/chain.js";
+import { canEditOpportunity } from "../lib/opportunityEdit.js";
+import { OpportunityRevisionTrail } from "../components/OpportunityRevisionTrail.jsx";
 
 /**
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
@@ -113,11 +118,20 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const [auditBusy, setAuditBusy] = useState(false);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const [poster, setPoster] = useState(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [reason, setReason] = useState("");
+  const [reasonError, setReasonError] = useState("");
+  const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setConfirm(false);
+    setReason("");
+    setReasonError("");
+    setAnchoredWithdrawal(null);
 
     findPosting(postingId)
       .then((found) => { if (!cancelled) setPosting(found); })
@@ -178,6 +192,51 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   };
 
   const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
+  const canWithdraw = ownsPosting && ["submitted", "open", "in_review"].includes(posting?.status);
+
+  const withdraw = async () => {
+    const withdrawalReason = (anchoredWithdrawal?.reason ?? reason).trim();
+    const entityLabel = posting.opportunityType === OPEN_FUNDING_TYPE
+      ? "funding opportunity"
+      : "problem statement";
+    if (!anchoredWithdrawal) {
+      if (withdrawalReason.length < 2) {
+        setReasonError(`Give a reason for withdrawing this ${entityLabel}.`);
+        return;
+      }
+      if (withdrawalReason.length > 1000) {
+        setReasonError("Use 1,000 characters or fewer.");
+        return;
+      }
+      if (!isConnected || connectedAddress?.toLowerCase() !== posting.ownerId?.toLowerCase()) {
+        setReasonError("Connect the wallet that published this opportunity to sign the withdrawal.");
+        return;
+      }
+    }
+    setWithdrawing(true);
+    setError(null);
+    setReasonError("");
+    let anchored = anchoredWithdrawal;
+    try {
+      if (!anchored) {
+        await anchorOpportunityWithdrawal(posting, { account: connectedAddress, reason: withdrawalReason });
+        anchored = { reason: withdrawalReason };
+        setAnchoredWithdrawal(anchored);
+        setReason(withdrawalReason);
+      }
+      await withdrawPosting(posting.id, anchored.reason);
+      setPosting((current) => ({ ...current, status: "cancelled", withdrawalReason: anchored.reason }));
+      setConfirm(false);
+      setAnchoredWithdrawal(null);
+    } catch (err) {
+      setError(anchored
+        ? `The withdrawal was recorded on Arbitrum Sepolia, but saving it failed. ${messageForFirebaseError(err)} Finish saving it with the same reason — you will not be asked to sign again.`
+        : auditErrorMessage(err));
+      if (!anchored) setConfirm(false);
+    } finally {
+      setWithdrawing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -222,6 +281,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
   const expired = isExpired(posting.expiresAt);
   const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
+  const entityLabel = isOpenFunding ? "funding opportunity" : "problem statement";
   const audit = isOpenFunding
     ? fundingOpportunityAuditReceipt(posting)
     : postingAuditReceipt(posting);
@@ -236,8 +296,8 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
   return (
     <section className="page detail-page">
-      <button className="back" type="button" onClick={() => onNavigate("discover")}>
-        Back to opportunities
+      <button className="back" type="button" onClick={() => onNavigate(ownsPosting ? "my-problems" : "discover")}>
+        {ownsPosting ? "Back to my problems" : "Back to opportunities"}
       </button>
 
       {walletPromptOpen && (
@@ -269,6 +329,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               <Detail heading="Success criteria">{posting.successCriteria}</Detail>
               <Detail heading="Relevant data availability">{posting.dataAvailability}</Detail>
             </>
+          )}
+
+          {posting.status === "cancelled" && posting.withdrawalReason && (
+            <Detail heading="Withdrawal reason">{posting.withdrawalReason}</Detail>
           )}
 
           {posting.attachments.length > 0 && (
@@ -312,7 +376,9 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
           />
 
-          {error && <p className="attachment-error" role="alert">{error}</p>}
+          <OpportunityRevisionTrail postingId={posting.id} />
+
+          {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
         </article>
 
         <aside className="context-panel">
@@ -347,6 +413,18 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             isAuthenticated={isAuthenticated}
             onNavigate={onNavigate}
           />
+          {/* postingActions only offers Edit on a draft, routed to the create form.
+              These two are the published-posting owner actions it has no route for. */}
+          {canEditOpportunity(posting, user?.id) && (
+            <button className="secondary" type="button" onClick={() => onNavigate(`edit-posting/${posting.id}`)}>
+              Edit {entityLabel}
+            </button>
+          )}
+          {canWithdraw && (
+            <button className="secondary" type="button" disabled={withdrawing} onClick={() => setConfirm(true)}>
+              Withdraw {entityLabel}
+            </button>
+          )}
 
           <div className="expiry-panel">
             <span className="eyebrow">{expired ? "Closed" : "Time remaining"}</span>
@@ -376,6 +454,58 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
           )}
         </aside>
       </div>
+      {confirm && (
+        <Modal
+          labelledBy="withdraw-opportunity-title"
+          describedBy="withdraw-opportunity-desc"
+          onDismiss={() => { if (!withdrawing) setConfirm(false); }}
+        >
+          <h2 id="withdraw-opportunity-title">Withdraw this {entityLabel}?</h2>
+          <p id="withdraw-opportunity-desc">
+            It leaves the marketplace immediately. No new proposals can be submitted.
+            Existing proposals stay on file.
+          </p>
+          <Field
+            htmlFor="opportunity-withdrawal-reason"
+            label="Why are you withdrawing?"
+            error={reasonError}
+            hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to members who can still see the opportunity. It cannot be changed afterwards."
+          >
+            {({ id, describedBy, invalid }) => (
+              <textarea
+                id={id}
+                rows={3}
+                value={anchoredWithdrawal?.reason ?? reason}
+                maxLength={1000}
+                disabled={withdrawing || Boolean(anchoredWithdrawal)}
+                aria-describedby={describedBy}
+                aria-invalid={invalid}
+                onChange={(event) => {
+                  if (anchoredWithdrawal) return;
+                  setReason(event.target.value);
+                  setReasonError("");
+                }}
+              />
+            )}
+          </Field>
+          {error && anchoredWithdrawal ? <p className="error-banner" role="alert">{error}</p> : null}
+          <p className="field-hint">
+            {anchoredWithdrawal
+              ? "The withdrawal is already signed on Arbitrum Sepolia. Saving it does not need another signature."
+              : "Your wallet signs the withdrawal before it takes effect. If you decline, the opportunity stays listed exactly as it is."}
+          </p>
+          <div className="modal-actions">
+            <button className="secondary" type="button" disabled={withdrawing || Boolean(anchoredWithdrawal)} onClick={() => setConfirm(false)}>
+              Keep {entityLabel}
+            </button>
+            <button className="danger-btn" type="button" disabled={withdrawing} onClick={withdraw}>
+              {withdrawing
+                ? (anchoredWithdrawal ? "Saving…" : "Waiting for your wallet…")
+                : (anchoredWithdrawal ? "Finish saving withdrawal" : "Sign and withdraw")}
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }

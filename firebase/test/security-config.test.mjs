@@ -161,10 +161,15 @@ describe("security deployment configuration", () => {
     // from the record. It is only safe because the entry is keyed on the event
     // id, so a redelivery overwrites rather than appends a duplicate.
     assert.match(functionsSource, /recordProposalEdit = onDocumentUpdated\(\s*\{[^\n]*retry:\s*true/);
+    assert.match(functionsSource, /recordOpportunityEdit = onDocumentUpdated\(\s*\{[^\n]*retry:\s*true/);
     const revisions = fs.readFileSync(
       new URL("../functions/proposalRevisions.js", import.meta.url), "utf8",
     );
     assert.match(revisions, /\.doc\(eventId\)/);
+    const opportunityRevisions = fs.readFileSync(
+      new URL("../functions/opportunityRevisions.js", import.meta.url), "utf8",
+    );
+    assert.match(opportunityRevisions, /\.doc\(eventId\)/);
   });
 
   it("enables TTL cleanup for nonce and rate-limit documents", () => {

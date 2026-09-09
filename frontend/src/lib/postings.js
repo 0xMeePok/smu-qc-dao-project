@@ -1,6 +1,7 @@
 import {
   Timestamp,
   collection,
+  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -32,6 +33,7 @@ import { expiryDateFrom } from "../config/postingCategories.js";
 
 export const POSTING_STATUS_SUBMITTED = "submitted";
 export const POSTING_STATUS_DRAFT = "draft";
+export const POSTING_STATUS_CANCELLED = "cancelled";
 
 /** Reserves a posting id without writing anything. Call before the first upload. */
 export function newPostingId() {
@@ -281,6 +283,48 @@ export async function publishDraft({
   const { createdAt, ...record } = built;
   await updateDoc(postingRef(postingId), record);
   return findPosting(postingId);
+}
+
+/** Removes a live opportunity from the marketplace after its on-chain withdrawal. */
+export async function withdrawPosting(id, reason) {
+  requireFirebase();
+  const withdrawalReason = String(reason ?? "").trim();
+  if (withdrawalReason.length < 2) throw new Error("Give a reason for withdrawing this opportunity.");
+  if (withdrawalReason.length > 1000) throw new Error("Use 1,000 characters or fewer.");
+  await updateDoc(postingRef(id), {
+    status: POSTING_STATUS_CANCELLED,
+    withdrawalReason,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Chain-first correction. `record` is the document that was hashed; it must be
+ * reused rather than rebuilt so expiresAt and status stay the ones that were
+ * anchored. `createdAt` is immutable.
+ */
+export async function updatePosting({
+  postingId, ownerId, organisation, form, attachments = [], record: preparedRecord = null, audit = null,
+}) {
+  requireFirebase();
+  const built = preparedRecord
+    ? { ...preparedRecord }
+    : buildPostingDocument({ ownerId, organisation, form, attachments });
+  const { createdAt, ...record } = built;
+  await updateDoc(postingRef(postingId), {
+    ...record,
+    audit: audit ? { ...audit } : deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+  return findPosting(postingId);
+}
+
+export async function listOpportunityRevisions(postingId) {
+  requireFirebase();
+  const snapshot = await getDocs(collection(db, "problems", postingId, "revisions"));
+  return snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort((a, b) => (b.at?.toMillis?.() || 0) - (a.at?.toMillis?.() || 0));
 }
 
 /** Every posting this wallet owns, drafts included, newest first. */

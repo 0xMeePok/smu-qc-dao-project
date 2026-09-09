@@ -16,14 +16,21 @@ export function proposalAuditPayload(record) {
 
 export function prepareStoredProposal(record) {
   const hashScheme = record.audit?.schemaVersion ?? 1;
+  const proposal = proposalAuditPayload(record);
   return prepareProposalCommit({
     recordId: record.id,
     opportunityRecordId: record.problemId,
     expectedOpportunityRevisionIndex: 0,
     hashScheme,
-    proposalPayload: proposalAuditPayload(record),
+    proposalPayload: proposal,
+    // The whole record plus its files, mirroring the opportunity's single
+    // contentHash. AuditRegistry records each hash once per proposal, and
+    // attachments are frozen after submission - so a narrow
+    // {methodology, attachments} slice left this hash unmoved on any other edit
+    // and the amendment reverted. Both hashes now move together, and the
+    // `solution` document label still keeps them distinct.
     solutionPayload: {
-      methodology: record.methodology ?? "",
+      ...proposal,
       attachments: [...(record.attachments ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
     },
   });

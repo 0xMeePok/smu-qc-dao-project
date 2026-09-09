@@ -57,6 +57,21 @@ export function parseAttachmentPath(path) {
 }
 
 /**
+ * Postings that have left draft. Objects under these ids stay in the bucket even
+ * after the owner unlinks them: deleting an unreferenced published file would
+ * let the owner recreate different bytes at the same {id}.pdf while the
+ * opportunity hash (id/name/size/type) stayed unchanged.
+ */
+export function collectImmutableProblemIds(postings) {
+  const published = new Set();
+  for (const posting of postings) {
+    if (!posting?.id) continue;
+    if (posting.status && posting.status !== "draft") published.add(String(posting.id));
+  }
+  return published;
+}
+
+/**
  * The set of storage paths that postings actually point at. Anything in the bucket
  * and not in this set is unreferenced.
  */
@@ -89,6 +104,7 @@ export function collectReferencedPaths(postings) {
 export function planSweep({
   objects,
   referencedPaths,
+  immutableProblemIds = new Set(),
   now,
   graceMs = DEFAULT_GRACE_MS,
   maxDeletes = MAX_DELETES_PER_RUN,
@@ -108,6 +124,11 @@ export function planSweep({
 
     if (referencedPaths.has(object.path)) {
       kept += 1;
+      continue;
+    }
+
+    if (immutableProblemIds.has(parsed.problemId)) {
+      skipped.push({ path: object.path, reason: "published-posting" });
       continue;
     }
 
@@ -137,15 +158,19 @@ export function planSweep({
 
 /**
  * Re-reads problems/{problemId} so a posting published after the collection
- * snapshot cannot have its attachment deleted in this run.
+ * snapshot cannot have its attachment deleted in this run. A published record
+ * retains every object under its prefix, referenced or not: unlinking then
+ * sweeping is the other half of the byte-swap that storage.rules now refuse.
  */
-async function isReferencedByCurrentPosting(db, path) {
+async function mustRetainObject(db, path) {
   const parsed = parseAttachmentPath(path);
   if (!parsed) return false;
   const snap = await db.collection("problems").doc(parsed.problemId).get();
   if (!snap.exists) return false;
+  const data = snap.data() ?? {};
+  if (data.status && data.status !== "draft") return true;
   // The document id IS the problemId, and rebuilding the path needs it.
-  return collectReferencedPaths([{ id: snap.id, ...snap.data() }]).has(path);
+  return collectReferencedPaths([{ id: snap.id, ...data }]).has(path);
 }
 
 /**
@@ -171,11 +196,11 @@ export async function sweepOrphanedAttachments({
   }));
 
   const snapshot = await db.collection("problems").get();
-  const referencedPaths = collectReferencedPaths(
-    snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
-  );
+  const postings = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  const referencedPaths = collectReferencedPaths(postings);
+  const immutableProblemIds = collectImmutableProblemIds(postings);
 
-  const plan = planSweep({ objects, referencedPaths, now, graceMs });
+  const plan = planSweep({ objects, referencedPaths, immutableProblemIds, now, graceMs });
   const byPath = new Map(objects.map((object) => [object.path, object]));
 
   if (plan.capped) {
@@ -189,8 +214,8 @@ export async function sweepOrphanedAttachments({
   if (!dryRun) {
     for (const path of plan.deletions) {
       try {
-        if (await isReferencedByCurrentPosting(db, path)) {
-          logger.info(`[attachment-sweep] skip ${path}: newly-referenced`);
+        if (await mustRetainObject(db, path)) {
+          logger.info(`[attachment-sweep] skip ${path}: retained`);
           continue;
         }
         await byPath.get(path).ref.delete();
