@@ -376,7 +376,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
           />
 
-          <OpportunityRevisionTrail postingId={posting.id} />
+          <OpportunityRevisionTrail postingId={posting.id} uid={user?.id} isOwner={ownsPosting} />
 
           {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
         </article>

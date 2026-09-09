@@ -319,9 +319,20 @@ export async function updatePosting({
   return findPosting(postingId);
 }
 
-export async function listOpportunityRevisions(postingId) {
+/**
+ * The revisions rule gives the owner every entry and other members only the
+ * statuses at which the posting itself is readable. Both branches test
+ * `resource.data`, so an unfiltered list cannot be proven safe and Firestore
+ * refuses it outright - the query has to carry the matching filter.
+ */
+export const MEMBER_READABLE_REVISION_STATUSES = ["submitted", "open", "cancelled"];
+
+export async function listOpportunityRevisions(postingId, { uid, isOwner = false } = {}) {
   requireFirebase();
-  const snapshot = await getDocs(collection(db, "problems", postingId, "revisions"));
+  const constraint = isOwner
+    ? where("ownerId", "==", String(uid ?? "").toLowerCase())
+    : where("status", "in", MEMBER_READABLE_REVISION_STATUSES);
+  const snapshot = await getDocs(query(collection(db, "problems", postingId, "revisions"), constraint));
   return snapshot.docs
     .map((item) => ({ id: item.id, ...item.data() }))
     .sort((a, b) => (b.at?.toMillis?.() || 0) - (a.at?.toMillis?.() || 0));
