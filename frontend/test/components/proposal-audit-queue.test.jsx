@@ -40,6 +40,7 @@ const item = {
   opportunity,
 };
 beforeEach(() => mocks.call.mockReset());
+// FUT-ARR-130: group by parent listing, open receipts, detect mismatch, retry confirmation
 it("groups by parent listing, opens a receipt pane, detects mismatch, and retries confirmation", async () => {
   mocks.call.mockImplementation(async (name) => ({ data: name === "adminListProposalAudits" ? { items: [item], cursor: null }
     : name === "adminVerifyProposalAudit" ? { verified: false } : { message: "Verification confirmed and receipt saved." } }));
@@ -52,6 +53,7 @@ it("groups by parent listing, opens a receipt pane, detects mismatch, and retrie
   expect(await screen.findByText("Verification confirmed and receipt saved.")).toBeTruthy();
   expect(mocks.call).toHaveBeenCalledWith("adminRetryProposalAudit", { proposalId: "proposal1" });
 });
+// FUT-ARR-131: open parent listing audit receipt in the pane
 it("opens the parent listing audit receipt in the pane", async () => {
   mocks.call.mockResolvedValue({ data: { items: [item], cursor: null } });
   render(<ProposalAuditQueue />);
@@ -59,6 +61,7 @@ it("opens the parent listing audit receipt in the pane", async () => {
   fireEvent.click(await screen.findByRole("tab", { name: "Listing receipt" }));
   expect((await screen.findAllByText("Funded problem statement submitted")).length).toBeGreaterThan(0);
 });
+// FUT-ARR-132: explain missing parent listing and hide listing receipt tab
 it("explains when the parent listing is missing", async () => {
   mocks.call.mockResolvedValue({ data: { items: [{ ...item, opportunity: null }], cursor: null } });
   render(<ProposalAuditQueue />);
@@ -66,6 +69,7 @@ it("explains when the parent listing is missing", async () => {
   fireEvent.click(screen.getByRole("button", { name: "View receipts" }));
   expect(screen.queryByRole("tab", { name: "Listing receipt" })).toBeNull();
 });
+// FUT-ARR-133: request status filter from the server
 it("requests a status filter from the server", async () => {
   mocks.call.mockResolvedValue({ data: { items: [item], cursor: null } });
   render(<ProposalAuditQueue />);
@@ -74,6 +78,7 @@ it("requests a status filter from the server", async () => {
   expect(await screen.findByText("Quantum routing")).toBeTruthy();
   expect(mocks.call).toHaveBeenCalledWith("adminListProposalAudits", { cursor: null, status: "attention" });
 });
+// FUT-ARR-134: show retryable load error then empty state after refresh
 it("shows retryable loading errors and the empty state after refresh", async () => {
   mocks.call.mockRejectedValueOnce(new Error("Network unavailable")).mockResolvedValue({ data: { items: [], cursor: null } });
   render(<ProposalAuditQueue />);
@@ -81,6 +86,7 @@ it("shows retryable loading errors and the empty state after refresh", async () 
   fireEvent.click(screen.getByRole("button", { name: "Refresh queue" }));
   expect(await screen.findByText("No proposal verification jobs yet.")).toBeTruthy();
 });
+// FUT-ARR-135: preserve queue and explain a failed admin retry
 it("preserves the queue and explains a failed admin retry", async () => {
   mocks.call.mockImplementation(async (name) => {
     if (name === "adminRetryProposalAudit") throw new Error("Transaction still pending. Proposal saved.");
