@@ -50,6 +50,7 @@ export function createOpportunityAuditFlow({
   persistAudit,
   entityLabel,
   prepareCommit,
+  loadRecord,
   commitAudit = commitOpportunityAudit,
   verifyAudit = verifyOpportunityAudit,
   persistConfirmed = false,
@@ -63,6 +64,7 @@ export function createOpportunityAuditFlow({
       payload: payloadFor(opportunity),
       kind,
       expiresAt: opportunity.expiresAt,
+      hashScheme: opportunity.audit?.schemaVersion ?? AUDIT_HASH_SCHEME,
     });
     return {
       address,
@@ -87,7 +89,13 @@ export function createOpportunityAuditFlow({
   };
 
   const read = async (opportunity, { adapters } = {}) => {
-    const setup = prepare(opportunity);
+    // Rechecks must hash the current server document, never a page snapshot or
+    // the stored receipt's hash. A failed server read must fail verification.
+    const current = loadRecord
+      ? await loadRecord(opportunity.id, { fromServer: true })
+      : opportunity;
+    if (!current) throw new Error(`This ${entityLabel} is no longer available or you do not have access.`);
+    const setup = prepare(current);
     if (!setup) throw new Error("AuditRegistry is not configured.");
     return verifyAudit(setup.prepared, { address: setup.address, adapters });
   };

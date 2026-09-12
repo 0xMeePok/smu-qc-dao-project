@@ -53,21 +53,29 @@ function verificationState(result) {
     }
     : {
       kind: "mismatch",
-      message: "Mismatch detected — the current record differs from the configured AuditRegistry.",
+      message: "Mismatch detected — this submission does not match the version recorded in the smart contract on Arbitrum Sepolia. Its integrity cannot be verified. Contact the submission owner or an administrator to review the difference.",
       result,
     };
 }
 
 function unavailableState(error, audit) {
-  const missing = /invalidinput|revert/i.test(error?.message ?? "");
-  return {
-    kind: "unavailable",
-    message: missing && ["submitted", "pending"].includes(audit?.status)
-      ? "Unable to verify yet — the transaction is waiting for confirmation. Your submission is saved."
-      : missing
-      ? "No matching audit was found on the configured AuditRegistry."
-      : (error?.message || "Unable to read the configured AuditRegistry."),
-  };
+  const code = String(error?.code ?? "");
+  const detail = String(error?.message ?? "");
+  let message = "Unable to verify right now — the latest submission or smart contract could not be read. Check your connection and select Check again. No match or mismatch has been established.";
+  if (/permission-denied|unauthenticated/.test(code)) {
+    message = "Unable to verify — you do not currently have access to this submission. Sign in with an authorised account and try again.";
+  } else if (/no longer available/.test(detail)) {
+    message = "Unable to verify — this submission is no longer available or you no longer have access. Refresh the page or contact an administrator.";
+  } else if (/not configured/.test(detail)) {
+    message = "Verification is unavailable because the verification service is not configured. Contact an administrator.";
+  } else if (/hash scheme.*supported|unsupported.*schema/i.test(detail)) {
+    message = "Unable to verify — this submission uses an unsupported verification format. Contact an administrator.";
+  } else if (/invalidinput/i.test(detail)) {
+    message = ["submitted", "pending"].includes(audit?.status)
+      ? "No matching audit was found yet — the transaction may still be waiting for confirmation. Wait a moment and select Check again."
+      : "No matching audit was found in the smart contract on Arbitrum Sepolia. The submission is not verified. Contact the submission owner or an administrator.";
+  }
+  return { kind: "unavailable", message };
 }
 
 /** Human-readable view of the verification overlay required by QCDAO-77/78. */
@@ -92,6 +100,7 @@ export function AuditReceipt({
 
   const check = async (verify) => {
     const request = ++generation.current;
+    setVerification(null);
     setChecking(true);
     try {
       const result = await verify();
@@ -104,7 +113,7 @@ export function AuditReceipt({
   };
 
   useEffect(() => {
-    ++generation.current;
+    const request = ++generation.current;
     if (!shouldVerifyAutomatically) {
       setVerification(null);
       setChecking(false);
@@ -115,14 +124,14 @@ export function AuditReceipt({
     setChecking(true);
     Promise.resolve().then(() => verifyRef.current())
       .then((result) => {
-        if (!active) return;
+        if (!active || request !== generation.current) return;
         setVerification(verificationState(result));
       })
       .catch((error) => {
-        if (!active) return;
+        if (!active || request !== generation.current) return;
         setVerification(unavailableState(error, audit));
       })
-      .finally(() => { if (active) setChecking(false); });
+      .finally(() => { if (active && request === generation.current) setChecking(false); });
     return () => { active = false; ++generation.current; };
   }, [audit?.entityId, audit?.contentHash, audit?.solutionHash, audit?.transactionHash, audit?.status, shouldVerifyAutomatically]);
 
@@ -187,8 +196,8 @@ export function AuditReceipt({
         <div><dt>Firebase reference</dt><dd><code>{firebaseReference}</code></dd></div>
         <div><dt>Canonical format</dt><dd>Version {audit.schemaVersion}</dd></div>
         <div><dt>Receipt block</dt><dd>{audit.blockNumber || "Not confirmed"}</dd></div>
-        <CopyValue label="Verification hash" value={audit.contentHash} />
-        <CopyValue label="Solution hash" value={audit.solutionHash} />
+        <CopyValue label="Verification hash" value={verification?.result?.expected?.contentHash ?? audit.contentHash} />
+        <CopyValue label="Solution hash" value={verification?.result?.expected?.solutionHash ?? audit.solutionHash} />
         <CopyValue label="Transaction reference" value={audit.transactionHash} />
       </dl>
 

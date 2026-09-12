@@ -3,7 +3,7 @@ import {
   configuredAuditRegistryAddress,
   createOpportunityAuditFlow,
 } from "./opportunityAuditFlow.js";
-import { postingAuditPayload, updatePostingAudit } from "./postings.js";
+import { findPosting, postingAuditPayload, updatePostingAudit } from "./postings.js";
 import {
   prepareOpportunityWithdrawal,
   withdrawOpportunityAudit,
@@ -13,6 +13,7 @@ import {
 const postingAudit = createOpportunityAuditFlow({
   kind: OPPORTUNITY_KIND.BUSINESS_PROBLEM,
   payloadFor: postingAuditPayload,
+  loadRecord: findPosting,
   persistAudit: ({ recordId, audit }) => updatePostingAudit({ postingId: recordId, audit }),
   entityLabel: "posting",
   commitAudit: writeOpportunityAudit,

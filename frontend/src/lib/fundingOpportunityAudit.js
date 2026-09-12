@@ -5,10 +5,12 @@ import {
   updateFundingOpportunityAudit,
 } from "./fundingOpportunities.js";
 import { writeOpportunityAudit } from "./auditRegistry.js";
+import { findPosting } from "./postings.js";
 
 const fundingOpportunityAudit = createOpportunityAuditFlow({
   kind: OPPORTUNITY_KIND.OPEN_FUNDING,
   payloadFor: fundingOpportunityAuditPayload,
+  loadRecord: findPosting,
   persistAudit: ({ recordId, audit }) => updateFundingOpportunityAudit({
     opportunityId: recordId,
     audit,

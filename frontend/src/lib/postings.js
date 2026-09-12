@@ -5,6 +5,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   orderBy,
   query,
@@ -201,9 +202,9 @@ function normalisePosting(id, data) {
   };
 }
 
-export async function findPosting(postingId) {
+export async function findPosting(postingId, { fromServer = false } = {}) {
   requireFirebase();
-  const snapshot = await getDoc(postingRef(postingId));
+  const snapshot = await (fromServer ? getDocFromServer : getDoc)(postingRef(postingId));
   if (!snapshot.exists()) return null;
   const metrics = await findOpportunityMetrics(snapshot.id, snapshot.data());
   return postingFromSnapshot(snapshot, metrics);

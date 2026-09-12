@@ -44,6 +44,7 @@ const flow = createOpportunityAuditFlow({
   entityLabel: "proposal",
   persistAudit: updateProposalReceipt,
   prepareCommit: prepareStoredProposal,
+  loadRecord: findProposal,
   persistConfirmed: true,
   enforceWalletRetryLimit: true,
   commitAudit: anchorProposal,
@@ -82,8 +83,4 @@ export async function anchorProposalWithdrawal(record, { account, adapters, reas
     { address, account, adapters, onStatus },
   );
 }
-export async function readProposalAudit(record, options) {
-  const current = await findProposal(record.id, { fromServer: true });
-  if (!current) throw new Error("This proposal is no longer available or you do not have access.");
-  return flow.read(current, options);
-}
+export const readProposalAudit = flow.read;
