@@ -22,6 +22,7 @@ import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
 import { auditErrorMessage } from "../lib/errors.js";
+import { SubmissionError } from "../components/SubmissionError.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { useAccount } from "wagmi";
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../lib/proposalValidation.js";
@@ -309,7 +310,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       <p>Respond to {posting.title}. All fields are required to submit; you can save an unfinished draft at any point. Supporting PDFs are optional.</p></div>
     <div className="form-layout">
       <form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
-        {error && <p className="error-banner" role="alert">{error}</p>}
+        <SubmissionError message={error} />
         {active && !editing && !draftExists ? <div className="empty"><h2>You already have an active proposal</h2><p>Withdraw it before submitting a replacement.</p><button className="primary" type="button" onClick={() => onNavigate(`proposal/${active.id}`)}>View my proposal</button></div> : <>
           {blocked && <p className="error-banner" role="alert">{blocked}</p>}
           {editing && <p className="field-hint" role="status">This proposal has been submitted but not yet evaluated. Saving your changes records the edit — the changed fields, your wallet and the time — and returns the proposal for wallet verification, which appends a revision on Arbitrum Sepolia beside the original.</p>}

@@ -460,40 +460,46 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
           describedBy="withdraw-opportunity-desc"
           onDismiss={() => { if (!withdrawing) setConfirm(false); }}
         >
-          <h2 id="withdraw-opportunity-title">Withdraw this {entityLabel}?</h2>
-          <p id="withdraw-opportunity-desc">
-            It leaves the marketplace immediately. No new proposals can be submitted.
-            Existing proposals stay on file.
-          </p>
-          <Field
-            htmlFor="opportunity-withdrawal-reason"
-            label="Why are you withdrawing?"
-            error={reasonError}
-            hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to members who can still see the opportunity. It cannot be changed afterwards."
-          >
-            {({ id, describedBy, invalid }) => (
-              <textarea
-                id={id}
-                rows={3}
-                value={anchoredWithdrawal?.reason ?? reason}
-                maxLength={1000}
-                disabled={withdrawing || Boolean(anchoredWithdrawal)}
-                aria-describedby={describedBy}
-                aria-invalid={invalid}
-                onChange={(event) => {
-                  if (anchoredWithdrawal) return;
-                  setReason(event.target.value);
-                  setReasonError("");
-                }}
-              />
-            )}
-          </Field>
-          {error && anchoredWithdrawal ? <p className="error-banner" role="alert">{error}</p> : null}
-          <p className="field-hint">
-            {anchoredWithdrawal
-              ? "The withdrawal is already signed on Arbitrum Sepolia. Saving it does not need another signature."
-              : "Your wallet signs the withdrawal before it takes effect. If you decline, the opportunity stays listed exactly as it is."}
-          </p>
+          <div className="modal-head">
+            <div>
+              <h2 id="withdraw-opportunity-title">Withdraw this {entityLabel}?</h2>
+              <p id="withdraw-opportunity-desc">
+                It leaves the marketplace immediately. No new proposals can be submitted.
+                Existing proposals stay on file.
+              </p>
+            </div>
+          </div>
+          <div className="modal-body">
+            <Field
+              htmlFor="opportunity-withdrawal-reason"
+              label="Why are you withdrawing?"
+              error={reasonError}
+              hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to members who can still see the opportunity. It cannot be changed afterwards."
+            >
+              {({ id, describedBy, invalid }) => (
+                <textarea
+                  id={id}
+                  rows={3}
+                  value={anchoredWithdrawal?.reason ?? reason}
+                  maxLength={1000}
+                  disabled={withdrawing || Boolean(anchoredWithdrawal)}
+                  aria-describedby={describedBy}
+                  aria-invalid={invalid}
+                  onChange={(event) => {
+                    if (anchoredWithdrawal) return;
+                    setReason(event.target.value);
+                    setReasonError("");
+                  }}
+                />
+              )}
+            </Field>
+            {error && anchoredWithdrawal ? <p className="error-banner" role="alert">{error}</p> : null}
+            <p className="field-hint">
+              {anchoredWithdrawal
+                ? "The withdrawal is already signed on Arbitrum Sepolia. Saving it does not need another signature."
+                : "Your wallet signs the withdrawal before it takes effect. If you decline, the opportunity stays listed exactly as it is."}
+            </p>
+          </div>
           <div className="modal-actions">
             <button className="secondary" type="button" disabled={withdrawing || Boolean(anchoredWithdrawal)} onClick={() => setConfirm(false)}>
               Keep {entityLabel}

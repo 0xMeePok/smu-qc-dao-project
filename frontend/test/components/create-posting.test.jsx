@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createShouldFail: false,
   auditCalls: [],
   auditShouldFail: false,
+  auditError: null,
   connectedAddress: `0x${"a".repeat(40)}`,
   deleted: [],
   uploader: {
@@ -85,6 +86,7 @@ vi.mock("../../src/lib/postingAudit.js", () => ({
       account: options.account,
       persistReceipt: options.persistReceipt,
     });
+    if (mocks.auditError) throw mocks.auditError;
     const audit = {
       schemaVersion: 1,
       chainId: 421614,
@@ -156,6 +158,8 @@ const DRAFT_ATTACHMENT = {
 };
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+  mocks.auditError = null;
   mocks.created = [];
   mocks.createShouldFail = false;
   mocks.auditCalls = [];
@@ -212,6 +216,26 @@ describe("no data loss on a failed submit", () => {
 });
 
 describe("AuditRegistry integration", () => {
+  it.each([
+    { code: 4001, message: "User rejected" },
+    { message: "Transaction execution failed", cause: { cause: { code: 4001 } } },
+    { message: "User denied transaction signature" },
+  ])("[QCDAO-79] shows and focuses wallet cancellation, preserves input, and permits retry: %s", async (error) => {
+    mocks.auditError = error;
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/wallet transaction was declined/i);
+    expect(document.activeElement).toBe(alert);
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(mocks.created).toHaveLength(0);
+    expect(document.getElementById("title").value).toBe("Cold-chain route optimisation");
+    mocks.auditError = null;
+    fireEvent.submit(document.querySelector("form"));
+    await waitFor(() => expect(mocks.created).toHaveLength(1));
+    expect(screen.queryByText(/wallet transaction was declined/i)).toBeNull();
+  });
   it("[QCDAO-75..79] confirms the anchor before publishing to Firestore", async () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     fillRequired();

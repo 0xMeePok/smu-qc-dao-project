@@ -189,7 +189,11 @@ export function createOpportunityAuditFlow({
         await persist({ status: "confirmed", blockNumber: blockNumber(chainReceipt.blockNumber) });
         return current;
       } catch (error) {
-        await persist({ status: "failed", lastError: auditErrorMessage(error) });
+        await persist({
+          status: "failed",
+          ...(error.code === "AUDIT_TRANSACTION_CANCELLED" ? { transactionHash: "", blockNumber: 0 } : {}),
+          lastError: auditErrorMessage(error),
+        });
         throw error;
       }
     }
@@ -224,7 +228,8 @@ export function createOpportunityAuditFlow({
     } catch (error) {
       await persist({
         status: "failed",
-        transactionHash: error.transactionHash ?? current.transactionHash,
+        transactionHash: error.code === "AUDIT_TRANSACTION_CANCELLED"
+          ? "" : error.transactionHash ?? current.transactionHash,
         lastError: auditErrorMessage(error),
       });
       throw error;

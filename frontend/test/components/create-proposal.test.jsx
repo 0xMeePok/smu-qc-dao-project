@@ -69,13 +69,21 @@ describe("proposal submission form", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
     await screen.findByRole("heading", { name: "Saved proposal1" });
   });
-  it("writes nothing when the wallet declines, and says so", async () => {
-    mocks.anchor.mockRejectedValueOnce(Object.assign(new Error("User rejected"), { code: 4001 }));
+  it.each([
+    Object.assign(new Error("User rejected"), { code: 4001 }),
+    { message: "Transaction execution failed", cause: { cause: { code: 4001 } } },
+    { message: "User denied transaction signature" },
+  ])("[QCDAO-79] shows and focuses wallet cancellation, preserves input, and permits retry: %s", async (error) => {
+    mocks.anchor.mockRejectedValueOnce(error);
     await renderForm(); fill(); fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/wallet transaction was declined/i);
     // The whole point of the ordering: a declined signature leaves no proposal.
     expect(mocks.submit).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Proposal title").value).toBe("Proposal title content");
+    expect(document.activeElement).toBe(screen.getByRole("alert"));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    await screen.findByRole("heading", { name: "Saved proposal1" });
   });
   it("refuses to start without the signing wallet connected", async () => {
     mocks.connected = false;
@@ -83,6 +91,15 @@ describe("proposal submission form", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(/Connect the wallet/);
     expect(mocks.anchor).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
+  });
+  it("[QCDAO-79] explains cancellation of a pending transaction without saving or losing the form", async () => {
+    mocks.anchor.mockRejectedValueOnce({ code: "AUDIT_TRANSACTION_CANCELLED", message: "Cancelled", transactionHash: `0x${"3".repeat(64)}` });
+    await renderForm(); fill(); fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("pending verification transaction was cancelled in your wallet");
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Proposal title").value).toBe("Proposal title content");
+    expect(document.activeElement).toBe(screen.getByRole("alert"));
+    expect(screen.getByRole("button", { name: "Sign and submit proposal" }).disabled).toBe(false);
   });
   it("blocks expired opportunities, duplicates and pending uploads", async () => {
     mocks.posting.status = "expired"; await renderForm();

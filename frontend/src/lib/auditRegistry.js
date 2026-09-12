@@ -11,7 +11,7 @@ import {
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
 import { wagmiConfig } from "./wagmi.js";
-import { isTransactionFeeTooLow } from "./errors.js";
+import { isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
 import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, asOpportunityUpdate, prepareOpportunityCommit, prepareOpportunityUpdate, prepareOpportunityWithdrawal, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal } from "../../../firebase/functions/auditCanonical.js";
@@ -165,9 +165,10 @@ function errorText(error) {
 
 export function classifyAuditError(error, { attempt = 0, maxRetries = 0 } = {}) {
   const text = errorText(error);
-  const code = error?.code ?? error?.cause?.code;
   let category = "unknown";
-  if (code === 4001 || /userrejected|user rejected|denied transaction signature/.test(text)) {
+  if (error?.code === "AUDIT_TRANSACTION_CANCELLED") {
+    category = "transaction-cancelled";
+  } else if (isWalletRejection(error)) {
     category = "user-rejected";
   } else if (isTransactionFeeTooLow(error)) {
     category = "fee-too-low";
@@ -214,13 +215,31 @@ export async function waitForAuditReceipt({
 }) {
   const resolved = auditAdapters(adapters);
   const hash = assertBytes32(transactionHash, "Transaction hash");
+  let cancellation;
   return retryRead(
-    () => resolved.waitForTransactionReceipt({
-      hash,
-      chainId: AUDIT_REGISTRY_CHAIN_ID,
-      confirmations,
-      timeout,
-    }),
+    async () => {
+      const receipt = await resolved.waitForTransactionReceipt({
+        hash,
+        chainId: AUDIT_REGISTRY_CHAIN_ID,
+        confirmations,
+        timeout,
+        onReplaced: (replacement) => {
+          if (replacement.reason === "cancelled") cancellation = replacement;
+        },
+      });
+      // A wallet cancellation is a successful replacement transaction, but it
+      // did not execute the registry write. Viem resolves its receipt normally.
+      if (cancellation) {
+        const error = new Error("The transaction was cancelled in your wallet. No on-chain submission was completed.");
+        error.code = "AUDIT_TRANSACTION_CANCELLED";
+        error.transactionHash = hash;
+        error.replacementTransactionHash = cancellation.transaction?.hash
+          ?? cancellation.transactionReceipt?.transactionHash
+          ?? receipt?.transactionHash;
+        throw error;
+      }
+      return receipt;
+    },
     maxRetries,
     onRetry,
   );

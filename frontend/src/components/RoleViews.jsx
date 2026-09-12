@@ -406,6 +406,7 @@ export function AdminAudit() {
         </div>
       ) : (
         <>
+        <div className="audit-table-scroll" role="region" aria-label="Governance audit events" tabIndex={0}>
         <table className="audit-nav-table">
           <thead>
             <tr>
@@ -461,6 +462,7 @@ export function AdminAudit() {
           })}
           </tbody>
         </table>
+        </div>
         {hasMore && (
           <div className="submission-log-more">
             <button className="secondary" type="button" disabled={loadingMore} onClick={() => fetchAudits({ append: true })}>

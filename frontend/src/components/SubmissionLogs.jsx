@@ -278,6 +278,7 @@ function SubmissionLogs({ kind }) {
       )}
 
       {!loading && visibleItems.length > 0 && (
+        <div className="audit-table-scroll" role="region" aria-label="Submission logs" tabIndex={0}>
         <table className="audit-nav-table">
           <thead>
             <tr>
@@ -309,6 +310,7 @@ function SubmissionLogs({ kind }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {selected && (

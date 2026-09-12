@@ -172,6 +172,7 @@ export function ProposalAuditQueue() {
               ? `${group.opportunity.title || "Untitled"} · ${listingKind(group.opportunity)}`
               : "Parent listing is no longer available."}
           </h3>
+          <div className="audit-table-scroll" role="region" aria-label="Proposal verification jobs" tabIndex={0}>
           <table className="audit-nav-table">
             <thead>
               <tr>
@@ -206,6 +207,7 @@ export function ProposalAuditQueue() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ))}
       {cursor && (

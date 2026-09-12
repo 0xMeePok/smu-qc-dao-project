@@ -225,6 +225,78 @@ describe("AuditRegistry argument preparation", () => {
 });
 
 describe("AuditRegistry transaction lifecycle", () => {
+  for (const entity of ["opportunity", "proposal"]) {
+    it(`rejects a cancelled pending ${entity} transaction without confirming or retrying`, async () => {
+      const prepared = entity === "opportunity"
+        ? prepareOpportunityCommit({
+          recordId: "posting-123", payload: OPPORTUNITY_PAYLOAD,
+          kind: 0, expiresAt: 1_796_083_200,
+        })
+        : prepareProposalCommit({
+          recordId: "proposal-123", opportunityRecordId: "posting-123",
+          proposalPayload: { title: "Proposal" }, solutionPayload: { method: "Annealing" },
+          expectedOpportunityRevisionIndex: 0,
+        });
+      const commit = entity === "opportunity" ? commitOpportunityAudit : commitProposalAudit;
+      const replacementHash = `0x${"3".repeat(64)}`;
+      const statuses = [];
+      let writes = 0;
+      let waits = 0;
+      await assert.rejects(commit(prepared, {
+        account: ACCOUNT,
+        adapters: {
+          writeContract: async () => { writes += 1; return TX_HASH; },
+          waitForTransactionReceipt: async ({ onReplaced }) => {
+            waits += 1;
+            const receipt = { status: "success", blockNumber: 99n, transactionHash: replacementHash };
+            onReplaced({ reason: "cancelled", transaction: { hash: replacementHash }, transactionReceipt: receipt });
+            return receipt;
+          },
+          readContract: unused,
+        },
+        maxReceiptRetries: 3,
+        onStatus: (entry) => statuses.push(entry),
+      }), (error) => {
+        assert.equal(error.code, "AUDIT_TRANSACTION_CANCELLED");
+        assert.equal(error.transactionHash, TX_HASH);
+        assert.equal(error.replacementTransactionHash, replacementHash);
+        assert.equal(error.auditClassification.category, "transaction-cancelled");
+        assert.equal(error.auditClassification.retryable, false);
+        assert.match(error.message, /cancelled in your wallet/i);
+        return true;
+      });
+      assert.equal(writes, 1);
+      assert.equal(waits, 1);
+      assert.deepEqual(statuses.map(({ status }) => status), ["queued", "submitted", "pending", "failed"]);
+      assert.equal(statuses.at(-1).classification.category, "transaction-cancelled");
+    });
+  }
+
+  it("still confirms a transaction repriced in the wallet", async () => {
+    const prepared = prepareOpportunityCommit({
+      recordId: "posting-123", payload: OPPORTUNITY_PAYLOAD,
+      kind: 0, expiresAt: 1_796_083_200,
+    });
+    const statuses = [];
+    const replacementHash = `0x${"3".repeat(64)}`;
+    const receipt = { status: "success", blockNumber: 99n, transactionHash: replacementHash };
+    const result = await commitOpportunityAudit(prepared, {
+      account: ACCOUNT,
+      adapters: {
+        writeContract: async () => TX_HASH,
+        waitForTransactionReceipt: async ({ onReplaced }) => {
+          onReplaced({ reason: "repriced", transaction: { hash: replacementHash }, transactionReceipt: receipt });
+          return receipt;
+        },
+        readContract: unused,
+      },
+      onStatus: ({ status }) => statuses.push(status),
+    });
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.receipt, receipt);
+    assert.deepEqual(statuses, ["queued", "submitted", "pending", "confirmed"]);
+  });
+
   it("writes once, retries only receipt polling, and awaits statuses in order", async () => {
     const prepared = prepareOpportunityCommit({
       recordId: "posting-123",
