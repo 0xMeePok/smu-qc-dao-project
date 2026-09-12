@@ -76,9 +76,27 @@ export function isTransactionFeeTooLow(error) {
   return /max fee per gas less than block base fee|fee cap.*(?:less than|below|too low)|maxFeePerGas.*(?:less than|below).*baseFeePerGas/i.test(text);
 }
 
+export function isWalletRejection(error) {
+  // Wallet providers and viem wrap EIP-1193 errors at different depths.
+  const pending = [error];
+  const seen = new Set();
+  while (pending.length && seen.size < 16) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    if (["4001", "ACTION_REJECTED"].includes(String(current.code ?? ""))) return true;
+    const text = [current.name, current.shortMessage, current.message].filter(Boolean).join(" ");
+    if (/UserRejectedRequestError|user (?:rejected|denied|cancelled|canceled)|denied transaction signature/i.test(text)) return true;
+    pending.push(current.cause, current.data?.originalError);
+  }
+  return false;
+}
+
 export function auditErrorMessage(error) {
-  const rejected = error?.code === 4001 || /user rejected/i.test(error?.message ?? "");
-  if (rejected) return "The wallet transaction was declined. You can retry when ready.";
+  if (error?.code === "AUDIT_TRANSACTION_CANCELLED") {
+    return "The pending verification transaction was cancelled in your wallet. This submission was not completed. Your entries are still here; submit again when ready.";
+  }
+  if (isWalletRejection(error)) return "The wallet transaction was declined. You can retry when ready.";
   if (/wallet retry limit has been reached/i.test(error?.message ?? "")) {
     return "The wallet retry limit has been reached. Ask an administrator to reset verification attempts.";
   }

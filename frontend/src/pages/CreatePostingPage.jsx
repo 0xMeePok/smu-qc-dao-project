@@ -26,6 +26,7 @@ import { deleteAttachment } from "../lib/attachments.js";
 import { auditErrorMessage, messageForFirebaseError } from "../lib/errors.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
+import { SubmissionError } from "../components/SubmissionError.jsx";
 import { formatInstant, toDate } from "../lib/datetime.js";
 import {
   anchorPostingAudit,
@@ -781,11 +782,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             />
           )}
 
-          {submitError && (
-            <p className="attachment-error" role="alert">
-              {submitError} Nothing you typed has been lost — fix the problem and submit again.
-            </p>
-          )}
+          <SubmissionError message={submitError}>
+            {" "}Nothing you typed has been lost — you can submit again when ready.
+          </SubmissionError>
           {Object.keys(errors).length > 0 && (
             <p className="field-hint" role="status">
               {Object.keys(errors).length} field(s) need attention above.

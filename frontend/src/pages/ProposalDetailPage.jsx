@@ -140,15 +140,21 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
-      <h2 id="withdraw-proposal-title">Withdraw this proposal?</h2>
-      <p id="withdraw-proposal-desc">It leaves evaluation and selection immediately. You can submit a new proposal while the opportunity remains open.</p>
-      <Field htmlFor="withdrawal-reason" label="Why are you withdrawing?" error={reasonError} hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to the sponsor. It cannot be changed afterwards.">
-        {({ id, describedBy, invalid }) => <textarea id={id} rows={3} value={anchoredWithdrawal?.reason ?? reason} maxLength={1000} disabled={withdrawing || Boolean(anchoredWithdrawal)} aria-describedby={describedBy} aria-invalid={invalid} onChange={(event) => { if (anchoredWithdrawal) return; setReason(event.target.value); setReasonError(""); }} />}
-      </Field>
-      {error && anchoredWithdrawal ? <p className="error-banner" role="alert">{error}</p> : null}
-      <p className="field-hint">{anchoredWithdrawal
-        ? "The withdrawal is already signed on Arbitrum Sepolia. Saving it does not need another signature."
-        : "Your wallet signs the withdrawal before it takes effect. If you decline, the proposal stays in evaluation exactly as it is."}</p>
+      <div className="modal-head">
+        <div>
+          <h2 id="withdraw-proposal-title">Withdraw this proposal?</h2>
+          <p id="withdraw-proposal-desc">It leaves evaluation and selection immediately. You can submit a new proposal while the opportunity remains open.</p>
+        </div>
+      </div>
+      <div className="modal-body">
+        <Field htmlFor="withdrawal-reason" label="Why are you withdrawing?" error={reasonError} hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to the sponsor. It cannot be changed afterwards.">
+          {({ id, describedBy, invalid }) => <textarea id={id} rows={3} value={anchoredWithdrawal?.reason ?? reason} maxLength={1000} disabled={withdrawing || Boolean(anchoredWithdrawal)} aria-describedby={describedBy} aria-invalid={invalid} onChange={(event) => { if (anchoredWithdrawal) return; setReason(event.target.value); setReasonError(""); }} />}
+        </Field>
+        {error && anchoredWithdrawal ? <p className="error-banner" role="alert">{error}</p> : null}
+        <p className="field-hint">{anchoredWithdrawal
+          ? "The withdrawal is already signed on Arbitrum Sepolia. Saving it does not need another signature."
+          : "Your wallet signs the withdrawal before it takes effect. If you decline, the proposal stays in evaluation exactly as it is."}</p>
+      </div>
       <div className="modal-actions"><button className="secondary" disabled={withdrawing || Boolean(anchoredWithdrawal)} onClick={() => setConfirm(false)}>Keep proposal</button><button className="danger-btn" disabled={withdrawing} onClick={withdraw}>{withdrawing ? (anchoredWithdrawal ? "Saving…" : "Waiting for your wallet…") : (anchoredWithdrawal ? "Finish saving withdrawal" : "Sign and withdraw")}</button></div>
     </Modal>}
   </section>;

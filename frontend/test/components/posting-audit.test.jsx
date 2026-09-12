@@ -54,6 +54,19 @@ beforeEach(() => {
 });
 
 describe("QCDAO-79 posting audit recovery", () => {
+  it.each([false, true])("clears a cancelled transaction so a fresh submission can be signed (resume=%s)", async (resume) => {
+    const writeContract = vi.fn(async () => TX);
+    const cancelled = Object.assign(new Error("Cancelled"), { code: "AUDIT_TRANSACTION_CANCELLED", transactionHash: TX });
+    const result = anchorPostingAudit(posting({ ...queuedAudit(), ...(resume ? { status: "pending", transactionHash: TX } : {}) }), {
+      account: ACCOUNT,
+      adapters: { writeContract, readContract: configuredReads(), waitForTransactionReceipt: async () => { throw cancelled; } },
+    });
+    await expect(result).rejects.toBe(cancelled);
+    expect(mocks.updates.at(-1)).toMatchObject({ status: "failed", transactionHash: "" });
+    expect(mocks.updates.at(-1).lastError).toContain("cancelled in your wallet");
+    expect(mocks.updates.map((audit) => audit.status)).not.toContain("confirmed");
+    expect(writeContract).toHaveBeenCalledTimes(resume ? 0 : 1);
+  });
   it("writes once and persists the ordered transaction lifecycle", async () => {
     let writes = 0;
     const adapters = {
