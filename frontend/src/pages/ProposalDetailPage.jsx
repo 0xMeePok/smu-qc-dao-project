@@ -120,7 +120,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const sponsors = Boolean(user?.id && proposal.postingOwnerId === user.id.toLowerCase());
   return <section className="page detail-page">
     <button className="back" onClick={() => onNavigate(owns ? "proposals" : "funding")}>{owns ? "Back to my proposals" : "Back to funding portfolio"}</button>
-    {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. Your submission is saved and verified on Arbitrum Sepolia.</p>}
+    {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. Check the on-chain verification below for its current integrity status.</p>}
     {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
     <div className="detail-layout"><article className="detail-main"><span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span><h1>{proposal.title}</h1><p className="lead">{proposal.summary}</p>
       {isOpenFunding && <p>The funder acts as the problem owner for selection. This proposal follows the same evaluation, selection and approval process as proposals for funded problems.</p>}

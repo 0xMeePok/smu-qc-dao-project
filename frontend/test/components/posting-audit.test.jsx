@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ updates: [], updateError: null }));
 
 vi.mock("../../src/lib/postings.js", () => ({
+  findPosting: vi.fn(),
   postingAuditPayload: (posting) => ({ title: posting.title, expiresAt: posting.expiresAt }),
   updatePostingAudit: async ({ audit }) => {
     mocks.updates.push(audit);
