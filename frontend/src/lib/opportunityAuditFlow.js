@@ -1,5 +1,6 @@
 import {
   AUDIT_HASH_SCHEME,
+  AUDIT_ENTITY_ID_SCHEME,
   AUDIT_REGISTRY_CHAIN_ID,
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
@@ -61,6 +62,7 @@ export function createOpportunityAuditFlow({
     if (!address) return null;
     const prepared = prepareCommit ? prepareCommit(opportunity) : prepareOpportunityCommit({
       recordId: opportunity.id,
+      actor: AUDIT_ENTITY_ID_SCHEME === 2 ? opportunity.ownerId : undefined,
       payload: payloadFor(opportunity),
       kind,
       expiresAt: opportunity.expiresAt,

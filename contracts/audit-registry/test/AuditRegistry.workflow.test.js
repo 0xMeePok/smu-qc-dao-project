@@ -1,19 +1,20 @@
 import { expect } from "chai";
 import { network } from "hardhat";
+const actorId = (actor, digest) => actor.address.toLowerCase() + digest.slice(2, 26);
 
 // Integration cases that complement the existing per-method and fuzz tests.
 describe("AuditRegistry workflow boundaries", function () {
-  let connection, ethers, registry, researcher, other;
+  let connection, ethers, registry, owner, researcher, other;
   let opportunityId, proposalId, expiry;
 
   beforeEach(async function () {
     connection = await network.create();
     ({ ethers } = connection);
-    [, researcher, other] = await ethers.getSigners();
+    [owner, researcher, other] = await ethers.getSigners();
     registry = await (await ethers.getContractFactory("AuditRegistry")).deploy();
     await registry.waitForDeployment();
-    opportunityId = ethers.id("workflow-opportunity");
-    proposalId = ethers.id("workflow-proposal");
+    opportunityId = actorId(owner, ethers.id("workflow-opportunity"));
+    proposalId = actorId(researcher, ethers.id("workflow-proposal"));
     expiry = (await ethers.provider.getBlock("latest")).timestamp + 3600;
     await registry.commitOpportunity(opportunityId, 0, ethers.id("opportunity-v1"), expiry);
   });
@@ -106,7 +107,7 @@ describe("AuditRegistry workflow boundaries", function () {
   });
 
   it("keeps two researchers' proposals separate when mined in the same block", async function () {
-    const secondId = ethers.id("second-proposal");
+    const secondId = actorId(other, ethers.id("second-proposal"));
     await ethers.provider.send("evm_setAutomine", [false]);
     try {
       const first = await registry.connect(researcher).commitProposal(
@@ -134,21 +135,23 @@ describe("AuditRegistry workflow boundaries", function () {
     }
   });
 
-  it("accepts only one of two competing submissions for the same proposal ID", async function () {
+  it("rejects a copied proposal ID even when the attacker broadcasts first", async function () {
     await ethers.provider.send("evm_setAutomine", [false]);
     try {
-      const first = await registry.connect(researcher).commitProposal(
-        proposalId, opportunityId, ...hashes("first"), 0, { gasLimit: 1_000_000 },
-      );
       const second = await registry.connect(other).commitProposal(
         proposalId, opportunityId, ...hashes("second"), 0, { gasLimit: 1_000_000 },
+      );
+      const first = await registry.connect(researcher).commitProposal(
+        proposalId, opportunityId, ...hashes("first"), 0, { gasLimit: 1_000_000 },
       );
       await ethers.provider.send("evm_mine", []);
       const receipts = await Promise.all([first, second].map((tx) => ethers.provider.getTransactionReceipt(tx.hash)));
       expect(receipts.map((receipt) => receipt.status).sort()).to.deep.equal([0, 1]);
       expect(receipts[0].blockNumber).to.equal(receipts[1].blockNumber);
-      const winner = receipts[0].status === 1 ? researcher : other;
-      const version = receipts[0].status === 1 ? "first" : "second";
+      expect(receipts[0].status).to.equal(1);
+      expect(receipts[1].status).to.equal(0);
+      const winner = researcher;
+      const version = "first";
       const saved = await registry.getProposal(proposalId);
       expect(saved.researcher).to.equal(winner.address);
       expect(saved.proposalHash).to.equal(hashes(version)[0]);
@@ -160,4 +163,14 @@ describe("AuditRegistry workflow boundaries", function () {
       await ethers.provider.send("evm_setAutomine", [true]);
     }
   });
+  it("rejects a copied opportunity ID before its owner has posted", async function () {
+    const fresh = actorId(owner, ethers.id("unpublished-owner-record"));
+    await expect(registry.connect(other).commitOpportunity(fresh, 0, ethers.id("attacker-content"), expiry))
+      .to.be.revertedWithCustomError(registry, "AccessDenied");
+    await expect(registry.getOpportunity(fresh)).to.be.revertedWithCustomError(registry, "InvalidInput");
+    expect(await registry.queryFilter(registry.filters.EventAnchored(fresh))).to.have.length(0);
+    await registry.connect(owner).commitOpportunity(fresh, 0, ethers.id("owner-content"), expiry);
+    expect((await registry.getOpportunity(fresh)).owner).to.equal(owner.address);
+  });
+
 });

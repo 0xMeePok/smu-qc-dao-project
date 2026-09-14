@@ -100,7 +100,7 @@ export function hashAuditPayload(entityType, payload, options) {
 export function createAuditEntityId(
   entityType,
   recordId,
-  { hashScheme = AUDIT_HASH_SCHEME } = {},
+  { hashScheme = AUDIT_HASH_SCHEME, actor } = {},
 ) {
   assertEntityType(entityType);
   assertHashScheme(hashScheme);
@@ -112,7 +112,10 @@ export function createAuditEntityId(
     namespace: "qcdao.audit.entity",
     recordId: id,
   }));
-  return keccak256(stringToHex(canonical));
+  const digest = keccak256(stringToHex(canonical));
+  if (actor === undefined) return digest; // Historical IDs remain reproducible.
+  if (!/^0x[0-9a-fA-F]{40}$/.test(actor)) throw new TypeError("An audit actor address is required.");
+  return `${actor.toLowerCase()}${digest.slice(2, 26)}`;
 }
 
 export const opportunityEntityId = (recordId, options) =>
@@ -169,9 +172,10 @@ export function prepareOpportunityCommit({
   payload,
   kind = OPPORTUNITY_KIND.BUSINESS_PROBLEM,
   expiresAt,
+  actor,
   hashScheme = AUDIT_HASH_SCHEME,
 }) {
-  const entityId = opportunityEntityId(recordId, { hashScheme });
+  const entityId = opportunityEntityId(recordId, { hashScheme, actor });
   const canonicalPayload = canonicalizeAuditPayload(AUDIT_ENTITY_TYPE.OPPORTUNITY, payload, { hashScheme });
   const contentHash = keccak256(stringToHex(canonicalPayload));
   const normalizedKind = normalizeKind(kind);
@@ -199,12 +203,14 @@ export function prepareProposalCommit({
   proposalPayload,
   solutionPayload,
   expectedOpportunityRevisionIndex,
+  actor,
+  opportunityActor,
   hashScheme = AUDIT_HASH_SCHEME,
 }) {
-  const entityId = proposalEntityId(recordId, { hashScheme });
+  const entityId = proposalEntityId(recordId, { hashScheme, actor });
   const parentId = opportunityId
     ? assertBytes32(opportunityId, "Opportunity id")
-    : opportunityEntityId(opportunityRecordId, { hashScheme });
+    : opportunityEntityId(opportunityRecordId, { hashScheme, actor: opportunityActor });
   const canonicalProposal = canonicalizeAuditPayload(
     AUDIT_ENTITY_TYPE.PROPOSAL,
     { document: "proposal", value: proposalPayload },
@@ -291,9 +297,10 @@ export function prepareOpportunityWithdrawal({
   recordId,
   ownerId,
   reason,
+  actor,
   hashScheme = AUDIT_HASH_SCHEME,
 }) {
-  const entityId = opportunityEntityId(recordId, { hashScheme });
+  const entityId = opportunityEntityId(recordId, { hashScheme, actor });
   const text = String(reason ?? "").trim();
   if (!text) throw new TypeError("A withdrawal reason is required.");
   const canonicalPayload = canonicalizeAuditPayload(
@@ -325,9 +332,10 @@ export function prepareProposalWithdrawal({
   recordId,
   researcherId,
   reason,
+  actor,
   hashScheme = AUDIT_HASH_SCHEME,
 }) {
-  const entityId = proposalEntityId(recordId, { hashScheme });
+  const entityId = proposalEntityId(recordId, { hashScheme, actor });
   const text = String(reason ?? "").trim();
   if (!text) throw new TypeError("A withdrawal reason is required.");
   const canonicalPayload = canonicalizeAuditPayload(
@@ -354,4 +362,3 @@ export function prepareProposalWithdrawal({
     args: [entityId, evidenceHash],
   });
 }
-

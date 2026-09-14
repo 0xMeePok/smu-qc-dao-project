@@ -100,7 +100,13 @@
 .audit-warning,
 .audit-verification-mismatch { background: #fde2df; color: #8b271f; }
 .audit-verification-match { background: #d9f2e3; color: #17653b; }
-.audit-verification-unavailable { background: #fff0c9; color: #6f4c00; }
+.audit-verification-unavailable,
+.audit-verification-unanchored { background: #fff0c9; color: #6f4c00; }
+.audit-verification > p:first-child { margin-top: 0; }
+.audit-verification > p:last-child { margin-bottom: 0; }
+.audit-mismatches { padding-left: 1.25rem; }
+.audit-mismatches li + li { margin-top: 1rem; }
+.audit-mismatches summary { cursor: pointer; }
 .audit-explorer-link { display: inline-flex; align-items: center; }
 .audit-unavailable { color: #59564f; }
 

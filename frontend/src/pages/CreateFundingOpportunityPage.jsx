@@ -366,6 +366,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           // The anchored record, not a rebuild: rebuilding derives a fresh
           // expiresAt that would no longer match the confirmed hash.
           opportunityId, ownerId: address, organisation, form, attachments, record,
+          audit: receiptForWrite(audit),
         })
         : await createFundingOpportunity({
           opportunityId,
@@ -374,6 +375,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           form,
           attachments,
           record,
+          audit: receiptForWrite(audit),
         });
       setPublished({ ...opportunity, audit });
       setAuditProgress(null);

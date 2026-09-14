@@ -488,31 +488,43 @@ function usePublishedPostings() {
   const [postings, setPostings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const cursor = useRef(null);
+  const generation = useRef(0);
+  const busy = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!isAuthenticated) {
-      setPostings([]);
-      setLoadError(null);
-      setLoading(false);
-      return () => { cancelled = true; };
-    }
-
+  async function loadPage(reset = false) {
+    if (busy.current || !isAuthenticated) return;
+    busy.current = true;
+    const current = generation.current;
     setLoading(true);
     setLoadError(null);
-    listPublishedPostings()
-      .then((items) => {
-        if (cancelled) return;
-        setPostings(items.map(toOpportunityListItem));
-      })
-      .catch((error) => { if (!cancelled) setLoadError(error); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    try {
+      const page = await listPublishedPostings({ cursor: reset ? null : cursor.current });
+      if (generation.current !== current) return;
+      cursor.current = page.cursor;
+      setHasMore(page.hasMore);
+      setPostings((old) => reset ? page.items.map(toOpportunityListItem)
+        : [...old, ...page.items.filter((item) => !old.some((row) => row.id === item.id)).map(toOpportunityListItem)]);
+    } catch (error) { if (generation.current === current) setLoadError(error); }
+    finally {
+      if (generation.current === current) { busy.current = false; setLoading(false); }
+    }
+  }
 
-    return () => { cancelled = true; };
+  useEffect(() => {
+    generation.current += 1;
+    busy.current = false;
+    cursor.current = null;
+    setPostings([]);
+    setHasMore(false);
+    setLoadError(null);
+    if (isAuthenticated) loadPage(true);
+    else setLoading(false);
+    return () => { generation.current += 1; };
   }, [isAuthenticated]);
 
-  return { postings, loading, loadError, isAuthenticated };
+  return { postings, loading, loadError, isAuthenticated, hasMore, loadMore: () => loadPage(false) };
 }
 
 function SignedOutNotice() {
@@ -532,7 +544,7 @@ function syncDiscoverUrl(filters) {
 }
 
 function Discover({ params }) {
-  const { postings, loading, loadError, isAuthenticated } = usePublishedPostings();
+  const { postings, loading, loadError, isAuthenticated, hasMore, loadMore } = usePublishedPostings();
   const paramsKey = params.toString();
   const [filters, setFilters] = useState(() => parseDiscoveryParams(params));
 
@@ -687,6 +699,10 @@ function Discover({ params }) {
         </fieldset>
       </div>
 
+      {hasMore && <p className="notice">Filters and sorting apply to the opportunities loaded so far. Load more to search further.</p>}
+      {hasMore && <button type="button" className="secondary" disabled={loading} onClick={loadMore}>
+        {loading ? "Loading opportunities…" : "Load more opportunities"}
+      </button>}
       {!isAuthenticated && <SignedOutNotice />}
       {isAuthenticated && loading && <OpportunityListSkeleton />}
       {loadError && (

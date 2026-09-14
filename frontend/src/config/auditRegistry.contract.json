@@ -1,7 +1,8 @@
 {
   "contractName": "AuditRegistry",
   "chainId": 421614,
-  "address": "0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD",
+  "address": "0x47dA28cAEf8021dD88fe18B80e367746e0036964",
+  "entityIdScheme": 2,
   "abi": [
     {
       "inputs": [],

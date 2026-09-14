@@ -1,3 +1,4 @@
+import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
 import { configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
 import { commitProposalAudit, prepareProposalWithdrawal, readOpportunityRevisionIndex, readProposalHashes, readProposalIsAnchored, updateProposalAudit, verifyProposalAudit, withdrawProposalAudit } from "./auditRegistry.js";
 import { findProposal, updateProposalReceipt } from "./proposals.js";
@@ -48,7 +49,10 @@ const flow = createOpportunityAuditFlow({
   persistConfirmed: true,
   enforceWalletRetryLimit: true,
   commitAudit: anchorProposal,
-  verifyAudit: verifyProposalAudit,
+  verifyAudit: (prepared, options) => verifyProposalAudit(prepared, {
+    ...options,
+    useRecordedOpportunityRevision: true,
+  }),
 });
 export function proposalAuditReceipt(record) {
   try {
@@ -79,6 +83,7 @@ export async function anchorProposalWithdrawal(record, { account, adapters, reas
   return withdrawProposalAudit(
     prepareProposalWithdrawal({
       recordId: record.id, researcherId: record.researcherId, reason,
+      actor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.researcherId : undefined,
     }),
     { address, account, adapters, onStatus },
   );

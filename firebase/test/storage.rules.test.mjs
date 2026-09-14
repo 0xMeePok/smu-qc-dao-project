@@ -6,8 +6,8 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { deleteObject, getBytes, ref, uploadBytes } from "firebase/storage";
-import { doc, setDoc } from "firebase/firestore";
+import { deleteObject, getBytes, ref, uploadBytes as rawUploadBytes } from "firebase/storage";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 /**
  * QCDAO-58 - storage.rules.
@@ -35,6 +35,29 @@ const POSTING = "posting123";
 const PDF_BYTES = new TextEncoder().encode("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n");
 
 let env;
+// Model a server-issued reservation for existing upload-format/ACL tests.
+// Raw unreserved uploads are tested separately in the security regression suite.
+async function uploadBytes(reference, bytes, metadata) {
+  const [scope, uid, recordId, fileName] = reference.fullPath.split("/");
+  if (["problems", "proposals"].includes(scope) && fileName?.endsWith(".pdf")) {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const attachmentId = fileName.slice(0, -4);
+      const id = `${scope}.${recordId}.${attachmentId}`;
+      const parent = await getDoc(doc(db, scope, recordId));
+      const reservation = await getDoc(doc(db, "uploadReservations", id));
+      if (reservation.exists()) return;
+      if (scope === "proposals" && parent.exists() && parent.data().status !== "draft") return;
+      if (parent.data()?.attachments?.some((item) => item.id + ".pdf" === fileName)) return;
+      await setDoc(doc(db, "uploadReservations", id), { uid, scope, recordId, attachmentId,
+        path: reference.fullPath, state: "reserved", sealed: false,
+        size: bytes.byteLength, sha256: metadata?.customMetadata?.sha256 || "",
+        expiresAt: new Date("2099-01-01") });
+    });
+  }
+  return rawUploadBytes(reference, bytes, metadata);
+}
+
 
 function pdfMetadata(overrides = {}) {
   return {
@@ -212,7 +235,7 @@ describe("storage rules: uploading a posting attachment", () => {
     );
   });
 
-  it("[BIT-OPD-128] allows delete-then-upload on a draft, so replacing a file is still possible", async () => {
+  it("[BIT-OPD-128] requires server removal and a fresh path when replacing a draft file", async () => {
     // Immutability must not become "you can never fix a wrong upload" before
     // publication. The supported draft path is removal followed by a new
     // attachment. After publish, the object itself is frozen (see the
@@ -221,8 +244,8 @@ describe("storage rules: uploading a posting attachment", () => {
     const storage = env.authenticatedContext(OWNER).storage();
 
     await assertSucceeds(uploadBytes(ref(storage, path), PDF_BYTES, pdfMetadata()));
-    await assertSucceeds(deleteObject(ref(storage, path)));
-    await assertSucceeds(uploadBytes(ref(storage, path), PDF_BYTES, pdfMetadata()));
+    await assertFails(deleteObject(ref(storage, path)));
+    await assertSucceeds(uploadBytes(ref(storage, objectPath(OWNER, POSTING, "newreplace.pdf")), PDF_BYTES, pdfMetadata()));
   });
 
   it("[BIT-OPD-129] refuses a posting id that is not a document-id shape", async () => {
@@ -279,22 +302,22 @@ describe("storage rules: reading and removing an attachment", () => {
       ownerId: OWNER, status: "draft",
       attachments: [{ id: "support01", name: "support.pdf", size: PDF_BYTES.length, contentType: "application/pdf" }],
     }));
-    await assertSucceeds(deleteObject(ref(owner, path)));
+    await assertFails(deleteObject(ref(owner, path)));
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", draftId), {
       ownerId: OWNER, status: "draft", attachments: [],
     }));
     await assertSucceeds(uploadBytes(
-      ref(owner, path),
+      ref(owner, `problems/${OWNER}/${draftId}/support02.pdf`),
       new TextEncoder().encode("%PDF- replacement while still a draft"),
       metadata,
     ));
   });
 
-  it("[BIT-OPD-133] lets the owner delete their own attachment (remove-before-publish)", async () => {
+  it("[BIT-OPD-133] requires trusted removal even for the owner before publish", async () => {
     const path = objectPath(OWNER, POSTING, "deletable.pdf");
     await seedObject(path);
     const storage = env.authenticatedContext(OWNER).storage();
-    await assertSucceeds(deleteObject(ref(storage, path)));
+    await assertFails(deleteObject(ref(storage, path)));
   });
 
   it("[BIT-OPD-134] refuses a delete by another wallet", async () => {
@@ -459,7 +482,7 @@ describe("proposal supporting PDFs", () => {
     // the file its author came back for. That is the whole point of a draft.
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), { researcherId: OWNER, postingOwnerId: OTHER, status: "draft" }));
     await assertSucceeds(uploadBytes(ref(author, secondPath), PDF_BYTES, draftMetadata));
-    await assertSucceeds(deleteObject(ref(author, secondPath)));
+    await assertFails(deleteObject(ref(author, secondPath)));
     // Another wallet never gets to write into this author's proposal folder.
     await assertFails(uploadBytes(ref(env.authenticatedContext(OTHER).storage(), secondPath), PDF_BYTES, draftMetadata));
     // Submit is chain-first: `submitted` with no receipt is already hashed on
@@ -475,6 +498,11 @@ describe("proposal supporting PDFs", () => {
       await assertFails(uploadBytes(ref(author, secondPath), PDF_BYTES, draftMetadata));
       await assertFails(uploadBytes(ref(author, draftPath), new TextEncoder().encode("%PDF- swapped"), draftMetadata));
     }
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "uploadReservations", `proposals.${draftId}.support01`), {
+      uid: OWNER, scope: "proposals", recordId: draftId, attachmentId: "support01",
+      path: draftPath, state: "reserved", sealed: true, size: PDF_BYTES.byteLength,
+      sha256: `0x${"4".repeat(64)}`, expiresAt: new Date("2099-01-01"),
+    }));
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), submitted));
     await assertFrozen();
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", draftId), {

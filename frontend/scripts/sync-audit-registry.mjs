@@ -58,6 +58,7 @@ const config = {
   contractName: artifact.contractName || "AuditRegistry",
   chainId,
   address,
+  ...(deployment.entityIdScheme ? { entityIdScheme: deployment.entityIdScheme } : {}),
   abi: artifact.abi,
 };
 

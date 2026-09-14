@@ -434,9 +434,9 @@ service cloud.firestore {
     // the per-entry string concatenation, which was the most expensive part of
     // this check against Firestore's 1000-expression evaluation cap.
     function attachmentEntry(item, requireDigest) {
-      let id = item.get('id', '');
-      let size = item.get('size', 0);
-      let name = item.get('name', '');
+      let id = item.id;
+      let size = item.size;
+      let name = item.name;
       let fieldCount = item.keys().size();
       return item is map
         // New records carry sha256; four-field legacy posting records remain
@@ -445,8 +445,8 @@ service cloud.firestore {
         && id is string && id.matches('^[A-Za-z0-9_-]{8,64}$')
         && name is string && name.size() > 0 && name.size() <= 200
         && size is number && size > 0 && size <= 10485760
-        && item.get('contentType', '') == 'application/pdf'
-        && (fieldCount == 4 || isBytes32(item.get('sha256', '')));
+        && item.contentType == 'application/pdf'
+        && (fieldCount == 4 || isBytes32(item.sha256));
     }
 
     // Two. Rules cannot loop, so every slot is unrolled and costs expressions
@@ -572,20 +572,19 @@ service cloud.firestore {
     }
 
     function validFundedPosting(data) {
-      // data.get() with a FAILING default rather than keys().hasAll([...]): a
-      // missing field falls back to a value the check below rejects, so presence
-      // is covered without scanning the key list. That scan was the single
-      // biggest cost here against the 1000-expression cap.
+      // These fields are required: a missing property denies the write just as
+      // an empty default would. Direct access saves the expression budget needed
+      // for publication-proof checks on records carrying attachments.
       return opportunityType(data) == 'business-problem'
-        && isNonEmptyString(data.get('title', ''), 160)
-        && isNonEmptyString(data.get('summary', ''), 4000)
-        && isNonEmptyString(data.get('organisation', ''), 120)
-        && isNonEmptyString(data.get('businessContext', ''), 4000)
-        && isNonEmptyString(data.get('currentApproach', ''), 4000)
-        && isNonEmptyString(data.get('currentLimitations', ''), 4000)
-        && isNonEmptyString(data.get('expectedOutcome', ''), 4000)
-        && isNonEmptyString(data.get('successCriteria', ''), 4000)
-        && isNonEmptyString(data.get('dataAvailability', ''), 4000)
+        && isNonEmptyString(data.title, 160)
+        && isNonEmptyString(data.summary, 4000)
+        && isNonEmptyString(data.organisation, 120)
+        && isNonEmptyString(data.businessContext, 4000)
+        && isNonEmptyString(data.currentApproach, 4000)
+        && isNonEmptyString(data.currentLimitations, 4000)
+        && isNonEmptyString(data.expectedOutcome, 4000)
+        && isNonEmptyString(data.successCriteria, 4000)
+        && isNonEmptyString(data.dataAvailability, 4000)
         // Only what validProblem has NOT already established. It has run on this
         // same write and checked the category set, the currency and the expiry
         // type; repeating them here is what pushed publishing a draft with
@@ -775,9 +774,8 @@ service cloud.firestore {
       // Branch early: QCDAO-51 has a smaller, distinct schema. Running it through
       // every optional QCDAO-48 field as well exceeds Firestore's hard 1,000-
       // expression evaluation limit on a valid create.
-      return (opportunityType(data) == 'open-funding' && validOpenFunding(data))
-        || (opportunityType(data) != 'open-funding'
-          && hasProblemSchema(data)
+      return opportunityType(data) == 'open-funding' ? validOpenFunding(data)
+        : (hasProblemSchema(data)
           && hasValidAudit(data)
           && isWalletAddress(data.ownerId)
           // A draft is allowed to be empty - that is the point of QCDAO-50.
@@ -1059,6 +1057,31 @@ service cloud.firestore {
         && (!data.keys().hasAny(['tranches']) || validTranches(data.tranches));
     }
 
+    function reservedRecord(scope, recordId) {
+      let reservation = get(/databases/$(database)/documents/recordReservations/$(scope + '_' + recordId)).data;
+      return reservation.uid == request.auth.uid && !reservation.get('retired', false);
+    }
+
+    function verifiedPublication(scope, recordId, data) {
+      let proof = get(/databases/$(database)/documents/publicationProofs/$(scope + '_' + recordId)).data;
+      return proof.uid == request.auth.uid
+        // Delivery metadata may evolve, but its transaction must be the one
+        // checked by attestPublication, including on creates and corrections.
+        && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
+        && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit']);
+    }
+
+    function publicationWriteAllowed(scope, recordId, data) {
+      return data.status == 'draft'
+        || (resource != null && resource.data.status != 'draft'
+          // Same-transaction receipt progress and withdrawals need no new proof.
+          // Adding, clearing or replacing the hash must pass verifiedPublication.
+          && data.get('audit', {}).get('transactionHash', '')
+            == resource.data.get('audit', {}).get('transactionHash', '')
+          && data.diff(resource.data).affectedKeys().hasOnly(['status', 'withdrawalReason', 'audit', 'updatedAt']))
+        || verifiedPublication(scope, recordId, data);
+    }
+
     match /problems/{problemId} {
       // The marketplace is open to MEMBERS, not to the open internet. A submitted
       // or open posting is readable by any active wallet that has finished
@@ -1069,10 +1092,14 @@ service cloud.firestore {
       // information, and the platform's value is that it circulates among
       // registered participants instead of by forwarded email. Requiring a session
       // also matches the posting detail route, which has always required one.
-      allow read: if isActiveUser(request.auth.uid)
+      allow get: if isActiveUser(request.auth.uid)
         && (resource.data.ownerId == request.auth.uid
           || (resource.data.status in ['submitted', 'open', 'cancelled']
             && hasCompletedProfile(request.auth.uid)));
+      allow list: if request.query.limit != null && request.query.limit <= 50
+        && isActiveUser(request.auth.uid)
+        && (resource.data.ownerId == request.auth.uid
+          || (resource.data.status in ['submitted', 'open', 'cancelled'] && hasCompletedProfile(request.auth.uid)));
       // Drafts only. Deleting a published document would make storage.rules
       // treat the prefix as pre-save again (posting == null), which re-opens
       // owner delete and recreate of the same {id}.pdf behind an on-chain hash.
@@ -1080,6 +1107,9 @@ service cloud.firestore {
         && resource.data.ownerId == request.auth.uid
         && resource.data.status == 'draft';
       allow create: if isActiveUser(request.auth.uid)
+        && hasCompletedProfile(request.auth.uid)
+        && reservedRecord("problems", problemId)
+        && publicationWriteAllowed("problems", problemId, request.resource.data)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
         // Nothing has been withdrawn yet, so a reason may only be an empty seed.
@@ -1097,32 +1127,38 @@ service cloud.firestore {
             && request.resource.data.expiresAt > request.time))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
-      allow update: if isActiveUser(request.auth.uid)
+      function problemUpdateIsAllowed() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return isActiveUser(request.auth.uid)
+        && publicationWriteAllowed("problems", problemId, after)
         && resource != null
-        && resource.data.ownerId == request.auth.uid
-        && request.resource.data.ownerId == resource.data.ownerId
+        && before.ownerId == request.auth.uid
+        && after.ownerId == before.ownerId
         // The AuditRegistry kind is immutable, so its Firestore discriminator is too.
-        && opportunityType(request.resource.data) == opportunityType(resource.data)
+        && opportunityType(after) == opportunityType(before)
         // A draft is not key-bounded, so it still pays the whole-document scan.
         // A published record already passed it, so its write validates the DIFF -
         // see validOpportunityUpdate.
-        && (resource.data.status == 'draft'
-          ? (opportunityWriteIsAllowed(resource.data, request.resource.data, problemId)
-            && validProblem(request.resource.data)
-            && validAttachments(request.resource.data, false)
+        && (before.status == 'draft'
+          ? (opportunityWriteIsAllowed(before, after, problemId)
+            && validProblem(after)
+            && validAttachments(after, false)
             // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
             // let in_review, matched, funded, completed and cancelled skip the
             // contract, so a posting could be blanked passing through those states.
-            && (request.resource.data.status == 'draft'
-              || validMarketplaceOpportunity(request.resource.data))
+            && (after.status == 'draft'
+              || validMarketplaceOpportunity(after))
             // Publishing a draft needs a live expiry. A draft can sit past its own
             // deadline, and it must not go to the marketplace already closed.
-            && (!isMarketplaceVisible(request.resource.data.status)
-              || request.resource.data.expiresAt > request.time))
-          : validOpportunityUpdate(resource.data, request.resource.data, problemId))
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.updatedAt == request.time
-        && validProblemTransition(resource.data.status, request.resource.data.status);
+            && (!isMarketplaceVisible(after.status)
+              || after.expiresAt > request.time))
+          : validOpportunityUpdate(before, after, problemId))
+        && after.createdAt == before.createdAt
+        && after.updatedAt == request.time
+        && validProblemTransition(before.status, after.status);
+      }
+      allow update: if problemUpdateIsAllowed();
     }
 
     match /problems/{problemId}/revisions/{revisionId} {
@@ -1163,6 +1199,9 @@ service cloud.firestore {
         && resource.data.status == 'draft'
         && resource.data.get('audit', {}).get('transactionHash', '') == '';
       allow create: if isActiveUser(request.auth.uid)
+        && hasCompletedProfile(request.auth.uid)
+        && reservedRecord("proposals", proposalId)
+        && publicationWriteAllowed("proposals", proposalId, request.resource.data)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.researcherId == request.auth.uid
         && request.resource.data.createdAt == request.time
@@ -1179,6 +1218,7 @@ service cloud.firestore {
       // never rebroadcast. `confirmed` is not client-writable; validProposal
       // rejects it so a researcher cannot mint a sponsor-facing receipt.
       allow update: if isActiveUser(request.auth.uid)
+        && publicationWriteAllowed("proposals", proposalId, request.resource.data)
         && resource.data.researcherId == request.auth.uid
         && request.resource.data.researcherId == resource.data.researcherId
         && request.resource.data.problemId == resource.data.problemId
@@ -1248,30 +1288,9 @@ service cloud.firestore {
     
     match /funding/{fundId} {
       allow read: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
-      allow delete: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
-      allow create: if isActiveUser(request.auth.uid)
-        && isWalletAddress(request.auth.uid)
-        && request.resource.data.funderId == request.auth.uid
-        && validFunding(request.resource.data)
-        && request.resource.data.status == 'pledged'
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time
-        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
-        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
-        && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
-      allow update: if isActiveUser(request.auth.uid)
-        && resource != null
-        && resource.data.funderId == request.auth.uid
-        && request.resource.data.funderId == resource.data.funderId
-        && request.resource.data.proposalId == resource.data.proposalId
-        && request.resource.data.problemId == resource.data.problemId
-        && validFunding(request.resource.data)
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.updatedAt == request.time
-        && validFundingTransition(resource.data.status, request.resource.data.status)
-        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
-        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
-        && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
+      // Financial lifecycle and verification attestations are Admin SDK only.
+      // Client intentions must never become public evidence of paid funding.
+      allow write: if false;
     }
 
     // Public-safe counters derived by Cloud Functions from role-scoped proposal

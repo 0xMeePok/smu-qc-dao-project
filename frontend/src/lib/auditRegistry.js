@@ -14,7 +14,7 @@ import { wagmiConfig } from "./wagmi.js";
 import { isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
-import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, asOpportunityUpdate, prepareOpportunityCommit, prepareOpportunityUpdate, prepareOpportunityWithdrawal, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal } from "../../../firebase/functions/auditCanonical.js";
+import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, asOpportunityUpdate, prepareOpportunityCommit, prepareOpportunityUpdate, prepareOpportunityWithdrawal, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
 
 // Arbitrum has no priority auction, so estimateFeesPerGas legitimately returns a
 // zero tip on Sepolia - and MetaMask then refuses to send, with "Priority fee must
@@ -404,8 +404,30 @@ function sameHex(left, right) {
   return String(left ?? "").toLowerCase() === String(right ?? "").toLowerCase();
 }
 
+const VERIFICATION_DIFFERENCES = {
+  owner: ["Owner wallet", "The owner wallet differs from the wallet recorded on Arbitrum Sepolia."],
+  researcher: ["Researcher wallet", "The researcher wallet differs from the wallet recorded on Arbitrum Sepolia."],
+  contentHash: ["Opportunity content hash", "Opportunity content hash mismatch. The current posting differs from the content anchored on Arbitrum Sepolia."],
+  proposalHash: ["Proposal content hash", "Proposal content hash mismatch. The current proposal details differ from the content anchored on Arbitrum Sepolia."],
+  solutionHash: ["Solution content hash", "Solution content hash mismatch. Proposal details or supporting-file metadata differ from the content anchored on Arbitrum Sepolia."],
+  kind: ["Opportunity type", "The opportunity type differs from the type recorded on Arbitrum Sepolia."],
+  expiresAt: ["Expiry", "The expiry differs from the expiry recorded on Arbitrum Sepolia."],
+  opportunityId: ["Linked opportunity", "The proposal is linked to a different opportunity on Arbitrum Sepolia."],
+  opportunityRevisionIndex: ["Linked opportunity revision", "The proposal is linked to a different opportunity revision on Arbitrum Sepolia."],
+  anchor: ["Publication anchor", "No matching publication anchor was found in the checked Arbitrum Sepolia history."],
+};
+
+function verificationDifference(field, expected, actual) {
+  const [label, message] = VERIFICATION_DIFFERENCES[field];
+  // A digest identifies which document differs, but cannot reveal which text
+  // field changed without an independently retained copy of the original.
+  return Object.freeze({ field, label, message, expected, actual });
+}
+
 function mismatch(mismatches, field, expected, actual, compare = Object.is) {
-  if (!compare(expected, actual)) mismatches.push({ field, expected, actual });
+  if (!compare(expected, actual)) {
+    mismatches.push(verificationDifference(field, expected, actual));
+  }
 }
 
 async function readWithRetries(functionName, args, options) {
@@ -483,7 +505,7 @@ async function findMatchingAnchor(entityId, expectedHash, options) {
 
 function verification(preparedAudit, actual, anchor, mismatches) {
   if (anchor && !anchor.anchor) {
-    mismatches.push({ field: "anchor", expected: preparedAudit.anchorHash, actual: null });
+    mismatches.push(verificationDifference("anchor", preparedAudit.anchorHash, null));
   }
   return Object.freeze({
     verified: mismatches.length === 0,
@@ -516,8 +538,17 @@ export async function verifyOpportunityAudit(input, options = {}) {
 }
 
 export async function verifyProposalAudit(input, options = {}) {
-  const expected = asPrepared(input, prepareProposalCommit);
+  let expected = asPrepared(input, prepareProposalCommit);
   const actual = await readWithRetries("getProposal", [expected.entityId], options);
+  if (options.useRecordedOpportunityRevision === true) {
+    // Saved proposal documents do not carry the committed parent revision.
+    // Use the proposal's own chain binding, never the parent's latest revision.
+    // Explicit revision checks remain the default for prepared operations.
+    expected = withOpportunityRevisionIndex(
+      expected,
+      tupleField(actual, "opportunityRevisionIndex", 2),
+    );
+  }
   const mismatches = [];
   if (expected.expectedResearcher) {
     mismatch(mismatches, "researcher", expected.expectedResearcher, tupleField(actual, "researcher", 0), sameHex);

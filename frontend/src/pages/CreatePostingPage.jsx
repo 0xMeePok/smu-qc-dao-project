@@ -398,6 +398,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           // The anchored record, not a rebuild: rebuilding derives a fresh
           // expiresAt that would no longer match the confirmed hash.
           postingId, ownerId: address, organisation, form, attachments, record,
+          audit: receiptForWrite(audit),
         })
         : await createPosting({
           postingId,
@@ -408,6 +409,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           // The contract is authoritative for the audit. Firebase stores only the
           // posting content, after its exact hash has been confirmed on-chain.
           record,
+          audit: receiptForWrite(audit),
         });
       setPublished({ ...posting, audit });
       setAuditProgress(null);

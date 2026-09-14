@@ -73,7 +73,7 @@ for (const flow of cases) {
       expect(screen.queryByText(/Verified match/)).toBeNull();
       expect(await screen.findByText("On-chain mismatch")).toBeTruthy();
       expect(screen.getByRole("alert").textContent).toContain("Mismatch detected");
-      expect(screen.getByText(flow.prepare(mocks.server).contentHash)).toBeTruthy();
+      expect(screen.getAllByText(flow.prepare(mocks.server).contentHash).length).toBeGreaterThan(0);
       expect(mocks.getServer).toHaveBeenCalledTimes(2);
       expect(mocks.getCached.mock.calls.every(([ref]) => ref.collection === "opportunityMetrics")).toBe(true);
       expect(adapters.writeContract).not.toHaveBeenCalled();

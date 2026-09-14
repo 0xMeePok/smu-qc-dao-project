@@ -1,3 +1,5 @@
+import { Timestamp } from "firebase-admin/firestore";
+import { memoryDb } from "./memoryDb.mjs";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -36,6 +38,7 @@ describe("parseAttachmentPath", () => {
   it("[BUT-OPD-006] accepts the exact shape the uploader writes", () => {
     assert.deepEqual(parseAttachmentPath(livePath()), {
       ownerId: OWNER,
+      scope: "problems",
       problemId: "p1",
       attachmentId: "abc123xy",
     });
@@ -197,34 +200,32 @@ describe("sweepOrphanedAttachments", () => {
   function harness({ files, postings, afterSnapshot }) {
     const deleted = [];
     const store = new Map((postings ?? []).map((posting) => [posting.id ?? "unknown", posting]));
-    const bucket = {
-      getFiles: async () => [files.map(({ path, createdAt }) => ({
-        name: path,
-        metadata: { timeCreated: new Date(createdAt).toISOString() },
-        delete: async () => { deleted.push(path); },
-      }))],
+    const db = memoryDb(Object.fromEntries([...store].map(([id, record]) => [`problems/${id}`, record])));
+    const objects = files.map(({ path, createdAt }) => ({
+      name: path, metadata: { timeCreated: new Date(createdAt).toISOString() },
+      delete: async () => { deleted.push(path); },
+    }));
+    let changed = false;
+    const originalCollection = db.collection;
+    db.collection = (name) => {
+      const collection = originalCollection(name);
+      if (name !== "problems") return collection;
+      return { ...collection, doc(id) {
+        const ref = collection.doc(id);
+        return { ...ref, async get() {
+          const snapshot = await ref.get();
+          if (!changed && afterSnapshot) {
+            changed = true;
+            afterSnapshot(store);
+            for (const [key, record] of store) db.records.set(`problems/${key}`, record);
+          }
+          return snapshot;
+        } };
+      } };
     };
-    const db = {
-      collection: () => ({
-        get: async () => {
-          const docs = [...store.entries()].map(([id, data]) => ({
-            id,
-            data: () => data,
-          }));
-          afterSnapshot?.(store);
-          return { docs };
-        },
-        doc: (id) => ({
-          get: async () => {
-            const data = store.get(id);
-            return {
-              exists: data !== undefined,
-              id,
-              data: () => data,
-            };
-          },
-        }),
-      }),
+    const bucket = {
+      getFiles: async ({ prefix = "" } = {}) => [objects.filter((file) => file.name.startsWith(prefix))],
+      file: (path) => ({ exists: async () => [objects.some((file) => file.name === path) && !deleted.includes(path)] }),
     };
     return { db, bucket, deleted, store, logger: { info() {}, warn() {} } };
   }
@@ -268,7 +269,7 @@ describe("sweepOrphanedAttachments", () => {
     });
     const files = (await bucket.getFiles())[0];
     files[0].delete = async () => { throw new Error("404 not found"); };
-    bucket.getFiles = async () => [files];
+    bucket.getFiles = async ({ prefix }) => [files.filter((file) => file.name.startsWith(prefix))];
 
     const summary = await sweepOrphanedAttachments({ db, bucket, dryRun: false, now: NOW, logger });
 
@@ -306,4 +307,34 @@ describe("sweepOrphanedAttachments", () => {
     assert.equal(summary.deleted, 0);
     assert.equal(summary.orphans, 0);
   });
+});
+
+
+it("QCDAO-134 resumes past retained reservations and reclaims abandoned proposal quota", async () => {
+  const expiresAt = Timestamp.fromMillis(NOW - DEFAULT_GRACE_MS - 1000);
+  const db = memoryDb(Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`uploadReservations/a${String(i).padStart(3, "0")}`, {
+    uid: OWNER, scope: "problems", recordId: "old", attachmentId: `old${i}`, state: "reserved", sealed: true, expiresAt,
+  }])));
+  const path = `proposals/${OWNER}/abandoned/orphan01.pdf`;
+  db.records.set("uploadReservations/zlast", { uid: OWNER, scope: "proposals", recordId: "abandoned", path,
+    state: "reserved", sealed: false, size: 10, expiresAt, quotaReleasedAt: null });
+  db.records.set(`uploadQuotas/${OWNER}`, { bytes: 10 });
+  db.records.set("uploadQuotas/proposals_abandoned", { bytes: 10, count: 1 });
+  const bucket = { file: () => ({ exists: async () => [false] }), getFiles: async () => [[]] };
+  const logger = { info() {}, warn() {} };
+  await sweepOrphanedAttachments({ db, bucket, dryRun: false, now: NOW, logger });
+  assert.equal(db.records.get("uploadReservations/zlast").state, "reserved");
+  await sweepOrphanedAttachments({ db, bucket, dryRun: false, now: NOW, logger });
+  assert.equal(db.records.get("uploadReservations/zlast").state, "retired");
+  assert.equal(db.records.get(`uploadQuotas/${OWNER}`).bytes, 0);
+});
+
+it("retains archived registry PDFs after their active parent was removed", async () => {
+  const path = `problems/${OWNER}/archived/oldfile1.pdf`;
+  const db = memoryDb({ "recordReservations/problems_archived": { uid: OWNER, retired: true } });
+  let deleted = false;
+  const file = { name: path, metadata: { timeCreated: new Date(NOW - 2 * DEFAULT_GRACE_MS).toISOString() }, delete: async () => { deleted = true; } };
+  const bucket = { getFiles: async ({ prefix }) => [path.startsWith(prefix) ? [file] : []], file: () => ({ exists: async () => [true] }) };
+  const result = await sweepOrphanedAttachments({ db, bucket, now: NOW, dryRun: false, logger: { info() {}, warn() {} } });
+  assert.equal(deleted, false); assert.equal(result.referenced, 1);
 });

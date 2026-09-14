@@ -9,21 +9,8 @@ export const MAX_FUNDING_TAG_LENGTH = 40;
  * audit payloads use one stable representation. The first occurrence keeps its
  * display casing.
  */
-export function parseFundingTags(value = "") {
-  const source = Array.isArray(value) ? value : String(value).split(",");
-  const seen = new Set();
-  const tags = [];
-
-  for (const item of source) {
-    const tag = String(item ?? "").normalize("NFC").trim().replace(/\s+/g, " ");
-    const key = tag.toLowerCase();
-    if (!tag || seen.has(key)) continue;
-    seen.add(key);
-    tags.push(tag);
-  }
-
-  return tags;
-}
+export { parseFundingTags } from "../../../firebase/functions/opportunityAuditPayload.js";
+import { parseFundingTags } from "../../../firebase/functions/opportunityAuditPayload.js";
 
 /**
  * QCDAO-51 discovery tags come from the selected technology areas. Keeping this

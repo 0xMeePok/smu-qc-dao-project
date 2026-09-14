@@ -53,6 +53,18 @@ function makeTask(path, metadata) {
   return task;
 }
 
+vi.mock("firebase/functions", () => ({
+  httpsCallable: (_functions, name) => async ({ scope, recordId, attachmentId }) => {
+    if (name === "removeAttachment") {
+      if (mocks.deleteShouldFail) {
+        const error = new Error("permission denied"); error.code = "storage/unauthorized"; throw error;
+      }
+      mocks.deleted.push(`${scope}/0x${"a".repeat(40)}/${recordId}/${attachmentId}.pdf`);
+    }
+    return { data: { reserved: true } };
+  },
+}));
+
 vi.mock("firebase/storage", () => ({
   ref: (_storage, path) => ({ fullPath: path }),
   uploadBytesResumable: (reference, _file, metadata) => {
@@ -296,6 +308,7 @@ describe("AttachmentUploader", () => {
 
     expect(mocks.tasks[0].cancelled).toBe(true);
     await waitFor(() => expect(screen.queryByText(/uploading/)).toBeNull());
+    await waitFor(() => expect(mocks.deleted).toEqual([mocks.tasks[0].path]));
     expect(onChangeSpy).not.toHaveBeenCalled();
     // A cancel is a user action, so it must not surface as an error.
     expect(screen.queryByRole("alert")).toBeNull();
@@ -308,6 +321,7 @@ describe("AttachmentUploader", () => {
 
     await act(async () => { mocks.tasks[0].fail("storage/unauthorized"); });
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/permission/));
+    await waitFor(() => expect(mocks.deleted).toEqual([mocks.tasks[0].path]));
   });
 
   it("[FIT-OPD-027] removing before publish deletes the stored object, not just the row", async () => {

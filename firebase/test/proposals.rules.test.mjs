@@ -1,13 +1,23 @@
+import { seedPublicationFixture } from "./publication-fixture.mjs";
 import fs from "node:fs";
 import { after, before, describe, it } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc as rawSetDoc, updateDoc as rawUpdateDoc, where, writeBatch } from "firebase/firestore";
 
 const AUTHOR = `0x${"81".repeat(20)}`;
 const SPONSOR = `0x${"91".repeat(20)}`;
 const OUTSIDER = `0x${"71".repeat(20)}`;
 const ATTACHMENT_DIGEST = `0x${"4".repeat(64)}`;
 let env;
+async function setDoc(reference, data, ...options) {
+  await seedPublicationFixture(env, reference, data);
+  return rawSetDoc(reference, data, ...options);
+}
+async function updateDoc(reference, data, ...options) {
+  await seedPublicationFixture(env, reference, data, true);
+  return rawUpdateDoc(reference, data, ...options);
+}
+
 let serial = 0;
 before(async () => {
   env = await initializeTestEnvironment({ projectId: "qc-dao-rules-test", firestore: { rules: fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8") } });
@@ -24,7 +34,8 @@ async function parent(overrides = {}) {
 function record(problemId, overrides = {}) {
   return { researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId, opportunityType: "business-problem", title: "Annealing routing", summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare annealing against a classical baseline", suitability: "A combinatorial routing problem", expectedOutcomes: "Improved routing", successCriteria: "10 percent less travel", timeline: "12 weeks", milestones: "Baseline, prototype, validation", team: "Operations research team", amount: 1500, currency: "USDC", status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides };
 }
-function submit(db, id, data, withSlot = true) {
+async function submit(db, id, data, withSlot = true) {
+  await seedPublicationFixture(env, doc(db, "proposals", id), data);
   const batch = writeBatch(db);
   batch.set(doc(db, "proposals", id), data);
   if (withSlot) batch.set(doc(db, "problems", data.problemId, "proposalAuthors", AUTHOR), { proposalId: id });
@@ -130,7 +141,8 @@ describe("QCDAO-59/60 submitted proposals", () => {
     const draft = record(id, { status: "draft", attachments: [attachment] });
     delete draft.postingOwnerId;
     await assertSucceeds(setDoc(doc(db, "proposals", "proposal-draft-digest"), draft));
-    const publish = (attachments) => {
+    const publish = async (attachments) => {
+      await seedPublicationFixture(env, doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() }, true);
       const batch = writeBatch(db);
       batch.update(doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() });
       batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "proposal-draft-digest" });
@@ -251,6 +263,7 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
 
     // Promotion keeps the id, so the attachments already stored under it and the
     // audit entity derived from it both survive the transition.
+    await seedPublicationFixture(env, doc(db, "proposals", "partial-draft"), correction(id), true);
     const batch = db.batch ? db.batch() : writeBatch(db);
     batch.update(doc(db, "proposals", "partial-draft"), correction(id));
     batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "partial-draft" });

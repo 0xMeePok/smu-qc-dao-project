@@ -571,7 +571,7 @@ describe("AuditRegistry read-side verification", () => {
     assert.deepEqual(result.mismatches.map(({ field }) => field), ["owner"]);
   });
 
-  it("reports the exact changed field instead of treating an existing record as verified", async () => {
+  it("reports a content hash mismatch without claiming to identify the changed text field", async () => {
     const expected = prepareOpportunityCommit({
       recordId: "posting-123",
       payload: OPPORTUNITY_PAYLOAD,
@@ -607,5 +607,70 @@ describe("AuditRegistry read-side verification", () => {
     assert.deepEqual(result.mismatches.map(({ field }) => field), ["contentHash"]);
     assert.equal(result.mismatches[0].expected, expected.contentHash);
     assert.equal(result.mismatches[0].actual, changed.contentHash);
+    assert.equal(result.mismatches[0].label, "Opportunity content hash");
+    assert.match(result.mismatches[0].message, /Opportunity content hash mismatch/);
+    assert.doesNotMatch(result.mismatches[0].message, /amount|title|summary/);
+  });
+
+  it("identifies a solution-only mismatch with both hash values", async () => {
+    const expected = prepareProposalCommit({
+      recordId: "proposal-123",
+      opportunityRecordId: "posting-123",
+      proposalPayload: { title: "Proposal", researcherId: ACCOUNT },
+      solutionPayload: { method: "Annealing" },
+      expectedOpportunityRevisionIndex: 3,
+    });
+    const chainSolutionHash = `0x${"8".repeat(64)}`;
+    const result = await verifyProposalAudit(expected, {
+      address: CONTRACT,
+      verifyAnchor: false,
+      adapters: {
+        writeContract: unused,
+        waitForTransactionReceipt: unused,
+        readContract: async () => ({
+          researcher: ACCOUNT,
+          opportunityId: expected.opportunityId,
+          opportunityRevisionIndex: 3n,
+          proposalHash: expected.proposalHash,
+          solutionHash: chainSolutionHash,
+        }),
+      },
+    });
+    assert.equal(result.verified, false);
+    assert.deepEqual(result.mismatches.map(({ field }) => field), ["solutionHash"]);
+    assert.equal(result.mismatches[0].expected, expected.solutionHash);
+    assert.equal(result.mismatches[0].actual, chainSolutionHash);
+    assert.match(result.mismatches[0].message, /Solution content hash mismatch/);
+  });
+
+  it("verifies matching current content and its publication anchor without a wallet write", async () => {
+    const expected = prepareOpportunityCommit({
+      recordId: "posting-123",
+      payload: { ...OPPORTUNITY_PAYLOAD, ownerId: ACCOUNT },
+      kind: 0,
+      expiresAt: 1_796_083_200,
+    });
+    const result = await verifyOpportunityAudit(expected, {
+      address: CONTRACT,
+      adapters: {
+        writeContract: unused,
+        waitForTransactionReceipt: unused,
+        readContract: async ({ functionName }) => {
+          if (functionName === "getOpportunity") return {
+            owner: ACCOUNT,
+            kind: 0,
+            contentHash: expected.contentHash,
+            expiresAt: 1_796_083_200n,
+          };
+          if (functionName === "anchorCount") return 1n;
+          if (functionName === "anchorAt") return { contentHash: expected.anchorHash };
+          return unused();
+        },
+      },
+    });
+    assert.equal(result.verified, true);
+    assert.equal(result.status, "verified");
+    assert.deepEqual(result.mismatches, []);
+    assert.equal(result.anchor.index, 0n);
   });
 });

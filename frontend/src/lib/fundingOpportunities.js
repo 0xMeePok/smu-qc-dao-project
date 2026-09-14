@@ -1,3 +1,4 @@
+import { attestPublication, reserveResource } from "./publication.js";
 import {
   Timestamp,
   collection,
@@ -14,7 +15,6 @@ import { toPostingRecord } from "./attachments.js";
 import {
   fundingTagsFromCategories,
   OPEN_FUNDING_TYPE,
-  parseFundingTags,
 } from "../config/fundingOpportunity.js";
 import { findPosting } from "./postings.js";
 
@@ -39,30 +39,7 @@ function trimmed(value) {
   return String(value ?? "").trim();
 }
 
-export function fundingOpportunityAuditPayload(opportunity) {
-  const attachments = [...(opportunity.attachments ?? [])]
-    .map((item) => ({
-      id: trimmed(item.id),
-      name: trimmed(item.name),
-      size: Number(item.size),
-      contentType: trimmed(item.contentType || "application/pdf"),
-    }))
-    .sort((left, right) => left.id.localeCompare(right.id));
-  return {
-    opportunityType: OPEN_FUNDING_TYPE,
-    ownerId: trimmed(opportunity.ownerId).toLowerCase(),
-    organisation: trimmed(opportunity.organisation),
-    title: trimmed(opportunity.title),
-    fundingThesis: trimmed(opportunity.fundingThesis),
-    eligibilityNotes: trimmed(opportunity.eligibilityNotes),
-    categories: [...(opportunity.categories ?? [])].map(trimmed).sort(),
-    tags: parseFundingTags(opportunity.tags).sort(),
-    amount: Number(opportunity.amount),
-    currency: trimmed(opportunity.currency),
-    expiresAt: opportunity.expiresAt,
-    ...(attachments.length > 0 ? { attachments } : {}),
-  };
-}
+export { fundingOpportunityAuditPayload } from "../../../firebase/functions/opportunityAuditPayload.js";
 
 export function buildFundingOpportunityDocument({
   ownerId, organisation, form, attachments = [], now = new Date(),
@@ -99,6 +76,7 @@ export async function saveFundingDraft({
     const { createdAt, ...rest } = record;
     await updateDoc(fundingOpportunityRef(opportunityId), rest);
   } else {
+    await reserveResource("problems", opportunityId);
     await setDoc(fundingOpportunityRef(opportunityId), record);
   }
   return findPosting(opportunityId);
@@ -110,13 +88,14 @@ export async function saveFundingDraft({
  * fresh expiresAt that would no longer match the confirmed hash.
  */
 export async function publishFundingDraft({
-  opportunityId, ownerId, organisation, form, attachments = [], record: preparedRecord = null,
+  opportunityId, ownerId, organisation, form, attachments = [], record: preparedRecord = null, audit = null,
 }) {
   requireFirebase();
   const built = preparedRecord
     ? { ...preparedRecord, status: FUNDING_STATUS_SUBMITTED }
     : buildFundingOpportunityDocument({ ownerId, organisation, form, attachments });
   const { createdAt, ...record } = built;
+  await attestPublication("problems", opportunityId, { ...record, audit: audit ?? record.audit });
   await updateDoc(fundingOpportunityRef(opportunityId), record);
   return findPosting(opportunityId);
 }
@@ -128,11 +107,13 @@ export async function createFundingOpportunity({
   form,
   attachments = [],
   record: preparedRecord = null,
+  audit = null,
 }) {
   requireFirebase();
   const record = preparedRecord
     ? { ...preparedRecord }
     : buildFundingOpportunityDocument({ ownerId, organisation, form, attachments });
+  await attestPublication("problems", opportunityId, { ...record, audit: audit ?? record.audit });
   await setDoc(fundingOpportunityRef(opportunityId), record);
   return (await findPosting(opportunityId)) ?? { id: opportunityId, ...record };
 }
@@ -153,6 +134,7 @@ export async function updateFundingOpportunity({
     ? { ...preparedRecord }
     : buildFundingOpportunityDocument({ ownerId, organisation, form, attachments });
   const { createdAt, ...record } = built;
+  await attestPublication("problems", opportunityId, { ...record, audit });
   await updateDoc(fundingOpportunityRef(opportunityId), {
     ...record,
     audit: audit ? { ...audit } : deleteField(),

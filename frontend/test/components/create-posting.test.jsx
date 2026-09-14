@@ -75,6 +75,7 @@ vi.mock("../../src/lib/attachments.js", () => ({
 }));
 
 vi.mock("../../src/lib/postingAudit.js", () => ({
+  receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
   postingAuditReceipt: (posting) => posting.audit ?? null,
   readPostingAudit: async () => {
     if (mocks.auditShouldFail) throw new Error("No matching audit found");
@@ -246,6 +247,7 @@ describe("AuditRegistry integration", () => {
     expect(mocks.auditCalls[0].account).toBe(`0x${"a".repeat(40)}`);
     expect(mocks.auditCalls[0].persistReceipt).toBe(false);
     expect(mocks.created[0].record.audit).toBeUndefined();
+    expect(mocks.created[0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
     expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
     expect(screen.getAllByText("Funded problem statement submitted")).toHaveLength(2);
   });

@@ -13,7 +13,10 @@ vi.mock("../../src/lib/firebase.js", () => ({
 
 vi.mock("../../src/lib/postings.js", () => ({
   POSTING_STATUS_DRAFT: "draft",
-  listOwnPostings: async () => mocks.postings,
+  listOwnPostings: async (_owner, { cursor = 0 } = {}) => ({
+    items: mocks.postings.slice(cursor || 0, (cursor || 0) + 50),
+    cursor: (cursor || 0) + 50, hasMore: mocks.postings.length > (cursor || 0) + 50,
+  }),
   deletePosting: async (posting) => {
     if (mocks.deleteShouldFail) throw new Error("nope");
     mocks.deleted.push(posting.id);
@@ -144,4 +147,18 @@ describe("drafts on the owner's workspace", () => {
     render(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText(/no drafts/i)).toBeTruthy());
   });
+});
+
+
+it("QCDAO-132 can load and resume a draft older than the first 50 postings", async () => {
+  mocks.postings = [...Array.from({ length: 50 }, (_, i) => ({ ...PUBLISHED, id: `p${i}`, title: `Published ${i}` })), DRAFT];
+  const onNavigate = vi.fn();
+  render(<MyProblems onNavigate={onNavigate} />);
+  await screen.findByRole("button", { name: "Load older opportunities" });
+  expect(screen.queryByText(DRAFT.title)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Load older opportunities" }));
+  await screen.findByText(DRAFT.title);
+  fireEvent.click(screen.getByRole("button", { name: "Resume editing" }));
+  expect(onNavigate).toHaveBeenCalledWith("create/draft1");
+  expect(screen.queryByRole("button", { name: "Load older opportunities" })).toBeNull();
 });

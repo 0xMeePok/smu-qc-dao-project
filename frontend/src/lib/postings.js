@@ -8,12 +8,15 @@ import {
   getDocFromServer,
   getDocs,
   orderBy,
+  limit,
+  startAfter,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
+import { attestPublication, reserveResource } from "./publication.js";
 import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { deleteAttachment, toPostingRecord } from "./attachments.js";
@@ -69,7 +72,11 @@ export function normaliseOpportunityMetrics(value = {}) {
 
 async function findOpportunityMetrics(postingId, fallback = {}) {
   const snapshot = await getDoc(opportunityMetricsRef(postingId));
-  return normaliseOpportunityMetrics(snapshot.exists() ? snapshot.data() : fallback);
+  const data = snapshot.exists() ? snapshot.data() : fallback;
+  // Historical totals can contain client-authored funding. Do not display that
+  // amount while the bounded server migration replaces the projection.
+  return normaliseOpportunityMetrics(data.version === 2 ? data
+    : { proposalCount: data.proposalCount, fundedAmount: 0, fundingProgressPercent: 0 });
 }
 
 function postingFromSnapshot(snapshot, metrics) {
@@ -93,32 +100,7 @@ function postingFromSnapshot(snapshot, metrics) {
  * attachments are set-like in the UI, so they are sorted before canonical JSON is
  * produced by lib/auditRegistry.js.
  */
-export function postingAuditPayload(posting) {
-  return {
-    ownerId: trimmed(posting.ownerId).toLowerCase(),
-    organisation: trimmed(posting.organisation),
-    title: trimmed(posting.title),
-    businessContext: trimmed(posting.businessContext),
-    summary: trimmed(posting.summary),
-    currentApproach: trimmed(posting.currentApproach),
-    currentLimitations: trimmed(posting.currentLimitations),
-    expectedOutcome: trimmed(posting.expectedOutcome),
-    successCriteria: trimmed(posting.successCriteria),
-    dataAvailability: trimmed(posting.dataAvailability),
-    categories: [...(posting.categories ?? [])].map(trimmed).sort(),
-    amount: Number(posting.amount),
-    currency: trimmed(posting.currency),
-    expiresAt: posting.expiresAt,
-    attachments: [...(posting.attachments ?? [])]
-      .map((item) => ({
-        id: trimmed(item.id),
-        name: trimmed(item.name),
-        size: Number(item.size),
-        contentType: trimmed(item.contentType || "application/pdf"),
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id)),
-  };
-}
+export { postingAuditPayload } from "../../../firebase/functions/opportunityAuditPayload.js";
 
 /**
  * Builds the document from form state. Split out from the write so the exact shape
@@ -174,6 +156,7 @@ export async function createPosting({
   const record = preparedRecord
     ? { ...preparedRecord }
     : buildPostingDocument({ ownerId, organisation, form, attachments, audit });
+  await attestPublication("problems", postingId, { ...record, audit: audit ?? record.audit });
   await setDoc(postingRef(postingId), record);
 
   // Read back rather than returning `record`. createdAt and updatedAt are
@@ -210,12 +193,17 @@ export async function findPosting(postingId, { fromServer = false } = {}) {
   return postingFromSnapshot(snapshot, metrics);
 }
 
-export async function listPublishedPostings() {
+export const MARKETPLACE_PAGE_SIZE = 25;
+
+export async function listPublishedPostings({ cursor = null, asOf = new Date() } = {}) {
   requireFirebase();
   const snapshot = await getDocs(query(
     collection(db, "problems"),
     where("status", "in", ["submitted", "open"]),
-    orderBy("createdAt", "desc"),
+    where("expiresAt", ">", Timestamp.fromDate(asOf)),
+    orderBy("expiresAt", "asc"),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(MARKETPLACE_PAGE_SIZE),
   ));
 
   const visible = snapshot.docs.filter((item) => {
@@ -228,10 +216,11 @@ export async function listPublishedPostings() {
 
   // Each metric read is independent. Running them together keeps the listing to
   // two network turns without exposing private proposal or funding documents.
-  return Promise.all(visible.map(async (item) => postingFromSnapshot(
+  const items = await Promise.all(visible.map(async (item) => postingFromSnapshot(
     item,
-    await findOpportunityMetrics(item.id, item.data()),
+    await findOpportunityMetrics(item.id),
   )));
+  return { items, cursor: snapshot.docs.at(-1) ?? null, hasMore: snapshot.docs.length === MARKETPLACE_PAGE_SIZE };
 }
 
 /**
@@ -258,6 +247,7 @@ export async function saveDraft({ postingId, ownerId, organisation, form, attach
     const { createdAt, ...rest } = record;
     await updateDoc(postingRef(postingId), rest);
   } else {
+    await reserveResource("problems", postingId);
     await setDoc(postingRef(postingId), record);
   }
 
@@ -273,7 +263,7 @@ export async function saveDraft({ postingId, ownerId, organisation, form, attach
  * confirmed hash, and later verification against Firestore fails.
  */
 export async function publishDraft({
-  postingId, ownerId, organisation, form, attachments = [], record: preparedRecord = null,
+  postingId, ownerId, organisation, form, attachments = [], record: preparedRecord = null, audit = null,
 }) {
   requireFirebase();
   const built = preparedRecord
@@ -282,6 +272,7 @@ export async function publishDraft({
       ownerId, organisation, form, attachments, status: POSTING_STATUS_SUBMITTED,
     });
   const { createdAt, ...record } = built;
+  await attestPublication("problems", postingId, { ...record, audit: audit ?? record.audit });
   await updateDoc(postingRef(postingId), record);
   return findPosting(postingId);
 }
@@ -312,6 +303,7 @@ export async function updatePosting({
     ? { ...preparedRecord }
     : buildPostingDocument({ ownerId, organisation, form, attachments });
   const { createdAt, ...record } = built;
+  await attestPublication("problems", postingId, { ...record, audit });
   await updateDoc(postingRef(postingId), {
     ...record,
     audit: audit ? { ...audit } : deleteField(),
@@ -339,15 +331,18 @@ export async function listOpportunityRevisions(postingId, { uid, isOwner = false
     .sort((a, b) => (b.at?.toMillis?.() || 0) - (a.at?.toMillis?.() || 0));
 }
 
-/** Every posting this wallet owns, drafts included, newest first. */
-export async function listOwnPostings(ownerId) {
+/** A bounded page of this wallet's postings, drafts included, newest first. */
+export async function listOwnPostings(ownerId, { cursor = null } = {}) {
   requireFirebase();
   const snapshot = await getDocs(query(
     collection(db, "problems"),
     where("ownerId", "==", String(ownerId).toLowerCase()),
     orderBy("updatedAt", "desc"),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(50),
   ));
-  return snapshot.docs.map((item) => normalisePosting(item.id, item.data()));
+  return { items: snapshot.docs.map((item) => normalisePosting(item.id, item.data())),
+    cursor: snapshot.docs.at(-1) ?? null, hasMore: snapshot.size === 50 };
 }
 
 /** Deletes a posting and the stored files it referenced. */

@@ -10,11 +10,12 @@ vi.mock("../../src/lib/proposals.js", () => ({
   },
 }));
 import { anchorProposalAudit, proposalAuditReceipt, proposalAuditPayload, readProposalAudit } from "../../src/lib/proposalAudit.js";
+import { AUDIT_ENTITY_ID_SCHEME } from "../../src/config/auditRegistry.js";
 import { prepareProposalCommit } from "../../src/lib/auditRegistry.js";
 const account = `0x${"a".repeat(40)}`;
 const tx = `0x${"3".repeat(64)}`;
-const record = { id: "proposal123", problemId: "problem123", researcherId: account, title: "Annealing", methodology: "Benchmark routing", attachments: [] };
-const prepared = prepareProposalCommit({ recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { ...proposalAuditPayload(record), attachments: [] } });
+const record = { id: "proposal123", problemId: "problem123", researcherId: account, postingOwnerId: `0x${"b".repeat(40)}`, title: "Annealing", methodology: "Benchmark routing", attachments: [] };
+const prepared = prepareProposalCommit({ actor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.researcherId : undefined, opportunityActor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.postingOwnerId : undefined, recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { ...proposalAuditPayload(record), attachments: [] } });
 function readContract({ functionName }) {
   // Defaults to the record's own hashes so verification reads match. An amendment
   // sets mocks.stored to the PRE-edit hashes, which is what the chain holds.
@@ -40,6 +41,8 @@ describe("proposal audit handoff", () => {
     const writeContract = vi.fn(async () => tx);
     const result = await anchorProposalAudit(record, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } });
     expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
+    expect(writeContract.mock.calls[0][0].args[0].slice(0, 42)).toBe(record.researcherId);
+    expect(writeContract.mock.calls[0][0].args[1].slice(0, 42)).toBe(record.postingOwnerId);
     expect(mocks.updates.map((audit) => audit.status)).toEqual(["queued", "submitted", "pending", "confirmed"]);
     expect(result.status).toBe("confirmed");
     expect(result.transactionHash).toBe(tx);
@@ -144,6 +147,34 @@ it("re-verifies a fresh server read and detects a changed proposal", async () =>
   const result = await readProposalAudit(record, { adapters: { readContract, writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() } });
   expect(mocks.find).toHaveBeenCalledWith(record.id, { fromServer: true });
   expect(result.verified).toBe(false);
+});
+it("verifies a saved proposal against its recorded nonzero parent revision without signing", async () => {
+  mocks.find.mockResolvedValue(record);
+  const chainRead = vi.fn((request) => request.functionName === "getProposal"
+    ? { ...readContract(request), opportunityRevisionIndex: 3n }
+    : readContract(request));
+  const writeContract = vi.fn();
+  const waitForTransactionReceipt = vi.fn();
+  const result = await readProposalAudit(record, {
+    adapters: { readContract: chainRead, writeContract, waitForTransactionReceipt },
+  });
+  expect(result.verified).toBe(true);
+  expect(result.expected.expectedOpportunityRevisionIndex).toBe(3);
+  expect(chainRead.mock.calls.map(([request]) => request.functionName)).not.toContain("opportunityRevisionCount");
+  expect(writeContract).not.toHaveBeenCalled();
+  expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+});
+it("still detects changed content when the recorded parent revision is nonzero", async () => {
+  mocks.find.mockResolvedValue({ ...record, title: "Tampered" });
+  const chainRead = (request) => request.functionName === "getProposal"
+    ? { ...readContract(request), opportunityRevisionIndex: 3n }
+    : readContract(request);
+  const result = await readProposalAudit(record, {
+    adapters: { readContract: chainRead, writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() },
+  });
+  expect(result.verified).toBe(false);
+  expect(result.mismatches.map(({ field }) => field)).toContain("proposalHash");
+  expect(result.mismatches.map(({ field }) => field)).not.toContain("opportunityRevisionIndex");
 });
 it("does not broadcast beyond the wallet attempt cap", async () => {
   const writeContract = vi.fn();
