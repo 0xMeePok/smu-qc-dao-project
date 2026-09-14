@@ -1,8 +1,12 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  // Component tests need a DOM.
+  test: {
+    environment: "jsdom",
+  },
   build: {
     // Builds into the Firebase project directory rather than frontend/dist.
     //

@@ -2630,7 +2630,7 @@ footer > p { margin: 0 auto 0 0; }
   }
 }
 
-/* EXPIRY COUNTDOWN (QCDAO-48) */
+/* Expiry countdown */
 .expiry-panel {
   margin-top: 16px;
   padding-top: 14px;
@@ -2656,7 +2656,45 @@ footer > p { margin: 0 auto 0 0; }
   font-variant-numeric: tabular-nums;
 }
 
-.expiry-countdown.expired strong {
+.expiry-admin-utility {
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--danger);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.expiry-admin-utility form {
+  display: grid;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.expiry-admin-utility form button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.expiry-urgency {
+  width: fit-content;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.expiry-approaching strong,
+.expiry-approaching .expiry-urgency {
+  color: #a45d00;
+}
+
+.expiry-critical strong,
+.expiry-critical .expiry-urgency,
+.expiry-expired strong,
+.expiry-expired .expiry-urgency {
   color: var(--danger);
 }
 

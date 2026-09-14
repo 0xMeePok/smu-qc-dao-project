@@ -33,7 +33,8 @@ import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { listPublishedPostings } from "./lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
 import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
-import { formatCountdown } from "./lib/datetime.js";
+import { ExpiryCountdown } from "./components/ExpiryCountdown.jsx";
+import { opportunityStatusLabel } from "./config/workflowStatus.js";
 import {
   DEFAULT_DISCOVERY_FILTERS,
   DISCOVERY_SORT_OPTIONS,
@@ -311,9 +312,7 @@ function StakeholderIcon({ type }) {
 
 function OpportunityCard({ item }) {
   const proposalLabel = `${item.proposalCount} ${item.proposalCount === 1 ? "proposal" : "proposals"}`;
-  const statusLabel = String(item.status ?? "open")
-    .replaceAll("_", " ")
-    .replace(/^./, (letter) => letter.toUpperCase());
+  const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt });
 
   return (
     <button className="opportunity-card" type="button" onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}>
@@ -349,8 +348,7 @@ function OpportunityCard({ item }) {
         <small>{item.fundingProgressPercent}% funded</small>
       </div>
       <div className="opportunity-deadline">
-        <strong>{formatCountdown(item.expiresAt)}</strong>
-        <small>{item.deadline}</small>
+        <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} />
       </div>
       <span className="row-arrow">
         <ArrowIcon />

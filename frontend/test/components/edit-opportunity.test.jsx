@@ -24,14 +24,14 @@ vi.mock("../../src/context/SessionContext.jsx", () => ({
 vi.mock("../../src/lib/postings.js", () => ({
   newPostingId: () => "posting1",
   findPosting: async () => mocks.posting,
-  buildPostingDocument: ({ form, attachments, status }) => ({
+  buildPostingDocument: ({ form, attachments, status, expiresAt }) => ({
     ownerId: account,
     organisation: "Singapore Management University",
     ...form,
     amount: Number(form.amount),
     attachments,
     status: status ?? "submitted",
-    expiresAt: mocks.posting?.expiresAt ?? new Date("2099-12-01T00:00:00Z"),
+    expiresAt: expiresAt ?? mocks.posting?.expiresAt ?? new Date("2099-12-01T00:00:00Z"),
     createdAt: mocks.posting?.createdAt,
     updatedAt: new Date(),
   }),
@@ -58,7 +58,7 @@ vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
 vi.mock("../../src/lib/fundingOpportunities.js", () => ({
   newFundingOpportunityId: () => "funding1",
   FUNDING_STATUS_DRAFT: "draft",
-  buildFundingOpportunityDocument: ({ form, attachments, status }) => ({
+  buildFundingOpportunityDocument: ({ form, attachments, status, expiresAt }) => ({
     opportunityType: "open-funding",
     ownerId: account,
     organisation: "Singapore Management University",
@@ -66,7 +66,7 @@ vi.mock("../../src/lib/fundingOpportunities.js", () => ({
     amount: Number(form.amount),
     attachments,
     status: status ?? "submitted",
-    expiresAt: mocks.posting?.expiresAt ?? new Date("2099-12-01T00:00:00Z"),
+    expiresAt: expiresAt ?? mocks.posting?.expiresAt ?? new Date("2099-12-01T00:00:00Z"),
     createdAt: mocks.posting?.createdAt,
     updatedAt: new Date(),
   }),
@@ -140,7 +140,25 @@ describe("editing a published posting", () => {
     await screen.findByText(/A proposal has already been received/);
     expect(screen.getByText("1. The problem").closest("fieldset").disabled).toBe(true);
     expect(screen.getByText("5. Funding and timing").closest("fieldset").disabled).toBe(true);
-    expect(screen.getByText("6. Supporting documents").closest("fieldset").disabled).toBe(false);
+    expect(screen.getByText("6. Extend the response window").closest("fieldset").disabled).toBe(false);
+    expect(screen.getByText("7. Supporting documents").closest("fieldset").disabled).toBe(false);
+  });
+
+  it("adds a selected extension to the stored deadline rather than re-anchoring at creation", async () => {
+    render(<CreatePostingPage editPostingId="posting1" onNavigate={mocks.navigate} />);
+    await screen.findByRole("heading", { name: "Edit your problem statement" });
+    fireEvent.change(screen.getByLabelText("Extend by"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and save changes" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
+    expect(mocks.update.mock.calls[0][0].record.expiresAt.toISOString())
+      .toBe("2099-12-31T00:00:00.000Z");
+  });
+
+  it("explains that an elapsed posting is expired rather than echoing its stale submitted status", async () => {
+    mocks.posting = { ...live, expiresAt: new Date(0) };
+    render(<CreatePostingPage editPostingId="posting1" onNavigate={mocks.navigate} />);
+    expect(await screen.findByText("This posting has expired and can no longer be edited.")).toBeTruthy();
+    expect(screen.queryByText(/Its status is submitted/)).toBeNull();
   });
 });
 
@@ -184,7 +202,26 @@ describe("editing a published funding opportunity", () => {
     await screen.findByText(/A proposal has already been received/);
     expect(screen.getByText("1. Funding direction").closest("fieldset").disabled).toBe(true);
     expect(screen.getByText("4. Funding and timing").closest("fieldset").disabled).toBe(true);
-    expect(screen.getByText("5. Supporting material").closest("fieldset").disabled).toBe(false);
+    expect(screen.getByText("5. Extend the response window").closest("fieldset").disabled).toBe(false);
+    expect(screen.getByText("6. Supporting material").closest("fieldset").disabled).toBe(false);
     expect(screen.getByText("Uploader")).toBeTruthy();
+  });
+
+  it("extends a funding opportunity from its current absolute deadline", async () => {
+    mocks.posting = { ...funding };
+    render(<CreateFundingOpportunityPage editOpportunityId="funding1" onNavigate={mocks.navigate} />);
+    await screen.findByRole("heading", { name: "Edit your funding opportunity" });
+    fireEvent.change(screen.getByLabelText("Extend by"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and save changes" }));
+    await waitFor(() => expect(mocks.updateFunding).toHaveBeenCalled());
+    expect(mocks.updateFunding.mock.calls[0][0].record.expiresAt.toISOString())
+      .toBe("2099-12-31T00:00:00.000Z");
+  });
+
+  it("explains that an elapsed funding opportunity is expired rather than echoing its stale submitted status", async () => {
+    mocks.posting = { ...funding, expiresAt: new Date(0) };
+    render(<CreateFundingOpportunityPage editOpportunityId="funding1" onNavigate={mocks.navigate} />);
+    expect(await screen.findByText("This funding opportunity has expired and can no longer be edited.")).toBeTruthy();
+    expect(screen.queryByText(/Its status is submitted/)).toBeNull();
   });
 });

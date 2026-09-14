@@ -1068,6 +1068,39 @@ describe("proposals/{proposalId}", () => {
     await assertFails(setDoc(doc(db, "proposals", "forged-time"), baseProposal({ updatedAt: new Date(0) })));
   });
 
+  it("denies an atomically submitted proposal after the parent deadline elapses", async () => {
+    const problemId = "q56_proposal_elapsed";
+    const proposalId = "q56_proposal_after_deadline";
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", problemId), baseProblem({
+        status: "submitted",
+        currency: "USDC",
+        expiresAt: new Date(Date.now() - 60 * 1000),
+      }));
+    });
+
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const batch = writeBatch(db);
+    batch.set(doc(db, "proposals", proposalId), baseProposal({
+      problemId,
+      status: "submitted",
+      postingOwnerId: ADDRESS,
+      opportunityType: "business-problem",
+      category: "quantum-annealing",
+      currency: "USDC",
+      methodology: "Compare annealing against a classical baseline.",
+      suitability: "The parent is a combinatorial routing problem.",
+      expectedOutcomes: "A lower-cost routing schedule.",
+      successCriteria: "Reduce travel distance by ten percent.",
+      timeline: "Twelve weeks.",
+      milestones: "Baseline, prototype, validation.",
+      team: "An operations research team.",
+      attachments: [],
+    }));
+    batch.set(doc(db, "problems", problemId, "proposalAuthors", ADDRESS), { proposalId });
+    await assertFails(batch.commit());
+  });
+
   it("[QCDAO-127] enforces proposal status transitions", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "proposals", "prop_tr"), baseProposal()));
@@ -1157,6 +1190,30 @@ describe("evaluations/{evaluationId}", () => {
     }));
   });
 
+  it("blocks evaluation creation and updates after the parent lapses", async () => {
+    const PAST = new Date(Date.now() - 60 * 1000);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ADDRESS), baseProfile(null, ADDRESS));
+      await setDoc(doc(ctx.firestore(), "problems", "q56_eval_expired"), {
+        ownerId: ADDRESS, status: "expired", expiresAt: PAST,
+      });
+      await setDoc(doc(ctx.firestore(), "proposals", "q56_eval_prop"), {
+        researcherId: ADDRESS, problemId: "q56_eval_expired", status: "submitted",
+      });
+      await setDoc(doc(ctx.firestore(), "evaluations", "q56_eval_existing"), baseEvaluation({
+        proposalId: "q56_eval_prop",
+      }));
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "evaluations", "q56_eval_new"), baseEvaluation({
+      proposalId: "q56_eval_prop",
+    })));
+    await assertFails(updateDoc(doc(db, "evaluations", "q56_eval_existing"), {
+      status: "submitted", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(db, "evaluations", "q56_eval_existing")));
+  });
+
   it("[QCDAO47] blocks access and reads for suspended evaluators", async () => {
     const SUSPENDED_USER = `0x${"f".repeat(40)}`;
     await env.withSecurityRulesDisabled(async (ctx) => {
@@ -1222,6 +1279,45 @@ describe("funding/{fundId}", () => {
       status: "approved",
       updatedAt: serverTimestamp(),
     }));
+  });
+
+  it("blocks funding creation and updates after the parent deadline", async () => {
+    const PAST = new Date(Date.now() - 60 * 1000);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ADDRESS), baseProfile(null, ADDRESS));
+      await setDoc(doc(ctx.firestore(), "problems", "q56_funding_expired"), {
+        ownerId: ADDRESS, status: "expired", expiresAt: PAST,
+      });
+      await setDoc(doc(ctx.firestore(), "proposals", "q56_funding_prop"), {
+        researcherId: ADDRESS, problemId: "q56_funding_expired", status: "submitted",
+      });
+      await setDoc(doc(ctx.firestore(), "funding", "q56_funding_existing"), baseFunding({
+        proposalId: "q56_funding_prop", problemId: "q56_funding_expired",
+      }));
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "funding", "q56_funding_new"), baseFunding({
+      proposalId: "q56_funding_prop", problemId: "q56_funding_expired",
+    })));
+    await assertFails(updateDoc(doc(db, "funding", "q56_funding_existing"), {
+      status: "approved", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(deleteDoc(doc(db, "funding", "q56_funding_existing")));
+  });
+
+  it("blocks funding against an expired legacy opportunity", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "expired_legacy_problem"), {
+        ownerId: ADDRESS, status: "expired",
+      });
+      await setDoc(doc(ctx.firestore(), "proposals", "expired_legacy_proposal"), {
+        researcherId: ADDRESS, problemId: "expired_legacy_problem", status: "submitted",
+      });
+    });
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "funding", "expired_legacy_funding"), baseFunding({
+      proposalId: "expired_legacy_proposal", problemId: "expired_legacy_problem",
+    })));
   });
 
   it("[QCDAO47] blocks access and reads for suspended funders", async () => {
@@ -1473,6 +1569,91 @@ describe("problems/{problemId} funded posting", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "q48_open"), submitted()));
     await assertSucceeds(updateDoc(doc(db, "problems", "q48_open"), {
       status: "open",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("permits a live owner to extend by a supported window, even after a proposal", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const initial = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const extended = new Date(initial.getTime() + 30 * 24 * 60 * 60 * 1000);
+    // A one-day deadline is below the documented minimum, so it is seeded directly.
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", "q49_extend"), submitted({ expiresAt: initial })));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "opportunityMetrics", "q49_extend"), { proposalCount: 1 });
+    });
+    await assertSucceeds(updateDoc(doc(db, "problems", "q49_extend"), {
+      expiresAt: extended,
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "q49_extend"), {
+      expiresAt: initial,
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "q49_extend"), {
+      expiresAt: new Date(extended.getTime() + 31 * 24 * 60 * 60 * 1000),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[QCDAO-49] accepts an extension saved together with an edit", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const initial = new Date(Math.floor(Date.now() / 1000) * 1000 + 40 * DAY);
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_combo"), submitted({ expiresAt: initial })));
+    await assertSucceeds(updateDoc(doc(db, "problems", "q49_combo"), {
+      title: "Corrected title",
+      expiresAt: new Date(initial.getTime() + 30 * DAY),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[QCDAO-49] keeps the funded ask locked when an extension rides along after a proposal", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const initial = new Date(Math.floor(Date.now() / 1000) * 1000 + 40 * DAY);
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_locked"), submitted({ expiresAt: initial })));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "opportunityMetrics", "q49_locked"), { proposalCount: 1 }));
+    const extended = new Date(initial.getTime() + 60 * DAY);
+    await assertFails(updateDoc(doc(db, "problems", "q49_locked"), {
+      title: "Changed after a proposal", expiresAt: extended, updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(updateDoc(doc(db, "problems", "q49_locked"), {
+      attachments: [], expiresAt: extended, updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("[QCDAO-49] refuses a published expiry outside the documented 30-180 day range", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertFails(setDoc(doc(db, "problems", "q49_far"), submitted({ expiresAt: new Date(Date.now() + 5 * 365 * DAY) })));
+    await assertFails(setDoc(doc(db, "problems", "q49_short"), submitted({ expiresAt: new Date(Date.now() + 10 * DAY) })));
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_min"), submitted({ expiresAt: new Date(Date.now() + 30 * DAY) })));
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_max"), submitted({ expiresAt: new Date(Date.now() + 180 * DAY) })));
+  });
+
+  it("rejects client expiry provenance, expired transitions, and deadline revival", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_server_only"), submitted()));
+    await assertFails(updateDoc(doc(db, "problems", "q49_server_only"), {
+      status: "expired",
+      expiryReason: "funding_requirement_not_met",
+      expirySource: "manual",
+      expiredAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "q49_elapsed"), submitted({
+        expiresAt: new Date(Date.now() - 60 * 1000),
+      }));
+    });
+    await assertFails(updateDoc(doc(db, "problems", "q49_elapsed"), {
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "q49_elapsed"), {
+      status: "in_review",
       updatedAt: serverTimestamp(),
     }));
   });
@@ -2039,6 +2220,16 @@ describe("problems/{problemId} drafts", () => {
       updatedAt: serverTimestamp(),
     }));
     await assertSucceeds(getDoc(doc(env.authenticatedContext(OTHER).firestore(), "problems", "d57_withdraw")));
+  });
+
+  it("[QCDAO-49] refuses publishing a draft whose expiry is outside the documented range", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_draft_far"), emptyDraft()));
+    await assertFails(updateDoc(doc(db, "problems", "q49_draft_far"), {
+      ...completeFields({ expiresAt: new Date(Date.now() + 400 * 24 * 60 * 60 * 1000) }),
+      status: "submitted",
+      updatedAt: serverTimestamp(),
+    }));
   });
 
   it("[QCDAO-57] refuses withdrawing a draft, which would publish it to every member", async () => {

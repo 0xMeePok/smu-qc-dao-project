@@ -1,5 +1,6 @@
 import {
   estimateFeesPerGas as wagmiEstimateFeesPerGas,
+  getBlock as wagmiGetBlock,
   readContract as wagmiReadContract,
   simulateContract as wagmiSimulateContract,
   waitForTransactionReceipt as wagmiWaitForTransactionReceipt,
@@ -129,6 +130,7 @@ export function createWagmiAuditAdapters(config = wagmiConfig) {
     },
     waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
     readContract: (request) => wagmiReadContract(config, request),
+    getBlock: (request) => wagmiGetBlock(config, request),
   };
 }
 

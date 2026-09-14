@@ -595,7 +595,6 @@ service cloud.firestore {
         // Presence only - validProblem already checked the value is a supported
         // currency. '' is what an absent field falls back to.
         && data.get('currency', '') != ''
-        && data.get('expiresAt', '') is timestamp
         // A funded problem statement with no funding attached is not one.
         && data.get('amount', 0) > 0
         // Sponsor identity is the owner's profile, not a free-text claim.
@@ -663,7 +662,7 @@ service cloud.firestore {
     }
 
     function validProblemStatus(status) {
-      return status in ['draft', 'submitted', 'open', 'in_review', 'matched', 'funded', 'completed', 'cancelled'];
+      return status in ['draft', 'submitted', 'open', 'in_review', 'matched', 'funded', 'completed', 'cancelled', 'expired'];
     }
 
     function validProblemTransition(before, after) {
@@ -686,6 +685,26 @@ service cloud.firestore {
       return after.status == 'cancelled' && before.status != 'cancelled'
         ? isNonEmptyString(after.get('withdrawalReason', ''), 1000)
         : after.get('withdrawalReason', '') == before.get('withdrawalReason', '');
+    }
+
+    // A live owner may extend by a supported window only.
+    function validLiveExpiryExtension(before, after) {
+      return before.status in ['submitted', 'open']
+        && after.status == before.status
+        && before.expiresAt > request.time
+        && after.expiresAt is timestamp
+        && after.expiresAt > before.expiresAt
+        && after.expiresAt > request.time
+        && (after.expiresAt == before.expiresAt + duration.value(30, 'd')
+          || after.expiresAt == before.expiresAt + duration.value(60, 'd')
+          || after.expiresAt == before.expiresAt + duration.value(90, 'd')
+          || after.expiresAt == before.expiresAt + duration.value(180, 'd'));
+    }
+
+    // Mirrors MIN/MAX_EXPIRY_DAYS in functions/opportunityExpiry.js, with a day of clock grace.
+    function expiryInDocumentedRange(expiresAt) {
+      let remaining = expiresAt.toMillis() - request.time.toMillis();
+      return remaining >= 2505600000 && remaining <= 15638400000;
     }
 
     // Content edits after the first proposal may only touch supporting files.
@@ -749,26 +768,29 @@ service cloud.firestore {
     // from every key list here, so they are immutable by omission.
     function validOpportunityUpdate(before, after, problemId) {
       let changed = after.diff(before).affectedKeys();
+      let content = changed.difference(['expiresAt'].toSet());
       return validOpportunityWithdrawal(before, after)
         && hasValidAudit(after)
         // A stored receipt is the record's on-chain linkage. It may be REPLACED by
         // a re-anchor, never dropped: hasValidAudit passes an absent map, so an
         // edit could otherwise erase the receipt and leave nothing pointing at it.
         && (!before.keys().hasAny(['audit']) || after.keys().hasAny(['audit']))
-        && (changed.hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason'])
+        // An extension is checked on its own, so it can be saved alongside an edit.
+        && (!changed.hasAny(['expiresAt']) || validLiveExpiryExtension(before, after))
+        && (content.hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason'])
           ? validProblemStatus(after.status)
-          : (changed.hasOnly([
+          : (content.hasOnly([
               'title', 'summary', 'businessContext', 'currentApproach',
               'currentLimitations', 'expectedOutcome', 'successCriteria',
               'dataAvailability', 'fundingThesis', 'eligibilityNotes',
-              'categories', 'tags', 'amount', 'currency', 'expiresAt',
+              'categories', 'tags', 'amount', 'currency',
               'status', 'attachments', 'audit', 'updatedAt'
             ])
             // Supporting files stay editable after the first proposal; the funded
             // ask that researchers already responded to does not.
-            && (changed.hasOnly(['attachments', 'audit', 'updatedAt'])
+            && (content.hasOnly(['attachments', 'audit', 'updatedAt'])
               || opportunityProposalCount(problemId) == 0)
-            && editedOpportunityIsValid(changed, after)));
+            && editedOpportunityIsValid(content, after)));
     }
 
     function validProblem(data) {
@@ -1059,6 +1081,21 @@ service cloud.firestore {
         && (!data.keys().hasAny(['tranches']) || validTranches(data.tranches));
     }
 
+    // Only live response windows permit related work.
+    function problemAllowsTimeBoundActions(problemId) {
+      return exists(/databases/$(database)/documents/problems/$(problemId))
+        && get(/databases/$(database)/documents/problems/$(problemId)).data.status != 'expired'
+        && (!get(/databases/$(database)/documents/problems/$(problemId)).data.keys().hasAny(['expiresAt'])
+          || get(/databases/$(database)/documents/problems/$(problemId)).data.expiresAt > request.time);
+    }
+
+    function proposalAllowsTimeBoundActions(proposalId) {
+      return exists(/databases/$(database)/documents/proposals/$(proposalId))
+        && problemAllowsTimeBoundActions(
+          get(/databases/$(database)/documents/proposals/$(proposalId)).data.problemId
+        );
+    }
+
     match /problems/{problemId} {
       // The marketplace is open to MEMBERS, not to the open internet. A submitted
       // or open posting is readable by any active wallet that has finished
@@ -1071,7 +1108,7 @@ service cloud.firestore {
       // also matches the posting detail route, which has always required one.
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.ownerId == request.auth.uid
-          || (resource.data.status in ['submitted', 'open', 'cancelled']
+          || (resource.data.status in ['submitted', 'open', 'cancelled', 'expired']
             && hasCompletedProfile(request.auth.uid)));
       // Drafts only. Deleting a published document would make storage.rules
       // treat the prefix as pre-save again (posting == null), which re-opens
@@ -1094,12 +1131,16 @@ service cloud.firestore {
           || (validMarketplaceOpportunity(request.resource.data)
             // Expiry is the window solution developers respond within, so a
             // posting that arrives already expired is a mistake, not a state.
-            && request.resource.data.expiresAt > request.time))
+            && expiryInDocumentedRange(request.resource.data.expiresAt)))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.ownerId == request.auth.uid
+        && resource.data.status != 'expired'
+        && (!(resource.data.status in ['submitted', 'open'])
+          || !resource.data.keys().hasAny(['expiresAt'])
+          || resource.data.expiresAt > request.time)
         && request.resource.data.ownerId == resource.data.ownerId
         // The AuditRegistry kind is immutable, so its Firestore discriminator is too.
         && opportunityType(request.resource.data) == opportunityType(resource.data)
@@ -1110,15 +1151,11 @@ service cloud.firestore {
           ? (opportunityWriteIsAllowed(resource.data, request.resource.data, problemId)
             && validProblem(request.resource.data)
             && validAttachments(request.resource.data, false)
-            // ONLY a draft may be incomplete. Keying this off isMarketplaceVisible()
-            // let in_review, matched, funded, completed and cancelled skip the
-            // contract, so a posting could be blanked passing through those states.
+            // ONLY a draft may be incomplete. A draft can only move to submitted or open,
+            // so publishing one needs the full contract and a documented-range expiry.
             && (request.resource.data.status == 'draft'
-              || validMarketplaceOpportunity(request.resource.data))
-            // Publishing a draft needs a live expiry. A draft can sit past its own
-            // deadline, and it must not go to the marketplace already closed.
-            && (!isMarketplaceVisible(request.resource.data.status)
-              || request.resource.data.expiresAt > request.time))
+              || (validMarketplaceOpportunity(request.resource.data)
+                && expiryInDocumentedRange(request.resource.data.expiresAt))))
           : validOpportunityUpdate(resource.data, request.resource.data, problemId))
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
@@ -1131,7 +1168,7 @@ service cloud.firestore {
       // statuses at which they can see the posting itself.
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.ownerId == request.auth.uid
-          || (resource.data.get('status', '') in ['submitted', 'open', 'cancelled']
+          || (resource.data.get('status', '') in ['submitted', 'open', 'cancelled', 'expired']
             && hasCompletedProfile(request.auth.uid)));
       allow write: if false;
     }
@@ -1225,7 +1262,9 @@ service cloud.firestore {
 
     match /evaluations/{evaluationId} {
       allow read: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
-      allow delete: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
+      allow delete: if isActiveUser(request.auth.uid)
+        && resource.data.evaluatorId == request.auth.uid
+        && proposalAllowsTimeBoundActions(resource.data.proposalId);
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.evaluatorId == request.auth.uid
@@ -1233,7 +1272,7 @@ service cloud.firestore {
         && request.resource.data.status == 'draft'
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
-        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId));
+        && proposalAllowsTimeBoundActions(request.resource.data.proposalId);
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.evaluatorId == request.auth.uid
@@ -1243,12 +1282,14 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validEvaluationTransition(resource.data.status, request.resource.data.status)
-        && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId));
+        && proposalAllowsTimeBoundActions(request.resource.data.proposalId);
     }
     
     match /funding/{fundId} {
       allow read: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
-      allow delete: if isActiveUser(request.auth.uid) && resource.data.funderId == request.auth.uid;
+      allow delete: if isActiveUser(request.auth.uid)
+        && resource.data.funderId == request.auth.uid
+        && problemAllowsTimeBoundActions(resource.data.problemId);
       allow create: if isActiveUser(request.auth.uid)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.funderId == request.auth.uid
@@ -1257,7 +1298,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
-        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
+        && problemAllowsTimeBoundActions(request.resource.data.problemId)
         && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
@@ -1270,7 +1311,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time
         && validFundingTransition(resource.data.status, request.resource.data.status)
         && exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
-        && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId))
+        && problemAllowsTimeBoundActions(request.resource.data.problemId)
         && get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.problemId == request.resource.data.problemId;
     }
 
@@ -1282,7 +1323,7 @@ service cloud.firestore {
         let problem = get(/databases/$(database)/documents/problems/$(problemId)).data;
         return isActiveUser(request.auth.uid)
           && (problem.ownerId == request.auth.uid
-            || (problem.status in ['submitted', 'open']
+            || (problem.status in ['submitted', 'open', 'expired']
               && hasCompletedProfile(request.auth.uid)));
       }
 

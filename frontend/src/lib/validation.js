@@ -1,6 +1,7 @@
 import {
   CATEGORY_VALUES,
   CURRENCIES,
+  EXPIRY_WINDOWS,
   MAX_CATEGORIES,
 } from "../config/postingCategories.js";
 import {
@@ -145,7 +146,15 @@ export function validateCurrency(value) {
 export function validateExpiry(value) {
   const days = Number(value);
   if (!Number.isFinite(days) || days <= 0) return "Choose how long this stays open.";
+  if (!EXPIRY_WINDOWS.some((window) => window.value === days)) {
+    return "Choose one of the documented response windows (30, 60, 90 or 180 days).";
+  }
   return null;
+}
+
+export function validateExpiryExtension(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  return validateExpiry(value);
 }
 
 
@@ -168,6 +177,7 @@ export function validatePosting(form) {
     amount: validateFundingAmount(form.amount),
     currency: validateCurrency(form.currency),
     expiryDays: validateExpiry(form.expiryDays),
+    expiryExtensionDays: validateExpiryExtension(form.expiryExtensionDays),
   };
 
   for (const key of Object.keys(errors)) {
@@ -206,6 +216,7 @@ export function validateFundingOpportunity(form) {
     amount: validateFundingAmount(form.amount),
     currency: validateCurrency(form.currency),
     expiryDays: validateExpiry(form.expiryDays),
+    expiryExtensionDays: validateExpiryExtension(form.expiryExtensionDays),
   };
 
   for (const key of Object.keys(errors)) {

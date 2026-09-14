@@ -54,8 +54,8 @@ smu-qc-dao-project/
 │   │   └── styles.css       # Core design system and styles
 │   └── test/                # Unit and integration test suites
 ├── firebase/                # Firestore rules, Cloud Functions, their tests
-│   ├── functions/           # getSiweNonce + verifySiweSignature
-│   └── test/                # Firestore rules tests (78, via emulator)
+│   ├── functions/           # Cloud Functions
+│   └── test/                # Firestore rules tests (via emulator)
 ├── docs/                    # Architecture and RBAC documentation
 │   └── ROLE_ROUTE_PERMISSIONS.md  # Living UAT reference for role-based access control
 └── README.md
@@ -245,9 +245,9 @@ need to redeploy, or want more detail on local emulators, see
 ## Testing
 
 ```bash
-npm test --prefix frontend            # 224 tests — validation, roles, routing, postings, attachments
-npm test --prefix firebase            # 194 tests — Firestore and Storage rules, via local emulators (needs Java)
-npm test --prefix firebase/functions  # 73 tests — adversarial signature verification, attachment sweep
+npm test --prefix frontend            # Frontend unit and component tests
+npm test --prefix firebase            # Firestore and Storage rules tests (via local emulators; needs Java)
+npm test --prefix firebase/functions  # Cloud Functions unit and integration tests
 ```
 
 Each suite boots and tears down whatever emulator it needs, so no manual setup is
