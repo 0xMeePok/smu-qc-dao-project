@@ -362,6 +362,30 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     }
   }
 
+  it("keeps submitted text bounds consistent with existing correction validation", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const cases = [
+      ["empty", "", false], ["one", "x", false], ["two", "ok", true],
+      ["maximum", "x".repeat(4000), true], ["oversized", "x".repeat(4001), false],
+      ["newline", "a\nb", true], ["emoji", "😀", true], ["emoji-pair", "😀😀", true],
+      ["emoji-maximum", "😀".repeat(2000), true], ["emoji-oversized", "😀".repeat(2001), false],
+      ["array", ["ok"], false], ["map", { text: "ok" }, false],
+      ["number", 12, false], ["null", null, false], ["missing", undefined, false],
+    ];
+    for (const [label, value, allowed] of cases) {
+      const problemId = await parent();
+      const data = record(problemId, { methodology: value });
+      if (value === undefined) delete data.methodology;
+      await (allowed ? assertSucceeds : assertFails)(submit(db, `text-create-${label}`, data));
+      const correctionParent = await parent();
+      const ref = doc(db, "proposals", `text-correction-${label}`);
+      await assertSucceeds(submit(db, ref.id, record(correctionParent)));
+      await (allowed ? assertSucceeds : assertFails)(updateDoc(ref, {
+        methodology: value === undefined ? deleteField() : value, updatedAt: serverTimestamp(),
+      }));
+    }
+  });
+
   it("stays inside the expression budget for the heaviest correction", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     const id = await parent({ opportunityType: "open-funding" });
