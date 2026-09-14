@@ -197,10 +197,11 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   };
 
   const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
-  // Matches the rules: a live posting past its deadline is locked until it lapses.
+  // Matches the rules: submitted/open lapse after the deadline; in_review is
+  // also owner-locked once expiresAt passes so it cannot skip that hand-off.
   const canWithdraw = ownsPosting
     && ["submitted", "open", "in_review"].includes(posting?.status)
-    && !isExpiredOpenOpportunity(posting);
+    && !isResponseWindowClosed(posting);
 
   const withdraw = async () => {
     const withdrawalReason = (anchoredWithdrawal?.reason ?? reason).trim();
@@ -220,8 +221,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         setReasonError("Connect the wallet that published this opportunity to sign the withdrawal.");
         return;
       }
-      if (isExpiredOpenOpportunity(posting)) {
-        setReasonError(`The response window has closed, so this ${entityLabel} will lapse automatically instead.`);
+      if (isResponseWindowClosed(posting)) {
+        setReasonError(isExpiredOpenOpportunity(posting)
+          ? `The response window has closed, so this ${entityLabel} will lapse automatically instead.`
+          : `The response window has closed, so this ${entityLabel} can no longer be withdrawn.`);
         return;
       }
     }

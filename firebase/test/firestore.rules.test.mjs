@@ -1658,6 +1658,74 @@ describe("problems/{problemId} funded posting", () => {
     }));
   });
 
+  it("keeps a live posting on the lapse path and locks skip statuses after the deadline", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    const other = env.authenticatedContext(OTHER).firestore();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", OTHER), baseProfile(null, OTHER));
+    });
+
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_skip_review"), submitted()));
+    await assertFails(updateDoc(doc(db, "problems", "q49_skip_review"), {
+      status: "in_review",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertSucceeds(getDoc(doc(other, "problems", "q49_skip_review")));
+
+    await assertSucceeds(setDoc(doc(db, "problems", "q49_skip_match"), submitted()));
+    await assertSucceeds(updateDoc(doc(db, "problems", "q49_skip_match"), {
+      status: "open",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "q49_skip_match"), {
+      status: "matched",
+      updatedAt: serverTimestamp(),
+    }));
+
+    const elapsed = new Date(Date.now() - 60 * 1000);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "q49_review_elapsed"), submitted({
+        status: "in_review",
+        expiresAt: elapsed,
+      }));
+      await setDoc(doc(ctx.firestore(), "problems", "q49_matched_elapsed"), submitted({
+        status: "matched",
+        expiresAt: elapsed,
+      }));
+      await setDoc(doc(ctx.firestore(), "opportunityMetrics", "q49_matched_elapsed"), { proposalCount: 1 });
+      await setDoc(doc(ctx.firestore(), "problems", "q49_review_live"), submitted({
+        status: "in_review",
+      }));
+    });
+
+    await assertFails(updateDoc(doc(db, "problems", "q49_review_elapsed"), {
+      title: "Mutating after the response deadline",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "q49_review_elapsed"), {
+      status: "cancelled",
+      withdrawalReason: "Withdraw after hiding from lapse.",
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(getDoc(doc(other, "problems", "q49_review_elapsed")));
+
+    await assertFails(updateDoc(doc(db, "problems", "q49_matched_elapsed"), {
+      attachments: [],
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "problems", "q49_matched_elapsed"), {
+      status: "cancelled",
+      withdrawalReason: "Withdraw a matched posting after the deadline.",
+      updatedAt: serverTimestamp(),
+    }));
+
+    await assertSucceeds(updateDoc(doc(db, "problems", "q49_review_live"), {
+      status: "cancelled",
+      withdrawalReason: "Programme closed before the deadline.",
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
   it("[BIT-OPD-167] refuses to strip structure while advancing a submitted posting to open", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "q48_strip_open"), submitted()));

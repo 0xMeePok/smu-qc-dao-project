@@ -188,9 +188,10 @@ describe("QCDAO-49 withdrawal window pre-flight", () => {
     }
   });
 
-  it("falls back to the local clock when the node is unreachable, and ignores postings past the response stage", async () => {
+  it("falls back to the local clock when the node is unreachable, and locks skip statuses after the deadline", async () => {
     const offline = { getBlock: async () => { throw new Error("fetch failed"); } };
-    await expect(assertWithdrawalWindowOpen({ ...live, expiresAt: new Date(Date.now() - 1000) }, offline)).rejects.toThrow(/response window has closed/);
-    await expect(assertWithdrawalWindowOpen({ ...live, status: "in_review", expiresAt: new Date(0) }, offline)).resolves.toBeUndefined();
+    await expect(assertWithdrawalWindowOpen({ ...live, expiresAt: new Date(Date.now() - 1000) }, offline)).rejects.toThrow(/will lapse automatically/);
+    await expect(assertWithdrawalWindowOpen({ ...live, status: "in_review", expiresAt: new Date(0) }, offline)).rejects.toThrow(/can no longer be withdrawn/);
+    await expect(assertWithdrawalWindowOpen({ ...live, status: "in_review" }, offline)).resolves.toBeUndefined();
   });
 });

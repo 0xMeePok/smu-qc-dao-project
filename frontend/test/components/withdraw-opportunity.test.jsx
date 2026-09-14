@@ -130,9 +130,11 @@ describe("withdrawing a posted opportunity", () => {
     expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
   });
 
-  it("[QCDAO-49] still offers withdrawal on a posting under review after its deadline", async () => {
+  it("[QCDAO-49] does not offer withdrawal on a posting under review after its deadline", async () => {
     mocks.posting = { ...problem, status: "in_review", expiresAt: new Date(Date.now() - 60 * 1000) };
     render(<PostingDetailPage postingId="posting1" onNavigate={vi.fn()} />);
-    expect(await screen.findByRole("button", { name: "Withdraw problem statement" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: problem.title })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Withdraw problem statement" })).toBeNull();
+    expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
   });
 });

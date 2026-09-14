@@ -670,11 +670,21 @@ service cloud.firestore {
         // NOT 'cancelled': that status is member-readable, and a draft has never
         // been published. Discarding a draft is a delete.
         || (before == 'draft' && after in ['submitted', 'open'])
-        || (before == 'submitted' && after in ['open', 'in_review', 'cancelled'])
-        || (before == 'open' && after in ['in_review', 'matched', 'cancelled'])
-        || (before == 'in_review' && after in ['open', 'matched', 'cancelled'])
-        || (before == 'matched' && after in ['funded', 'completed', 'cancelled'])
-        || (before == 'funded' && after in ['completed', 'cancelled']);
+        // in_review and matched leave the lapse query (submitted/open), hide the
+        // posting from marketplace reads, and skip escrowRefundTriggers. Those
+        // moves are Admin SDK only; a client may only open or withdraw.
+        || (before == 'submitted' && after in ['open', 'cancelled'])
+        || (before == 'open' && after in ['cancelled'])
+        || (before == 'in_review' && after in ['cancelled']);
+    }
+
+    // The scheduled lapse job only visits submitted/open. in_review and matched
+    // are the skip states a client used to walk into; lock them after expiresAt
+    // so an already-moved posting cannot keep mutating past the deadline.
+    function ownerDeadlineOpen(data) {
+      return !(data.status in ['submitted', 'open', 'in_review', 'matched'])
+        || !data.keys().hasAny(['expiresAt'])
+        || data.expiresAt > request.time;
     }
 
     // A withdrawal carries the owner's reason. Required on the way in - members
@@ -1137,16 +1147,13 @@ service cloud.firestore {
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
         && resource.data.ownerId == request.auth.uid
-        && resource.data.status != 'expired'
-        && (!(resource.data.status in ['submitted', 'open'])
-          || !resource.data.keys().hasAny(['expiresAt'])
-          || resource.data.expiresAt > request.time)
         && request.resource.data.ownerId == resource.data.ownerId
         // The AuditRegistry kind is immutable, so its Firestore discriminator is too.
         && opportunityType(request.resource.data) == opportunityType(resource.data)
         // A draft is not key-bounded, so it still pays the whole-document scan.
         // A published record already passed it, so its write validates the DIFF -
-        // see validOpportunityUpdate.
+        // see validOpportunityUpdate. The deadline lock is published-only so a
+        // draft carrying attachments does not spend it against the 1000-expression cap.
         && (resource.data.status == 'draft'
           ? (opportunityWriteIsAllowed(resource.data, request.resource.data, problemId)
             && validProblem(request.resource.data)
@@ -1156,7 +1163,9 @@ service cloud.firestore {
             && (request.resource.data.status == 'draft'
               || (validMarketplaceOpportunity(request.resource.data)
                 && expiryInDocumentedRange(request.resource.data.expiresAt))))
-          : validOpportunityUpdate(resource.data, request.resource.data, problemId))
+          : (resource.data.status != 'expired'
+            && ownerDeadlineOpen(resource.data)
+            && validOpportunityUpdate(resource.data, request.resource.data, problemId)))
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validProblemTransition(resource.data.status, request.resource.data.status);

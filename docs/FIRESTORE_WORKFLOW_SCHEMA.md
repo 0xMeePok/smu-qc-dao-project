@@ -73,7 +73,7 @@ because it maps to the immutable `OpportunityKind` stored by `AuditRegistry`.
 
 Allowed status transitions:
 
-- Opportunities: `draft → submitted/open/cancelled`; `submitted` and `open` may transition to server-only `expired`; all other transitions remain unchanged. `expired` is terminal.
+- Opportunities: `draft → submitted/open`; `submitted → open/cancelled`; `open → cancelled`; `in_review → cancelled`. `submitted` and `open` may transition to server-only `expired`. Clients cannot move a live posting to `in_review` or `matched` (those leave the lapse query and marketplace read ACL). `expired` is terminal.
 - Proposals: `draft → submitted/withdrawn`; `submitted → under_review/withdrawn`; `under_review → accepted/rejected/withdrawn`.
 - Evaluations: `draft → submitted → accepted`.
 - Funding: `pledged → approved/cancelled`; `approved → disbursing/cancelled`; `disbursing → completed/cancelled`.

@@ -10,7 +10,10 @@ import {
   withdrawOpportunityAudit,
   writeOpportunityAudit,
 } from "./auditRegistry.js";
-import { isExpiredOpenOpportunity } from "../../../firebase/functions/opportunityExpiry.js";
+import {
+  isExpiredOpenOpportunity,
+  isResponseWindowClosed,
+} from "../../../firebase/functions/opportunityExpiry.js";
 
 const postingAudit = createOpportunityAuditFlow({
   kind: OPPORTUNITY_KIND.BUSINESS_PROBLEM,
@@ -46,6 +49,9 @@ export async function assertWithdrawalWindowOpen(record, adapters) {
   }
   if (isExpiredOpenOpportunity(record, now)) {
     throw new Error("The response window has closed, so this opportunity will lapse automatically instead of being withdrawn.");
+  }
+  if (isResponseWindowClosed(record, now)) {
+    throw new Error("The response window has closed, so this opportunity can no longer be withdrawn.");
   }
 }
 
