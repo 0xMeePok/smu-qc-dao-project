@@ -59,6 +59,8 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
     const id = "bound-publication-audit", data = problem({ audit }), reference = doc(db, "problems", id);
     await trusted("problems", id, data);
     const replacement = { ...audit, transactionHash: `0x${"4".repeat(64)}` };
+    const { audit: omittedAudit, ...withoutReceipt } = data;
+    await assertFails(setDoc(reference, withoutReceipt));
     await assertFails(setDoc(reference, { ...data, audit: replacement }));
     await assertSucceeds(setDoc(reference, data));
     await assertFails(updateDoc(reference, { audit: replacement, updatedAt: serverTimestamp() }));
@@ -79,6 +81,7 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
       const data = problem({ audit });
       await trusted("problems", id, data);
       await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), problem({ status })));
+      if (status === "draft") await assertFails(updateDoc(reference, { status: "submitted", updatedAt: serverTimestamp() }));
       await assertFails(updateDoc(reference, { status: "submitted", audit: publicationAudit({ transactionHash: `0x${"4".repeat(64)}` }), updatedAt: serverTimestamp() }));
       await assertSucceeds(updateDoc(reference, { status: "submitted", audit, updatedAt: serverTimestamp() }));
     }

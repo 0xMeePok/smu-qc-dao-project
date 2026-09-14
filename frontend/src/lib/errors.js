@@ -134,6 +134,14 @@ export function auditErrorMessage(error) {
   return text || "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
+export function messageForPublicationSaveError(error) {
+  const code = String(error?.code ?? "").split("/").pop();
+  if (code === "permission-denied") {
+    return "The save was rejected by the service's security checks. This error does not identify which check failed. Keep this page open and retry saving once the issue is resolved.";
+  }
+  return messageForFirebaseError(error);
+}
+
 export function messageForFirebaseError(error) {
   if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;

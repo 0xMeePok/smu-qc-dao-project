@@ -66,8 +66,10 @@ describe("proposal submission form", () => {
     expect(banner.textContent).toMatch(/transaction was confirmed, but saving the proposal failed/);
     expect(banner.textContent).toMatch(/Network unavailable/);
     expect(screen.getByLabelText("Proposal title").value).toBe("Proposal title content");
-    fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    expect(screen.getByRole("heading", { name: "Transaction confirmed; proposal not saved" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
     await screen.findByRole("heading", { name: "Saved proposal1" });
+    expect(mocks.anchor.mock.calls[1][0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
   });
   it.each([
     Object.assign(new Error("User rejected"), { code: 4001 }),
