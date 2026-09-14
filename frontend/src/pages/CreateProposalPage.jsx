@@ -15,7 +15,6 @@ import {
   saveProposalDraft,
   submitProposal,
   updateProposal,
-  updateProposalReceipt,
 } from "../lib/proposals.js";
 import { anchorProposalBeforeWrite, receiptForWrite } from "../lib/proposalAudit.js";
 import { deleteAttachment } from "../lib/attachments.js";
@@ -253,25 +252,12 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           record, audit: receiptForWrite(audit),
         });
       } else {
-        // The receipt follows in its own write rather than riding along here.
-        // A create already pays for the whole schema, the parent opportunity and
-        // every attachment entry, and adding the audit map on top crosses
-        // Firestore's 1000-expression rule cap for an open-funding proposal with
-        // an attachment - which surfaced as a bare permission-denied AFTER the
-        // author had paid for the transaction. The ordering guarantee is
-        // unaffected: the chain is still written first, and this record does not
-        // exist until that transaction is confirmed.
+        // Server attestation and the first Firestore write both require the
+        // mined transaction reference. A later receipt write is too late.
         await submitProposal({
           proposalId, researcherId: user.id, posting, form, attachments,
-          fromDraft: draftExists, record,
+          fromDraft: draftExists, record, audit: receiptForWrite(audit),
         });
-        try {
-          await updateProposalReceipt({ recordId: proposalId, audit: receiptForWrite(audit) });
-        } catch {
-          // The proposal is saved and the transaction is on-chain; only the
-          // receipt copy is missing. The trigger queues it and the detail page
-          // offers a retry, so this must not fail the submission.
-        }
       }
       setSubmitted(true);
     } catch (err) {
