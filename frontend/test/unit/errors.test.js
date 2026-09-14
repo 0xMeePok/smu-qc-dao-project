@@ -1,6 +1,55 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { messageForFirebaseError, fieldForFirebaseError, OnboardingError } from "../../src/lib/errors.js";
+import { auditErrorMessage, isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, fieldForFirebaseError, OnboardingError } from "../../src/lib/errors.js";
+import { messageForProposalError } from "../../src/lib/proposalValidation.js";
+
+describe("App files missing after a deployment", () => {
+  for (const message of [
+    "Failed to fetch dynamically imported module: https://example.test/assets/ccip-old.js",
+    "error loading dynamically imported module: https://example.test/assets/ccip-old.js",
+    "Importing a module script failed.",
+    "Loading chunk wallet_123 failed.",
+  ]) {
+    it(`explains ${message.split(":")[0]} without exposing the contract wrapper`, () => {
+      const error = {
+        name: "ContractFunctionExecutionError",
+        message: "opportunityRevisionCount reverted: InvalidInput",
+        cause: { data: { originalError: new TypeError(message) } },
+      };
+      assert.equal(isModuleLoadError(error), true);
+      assert.equal(auditErrorMessage(error), MODULE_LOAD_ERROR_MESSAGE);
+      assert.equal(messageForFirebaseError(error), MODULE_LOAD_ERROR_MESSAGE);
+      assert.equal(messageForProposalError(error), MODULE_LOAD_ERROR_MESSAGE);
+      assert.match(auditErrorMessage(error), /Save your work as a draft or copy your edits, then refresh/);
+    });
+  }
+
+  it("recognizes module loading errors carried in viem details or an error name", () => {
+    for (const error of [
+      { message: "An unknown error occurred", details: "Failed to fetch dynamically imported module: /assets/ccip-old.js" },
+      { name: "ChunkLoadError", message: "A required resource failed" },
+    ]) {
+      assert.equal(auditErrorMessage(error), MODULE_LOAD_ERROR_MESSAGE);
+    }
+  });
+
+  it("does not turn an ordinary RPC fetch failure into refresh instructions", () => {
+    const error = new TypeError("Failed to fetch");
+    error.cause = { message: "HTTP request failed: Arbitrum RPC unavailable" };
+    assert.equal(isModuleLoadError(error), false);
+    assert.equal(auditErrorMessage(error), "Failed to fetch");
+    assert.equal(messageForFirebaseError(error), "Something went wrong: Failed to fetch");
+    assert.equal(messageForProposalError(error), "Failed to fetch");
+  });
+
+  it("handles cyclic wrappers without losing a module failure in another branch", () => {
+    const error = { message: "RPC request failed" };
+    error.cause = error;
+    assert.equal(isModuleLoadError(error), false);
+    error.data = { originalError: { message: "Importing a module script failed.", cause: error } };
+    assert.equal(auditErrorMessage(error), MODULE_LOAD_ERROR_MESSAGE);
+  });
+});
 
 describe("Unit Tests: Error Messages & Mapping", () => {
   it("explains a base-fee rejection even when wrapped as a contract revert", () => {

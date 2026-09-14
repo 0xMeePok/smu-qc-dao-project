@@ -16,5 +16,12 @@ export default defineConfig({
     // Required because outDir sits outside Vite's project root; without it Vite
     // refuses to clear the directory and stale assets accumulate between builds.
     emptyOutDir: true,
+    // This is a single-entry app. Ship the small deferred viem helpers with the
+    // entry so tabs kept open across a Hosting deploy never need an old ccip or
+    // signing chunk after its hashed URL has been removed. viem loads ccip even
+    // when handling ordinary contract reverts, before checking its CCIP setting.
+    rollupOptions: {
+      output: { inlineDynamicImports: true },
+    },
   },
 });

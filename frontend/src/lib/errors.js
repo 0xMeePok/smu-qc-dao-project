@@ -69,6 +69,22 @@ export class OnboardingError extends Error {
 export const TRANSACTION_FEE_TOO_LOW_MESSAGE =
   "Network fees rose before the transaction was sent. Try again to request a fresh fee estimate, then confirm it in your wallet.";
 
+export const MODULE_LOAD_ERROR_MESSAGE =
+  "This tab could not load a required app file. Save your work as a draft or copy your edits, then refresh the page and try again.";
+
+export function isModuleLoadError(error) {
+  const pending = [error], seen = new Set();
+  while (pending.length && seen.size < 16) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const text = [current.name, current.message, current.shortMessage, current.details].filter(Boolean).join(" ");
+    if (/failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|ChunkLoadError|loading chunk [\w-]+ failed/i.test(text)) return true;
+    pending.push(current.cause, current.data?.originalError);
+  }
+  return false;
+}
+
 export function isTransactionFeeTooLow(error) {
   // Wallet/RPC errors are often nested inside a ContractFunctionRevertedError.
   const text = [error?.shortMessage, error?.reason, error?.message,
@@ -93,6 +109,7 @@ export function isWalletRejection(error) {
 }
 
 export function auditErrorMessage(error) {
+  if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   if (error?.code === "AUDIT_TRANSACTION_CANCELLED") {
     return "The pending verification transaction was cancelled in your wallet. This submission was not completed. Your entries are still here; submit again when ready.";
   }
@@ -118,6 +135,7 @@ export function auditErrorMessage(error) {
 }
 
 export function messageForFirebaseError(error) {
+  if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
   // Firebase's own SDKs always use string codes ("auth/xyz", "permission-denied").
   // This function is also the catch-all for the chain-switch step in signIn() and
