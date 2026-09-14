@@ -1,3 +1,4 @@
+import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { prepareProposalCommit } from "./auditCanonical.js";
 
 // Frozen v1 field list. Changing a form label or adding a field must not change
@@ -19,6 +20,8 @@ export function prepareStoredProposal(record) {
   const proposal = proposalAuditPayload(record);
   return prepareProposalCommit({
     recordId: record.id,
+    actor: registry.entityIdScheme === 2 ? record.researcherId : undefined,
+    opportunityActor: registry.entityIdScheme === 2 ? record.postingOwnerId : undefined,
     opportunityRecordId: record.problemId,
     expectedOpportunityRevisionIndex: 0,
     hashScheme,

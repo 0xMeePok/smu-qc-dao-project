@@ -144,6 +144,9 @@ contract AuditRegistry {
         bytes32 contentHash,
         uint64 expiresAt
     ) external {
+        // The first 20 bytes are the intended actor, enforced on chain. Hashing
+        // the actor only in the client would still let a mempool observer copy
+        // the entire ID and acquire it first.
         if (
             opportunityId == bytes32(0)
                 || contentHash == bytes32(0)
@@ -152,6 +155,8 @@ contract AuditRegistry {
         ) {
             revert InvalidInput();
         }
+
+        if (address(bytes20(opportunityId)) != msg.sender) revert AccessDenied();
 
         uint64 timestamp = uint64(block.timestamp);
         _opportunities[opportunityId] = Opportunity({
@@ -248,6 +253,7 @@ contract AuditRegistry {
         ) {
             revert InvalidInput();
         }
+        if (address(bytes20(proposalId)) != msg.sender) revert AccessDenied();
         if (!_submissionOpen(opportunityId)) revert InvalidState();
 
         uint64 timestamp = uint64(block.timestamp);

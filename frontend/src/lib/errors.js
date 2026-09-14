@@ -69,6 +69,22 @@ export class OnboardingError extends Error {
 export const TRANSACTION_FEE_TOO_LOW_MESSAGE =
   "Network fees rose before the transaction was sent. Try again to request a fresh fee estimate, then confirm it in your wallet.";
 
+export const MODULE_LOAD_ERROR_MESSAGE =
+  "This tab could not load a required app file. Save your work as a draft or copy your edits, then refresh the page and try again.";
+
+export function isModuleLoadError(error) {
+  const pending = [error], seen = new Set();
+  while (pending.length && seen.size < 16) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const text = [current.name, current.message, current.shortMessage, current.details].filter(Boolean).join(" ");
+    if (/failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|ChunkLoadError|loading chunk [\w-]+ failed/i.test(text)) return true;
+    pending.push(current.cause, current.data?.originalError);
+  }
+  return false;
+}
+
 export function isTransactionFeeTooLow(error) {
   // Wallet/RPC errors are often nested inside a ContractFunctionRevertedError.
   const text = [error?.shortMessage, error?.reason, error?.message,
@@ -93,6 +109,7 @@ export function isWalletRejection(error) {
 }
 
 export function auditErrorMessage(error) {
+  if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   if (error?.code === "AUDIT_TRANSACTION_CANCELLED") {
     return "The pending verification transaction was cancelled in your wallet. This submission was not completed. Your entries are still here; submit again when ready.";
   }
@@ -117,7 +134,29 @@ export function auditErrorMessage(error) {
   return text || "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
+export function messageForPublicationSaveError(error) {
+  if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
+  const code = String(error?.code ?? "").split("/").pop();
+  if (code === "permission-denied") {
+    return "The save was rejected by the service's security checks. This error does not identify which check failed. Keep this page open and retry saving once the issue is resolved.";
+  }
+  if (code === "failed-precondition") {
+    const detail = String(error?.message ?? "");
+    if (/maintenance|retirement prevents publication/i.test(detail)) return "Publication is paused for registry maintenance. Keep this page open and retry saving when maintenance is complete.";
+    if (/attachment.*removed/i.test(detail)) return "An attachment was removed. Select it again before submitting.";
+    if (/attachment reservation/i.test(detail)) return "An attachment could not be verified against the uploaded file. Check the attachments before submitting.";
+    return "The server could not verify this submission against its mined transaction. Keep this page open and retry saving. If it still fails, share the transaction reference with an administrator.";
+  }
+  if (code === "unauthenticated") return "Your session has expired. Sign in again before retrying the save.";
+  if (code === "resource-exhausted") return "Too many publication attempts. Wait one minute before retrying the save.";
+  if (["unavailable", "deadline-exceeded", "internal", "not-found"].includes(code)) {
+    return "The publication service could not complete the save. Keep this page open and try again shortly.";
+  }
+  return error?.message || "The submission could not be saved. Keep this page open and try again.";
+}
+
 export function messageForFirebaseError(error) {
+  if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
   // Firebase's own SDKs always use string codes ("auth/xyz", "permission-denied").
   // This function is also the catch-all for the chain-switch step in signIn() and

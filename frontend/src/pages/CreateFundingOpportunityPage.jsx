@@ -2,17 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
+import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import {
   CURRENCIES,
-  DEFAULT_EXPIRY_DAYS,
   EXPIRY_WINDOWS,
   MAX_CATEGORIES,
   POSTING_CATEGORIES,
   categoryLabel,
-  extendExpiryDate,
   expiryDateFrom,
 } from "../config/postingCategories.js";
 import { fundingTagsFromCategories } from "../config/fundingOpportunity.js";
@@ -37,8 +36,8 @@ import {
   readFundingOpportunityAudit,
   receiptForWrite,
 } from "../lib/fundingOpportunityAudit.js";
-import { canEditOpportunity, isExpiredOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
-import { auditErrorMessage, messageForFirebaseError } from "../lib/errors.js";
+import { canEditOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
+import { auditErrorMessage, messageForFirebaseError, messageForPublicationSaveError } from "../lib/errors.js";
 
 const EMPTY_FORM = {
   title: "",
@@ -47,8 +46,7 @@ const EMPTY_FORM = {
   categories: [],
   amount: "",
   currency: CURRENCIES[0],
-  expiryDays: DEFAULT_EXPIRY_DAYS,
-  expiryExtensionDays: "",
+  expiryDays: 90,
 };
 
 function Section({ step, legend, hint, disabled, children }) {
@@ -110,7 +108,6 @@ function formFromOpportunity(opportunity) {
     amount: opportunity.amount ? String(opportunity.amount) : "",
     currency: opportunity.currency ?? EMPTY_FORM.currency,
     expiryDays: expiryWindowFor(opportunity.expiresAt, opportunity.createdAt) ?? EMPTY_FORM.expiryDays,
-    expiryExtensionDays: "",
   };
 }
 
@@ -152,6 +149,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
   const [auditProgress, setAuditProgress] = useState(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [confirmedAudit, setConfirmedAudit] = useState(null);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const pendingRecordRef = useRef(null);
   const formTop = useRef(null);
@@ -174,9 +173,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         }
         if (editOpportunityId) {
           if (!canEditOpportunity(opportunity, address)) {
-            setEditBlocked(isExpiredOpportunity(opportunity)
-              ? "This funding opportunity has expired and can no longer be edited."
-              : opportunity.status === "draft"
+            setEditBlocked(opportunity.status === "draft"
               ? "Resume this funding call from My Problems — drafts are not edited here."
               : `This funding opportunity can no longer be edited. Its status is ${opportunity.status}.`);
             return;
@@ -272,14 +269,13 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
     goTo("discover");
   };
 
-  const expiryPreview = useMemo(() => {
-    if (!editing) return formatInstant(expiryDateFrom(form.expiryDays, new Date()));
-    const currentExpiry = toDate(existing?.expiresAt);
-    const extension = form.expiryExtensionDays
-      ? extendExpiryDate(currentExpiry, form.expiryExtensionDays)
-      : currentExpiry;
-    return formatInstant(extension ?? currentExpiry);
-  }, [form.expiryDays, form.expiryExtensionDays, editing, existing?.expiresAt]);
+  const expiryPreview = useMemo(
+    () => formatInstant(expiryDateFrom(
+      form.expiryDays,
+      editing ? (toDate(existing?.createdAt) ?? new Date()) : new Date(),
+    )),
+    [form.expiryDays, editing, existing?.createdAt],
+  );
   const generatedTags = useMemo(
     () => fundingTagsFromCategories(form.categories),
     [form.categories],
@@ -337,6 +333,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
 
     setSubmitting(true);
     let latestAudit = auditProgress;
+    let savingRecord = false;
+    setSaveFailed(false);
+    setConfirmedAudit(null);
     try {
       const record = pendingRecordRef.current ?? buildFundingOpportunityDocument({
         ownerId: address,
@@ -345,9 +344,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         attachments,
         ...(editing ? {
           status: existing?.status ?? "submitted",
-          expiresAt: form.expiryExtensionDays
-            ? extendExpiryDate(existing?.expiresAt, form.expiryExtensionDays)
-            : existing?.expiresAt,
+          now: toDate(existing?.createdAt) ?? new Date(),
         } : {}),
       });
       pendingRecordRef.current = record;
@@ -365,6 +362,10 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         },
       });
 
+      latestAudit = audit;
+      setAuditProgress(audit);
+      setConfirmedAudit(audit);
+      savingRecord = true;
       const opportunity = editing
         ? await updateFundingOpportunity({
           opportunityId, ownerId: address, organisation, form, attachments, record,
@@ -375,6 +376,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           // The anchored record, not a rebuild: rebuilding derives a fresh
           // expiresAt that would no longer match the confirmed hash.
           opportunityId, ownerId: address, organisation, form, attachments, record,
+          audit: receiptForWrite(audit),
         })
         : await createFundingOpportunity({
           opportunityId,
@@ -383,6 +385,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           form,
           attachments,
           record,
+          audit: receiptForWrite(audit),
         });
       setPublished({ ...opportunity, audit });
       setAuditProgress(null);
@@ -392,8 +395,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         setAuditProgress(null);
         pendingRecordRef.current = null;
       }
-      setSubmitError(latestAudit?.transactionHash
-        ? messageForFirebaseError(error)
+      setSaveFailed(savingRecord);
+      setSubmitError(savingRecord
+        ? messageForPublicationSaveError(error)
         : auditErrorMessage(error));
     } finally {
       setSubmitting(false);
@@ -407,6 +411,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
     setSubmitError(null);
     setPublished(null);
     setAuditProgress(null);
+    setConfirmedAudit(null);
+    setSaveFailed(false);
     pendingRecordRef.current = null;
   };
 
@@ -591,7 +597,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
                 {errors.currency ? <p className="field-error" role="alert">{errors.currency}</p> : null}
               </div>
             </div>
-            {!editing && <div className={`field ${errors.expiryDays ? "field-invalid" : ""}`}>
+            <div className={`field ${errors.expiryDays ? "field-invalid" : ""}`}>
               <label htmlFor="expiryDays">Open for</label>
               <p className="field-hint">Closes on {expiryPreview}.</p>
               <select id="expiryDays" name="expiryDays" value={form.expiryDays} onChange={update}>
@@ -600,28 +606,10 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
                 ))}
               </select>
               {errors.expiryDays ? <p className="field-error" role="alert">{errors.expiryDays}</p> : null}
-            </div>}
+            </div>
           </Section>
 
-          {editing ? <Section
-            step="5"
-            legend="Extend the response window"
-            hint="The current deadline remains unchanged unless you add a documented window. Extensions are added to the current UTC deadline and are available only while the opportunity is live."
-          >
-            <div className={`field ${errors.expiryExtensionDays ? "field-invalid" : ""}`}>
-              <label htmlFor="expiryExtensionDays">Extend by</label>
-              <p className="field-hint">{form.expiryExtensionDays ? `New deadline: ${expiryPreview}.` : `Current deadline: ${expiryPreview}.`}</p>
-              <select id="expiryExtensionDays" name="expiryExtensionDays" value={form.expiryExtensionDays} onChange={update}>
-                <option value="">Keep the current deadline</option>
-                {EXPIRY_WINDOWS.map((window) => (
-                  <option key={window.value} value={window.value}>{window.label}</option>
-                ))}
-              </select>
-              {errors.expiryExtensionDays ? <p className="field-error" role="alert">{errors.expiryExtensionDays}</p> : null}
-            </div>
-          </Section> : null}
-
-          <Section step={editing ? "6" : "5"} legend="Supporting material" hint="Optional. Terms, scope notes or an application pack, as PDFs.">
+          <Section step="5" legend="Supporting material" hint="Optional. Terms, scope notes or an application pack, as PDFs.">
             <AttachmentUploader
               ownerId={address}
               problemId={opportunityId}
@@ -638,22 +626,14 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
               Your wallet signs updateOpportunity first. The opportunity is updated only after that transaction is confirmed on Arbitrum Sepolia.
             </p>
           )}
-          {auditProgress?.status === "confirmed" && (
-            <div className="detail-section">
-              <AuditReceipt
-                audit={auditProgress}
-                eventLabel={editing ? "Open funding opportunity updated" : "Open funding opportunity submitted"}
-                actorRole="Funder"
-              />
-            </div>
-          )}
+          <SubmissionProgress audit={confirmedAudit} saving={submitting} entityLabel="Opportunity" editing={editing} />
           <div className="form-actions">
             <button className="primary" type="submit" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0}>
               {submitting
-                ? (auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
+                ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
                 : pendingCount > 0
                   ? "Waiting for attachments…"
-                  : editing ? "Sign and save changes" : "Submit funding opportunity"}
+                  : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Submit funding opportunity"}
             </button>
             {!editing && (
             <button className="secondary" type="button" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0} onClick={persistDraft}>
@@ -701,7 +681,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             <div className="preview-card">
               <div className="card-top">
                 <span className="eyebrow">Open funding</span>
-                <span className="status-dot">Submitted</span>
+                <span className="status-pill">Preview</span>
               </div>
               <h3>{form.title || "Untitled funding opportunity"}</h3>
               <p>{form.fundingThesis || "Your funding thesis will appear here as you type."}</p>

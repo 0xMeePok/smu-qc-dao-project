@@ -15,15 +15,14 @@ import {
   saveProposalDraft,
   submitProposal,
   updateProposal,
-  updateProposalReceipt,
 } from "../lib/proposals.js";
 import { anchorProposalBeforeWrite, receiptForWrite } from "../lib/proposalAudit.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
-import { auditErrorMessage } from "../lib/errors.js";
+import { auditErrorMessage, messageForPublicationSaveError } from "../lib/errors.js";
 import { SubmissionError } from "../components/SubmissionError.jsx";
-import { AuditReceipt } from "../components/AuditReceipt.jsx";
+import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { useAccount } from "wagmi";
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../lib/proposalValidation.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
@@ -70,6 +69,8 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   const { user } = useAuth();
   const { address, isConnected } = useAccount();
   const [auditProgress, setAuditProgress] = useState(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [confirmedAudit, setConfirmedAudit] = useState(null);
   const [posting, setPosting] = useState(null);
   const [proposalId, setProposalId] = useState(null);
   const [active, setActive] = useState(null);
@@ -231,14 +232,18 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     }
     submitting.current = true; setBusy(true); setError("");
     let audit = null;
+    setSaveFailed(false);
+    setConfirmedAudit(null);
     try {
       const record = buildProposalDocument({
         researcherId: user.id, posting, form, attachments,
       });
-      audit = await anchorProposalBeforeWrite({ id: proposalId, ...record }, {
+      audit = await anchorProposalBeforeWrite({ id: proposalId, ...record, audit: auditProgress }, {
         account: address,
         onChange: setAuditProgress,
       });
+      setAuditProgress(audit);
+      setConfirmedAudit(audit);
       if (editing) {
         // A correction MUST carry its receipt: the stored one attests to the
         // content being replaced, so leaving it untouched is not an option.
@@ -247,36 +252,24 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           record, audit: receiptForWrite(audit),
         });
       } else {
-        // The receipt follows in its own write rather than riding along here.
-        // A create already pays for the whole schema, the parent opportunity and
-        // every attachment entry, and adding the audit map on top crosses
-        // Firestore's 1000-expression rule cap for an open-funding proposal with
-        // an attachment - which surfaced as a bare permission-denied AFTER the
-        // author had paid for the transaction. The ordering guarantee is
-        // unaffected: the chain is still written first, and this record does not
-        // exist until that transaction is confirmed.
+        // Server attestation and the first Firestore write both require the
+        // mined transaction reference. A later receipt write is too late.
         await submitProposal({
           proposalId, researcherId: user.id, posting, form, attachments,
-          fromDraft: draftExists, record,
+          fromDraft: draftExists, record, audit: receiptForWrite(audit),
         });
-        try {
-          await updateProposalReceipt({ recordId: proposalId, audit: receiptForWrite(audit) });
-        } catch {
-          // The proposal is saved and the transaction is on-chain; only the
-          // receipt copy is missing. The trigger queues it and the detail page
-          // offers a retry, so this must not fail the submission.
-        }
       }
       setSubmitted(true);
     } catch (err) {
       // Distinguish the two halves: a wallet or chain failure has changed
       // nothing, while a failure after the anchor leaves a paid-for transaction
       // whose record still needs saving.
+      setSaveFailed(Boolean(audit?.transactionHash));
       setError(audit?.transactionHash
-        ? `The verification transaction was confirmed, but saving the proposal failed. ${messageForProposalError(err)} Your entries are still here — submitting again reuses the same anchor.`
+        ? `The verification transaction was confirmed, but saving the proposal failed. ${messageForPublicationSaveError(err)} Your entries are still here — submitting again reuses the same anchor.`
         : auditErrorMessage(err));
     }
-    finally { submitting.current = false; setBusy(false); setAuditProgress(null); }
+    finally { submitting.current = false; setBusy(false); if (!audit) setAuditProgress(null); }
   };
 
   // Deliberately NOT autoAnchor: the proposal was anchored before it was
@@ -333,9 +326,9 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           <p className="field-hint">{editing
             ? "Your wallet signs the amendment first. The proposal is updated only after that transaction is confirmed on Arbitrum Sepolia, so the stored version always matches its on-chain record."
             : "Your wallet signs first. The proposal is saved only after that transaction is confirmed on Arbitrum Sepolia, so nothing enters evaluation unverified."}</p>
-          {auditProgress?.status === "confirmed" && <div className="detail-section"><AuditReceipt entityLabel="Proposal" audit={auditProgress} eventLabel={editing ? "Proposal updated" : "Proposal submitted"} actorRole="Researcher / solution developer" /></div>}
+          <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
           <div className="form-actions">
-            <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : editing ? "Sign and save changes" : "Sign and submit proposal"}</button>
+            <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Sign and submit proposal"}</button>
             {!editing && <button className="secondary" type="button" disabled={disabled || pending} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>}
           </div>
           {!editing && <DraftStatus savedAt={savedAt} saving={savingDraft} />}

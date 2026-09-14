@@ -31,7 +31,7 @@ vi.mock("../../src/lib/proposalAudit.js", () => ({
   anchorProposalAudit: (...args) => mocks.anchor(...args),
   anchorProposalBeforeWrite: (...args) => mocks.anchor(...args),
   anchorProposalWithdrawal: (...args) => mocks.anchorWithdrawal(...args),
-  receiptForWrite: (audit) => audit,
+  receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
   proposalAuditReceipt: (record) => record.audit ?? { status: "queued" },
   readProposalAudit: async () => ({ verified: true }),
 }));
@@ -230,17 +230,12 @@ describe("nothing is written before the transaction confirms", () => {
     // The record handed to the chain is the record handed to Firestore. Rebuilding
     // between the two would store content the receipt does not describe.
     expect(mocks.submit.mock.calls[0][0].record).toBeTruthy();
-    // The receipt follows in its own write: carrying it on the create crossed
-    // Firestore's rule expression cap for an open-funding proposal with a file.
-    expect(mocks.submit.mock.calls[0][0].audit).toBeUndefined();
-    await waitFor(() => expect(mocks.receipt).toHaveBeenCalled());
-    expect(mocks.receipt.mock.calls[0][0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
+    // Attestation and the atomic write both need this pending receipt.
+    expect(mocks.submit.mock.calls[0][0].audit).toMatchObject({ status: "pending", transactionHash: `0x${"3".repeat(64)}` });
+    expect(mocks.receipt).not.toHaveBeenCalled();
   });
 
-  it("still counts the proposal as submitted when only the receipt write fails", async () => {
-    // The proposal is saved and the transaction is on-chain; the trigger queues
-    // the receipt and the detail page offers a retry. Failing the submission
-    // here would tell the author their work was lost when it was not.
+  it("saves the receipt atomically without relying on a second write", async () => {
     mocks.receipt.mockRejectedValueOnce(new Error("Network unavailable"));
     render(<CreateProposalPage postingId="problem1" onNavigate={vi.fn()} />);
     await screen.findByRole("heading", { name: "Submit a proposal" });
@@ -252,6 +247,8 @@ describe("nothing is written before the transaction confirms", () => {
     await waitFor(() => expect(mocks.submit).toHaveBeenCalled());
     // The confirmation screen, not an error banner.
     expect(await screen.findByText(/Proposal submitted successfully/)).toBeTruthy();
+    expect(mocks.submit.mock.calls[0][0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
+    expect(mocks.receipt).not.toHaveBeenCalled();
   });
 
   it("leaves a submitted proposal untouched when an edit is declined", async () => {

@@ -4,6 +4,7 @@ import {
   type FaucetEnvironment,
 } from "../lib/faucet.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { boundedBody, checkLength, RequestTooLarge } from "../lib/request-body.js";
 
 export const config = { maxDuration: 60 };
 
@@ -17,24 +18,14 @@ function getEnvironment(): FaucetEnvironment {
   };
 }
 
-type VercelRequest = IncomingMessage & { body?: unknown };
+type VercelRequest = IncomingMessage;
 
 async function requestBody(request: VercelRequest) {
-  if (request.body !== undefined) {
-    if (typeof request.body === "string") {
-      return request.body;
-    }
-    if (request.body instanceof Uint8Array) {
-      return Buffer.from(request.body).toString("utf8");
-    }
-    return JSON.stringify(request.body);
-  }
-
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of request) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-  }
-  return Buffer.concat(chunks).toString("utf8");
+  checkLength(request.headers["content-length"] ?? null);
+  // Never access Vercel's lazy request.body parser: only raw bytes can enforce
+  // the limit before parsing (whitespace and duplicate keys still count).
+  // Do not destroy the socket on early return: the caller must receive the 413.
+  return boundedBody(request.iterator({ destroyOnReturn: false }));
 }
 
 async function toWebRequest(request: VercelRequest) {
@@ -76,10 +67,10 @@ export default async function handler(
       await handleFaucet(webRequest, getEnvironment()),
     );
     await sendWebResponse(result, response);
-  } catch {
-    response.statusCode = 500;
+  } catch (error) {
+    response.statusCode = error instanceof RequestTooLarge ? 413 : 500;
     response.setHeader("content-type", "application/json; charset=utf-8");
     response.setHeader("cache-control", "no-store");
-    response.end(JSON.stringify({ error: "The faucet service is temporarily unavailable." }));
+    response.end(JSON.stringify({ error: error instanceof RequestTooLarge ? "Request is too large." : "The faucet service is temporarily unavailable." }));
   }
 }

@@ -35,7 +35,6 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   // withdrawProposal that would revert — and so the anchored reason cannot be
   // edited into something the receipt no longer describes.
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
-  const started = useRef(false);
   const anchorInFlight = useRef(new Set());
   const activeProposalId = useRef(proposalId);
   activeProposalId.current = proposalId;
@@ -43,7 +42,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     let cancelled = false;
     setLoading(true); setProposal(null); setError(""); setConfirm(false);
     setReason(""); setReasonError(""); setAnchoredWithdrawal(null);
-    setAuditBusy(anchorInFlight.current.has(proposalId)); started.current = false;
+    setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -63,9 +62,6 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     catch (err) { if (activeProposalId.current === record.id) setError(`Your proposal is saved. ${auditErrorMessage(err)}`); }
     finally { anchorInFlight.current.delete(record.id); if (activeProposalId.current === record.id) setAuditBusy(false); }
   };
-  useEffect(() => {
-    if (autoAnchor && proposal && owns && !started.current) { started.current = true; void anchor(proposal, false); }
-  }, [autoAnchor, proposal, owns]);
   useEffect(() => {
     if (!proposal || auditBusy || proposal.audit?.status === "confirmed") return;
     let active = true;

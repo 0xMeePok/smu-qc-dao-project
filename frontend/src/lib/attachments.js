@@ -1,11 +1,11 @@
 import {
-  deleteObject,
   getBlob,
   ref as storageRef,
   uploadBytesResumable,
 } from "firebase/storage";
+import { httpsCallable } from "firebase/functions";
 import { sha256 } from "viem";
-import { storage, isStorageConfigured, storageNeedsEmulator } from "./firebase.js";
+import { functions, storage, isStorageConfigured, storageNeedsEmulator } from "./firebase.js";
 
 /**
  * QCDAO-58 - supporting files attached to a posting.
@@ -206,31 +206,42 @@ export function uploadAttachment({ file, ownerId, problemId, sha256: contentDige
     sha256: contentDigest,
   };
 
-  const task = uploadBytesResumable(storageRef(storage, path), file, {
-    contentType: ACCEPTED_MIME,
-    // storage.rules refuses an upload whose metadata disagrees with the path it is
-    // being written to, so these are not decoration.
-    customMetadata: {
-      uploadedBy: String(ownerId).toLowerCase(),
-      problemId: String(problemId),
-      originalName: attachment.name,
-      sha256: contentDigest,
-    },
-  });
+  let task;
+  let cancelled = false;
+  const done = (async () => {
+    let reserved = false;
+    try {
+      await httpsCallable(functions, "reserveAttachment")({ scope, recordId: problemId,
+        attachmentId, size: file.size, sha256: contentDigest });
+      reserved = true;
+      if (cancelled) {
+        const error = new Error("Upload cancelled."); error.code = "storage/canceled"; throw error;
+      }
+      task = uploadBytesResumable(storageRef(storage, path), file, {
+        contentType: ACCEPTED_MIME,
+        customMetadata: { uploadedBy: String(ownerId).toLowerCase(), problemId: String(problemId),
+          originalName: attachment.name, sha256: contentDigest },
+      });
+      return await new Promise((resolve, reject) => {
+        task.on("state_changed", (snapshot) => {
+          if (typeof onProgress === "function" && snapshot.totalBytes) {
+            onProgress(Math.round(snapshot.bytesTransferred / snapshot.totalBytes * 100));
+          }
+        }, reject, () => resolve(attachment));
+      });
+    } catch (error) {
+      if (reserved) {
+        // The callable deletes any partial object and releases the exact reserved
+        // quota. If cleanup itself is unavailable, the sweeper remains the fallback.
+        try {
+          await httpsCallable(functions, "removeAttachment")({ scope, recordId: problemId, attachmentId });
+        } catch { /* Preserve the upload error; scheduled cleanup retries later. */ }
+      }
+      throw error;
+    }
+  })();
+  return { attachment, cancel: () => { cancelled = true; task?.cancel(); }, done };
 
-  const done = new Promise((resolve, reject) => {
-    task.on(
-      "state_changed",
-      (snapshot) => {
-        if (typeof onProgress !== "function" || !snapshot.totalBytes) return;
-        onProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
-      },
-      reject,
-      () => resolve(attachment),
-    );
-  });
-
-  return { attachment, cancel: () => task.cancel(), done };
 }
 
 /**
@@ -245,13 +256,7 @@ export function uploadAttachment({ file, ownerId, problemId, sha256: contentDige
  */
 export async function deleteAttachment({ attachment, ownerId, problemId, scope = "problems" }) {
   requireStorage();
-  try {
-    await deleteObject(storageRef(storage, attachmentPath({
-      ownerId, problemId, attachmentId: attachment.id, scope,
-    })));
-  } catch (error) {
-    if (error?.code !== "storage/object-not-found") throw error;
-  }
+  await httpsCallable(functions, "removeAttachment")({ scope, recordId: problemId, attachmentId: attachment.id });
 }
 
 /**

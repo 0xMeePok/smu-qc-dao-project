@@ -1,28 +1,10 @@
-/**
- * QCDAO-58 - orphaned posting attachments.
- *
- * An orphan is a completed object under problems/ that no posting references.
- *
- * This is NOT primarily an abuse problem. App Check enforcement on Cloud Storage
- * already stops a script with a valid ID token from bulk-uploading. Orphans are
- * mostly made by ordinary use: someone uploads a PDF, then abandons the form or
- * closes the tab before publishing. The client deletes what it can when a draft is
- * abandoned deliberately, but a closed tab cannot be cleaned up from the browser -
- * there is no reliable moment to run a delete in. So the bucket accumulates real
- * files nothing points at, and something server-side has to notice.
- *
- * Deletion is re-checked against the posting immediately before each object is
- * removed. A form left open past the grace period can still publish between the
- * collection snapshot and the delete; without that re-get, the sweeper would
- * destroy a file the new posting now references.
- *
- * The lifecycle rule in storage.lifecycle.json only aborts INCOMPLETE resumable
- * uploads. A completed upload that no posting references is a different thing, and
- * this is what handles it.
- *
- * Everything that decides WHAT to delete is a pure function below, so the rules can
- * be tested exhaustively without a bucket. Only sweepOrphanedAttachments() touches
- * Firestore or Storage.
+import { Timestamp } from "firebase-admin/firestore";
+import { matchesUploadReservation, retireUpload, releaseDeletedUpload,
+  uploadReservationKey } from "./resourceQuotas.js";
+/** Quota-backed, bounded cleanup of abandoned problem and proposal uploads.
+ * Published evidence is sealed before publication and permanently retained.
+ * Legacy published prefixes are also retained because revisions may reference
+ * bytes that are no longer linked from the current document.
  */
 
 export const ATTACHMENT_PREFIX = "problems/";
@@ -48,12 +30,12 @@ export function parseAttachmentPath(path) {
   if (parts.length !== 4) return null;
 
   const [prefix, ownerId, problemId, fileName] = parts;
-  if (prefix !== "problems") return null;
+  if (!["problems", "proposals"].includes(prefix)) return null;
   if (!/^0x[0-9a-f]{40}$/.test(ownerId)) return null;
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(problemId)) return null;
   if (!/^[A-Za-z0-9._-]{1,120}\.pdf$/.test(fileName)) return null;
 
-  return { ownerId, problemId, attachmentId: fileName.replace(/\.pdf$/, "") };
+  return { ownerId, problemId, attachmentId: fileName.replace(/\.pdf$/, ""), scope: prefix };
 }
 
 /**
@@ -79,7 +61,7 @@ export function collectReferencedPaths(postings) {
   const referenced = new Set();
   for (const posting of postings) {
     const attachments = Array.isArray(posting?.attachments) ? posting.attachments : [];
-    const ownerId = String(posting?.ownerId ?? "").toLowerCase();
+    const ownerId = String(posting?.ownerId ?? posting?.researcherId ?? "").toLowerCase();
     const problemId = posting?.id;
     for (const attachment of attachments) {
       // Legacy records carried `path`; current ones do not, so the path is rebuilt
@@ -87,7 +69,7 @@ export function collectReferencedPaths(postings) {
       // Reading only `path` made every live attachment look orphaned.
       if (typeof attachment?.path === "string") referenced.add(attachment.path);
       if (ownerId && problemId && attachment?.id) {
-        referenced.add(`problems/${ownerId}/${problemId}/${attachment.id}.pdf`);
+        referenced.add(`${posting.scope || (posting.researcherId ? "proposals" : "problems")}/${ownerId}/${problemId}/${attachment.id}.pdf`);
       }
     }
   }
@@ -164,86 +146,116 @@ export function planSweep({
  */
 async function mustRetainObject(db, path) {
   const parsed = parseAttachmentPath(path);
-  if (!parsed) return false;
-  const snap = await db.collection("problems").doc(parsed.problemId).get();
-  if (!snap.exists) return false;
-  const data = snap.data() ?? {};
-  if (data.status && data.status !== "draft") return true;
-  // The document id IS the problemId, and rebuilding the path needs it.
-  return collectReferencedPaths([{ id: snap.id, ...data }]).has(path);
+  if (!parsed) return true;
+  const { scope, problemId, attachmentId } = parsed;
+  const key = uploadReservationKey(scope, problemId, attachmentId);
+  const [parent, reservation, proof, recordReservation] = await Promise.all([
+    db.collection(scope).doc(problemId).get(),
+    db.collection("uploadReservations").doc(key).get(),
+    db.collection("publicationProofs").doc(`${scope}_${problemId}`).get(),
+    db.collection("recordReservations").doc(`${scope}_${problemId}`).get(),
+  ]);
+  if (reservation.exists && !matchesUploadReservation(reservation.data(), {
+    scope, id: problemId, uid: parsed.ownerId, attachmentId, path,
+  })) return true;
+  if (reservation.data()?.sealed || recordReservation.data()?.retired) return true;
+  if (collectReferencedPaths([{ ...parent.data(), id: problemId, scope },
+    { ...proof.data()?.record, id: problemId, scope }]).has(path)) return true;
+  // Historical revisions may reference legacy objects. Keep their bytes; new
+  // reservations distinguish unused uploads from immutable published files.
+  return !reservation.exists && parent.exists && parent.data().status !== "draft";
 }
 
-/**
- * Reads the bucket and the postings, plans the sweep, and (unless dryRun) deletes.
- *
- * Deliberately dry-run by default at the call site in index.js: this is the one
- * scheduled job in the project that destroys data, and it should prove itself
- * against real content in the logs before it is allowed to act.
- */
+/** Bounded, resumable scan over BOTH namespaces. No whole-collection queries. */
 export async function sweepOrphanedAttachments({
-  db,
-  bucket,
-  dryRun = true,
-  now = Date.now(),
-  graceMs = DEFAULT_GRACE_MS,
-  logger = console,
+  db, bucket, dryRun = true, now = Date.now(), graceMs = DEFAULT_GRACE_MS, logger = console,
 }) {
-  const [files] = await bucket.getFiles({ prefix: ATTACHMENT_PREFIX });
-  const objects = files.map((file) => ({
-    path: file.name,
-    createdAt: Date.parse(file.metadata?.timeCreated ?? ""),
-    ref: file,
-  }));
-
-  const snapshot = await db.collection("problems").get();
-  const postings = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-  const referencedPaths = collectReferencedPaths(postings);
-  const immutableProblemIds = collectImmutableProblemIds(postings);
-
-  const plan = planSweep({ objects, referencedPaths, immutableProblemIds, now, graceMs });
-  const byPath = new Map(objects.map((object) => [object.path, object]));
-
-  if (plan.capped) {
-    logger.warn(
-      `[attachment-sweep] deletion plan hit the ${MAX_DELETES_PER_RUN} cap. `
-      + "Investigate before assuming this is a normal backlog.",
-    );
-  }
-
-  let deleted = 0;
-  if (!dryRun) {
-    for (const path of plan.deletions) {
-      try {
-        if (await mustRetainObject(db, path)) {
-          logger.info(`[attachment-sweep] skip ${path}: retained`);
-          continue;
-        }
-        await byPath.get(path).ref.delete();
-        deleted += 1;
-      } catch (error) {
-        // Another run, or the owner, may have removed it already. Not a failure.
-        logger.warn(`[attachment-sweep] could not delete ${path}: ${error.message}`);
-      }
+  const summary = { scanned: 0, referenced: 0, orphans: 0, deleted: 0, skipped: 0, capped: false, dryRun };
+  if ((await db.collection("maintenanceState").doc("registryCutover").get()).data()?.active) return { ...summary, maintenance: true };
+  const reservationCheckpoint = db.collection("maintenanceState").doc("attachmentSweep_reservations");
+  const previousReservations = (await reservationCheckpoint.get()).data();
+  let abandonedQuery = db.collection("uploadReservations").where("state", "==", "reserved")
+    .where("expiresAt", "<", Timestamp.fromMillis(now - graceMs))
+    .orderBy("expiresAt").orderBy("__name__")
+    .limit(250);
+  if (previousReservations?.lastId) abandonedQuery = abandonedQuery.startAfter(previousReservations.expiresAt, previousReservations.lastId);
+  const abandoned = await abandonedQuery.get();
+  for (const reservation of abandoned.docs) {
+    const data = reservation.data();
+    if (data.sealed || typeof data.path !== "string") continue;
+    const [exists] = await bucket.file(data.path).exists();
+    if (!exists && !dryRun) {
+      await retireUpload({ db, key: reservation.id, expectedPath: data.path, now: Timestamp.fromMillis(now) });
+      await releaseDeletedUpload({ db, key: reservation.id, deletedPath: data.path, now: Timestamp.fromMillis(now) });
     }
   }
-
-  const summary = {
-    scanned: objects.length,
-    referenced: plan.kept,
-    orphans: plan.deletions.length,
-    deleted,
-    skipped: plan.skipped.length,
-    capped: plan.capped,
-    dryRun,
-  };
-
-  logger.info(`[attachment-sweep] ${JSON.stringify(summary)}`);
-  if (dryRun && plan.deletions.length > 0) {
-    logger.info(
-      `[attachment-sweep] DRY RUN - would have deleted ${plan.deletions.length} object(s). `
-      + "Set ATTACHMENT_SWEEP_ENABLED=true to act on this.",
-    );
+  if (!dryRun) {
+    const last = abandoned.docs.at(-1);
+    await reservationCheckpoint.set(last && abandoned.docs.length === 250
+      ? { lastId: last.id, expiresAt: last.data().expiresAt } : { lastId: "" });
   }
-
+  const retiredCheckpoint = db.collection("maintenanceState").doc("attachmentSweep_retired");
+  const previousRetired = (await retiredCheckpoint.get()).data();
+  let retiredQuery = db.collection("uploadReservations").where("state", "==", "retired")
+    .where("quotaReleasedAt", "==", null).orderBy("__name__").limit(250);
+  if (previousRetired?.lastId) retiredQuery = retiredQuery.startAfter(previousRetired.lastId);
+  const retired = await retiredQuery.get();
+  for (const reservation of retired.docs) {
+    const path = reservation.data().path;
+    if (typeof path !== "string") continue;
+    const [exists] = await bucket.file(path).exists();
+    if (!exists && !dryRun) await releaseDeletedUpload({ db, key: reservation.id,
+      deletedPath: path, now: Timestamp.fromMillis(now) });
+  }
+  if (!dryRun) await retiredCheckpoint.set({ lastId: retired.docs.length === 250 ? retired.docs.at(-1).id : "" });
+  for (const scope of ["problems", "proposals"]) {
+    const checkpoint = db.collection("maintenanceState").doc(`attachmentSweep_${scope}`);
+    const saved = await checkpoint.get();
+    const [files, next] = await bucket.getFiles({ prefix: `${scope}/`, autoPaginate: false,
+      maxResults: 250, ...(saved.data()?.pageToken ? { pageToken: saved.data().pageToken } : {}) });
+    for (const file of files) {
+      summary.scanned += 1;
+      const parsed = parseAttachmentPath(file.name);
+      const createdAt = Date.parse(file.metadata?.timeCreated ?? "");
+      if (!parsed || !Number.isFinite(createdAt) || now - createdAt < graceMs) { summary.skipped += 1; continue; }
+      if (await mustRetainObject(db, file.name)) { summary.referenced += 1; continue; }
+      summary.orphans += 1;
+      if (dryRun) continue;
+      try {
+        const key = uploadReservationKey(parsed.scope, parsed.problemId, parsed.attachmentId);
+        const reservation = await db.collection("uploadReservations").doc(key).get();
+        if (reservation.exists) {
+          if (!matchesUploadReservation(reservation.data(), {
+            scope: parsed.scope, id: parsed.problemId, uid: parsed.ownerId,
+            attachmentId: parsed.attachmentId, path: file.name,
+          })) throw new Error("Upload reservation does not match this object; retaining it.");
+          await retireUpload({ db, key, expectedPath: file.name, now: Timestamp.fromMillis(now) });
+        } else {
+          // A legacy orphan gets a tombstone before deletion, closing future
+          // reservation/recreation of the same path. Race against publication.
+          await db.runTransaction(async (tx) => {
+            const ref = db.collection("uploadReservations").doc(key);
+            const proofRef = db.collection("publicationProofs").doc(`${parsed.scope}_${parsed.problemId}`);
+            const [fresh, proof] = await Promise.all([tx.get(ref), tx.get(proofRef)]);
+            if (fresh.exists || collectReferencedPaths([{ ...proof.data()?.record, id: parsed.problemId, scope: parsed.scope }]).has(file.name)) {
+              throw new Error("Attachment changed during cleanup; retry next sweep.");
+            }
+            tx.set(ref, { state: "retired", uid: parsed.ownerId, scope: parsed.scope,
+              recordId: parsed.problemId, attachmentId: parsed.attachmentId,
+              path: file.name, retiredAt: Timestamp.fromMillis(now) });
+          });
+        }
+        if (await mustRetainObject(db, file.name)) continue;
+        if ((await db.collection("maintenanceState").doc("registryCutover").get()).data()?.active) continue;
+        await file.delete({ ignoreNotFound: true, ifGenerationMatch: file.metadata?.generation });
+        await releaseDeletedUpload({ db, key, deletedPath: file.name, now: Timestamp.fromMillis(now) });
+        summary.deleted += 1;
+      } catch (error) { logger.warn(`[attachment-sweep] retained ${file.name}: ${error.message}`); }
+    }
+    const pageToken = next?.pageToken || "";
+    summary.capped ||= Boolean(pageToken);
+    if (!dryRun) await checkpoint.set({ pageToken, updatedAt: Timestamp.fromMillis(now) });
+  }
+  logger.info(`[attachment-sweep] ${JSON.stringify(summary)}`);
   return summary;
 }

@@ -159,6 +159,9 @@ async function waitForDeploymentReceipt(ethers, transactionHash) {
 
 async function main() {
   requireEnvironment();
+  if (process.env.AUDIT_REGISTRY_MIGRATION_APPROVED !== "true") {
+    throw new Error("Actor-scoped registry IDs require a reviewed migration of existing opportunities and proposals. See docs/security-remediation-131-139.md before approving a replacement deployment.");
+  }
 
   const { ethers, networkName, verification } = await network.create();
 
@@ -201,6 +204,7 @@ async function main() {
 
   console.log(`Deployment transaction: ${deploymentTransaction.hash}`);
   const record = {
+    entityIdScheme: 2,
     network: EXPECTED_NETWORK,
     chainId: Number(connectedNetwork.chainId),
     address,

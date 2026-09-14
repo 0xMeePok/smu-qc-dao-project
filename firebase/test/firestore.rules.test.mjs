@@ -1,3 +1,4 @@
+import { seedPublicationFixture } from "./publication-fixture.mjs";
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
@@ -6,11 +7,20 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, getDocs, collection, query, where, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, collection, query, where, limit, setDoc as rawSetDoc, updateDoc as rawUpdateDoc, deleteDoc, deleteField, writeBatch, serverTimestamp } from "firebase/firestore";
 
 const ADDRESS = `0x${"a".repeat(40)}`;
 const OTHER = `0x${"b".repeat(40)}`;
 let env;
+async function setDoc(reference, data, ...options) {
+  await seedPublicationFixture(env, reference, data);
+  return rawSetDoc(reference, data, ...options);
+}
+async function updateDoc(reference, data, ...options) {
+  await seedPublicationFixture(env, reference, data, true);
+  return rawUpdateDoc(reference, data, ...options);
+}
+
 
 
 
@@ -1228,7 +1238,7 @@ describe("evaluations/{evaluationId}", () => {
 describe("funding/{fundId}", () => {
   it("[BIT-AAR-85] [QCDAO43] allows access to the funder", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "funding", "f1"), baseFunding()));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "funding", "f1"), baseFunding()));
     await assertSucceeds(getDoc(doc(db, "funding", "f1")));
   });
 
@@ -1268,14 +1278,14 @@ describe("funding/{fundId}", () => {
     await assertFails(setDoc(doc(db, "funding", "forged-time"), baseFunding({ updatedAt: new Date(0) })));
   });
 
-  it("[QCDAO-127] enforces funding status transitions", async () => {
+  it("[QCDAO-133] reserves funding lifecycle transitions for the server", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "funding", "f_tr"), baseFunding()));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "funding", "f_tr"), baseFunding()));
     await assertFails(updateDoc(doc(db, "funding", "f_tr"), {
       status: "completed",
       updatedAt: serverTimestamp(),
     }));
-    await assertSucceeds(updateDoc(doc(db, "funding", "f_tr"), {
+    await assertFails(updateDoc(doc(db, "funding", "f_tr"), {
       status: "approved",
       updatedAt: serverTimestamp(),
     }));

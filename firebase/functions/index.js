@@ -19,13 +19,14 @@ import {
   writeSessionCutoff,
 } from "./adminActions.js";
 import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
-import { affectedProblemIds, refreshOpportunityMetrics } from "./opportunityMetrics.js";
+import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { recordProposalRevision } from "./proposalRevisions.js";
 import { recordOpportunityRevision } from "./opportunityRevisions.js";
-import { EXPIRY_REASONS } from "./opportunityExpiry.js";
-import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
+import { verifyPublication } from "./publication.js";
+import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
+  uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
 initializeApp();
 
@@ -102,16 +103,14 @@ const NONCE_MAX_INSTANCES = 10;
 // database location. Otherwise every sign-in crosses regions.
 const REGION = "asia-southeast1";
 
-async function syncOpportunityMetrics(event) {
-  const problemIds = affectedProblemIds(event);
-  await Promise.all(problemIds.map((problemId) => refreshOpportunityMetrics({
-    db,
-    problemId,
-    updatedAt: Timestamp.now(),
-  })));
+async function syncOpportunityMetrics(event, collectionName, recordId) {
+  if (!affectsMetrics(collectionName, event)) return;
+  await syncMetricContribution({ db, collectionName, recordId, updatedAt: Timestamp.now() });
 }
 
 async function syncProblemOpportunityMetrics(event) {
+  if (event.data?.before?.exists && event.data?.after?.exists
+      && event.data.before.data().amount === event.data.after.data().amount) return;
   await refreshOpportunityMetrics({
     db,
     problemId: event.params.problemId,
@@ -122,25 +121,152 @@ async function syncProblemOpportunityMetrics(event) {
 // Proposal bodies stay private. These triggers publish only counts and aggregate
 // funding progress for the marketplace cards and posting detail page.
 export const syncProposalOpportunityMetrics = onDocumentWritten(
-  { document: "proposals/{proposalId}", region: REGION },
-  syncOpportunityMetrics,
+  { document: "proposals/{proposalId}", region: REGION, maxInstances: 5, retry: true },
+  (event) => syncOpportunityMetrics(event, "proposals", event.params.proposalId),
 );
 
 export const syncFundingOpportunityMetrics = onDocumentWritten(
-  { document: "funding/{fundId}", region: REGION },
-  syncOpportunityMetrics,
+  { document: "funding/{fundId}", region: REGION, maxInstances: 5, retry: true },
+  (event) => syncOpportunityMetrics(event, "funding", event.params.fundId),
 );
 
 // The requested amount is the denominator for funding progress. Rebuild when the
 // opportunity itself changes as well, and remove the projection when it is deleted.
 export const syncProblemMarketplaceMetrics = onDocumentWritten(
-  { document: "problems/{problemId}", region: REGION },
+  { document: "problems/{problemId}", region: REGION, maxInstances: 5, retry: true },
   syncProblemOpportunityMetrics,
 );
 
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,
   transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL || undefined),
+});
+
+async function requireMember(request) {
+  const uid = request.auth?.uid;
+  if (!/^0x[0-9a-f]{40}$/.test(uid ?? "")) throw new HttpsError("unauthenticated", "Sign in with your wallet.");
+  const [profile, cutoff, maintenance] = await Promise.all([
+    db.collection("users").doc(uid).get(), db.collection(SESSION_REVOCATIONS_COLLECTION).doc(uid).get(),
+    db.collection("maintenanceState").doc("registryCutover").get(),
+  ]);
+  if (maintenance.data()?.active) throw new HttpsError("unavailable", "Registry maintenance is in progress.");
+  if (!profile.exists || profile.data().suspended) throw new HttpsError("permission-denied", "Complete your active member profile first.");
+  if (isAuthTimeRevoked(request.auth.token.auth_time ?? 0,
+    profile.data().sessionsValidAfterEpoch, cutoff.data()?.sessionsValidAfterEpoch)) {
+    throw new HttpsError("unauthenticated", "Sign in again to continue.");
+  }
+  return uid;
+}
+
+const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
+  enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
+
+export const reserveResource = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  await reserveRecord({ db, uid, scope: request.data?.scope, id: request.data?.recordId, now: Timestamp.now() });
+  return { reserved: true };
+});
+
+export const reserveAttachment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return reserveUpload({ db, uid, scope: request.data?.scope, id: request.data?.recordId,
+    attachmentId: request.data?.attachmentId, size: request.data?.size, sha256: request.data?.sha256,
+    now: Timestamp.now(), Timestamp });
+});
+
+export const removeAttachment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  const { scope, recordId, attachmentId } = request.data ?? {};
+  validateResource(scope, recordId);
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(attachmentId ?? "")) throw new HttpsError("invalid-argument", "Invalid attachment.");
+  const key = uploadReservationKey(scope, recordId, attachmentId);
+  const path = uploadObjectPath(scope, uid, recordId, attachmentId);
+  const [legacyFileExists] = await getStorage().bucket().file(path).exists();
+  // This transaction conflicts with publication sealing, including legacy files.
+  await db.runTransaction(async (tx) => {
+    const ref = db.collection("uploadReservations").doc(key);
+    const [parent, reservation, proof, recordReservation, maintenance] = await Promise.all([
+      tx.get(db.collection(scope).doc(recordId)), tx.get(ref),
+      tx.get(db.collection("publicationProofs").doc(resourceKey(scope, recordId))),
+      tx.get(db.collection("recordReservations").doc(resourceKey(scope, recordId))),
+      tx.get(db.collection("maintenanceState").doc("registryCutover")),
+    ]);
+    if (maintenance.data()?.active || recordReservation.data()?.retired) throw new HttpsError("failed-precondition", "Registry maintenance or retirement prevents removal.");
+    if ((parent.exists && (parent.data()[scope === "problems" ? "ownerId" : "researcherId"] !== uid || parent.data().status !== "draft"))
+        || (reservation.exists && (!matchesUploadReservation(reservation.data(), {
+          scope, id: recordId, uid, attachmentId, path,
+        }) || reservation.data().sealed))
+        || proof.data()?.record?.attachments?.some((item) => item.id === attachmentId)) {
+      throw new HttpsError("permission-denied", "Published attachment bytes must be retained.");
+    }
+    if (!reservation.exists && !legacyFileExists) return; // No arbitrary permanent tombstones.
+    if (!reservation.exists) tx.set(ref, { uid, scope, recordId, attachmentId, path,
+      state: "retired", retiredAt: Timestamp.now() });
+    else tx.update(ref, { state: "retired", retiredAt: Timestamp.now() });
+  });
+  await getStorage().bucket().file(path).delete({ ignoreNotFound: true });
+  await releaseDeletedUpload({ db, key, deletedPath: path, now: Timestamp.now() });
+  return { removed: true };
+});
+
+// The client still commits its schema-validated Firestore transaction, including
+// the one-proposal-per-author slot. Rules require this server-only exact-content
+// attestation, so no submitted create, draft promotion or correction can skip the
+// chain. Verifying an arbitrary client-supplied status/hash alone is insufficient.
+export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  const { scope, recordId, record: input } = request.data ?? {};
+  validateResource(scope, recordId);
+  if (!input || typeof input !== "object" || Array.isArray(input)
+      || Buffer.byteLength(JSON.stringify(input)) > 60_000 || (input.attachments?.length ?? 0) > 2) {
+    throw new HttpsError("invalid-argument", "Invalid publication content.");
+  }
+  const record = { ...input, id: recordId };
+  if (record[scope === "problems" ? "ownerId" : "researcherId"] !== uid) {
+    throw new HttpsError("permission-denied", "You can publish only your own records.");
+  }
+  if (scope === "problems") {
+    const date = new Date(record.expiresAt);
+    if (!Number.isFinite(date.getTime())) throw new HttpsError("invalid-argument", "Invalid expiry.");
+    record.expiresAt = Timestamp.fromDate(date);
+  }
+  await reserveRecord({ db, uid, scope, id: recordId, now: Timestamp.now() });
+  // Also bound repeated attestations/expensive chain reads for a reserved record.
+  const attemptRef = db.collection("publicationAttempts").doc(`${uid}_${Math.floor(Date.now() / 60_000)}`);
+  await db.runTransaction(async (tx) => {
+    const old = await tx.get(attemptRef);
+    const count = old.data()?.count ?? 0;
+    if (count >= 10) throw new HttpsError("resource-exhausted", "Wait one minute before retrying publication.");
+    tx.set(attemptRef, { count: count + 1, expiresAt: Timestamp.fromMillis(Date.now() + 120_000) });
+  });
+  try { await verifyPublication({ scope, record, client: publicClient }); }
+  catch { throw new HttpsError("failed-precondition", "The content could not be verified against its mined transaction. Wait for confirmation and retry."); }
+  const { id: ignoredId, createdAt, updatedAt, audit, ...content } = record;
+  const proofRef = db.collection("publicationProofs").doc(resourceKey(scope, recordId));
+  await db.runTransaction(async (tx) => {
+    const [maintenance, reservation] = await Promise.all([
+      tx.get(db.collection("maintenanceState").doc("registryCutover")),
+      tx.get(db.collection("recordReservations").doc(resourceKey(scope, recordId))),
+    ]);
+    if (maintenance.data()?.active || reservation.data()?.retired) throw new HttpsError("failed-precondition", "Registry maintenance or retirement prevents publication.");
+    const attachments = record.attachments ?? [];
+    const reservations = await Promise.all(attachments.map((item) =>
+      tx.get(db.collection("uploadReservations").doc(uploadReservationKey(scope, recordId, item.id)))));
+    for (let index = 0; index < reservations.length; index += 1) {
+      const reservation = reservations[index], item = attachments[index];
+      if (!reservation.exists) continue; // Existing immutable attachments predate reservations.
+      const expectedPath = uploadObjectPath(scope, uid, recordId, item.id);
+      if (!matchesUploadReservation(reservation.data(), {
+        scope, id: recordId, uid, attachmentId: item.id, path: expectedPath,
+      }) || reservation.data().size !== item.size || reservation.data().sha256 !== item.sha256) {
+        throw new HttpsError("failed-precondition", "An attachment reservation does not match the published file.");
+      }
+      if (reservation.data().state === "retired") throw new HttpsError("failed-precondition", "An attachment was removed. Select it again.");
+      tx.update(reservation.ref, { sealed: true });
+    }
+    tx.set(proofRef, { uid, record: content, transactionHash: audit.transactionHash, verifiedAt: Timestamp.now() });
+  });
+  return { verified: true };
 });
 
 function normaliseAddress(value) {
@@ -301,25 +427,47 @@ export const getSiweNonce = onCall(
  * `request.auth.uid == address`, and a uid can exist only if this function verified a
  * signature first. Nothing the browser does can forge one.
  */
-export const verifySiweSignature = onCall({ region: REGION }, async (request) => {
+export const verifySiweSignature = onCall({
+  region: REGION, maxInstances: NONCE_MAX_INSTANCES,
+  enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
+}, async (request) => {
   const address = normaliseAddress(request.data?.address);
   const signature = request.data?.signature;
 
-  if (typeof signature !== "string" || !signature.startsWith("0x")) {
-    throw new HttpsError("invalid-argument", "A signature is required.");
+  // Contract wallets may use variable-length signatures; bound and validate the
+  // bytes before spending a database read or making an EIP-1271 RPC request.
+  if (typeof signature !== "string" || !/^0x(?:[0-9a-fA-F]{2}){1,2048}$/.test(signature)) {
+    throw new HttpsError("invalid-argument", "A valid wallet signature is required.");
   }
 
   const ref = db.collection(NONCE_COLLECTION).doc(address);
 
-  // READ ONLY. The nonce is not touched until the signature is known to be good.
-  //
-  // This used to claim the nonce inside a transaction BEFORE verifying, then undo
-  // that with a second write when verification failed. Two problems: a bogus
-  // signature briefly marked a live nonce consumed, so a legitimate signature
-  // arriving inside that window was rejected as already-used; and if the undo
-  // failed, or the instance died between the two writes, the nonce stayed burned
-  // and the real owner was locked out until they started again.
-  const snapshot = await ref.get();
+  // Bound verification work atomically before cryptography. Failed signatures
+  // spend an attempt but never consume the wallet nonce.
+  const source = (process.env.FUNCTIONS_EMULATOR === "true" && request.rawRequest?.headers?.["x-emulator-test-source"])
+    || request.rawRequest?.ip || request.rawRequest?.socket?.remoteAddress || "unknown";
+  const sourceHash = createHash("sha256").update(source).digest("hex");
+  const snapshot = await db.runTransaction(async (tx) => {
+    const now = Date.now();
+    const sourceRef = db.collection(RATE_LIMIT_COLLECTION).doc(`verify_source_${sourceHash}`);
+    const globalRef = db.collection(RATE_LIMIT_COLLECTION).doc("verify_global");
+    const [nonce, sourceSnapshot, globalSnapshot] = await Promise.all([
+      tx.get(ref), tx.get(sourceRef), tx.get(globalRef),
+    ]);
+    const perSource = quotaCounter(sourceSnapshot, now);
+    const global = quotaCounter(globalSnapshot, now);
+    const attempts = nonce.data()?.verificationAttempts ?? 0;
+    if (perSource.count >= 30 || global.count >= 300 || attempts >= 10) {
+      throw new HttpsError("resource-exhausted", "Too many verification attempts. Wait a few minutes and start sign-in again.");
+    }
+    const expiresAt = Timestamp.fromMillis(now + RATE_LIMIT_WINDOW_MS * 2);
+    tx.set(sourceRef, { count: perSource.count + 1, windowStartedAt: Timestamp.fromMillis(perSource.windowStartedAtMs), expiresAt });
+    tx.set(globalRef, { count: global.count + 1, windowStartedAt: Timestamp.fromMillis(global.windowStartedAtMs), expiresAt });
+    // Reserve attempts atomically BEFORE verification so concurrent failures
+    // cannot all pass a read-only counter. Do not consume the wallet's nonce.
+    if (nonce.exists) tx.update(ref, { verificationAttempts: attempts + 1 });
+    return nonce;
+  });
   if (!snapshot.exists) {
     throw new HttpsError("failed-precondition", "No sign-in request is pending for this wallet. Start again.");
   }
@@ -502,25 +650,6 @@ function auditProposalId(request) {
   return id;
 }
 
-function expiryOpportunityId(request) {
-  const id = request.data?.problemId;
-  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
-    throw new HttpsError("invalid-argument", "A valid opportunity reference is required.");
-  }
-  return id;
-}
-
-function forceExpiryReason(request) {
-  const reason = request.data?.reason;
-  if (!Object.values(EXPIRY_REASONS).includes(reason)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "Choose one of the prescribed expiry reasons before forcing expiry.",
-    );
-  }
-  return reason;
-}
-
 async function recoverAudit(proposalId, manual = false) {
   return recoverProposalAudit({ db, client: publicClient, proposalId, manual, now: Timestamp.now(), Timestamp });
 }
@@ -570,15 +699,6 @@ export const retryPendingProposalAudits = onSchedule(
     for (const job of jobs.docs) {
       try { await recoverAudit(job.id); } catch (error) { console.warn("Proposal audit recovery:", job.id, error.message); }
     }
-  },
-);
-
-/** Lapses every due opportunity; an unfinished run resumes from its checkpoint. */
-export const lapseExpiredOpportunities = onSchedule(
-  { schedule: "every 1 minutes", region: REGION, maxInstances: 1, timeoutSeconds: 540 },
-  async () => {
-    const summary = await lapseDueOpportunities({ db, Timestamp });
-    console.log("Opportunity lapse run", summary);
   },
 );
 
@@ -692,31 +812,6 @@ export const adminRetryProposalAudit = onCall({ region: REGION, maxInstances: 3 
   await enqueueProposalAudit({ db, record: { ...record, id }, now: Timestamp.now() });
   try { await recoverAudit(id, true); return { message: "Verification confirmed and receipt saved." }; }
   catch (error) { throw new HttpsError("unavailable", error.message); }
-});
-
-/** Admin-only force expiry. */
-export const adminForceExpireOpportunity = onCall({ region: REGION, maxInstances: 3 }, async (request) => {
-  const { uid, adminUser } = await requireAdmin(request);
-  const problemId = expiryOpportunityId(request);
-  const reason = forceExpiryReason(request);
-  const outcome = await expireOpportunity({
-    db,
-    Timestamp,
-    problemId,
-    now: Timestamp.now(),
-    source: EXPIRY_SOURCES.MANUAL,
-    actorId: uid,
-    actorName: adminUser.fullName,
-    forceReason: reason,
-  });
-
-  if (outcome.outcome === "not-found") {
-    throw new HttpsError("not-found", "This opportunity no longer exists.");
-  }
-  if (!outcome.changed) {
-    throw new HttpsError("failed-precondition", "Only a response-open opportunity can be force-expired.");
-  }
-  return { ...outcome, problemId };
 });
 
 /**
@@ -884,19 +979,10 @@ export const adminSetSuspended = onCall({ region: REGION }, async (request) => {
   };
 });
 
-/**
- * QCDAO-58 remediation - deletes posting attachments that no posting references.
- *
- * storage.rules constrains every property of an individual upload but cannot count
- * objects, so nothing stops a wallet writing more PDFs than any posting will ever
- * point at. The lifecycle rule handles abandoned PARTIAL uploads; this handles
- * completed ones that ended up orphaned - a cancelled draft, or a deliberate one.
- *
- * DRY RUN BY DEFAULT. This is the only scheduled job here that destroys data, so it
- * reports what it would delete and does nothing until ATTACHMENT_SWEEP_ENABLED is
- * explicitly "true". Read one run's logs first, confirm the counts look sane, then
- * turn it on. Objects younger than the grace period are never candidates, so a form
- * somebody is still filling in is safe either way.
+/** Clean both namespaces in bounded, resumable pages. Reservations bound new
+ * uploads; this job reclaims abandoned charges and objects after the grace period.
+ * Sealed published evidence and historical published files are retained. Set
+ * ATTACHMENT_SWEEP_ENABLED=true explicitly to enable deletion after a dry run.
  */
 export const sweepAttachments = onSchedule(
   {

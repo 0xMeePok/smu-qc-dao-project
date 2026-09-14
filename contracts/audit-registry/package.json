@@ -7,7 +7,8 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test mocha",
-    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia"
+    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
+    "verify:arbitrum-sepolia": "node scripts/verify-live.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "4.0.15",

@@ -102,3 +102,5 @@ firebase/public/
 firebase/firebase.local.json
 /reports/sprint-2-audit/findings
 /reports/sprint-2-audit
+docs/contributor-security-review.md
+docs/AUDIT_REGISTRY_INTEGRATION.md

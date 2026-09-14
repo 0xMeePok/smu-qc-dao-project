@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { network } from "hardhat";
+const actorId = (actor, digest) => actor.address.toLowerCase() + digest.slice(2, 26);
 
 const ZERO_BYTES32 =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -35,10 +36,10 @@ describe("AuditRegistry", function () {
     await registry.waitForDeployment();
 
     const latest = await ethers.provider.getBlock("latest");
-    const opportunityId = ethers.id("opportunity-1");
+    const opportunityId = actorId(owner, ethers.id("opportunity-1"));
     const opportunityHash = ethers.id("opportunity-hash-v1");
     const expiresAt = BigInt(latest.timestamp) + 90n * 24n * 60n * 60n;
-    const proposalId = ethers.id("proposal-1");
+    const proposalId = actorId(researcher, ethers.id("proposal-1"));
     const proposalHash = ethers.id("proposal-hash-v1");
     const solutionHash = ethers.id("solution-hash-v1");
 
@@ -170,8 +171,8 @@ describe("AuditRegistry", function () {
 
       it("posts open funding as a funder and a funding request as a researcher", async function () {
         const { ethers, registry, owner, researcher } = await deployFixture();
-        const openFundingId = ethers.id("open-funding-1");
-        const fundingRequestId = ethers.id("funding-request-1");
+        const openFundingId = actorId(owner, ethers.id("open-funding-1"));
+        const fundingRequestId = actorId(researcher, ethers.id("funding-request-1"));
 
         const fundingTx = await registry
           .connect(owner)
@@ -228,7 +229,7 @@ describe("AuditRegistry", function () {
         const { ethers, registry, owner, opportunityHash, expiresAt } = ctx;
 
         await commitFirstOpportunity(ctx);
-        const secondId = ethers.id("opportunity-2");
+        const secondId = actorId(ctx.owner, ethers.id("opportunity-2"));
         await registry
           .connect(owner)
           .commitOpportunity(secondId, OpportunityKind.OpenFunding, opportunityHash, expiresAt);
@@ -569,7 +570,7 @@ describe("AuditRegistry", function () {
       it("accepts a second researcher on the same open-funding opportunity", async function () {
         const ctx = await deployFixture();
         const { ethers, registry, owner, researcher, other } = ctx;
-        const opportunityId = ethers.id("shared-opportunity");
+        const opportunityId = actorId(ctx.owner, ethers.id("shared-opportunity"));
 
         await registry
           .connect(owner)
@@ -582,7 +583,7 @@ describe("AuditRegistry", function () {
         await commitProposalAtCurrentRevision(
           registry,
           researcher,
-          ethers.id("proposal-a"),
+          actorId(ctx.researcher, ethers.id("proposal-a")),
           opportunityId,
           ethers.id("proposal-a-hash"),
           ethers.id("solution-a-hash")
@@ -590,16 +591,16 @@ describe("AuditRegistry", function () {
         await commitProposalAtCurrentRevision(
           registry,
           other,
-          ethers.id("proposal-b"),
+          actorId(ctx.other, ethers.id("proposal-b")),
           opportunityId,
           ethers.id("proposal-b-hash"),
           ethers.id("solution-b-hash")
         );
 
-        expect((await registry.getProposal(ethers.id("proposal-a"))).researcher).to.equal(
+        expect((await registry.getProposal(actorId(ctx.researcher, ethers.id("proposal-a")))).researcher).to.equal(
           researcher.address
         );
-        expect((await registry.getProposal(ethers.id("proposal-b"))).researcher).to.equal(
+        expect((await registry.getProposal(actorId(ctx.other, ethers.id("proposal-b")))).researcher).to.equal(
           other.address
         );
       });
@@ -611,7 +612,7 @@ describe("AuditRegistry", function () {
         const nextHash = ethers.id("opportunity-hash-v2");
         await registry.connect(owner).updateOpportunity(opportunityId, nextHash, expiresAt);
 
-        const laterId = ethers.id("proposal-after-update");
+        const laterId = actorId(ctx.researcher, ethers.id("proposal-after-update"));
         await commitProposalAtCurrentRevision(
           registry, researcher, laterId, opportunityId, ethers.id("p-after"), ethers.id("s-after")
         );
@@ -629,7 +630,7 @@ describe("AuditRegistry", function () {
         const { ethers, registry, researcher, opportunityId } = ctx;
         await commitFirstOpportunity(ctx);
 
-        const proposalId = ethers.id("same-hash-proposal");
+        const proposalId = actorId(ctx.researcher, ethers.id("same-hash-proposal"));
         const both = ethers.id("one-hash-for-both");
         await commitProposalAtCurrentRevision(
           registry, researcher, proposalId, opportunityId, both, both
@@ -667,15 +668,15 @@ describe("AuditRegistry", function () {
         const { ethers, registry, researcher, other, proposalHash, solutionHash } = ctx;
 
         await commitFirstProposal(ctx);
-        const secondOpportunity = ethers.id("opportunity-2");
+        const secondOpportunity = actorId(ctx.owner, ethers.id("opportunity-2"));
         await registry
           .connect(ctx.owner)
           .commitOpportunity(secondOpportunity, OpportunityKind.FundingRequest, ethers.id("fr"), 0);
         await commitProposalAtCurrentRevision(
-          registry, other, ethers.id("proposal-2"), secondOpportunity, proposalHash, solutionHash
+          registry, other, actorId(ctx.other, ethers.id("proposal-2")), secondOpportunity, proposalHash, solutionHash
         );
 
-        const copy = await registry.getProposal(ethers.id("proposal-2"));
+        const copy = await registry.getProposal(actorId(ctx.other, ethers.id("proposal-2")));
         expect(copy.proposalHash).to.equal(proposalHash);
         expect(copy.solutionHash).to.equal(solutionHash);
         expect(copy.researcher).to.equal(other.address);
@@ -1011,8 +1012,8 @@ describe("AuditRegistry", function () {
           )
         ).to.be.revertedWithCustomError(registry, "InvalidState");
 
-        const lateId = ethers.id("expiring-opportunity");
-        const lateProposal = ethers.id("expiring-proposal");
+        const lateId = actorId(ctx.owner, ethers.id("expiring-opportunity"));
+        const lateProposal = actorId(researcher, ethers.id("expiring-proposal"));
         const latest = await ethers.provider.getBlock("latest");
         await registry
           .connect(owner)

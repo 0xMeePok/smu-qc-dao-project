@@ -1,6 +1,7 @@
 import { PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { toDate } from "./datetime.js";
+import { isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE } from "./errors.js";
 
 export function proposalBlockReason(posting, now = new Date()) {
   if (!posting) return "This opportunity is not available.";
@@ -33,6 +34,7 @@ export function validateProposal(form, posting) {
 
 /** Keep SDK diagnostics out of proposal screens; retain our business-rule errors. */
 export function messageForProposalError(error) {
+  if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   const code = String(error?.code ?? "").split("/").pop();
   if (["permission-denied", "unauthorized"].includes(code)) return "This proposal or opportunity is not available to your account. Check that you are signed in with the correct wallet.";
   if (code === "unauthenticated") return "Your session has expired. Sign in again to continue.";

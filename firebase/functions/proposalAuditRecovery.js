@@ -1,6 +1,7 @@
 import { decodeFunctionData } from "viem";
 import { createHash } from "node:crypto";
 import { getStorage } from "firebase-admin/storage";
+import { withOpportunityRevisionIndex } from "./auditCanonical.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 
@@ -38,7 +39,7 @@ export function registryAddress() {
 // Confirmation is a server attestation of a mined, successful commit for this
 // exact stored record and researcher, never a client-supplied status or hash.
 export async function verifyMinedProposal(record, client, { readAttachment = readAttachmentBytes } = {}) {
-  const expected = prepareStoredProposal(record);
+  let expected = prepareStoredProposal(record);
   const hash = record.audit?.transactionHash;
   if (!/^0x[0-9a-f]{64}$/i.test(hash ?? "")) throw new Error("The researcher must submit the wallet transaction first.");
   const address = registryAddress();
@@ -65,6 +66,11 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
     throw new Error("The transaction is not final yet; confirmation will be checked again.");
   }
   const decoded = decodeFunctionData({ abi: registry.abi, data: transaction.input });
+  // The registry enforces the live parent revision at transaction time. Verify
+  // that same revision in the current proposal instead of assuming revision zero.
+  if (["commitProposal", "updateHashes"].includes(decoded.functionName)) {
+    expected = withOpportunityRevisionIndex(expected, Number(decoded.args.at(-1)));
+  }
   const expectedArgs = {
     commitProposal: expected.args,
     updateHashes: [

@@ -76,11 +76,24 @@ the frontend is read from the configured contract and compared with a freshly
 computed opportunity hash. Transient receipt reads are capped at three attempts.
 
 The current Arbitrum Sepolia deployment is
-`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD` (transaction
-`0x7df4e661d7dbd82b3bc0e00727d10d581a604614d23d1a7e16f4e571d242403b`).
+`0x47dA28cAEf8021dD88fe18B80e367746e0036964` (transaction
+`0x02f73510e1b9e1753c14f6c2c2a0ca7ce213c94f31fee101fa7b436f59a2d36a`).
 It is the checked-in frontend default. `VITE_AUDIT_REGISTRY_ADDRESS` may override
 it for a later deployment; an invalid override disables on-chain verification
 without blocking the Firestore workflow.
+
+Deploying the replacement contract does not move existing records or update an
+already-hosted frontend. Follow [the coordinated cutover](registry-cutover.md)
+before switching the live site's registry. A match against the historical
+`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD` is evidence from that registry,
+not evidence that the same record exists in the replacement.
+
+Production builds include viem's deferred error helpers in the entry file so
+tabs kept open during a deployment do not request removed helper files later.
+Hosting revalidates app HTML, keeps hashed assets immutable, and returns 404 for
+removed assets instead of the SPA's HTML. An older tab encountering a module-load
+failure offers save/copy-and-refresh guidance without automatically reloading
+and losing form entries.
 
 ## Swapping the contract
 
@@ -96,8 +109,10 @@ cd frontend
 npm run sync:audit-registry
 ```
 
-The command reads the default Hardhat artifact and Arbitrum Sepolia deployment
-record. A different artifact or deployment can be selected explicitly:
+The command reads the default Hardhat artifact and the active manifest at
+`contracts/audit-registry/manifests/arbitrumSepolia.json`, and updates both the
+frontend and Functions configuration. The older `deployments/arbitrumSepolia.json`
+is historical. A different artifact or deployment can be selected explicitly:
 
 ```bash
 npm run sync:audit-registry -- \

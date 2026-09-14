@@ -165,11 +165,13 @@ describe("security deployment configuration", () => {
     const revisions = fs.readFileSync(
       new URL("../functions/proposalRevisions.js", import.meta.url), "utf8",
     );
-    assert.match(revisions, /\.doc\(eventId\)/);
+    assert.match(revisions, /writeRegistryRevision\(\{[^\n]*eventId/);
     const opportunityRevisions = fs.readFileSync(
       new URL("../functions/opportunityRevisions.js", import.meta.url), "utf8",
     );
-    assert.match(opportunityRevisions, /\.doc\(eventId\)/);
+    assert.match(opportunityRevisions, /writeRegistryRevision\(\{[^\n]*eventId/);
+    const writer = fs.readFileSync(new URL("../functions/registryRetirement.js", import.meta.url), "utf8");
+    assert.match(writer, /\.doc\(eventId\)/);
   });
 
   it("enables TTL cleanup for nonce and rate-limit documents", () => {
@@ -177,6 +179,6 @@ describe("security deployment configuration", () => {
       .filter((entry) => entry.fieldPath === "expiresAt" && entry.ttl === true)
       .map((entry) => entry.collectionGroup)
       .sort();
-    assert.deepEqual(ttlGroups, ["siweNonces", "siweRateLimits"]);
+    assert.deepEqual(ttlGroups, ["publicationAttempts", "siweNonces", "siweRateLimits"]);
   });
 });

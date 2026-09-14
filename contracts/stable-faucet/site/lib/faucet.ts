@@ -10,6 +10,7 @@ import {
   completeWalletDistribution,
   reserveWalletDistribution,
 } from "./rate-limit.js";
+import { readWebBody, RequestTooLarge } from "./request-body.js";
 
 export interface FaucetEnvironment {
   ARBITRUM_SEPOLIA_RPC_URL?: string;
@@ -29,7 +30,6 @@ type FaucetBody = {
 
 const CHAIN_ID = 421614;
 const SIGNATURE_TTL_SECONDS = 5 * 60;
-const MAX_REQUEST_BYTES = 8_192;
 const FAUCET_ABI = [
   "function faucetMint(address recipient)",
   "function nextClaimAt(address recipient) view returns (uint256)",
@@ -100,10 +100,6 @@ export async function handleFaucet(
     return json({ error: "Method not allowed." }, 405, { allow: "POST" });
   }
 
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (!Number.isFinite(contentLength) || contentLength > MAX_REQUEST_BYTES) {
-    return json({ error: "Request is too large." }, 413);
-  }
   if (
     !request.headers.get("content-type")?.toLowerCase().startsWith(
       "application/json",
@@ -113,12 +109,11 @@ export async function handleFaucet(
   }
   let body: FaucetBody;
   try {
-    const rawBody = await request.text();
-    if (new TextEncoder().encode(rawBody).byteLength > MAX_REQUEST_BYTES) {
-      return json({ error: "Request is too large." }, 413);
-    }
+    const rawBody = await readWebBody(request);
     body = JSON.parse(rawBody) as FaucetBody;
-  } catch {
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
+  } catch (error) {
+    if (error instanceof RequestTooLarge) return json({ error: "Request is too large." }, 413);
     return json({ error: "Invalid JSON request." }, 400);
   }
 
@@ -234,7 +229,26 @@ export async function handleFaucet(
       );
     }
 
-    const transaction = await contract.faucetMint(normalizedRecipient);
+    const [balance, fee, gasEstimate, pendingNonce] = await Promise.all([
+      provider.getBalance(signer.address), provider.getFeeData(),
+      contract.faucetMint.estimateGas(normalizedRecipient), provider.getTransactionCount(signer.address, "pending"),
+    ]);
+    const gasLimit = gasEstimate * 12n / 10n;
+    const maxFeePerGas = fee.maxFeePerGas;
+    if (!maxFeePerGas || maxFeePerGas <= 0n || maxFeePerGas > 1_000_000_000n || gasLimit > 2_000_000n) {
+      return json({ error: "Testnet fees are above the faucet safety limit. Try again later." }, 503);
+    }
+    const maximumGasWei = gasLimit * maxFeePerGas;
+    if (balance < maximumGasWei + 5_000_000_000_000_000n) {
+      console.error("Faucet paused: signer balance below safety reserve.");
+      return json({ error: "The faucet is paused for replenishment." }, 503);
+    }
+    // Testnet policy: the contract's wallet/token cooldown is authoritative.
+    // The local map is a courtesy throttle; no external budget store is
+    // required. Different wallets can mint for testing. Concurrent instances may
+    // race for the signer nonce; rejected claims can retry without skipping it.
+    const transaction = await contract.faucetMint(normalizedRecipient, { nonce: pendingNonce, gasLimit,
+      maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas ?? 0n });
     const receipt = await transaction.wait(1);
     if (!receipt || receipt.status !== 1) {
       return json({ error: "The mint transaction was not confirmed." }, 502);

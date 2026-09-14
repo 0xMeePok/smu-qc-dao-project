@@ -1,13 +1,23 @@
+import { seedPublicationFixture } from "./publication-fixture.mjs";
 import fs from "node:fs";
 import { after, before, describe, it } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc as rawSetDoc, updateDoc as rawUpdateDoc, where, writeBatch } from "firebase/firestore";
 
 const AUTHOR = `0x${"81".repeat(20)}`;
 const SPONSOR = `0x${"91".repeat(20)}`;
 const OUTSIDER = `0x${"71".repeat(20)}`;
 const ATTACHMENT_DIGEST = `0x${"4".repeat(64)}`;
 let env;
+async function setDoc(reference, data, ...options) {
+  await seedPublicationFixture(env, reference, data);
+  return rawSetDoc(reference, data, ...options);
+}
+async function updateDoc(reference, data, ...options) {
+  await seedPublicationFixture(env, reference, data, true);
+  return rawUpdateDoc(reference, data, ...options);
+}
+
 let serial = 0;
 before(async () => {
   env = await initializeTestEnvironment({ projectId: "qc-dao-rules-test", firestore: { rules: fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8") } });
@@ -24,7 +34,8 @@ async function parent(overrides = {}) {
 function record(problemId, overrides = {}) {
   return { researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId, opportunityType: "business-problem", title: "Annealing routing", summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare annealing against a classical baseline", suitability: "A combinatorial routing problem", expectedOutcomes: "Improved routing", successCriteria: "10 percent less travel", timeline: "12 weeks", milestones: "Baseline, prototype, validation", team: "Operations research team", amount: 1500, currency: "USDC", status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides };
 }
-function submit(db, id, data, withSlot = true) {
+async function submit(db, id, data, withSlot = true) {
+  await seedPublicationFixture(env, doc(db, "proposals", id), data);
   const batch = writeBatch(db);
   batch.set(doc(db, "proposals", id), data);
   if (withSlot) batch.set(doc(db, "problems", data.problemId, "proposalAuthors", AUTHOR), { proposalId: id });
@@ -130,7 +141,8 @@ describe("QCDAO-59/60 submitted proposals", () => {
     const draft = record(id, { status: "draft", attachments: [attachment] });
     delete draft.postingOwnerId;
     await assertSucceeds(setDoc(doc(db, "proposals", "proposal-draft-digest"), draft));
-    const publish = (attachments) => {
+    const publish = async (attachments) => {
+      await seedPublicationFixture(env, doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() }, true);
       const batch = writeBatch(db);
       batch.update(doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() });
       batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "proposal-draft-digest" });
@@ -251,6 +263,7 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
 
     // Promotion keeps the id, so the attachments already stored under it and the
     // audit entity derived from it both survive the transition.
+    await seedPublicationFixture(env, doc(db, "proposals", "partial-draft"), correction(id), true);
     const batch = db.batch ? db.batch() : writeBatch(db);
     batch.update(doc(db, "proposals", "partial-draft"), correction(id));
     batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "partial-draft" });
@@ -302,27 +315,75 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     await assertSucceeds(submit(db, "anchored-first", record(id, { audit: anchored })));
   });
 
-  it("stays inside the expression budget for the heaviest SUBMISSION", async () => {
-    // Reported from the preview channel: an open-funding proposal with one
-    // attachment wrote fine before the receipt moved into the create, and
-    // permission-denied afterwards. Chain-first put the audit map on the same
-    // write as the full open-funding schema and the attachment entry.
+  for (const opportunityType of ["business-problem", "open-funding"]) {
+    for (const promoteDraft of [false, true]) {
+      it(`publishes ${opportunityType} ${promoteDraft ? "draft" : "create"} with its mined receipt and two PDFs atomically`, async () => {
+        const db = env.authenticatedContext(AUTHOR).firestore();
+        const problemId = await parent({ opportunityType });
+        const proposalId = `chain-first-${opportunityType}-${promoteDraft}`;
+        const ref = doc(db, "proposals", proposalId);
+        const framing = opportunityType === "open-funding"
+          ? { proposedProblem: "Improve emergency routing", relevance: "Faster response", thesisFit: "Resilient public systems" }
+          : {};
+        const data = record(problemId, {
+          opportunityType, ...framing,
+          attachments: ["fileaaa1", "fileaaa2"].map((id) => ({
+            id, name: "proposal.pdf", contentType: "application/pdf", size: 10 * 1024 * 1024, sha256: ATTACHMENT_DIGEST,
+          })),
+          audit: receipt({ status: "pending", transactionHash: `0x${"8".repeat(64)}`, blockNumber: 306630536, attemptCount: 1 }),
+        });
+        if (promoteDraft) {
+          await assertSucceeds(setDoc(ref, {
+            researcherId: AUTHOR, problemId, status: "draft", title: "First pass",
+            createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          }));
+        }
+        const { createdAt, ...update } = data;
+        const patch = promoteDraft ? update : data;
+        // Use the real nonempty attested hash, then bypass fixture wrappers:
+        // omitting the receipt must fail, and the author slot must stay absent.
+        await seedPublicationFixture(env, ref, patch, promoteDraft);
+        const commit = (payload) => {
+          const batch = writeBatch(db);
+          if (promoteDraft) batch.update(ref, payload);
+          else batch.set(ref, payload);
+          batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+          return batch.commit();
+        };
+        const { audit, ...withoutReceipt } = patch;
+        await assertFails(commit(withoutReceipt));
+        await assertFails(commit({ ...patch, audit: { ...audit, transactionHash: `0x${"9".repeat(64)}` } }));
+        await env.withSecurityRulesDisabled(async (ctx) => {
+          const slot = await getDoc(doc(ctx.firestore(), "problems", problemId, "proposalAuthors", AUTHOR));
+          if (slot.exists()) throw new Error("Rejected publication left an author slot behind");
+        });
+        await assertSucceeds(commit(patch));
+      });
+    }
+  }
+
+  it("keeps submitted text bounds consistent with existing correction validation", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
-    const id = await parent({ opportunityType: "open-funding" });
-    const framing = { opportunityType: "open-funding", proposedProblem: "Improve emergency routing", relevance: "Faster response", thesisFit: "Resilient public systems" };
-    const files = (...ids) => ids.map((id) => ({
-      id, name: "proposal.pdf", contentType: "application/pdf", size: 7603202, sha256: ATTACHMENT_DIGEST,
-    }));
-    await assertSucceeds(submit(db, "heaviest-submit", record(id, {
-      ...framing, attachments: files("fileaaa1", "fileaaa2"),
-    })));
-    // The receipt lands in its own write. Carrying it on the create as well is
-    // what crossed the cap, so the client writes it second; see
-    // CreateProposalPage. This asserts the write that actually happens.
-    await assertSucceeds(updateDoc(doc(db, "proposals", "heaviest-submit"), {
-      audit: receipt({ status: "pending", transactionHash: `0x${"8".repeat(64)}`, blockNumber: 306630536, attemptCount: 1 }),
-      updatedAt: serverTimestamp(),
-    }));
+    const cases = [
+      ["empty", "", false], ["one", "x", false], ["two", "ok", true],
+      ["maximum", "x".repeat(4000), true], ["oversized", "x".repeat(4001), false],
+      ["newline", "a\nb", true], ["emoji", "😀", true], ["emoji-pair", "😀😀", true],
+      ["emoji-maximum", "😀".repeat(2000), true], ["emoji-oversized", "😀".repeat(2001), false],
+      ["array", ["ok"], false], ["map", { text: "ok" }, false],
+      ["number", 12, false], ["null", null, false], ["missing", undefined, false],
+    ];
+    for (const [label, value, allowed] of cases) {
+      const problemId = await parent();
+      const data = record(problemId, { methodology: value });
+      if (value === undefined) delete data.methodology;
+      await (allowed ? assertSucceeds : assertFails)(submit(db, `text-create-${label}`, data));
+      const correctionParent = await parent();
+      const ref = doc(db, "proposals", `text-correction-${label}`);
+      await assertSucceeds(submit(db, ref.id, record(correctionParent)));
+      await (allowed ? assertSucceeds : assertFails)(updateDoc(ref, {
+        methodology: value === undefined ? deleteField() : value, updatedAt: serverTimestamp(),
+      }));
+    }
   });
 
   it("stays inside the expression budget for the heaviest correction", async () => {

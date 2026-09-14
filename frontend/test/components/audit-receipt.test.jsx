@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuditReceipt } from "../../src/components/AuditReceipt.jsx";
 
@@ -42,6 +42,60 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AuditReceipt", () => {
+  it("does not treat a stored confirmed label as chain evidence", () => {
+    renderReceipt({ onVerify: undefined });
+    expect(screen.getByText("Verification not checked")).toBeTruthy();
+    expect(screen.queryByText("Transaction confirmation recorded")).toBeNull();
+    expect(screen.queryByText("Verified on Arbitrum Sepolia")).toBeNull();
+  });
+  it.each(["queued", "pending", "failed"])("checks a %s receipt without a saved transaction and hides signing for a chain match", async (status) => {
+    const retry = vi.fn(), verify = vi.fn(async () => ({ verified: true }));
+    renderReceipt({ audit: receipt({ status, transactionHash: "", blockNumber: 0, attemptCount: 3,
+      lastError: "This content is already anchored on Arbitrum Sepolia. Change the posting before signing again." }),
+      onVerify: verify, onRetry: retry });
+    expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
+    expect(verify).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: /start verification|resume verification|retry anchoring/i })).toBeNull();
+    expect(screen.queryByText(/Change the posting|Wallet retry limit/)).toBeNull();
+    expect(screen.getByText("Not recorded")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it("does not offer another signature while the chain check is pending or offline", async () => {
+    let reject;
+    renderReceipt({ audit: receipt({ status: "queued", transactionHash: "" }), onRetry: vi.fn(),
+      onVerify: () => new Promise((_, fail) => { reject = fail; }) });
+    expect(screen.queryByRole("button", { name: "Start verification" })).toBeNull();
+    await waitFor(() => expect(reject).toBeTypeOf("function"));
+    await act(async () => { reject(new Error("RPC offline")); });
+    expect(await screen.findByText(/Unable to verify right now/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start verification" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  });
+
+  it("shows the mismatched portion and both hashes without offering to overwrite the anchor", async () => {
+    const actual = `0x${"4".repeat(64)}`;
+    renderReceipt({ audit: receipt({ status: "queued", transactionHash: "" }), onRetry: vi.fn(),
+      onVerify: async () => ({ verified: false, mismatches: [{ field: "solutionHash", label: "Solution and attachments hash",
+        message: "Solution content or supporting attachment metadata differs from the on-chain version.", expected: HASH, actual }] }) });
+    expect(await screen.findByText("On-chain mismatch")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Solution content or supporting attachment metadata differs");
+    expect(screen.getByRole("alert").textContent).toContain(actual);
+    expect(screen.getByRole("alert").textContent).toContain(HASH);
+    expect(screen.getByText(/cannot reveal the exact text/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start verification" })).toBeNull();
+  });
+
+  it("offers a start only after the contract reports a missing record", async () => {
+    const retry = vi.fn();
+    renderReceipt({ audit: receipt({ status: "queued", transactionHash: "" }), onRetry: retry,
+      onVerify: async () => { throw new Error("execution reverted: InvalidInput"); } });
+    fireEvent.click(await screen.findByRole("button", { name: "Start verification" }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Verified on Arbitrum Sepolia")).toBeNull();
+  });
+
   it("offers a start action for a queued receipt after a wallet disconnect", () => {
     const start = vi.fn();
     renderReceipt({ audit: receipt({ status: "queued", transactionHash: "", attemptCount: 0 }), onVerify: undefined, onRetry: start });
@@ -118,9 +172,10 @@ describe("AuditReceipt", () => {
       onVerify: verify,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /check again/i }));
     await waitFor(() => expect(verify).toHaveBeenCalledOnce());
     expect(await screen.findByText(/No matching audit/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /check again/i }));
+    await waitFor(() => expect(verify).toHaveBeenCalledTimes(2));
   });
 });
 

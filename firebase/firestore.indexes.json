@@ -385,6 +385,34 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "uploadReservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "state",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expiresAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "uploadReservations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "state",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "quotaReleasedAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -396,6 +424,12 @@
     },
     {
       "collectionGroup": "siweRateLimits",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "publicationAttempts",
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []
