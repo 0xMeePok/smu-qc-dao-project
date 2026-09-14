@@ -1,49 +1,8 @@
 rules_version = '2';
 
-// QCDAO-58 - supporting files attached to a posting.
-//
-// The object path IS the authorisation record:
-//
-//     problems/{ownerId}/{problemId}/{fileName}
-//
-// `ownerId` is a wallet address, and request.auth.uid IS the lowercase wallet
-// address (firebase/functions/index.js only mints a token after verifying a
-// signature over a server-issued nonce - see the header of firestore.rules). So
-// `request.auth.uid == ownerId` is a real ownership proof taken straight from the
-// path, with no Firestore lookup on the hot path.
-//
-// Putting the owner in the path rather than reading problems/{problemId}.ownerId
-// is what makes "remove-before-publish" work: attachments are uploaded while the
-// posting is still an unsaved draft, so there is no posting document to consult
-// yet. Ownership is still provable, because it is in the path being written to.
-//
-// Any signed-in wallet can READ attachments under this prefix. Upload and delete
-// stay owner-only. Read does not look up the posting in Firestore: a Storage
-// rule that called firestore.get() on problems/{id} refused every non-owner
-// download in production (the owner still succeeded via the path), which is the
-// 403 on Discover. Keep reads on request.auth only.
-//
-// ON OBJECT COUNT - what these rules can and cannot do.
-// firestore.rules caps a posting's attachment list at 5, but that governs the
-// posting record, not the bucket. Storage rules cannot count objects or read a
-// running total, so nothing here bounds how many objects one wallet writes. Every
-// per-REQUEST property is constrained (owner, type, name, size, metadata); volume
-// is not expressible as a rule and is handled outside this file:
-//
-//   1. App Check enforcement on Cloud Storage - CURRENTLY OFF. reCAPTCHA never
-//      mints a token here (zero assessments in 90 days; the provider iframe is
-//      denied storage access), so enforcing it refuses every upload. Re-enable
-//      only after grecaptcha.enterprise.execute() is confirmed to resolve. It
-//      bounds upload VOLUME; access is gated by SIWE and the rules below.
-//   2. sweepAttachments (functions/attachmentSweeper.js) deletes objects under
-//      this prefix that no posting references. Still needed WITH App Check on,
-//      because most orphans are not abuse: a user who uploads and then abandons
-//      the form, or closes the tab before publishing, leaves a real file behind
-//      through entirely ordinary use. The client deletes what it can on abandon,
-//      but it cannot clean up after a closed tab - that is this job's work.
-//   3. storage.lifecycle.json aborts incomplete resumable uploads after a day.
-//      Covers partial transfers only; completed orphans are (2)'s problem.
-//   4. A budget alert, so anything unexpected surfaces as a notification.
+// Immutable PDFs use server-issued exact-path reservations. Quotas are charged
+// before upload, and deletion retires the reservation before removing bytes.
+// Each operation uses at most two Firestore reads: profile plus record/reservation.
 service firebase.storage {
   match /b/{bucket}/o {
 
@@ -119,10 +78,22 @@ service firebase.storage {
     // Combined, listed ids cannot be rewritten and unlisted published ids cannot
     // be removed from the bucket by the owner, so the marketplace URL stays bound
     // to the original object.
-    function postingAcceptsNewFile(problemId, ownerId, fileName) {
-      let posting = attachmentRecord('problems', problemId);
-      return posting == null
-        || (posting.data.ownerId == ownerId && !isReferencedFile(posting, fileName));
+    // One reservation read + one profile read, within Storage's two-read cap.
+    // The server reserves an exact immutable object and charges quota first.
+    function hasUploadReservation(scope, recordId, fileName) {
+      let attachmentId = fileName.replace('[.]pdf$', '');
+      let reservation = attachmentRecord('uploadReservations', scope + '.' + recordId + '.' + attachmentId);
+      return reservation != null
+        && reservation.data.uid == request.auth.uid
+        && reservation.data.scope == scope
+        && reservation.data.recordId == recordId
+        && reservation.data.attachmentId == attachmentId
+        && reservation.data.path == scope + '/' + request.auth.uid + '/' + recordId + '/' + fileName
+        && reservation.data.state == 'reserved'
+        && !reservation.data.sealed
+        && reservation.data.expiresAt > request.time
+        && reservation.data.size == request.resource.size
+        && reservation.data.sha256 == request.resource.metadata.sha256;
     }
 
     // Remove-before-publish (and the pre-save path where no document exists yet)
@@ -230,15 +201,14 @@ service firebase.storage {
         && isPdf(fileName)
         && withinSizeCap()
         && metadataIsHonest(problemId)
-        && postingAcceptsNewFile(problemId, ownerId, fileName);
+        && hasUploadReservation("problems", problemId, fileName);
 
       // Remove-before-publish only. Restricted to the owner for the same reason
       // writes are. Published objects stay in the bucket even after the owner
       // unlinks them from attachments[] - otherwise delete-then-upload at the
       // same {id}.pdf would replace the bytes behind a stable marketplace URL
       // and an unchanged opportunity hash.
-      allow delete: if isWallet(ownerId) && isActiveMember()
-        && postingAllowsFileRemoval(problemId, ownerId);
+      allow delete: if false; // removeAttachment retires the reservation before deleting.
     }
 
     // Proposal files are private to the submitting wallet and the sponsor. A
@@ -277,9 +247,8 @@ service firebase.storage {
       allow create: if resource == null && isWallet(ownerId) && isActiveMember()
         && isPostingId(proposalId) && isPdf(fileName) && withinSizeCap()
         && metadataIsHonest(proposalId)
-        && proposalAcceptsFileChanges(proposalId, ownerId);
-      allow delete: if isWallet(ownerId) && isActiveMember()
-        && proposalAcceptsFileChanges(proposalId, ownerId);
+        && hasUploadReservation("proposals", proposalId, fileName);
+      allow delete: if false;
     }
 
     // Deny everything not matched above, including any legacy path.

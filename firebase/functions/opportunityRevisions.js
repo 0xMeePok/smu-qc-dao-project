@@ -1,3 +1,4 @@
+import { writeRegistryRevision } from "./registryRetirement.js";
 import { prepareOpportunityCommit } from "./auditCanonical.js";
 
 export const TRACKED_POSTING_FIELDS = [
@@ -142,8 +143,6 @@ export async function recordOpportunityRevision({ db, recordId, eventId, before,
   const entry = opportunityRevisionEntry({ recordId, before, after, at });
   if (!entry) return null;
 
-  await db.collection("problems").doc(recordId)
-    .collection("revisions").doc(eventId)
-    .set(entry);
+  await writeRegistryRevision({ db, scope: "problems", id: recordId, eventId, entry });
   return entry;
 }

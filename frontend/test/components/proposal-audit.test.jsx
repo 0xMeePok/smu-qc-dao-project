@@ -10,11 +10,12 @@ vi.mock("../../src/lib/proposals.js", () => ({
   },
 }));
 import { anchorProposalAudit, proposalAuditReceipt, proposalAuditPayload, readProposalAudit } from "../../src/lib/proposalAudit.js";
+import { AUDIT_ENTITY_ID_SCHEME } from "../../src/config/auditRegistry.js";
 import { prepareProposalCommit } from "../../src/lib/auditRegistry.js";
 const account = `0x${"a".repeat(40)}`;
 const tx = `0x${"3".repeat(64)}`;
-const record = { id: "proposal123", problemId: "problem123", researcherId: account, title: "Annealing", methodology: "Benchmark routing", attachments: [] };
-const prepared = prepareProposalCommit({ recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { ...proposalAuditPayload(record), attachments: [] } });
+const record = { id: "proposal123", problemId: "problem123", researcherId: account, postingOwnerId: `0x${"b".repeat(40)}`, title: "Annealing", methodology: "Benchmark routing", attachments: [] };
+const prepared = prepareProposalCommit({ actor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.researcherId : undefined, opportunityActor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.postingOwnerId : undefined, recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { ...proposalAuditPayload(record), attachments: [] } });
 function readContract({ functionName }) {
   // Defaults to the record's own hashes so verification reads match. An amendment
   // sets mocks.stored to the PRE-edit hashes, which is what the chain holds.
@@ -40,6 +41,8 @@ describe("proposal audit handoff", () => {
     const writeContract = vi.fn(async () => tx);
     const result = await anchorProposalAudit(record, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } });
     expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
+    expect(writeContract.mock.calls[0][0].args[0].slice(0, 42)).toBe(record.researcherId);
+    expect(writeContract.mock.calls[0][0].args[1].slice(0, 42)).toBe(record.postingOwnerId);
     expect(mocks.updates.map((audit) => audit.status)).toEqual(["queued", "submitted", "pending", "confirmed"]);
     expect(result.status).toBe("confirmed");
     expect(result.transactionHash).toBe(tx);

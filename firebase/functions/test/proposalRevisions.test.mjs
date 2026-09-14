@@ -28,6 +28,7 @@ function proposal(overrides = {}) {
 /** Collects what a trigger run would have written, without an emulator. */
 function fakeDb(sink) {
   return {
+    runTransaction: async (fn) => fn({ get: async () => ({ data: () => undefined }), set: (ref, entry) => ref.set(entry) }),
     collection: () => ({
       doc: () => ({
         collection: () => ({

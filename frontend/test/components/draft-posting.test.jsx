@@ -58,13 +58,14 @@ vi.mock("../../src/lib/postings.js", () => ({
 // module and reaches back into the mocked postings.js. Stubbed out here: drafts
 // have their own suite and audit anchoring has its own.
 vi.mock("../../src/lib/postingAudit.js", () => ({
+  receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
   postingAuditReceipt: (posting) => posting.audit ?? null,
   readPostingAudit: async () => ({ verified: true }),
   anchorPostingAudit: async (posting) => {
     // Keep the exact document that was hashed, so a rebuild is detectable.
     const { id, audit, ...record } = posting;
     mocks.anchoredRecord = record;
-    return { status: "confirmed" };
+    return { status: "confirmed", transactionHash: `0x${"3".repeat(64)}` };
   },
 }));
 
@@ -299,6 +300,7 @@ describe("resuming a draft", () => {
     fireEvent.submit(document.querySelector("form"));
     await waitFor(() => expect(mocks.published).toHaveLength(1));
     expect(mocks.published[0].via).toBe("publishDraft");
+    expect(mocks.published[0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
     // The confirmation screen must actually render; it was crashing silently.
     await waitFor(() => expect(screen.getByText(/posting submitted/i)).toBeTruthy());
   });
@@ -345,6 +347,7 @@ describe("publishing", () => {
     fireEvent.submit(document.querySelector("form"));
     await waitFor(() => expect(mocks.published).toHaveLength(1));
     expect(mocks.published[0].via).toBe("publishDraft");
+    expect(mocks.published[0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
     await waitFor(() => expect(screen.getByText(/posting submitted/i)).toBeTruthy());
   });
 
@@ -359,6 +362,7 @@ describe("publishing", () => {
     fireEvent.submit(document.querySelector("form"));
     await waitFor(() => expect(mocks.published).toHaveLength(1));
     expect(mocks.published[0].via).toBe("publishDraft");
+    expect(mocks.published[0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /post another problem/i }));
@@ -373,7 +377,7 @@ describe("publishing", () => {
 
   // The contract is authoritative for the audit, so publishing a draft must anchor
   // on-chain WITHOUT writing the receipt into Firestore - same as a direct submit.
-  it("[FIT-P50-37] anchors on publish without persisting the receipt", async () => {
+  it("[FIT-P50-37] supplies the mined receipt for trusted publication without changing the hashed record", async () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     fireEvent.click(saveDraftButton());
     await waitFor(() => expect(mocks.drafts).toHaveLength(1));
@@ -382,7 +386,7 @@ describe("publishing", () => {
     fireEvent.submit(document.querySelector("form"));
     await waitFor(() => expect(mocks.published).toHaveLength(1));
     expect(mocks.published[0].via).toBe("publishDraft");
-    expect(mocks.published[0].audit).toBeUndefined();
+    expect(mocks.published[0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
     // The anchored record IS reused - rebuilding it would derive a fresh
     // expiresAt that no longer matches the confirmed hash - but the receipt
     // itself still must not be written into Firestore.

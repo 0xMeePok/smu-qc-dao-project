@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { network } from "hardhat";
+const actorId = (actor, digest) => actor.address.toLowerCase() + digest.slice(2, 26);
 
 const ZERO =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -27,7 +28,7 @@ describe("AuditRegistry fuzz", function () {
   }
 
   async function openPosting(ethers, registry, owner) {
-    const opportunityId = randHash(ethers);
+    const opportunityId = actorId(owner, randHash(ethers));
     await registry
       .connect(owner)
       .commitOpportunity(opportunityId, OpportunityKind.BusinessProblem, randHash(ethers), 0);
@@ -77,7 +78,7 @@ describe("AuditRegistry fuzz", function () {
     const opportunityId = await openPosting(ethers, registry, owner);
 
     for (let i = 0; i < 16; i += 1) {
-      const proposalId = randHash(ethers);
+      const proposalId = actorId(researcher, randHash(ethers));
       const proposalHash = randHash(ethers);
       const solutionHash = randHash(ethers);
 
@@ -108,7 +109,7 @@ describe("AuditRegistry fuzz", function () {
     const { ethers, wallets, registry } = await setup();
     const [owner, researcher] = wallets;
     const opportunityId = await openPosting(ethers, registry, owner);
-    const proposalId = randHash(ethers);
+    const proposalId = actorId(researcher, randHash(ethers));
 
     const pairs = [{ proposalHash: randHash(ethers), solutionHash: randHash(ethers) }];
     await commitProposalAtCurrentRevision(
@@ -150,7 +151,7 @@ describe("AuditRegistry fuzz", function () {
     const { ethers, wallets, registry } = await setup();
     const [owner, researcher] = wallets;
     const opportunityId = await openPosting(ethers, registry, owner);
-    const proposalId = randHash(ethers);
+    const proposalId = actorId(researcher, randHash(ethers));
     const original = { proposalHash: randHash(ethers), solutionHash: randHash(ethers) };
 
     await commitProposalAtCurrentRevision(
@@ -184,7 +185,7 @@ describe("AuditRegistry fuzz", function () {
     const { ethers, wallets, registry } = await setup();
     const [owner, researcher] = wallets;
     const opportunityId = await openPosting(ethers, registry, owner);
-    const proposalId = randHash(ethers);
+    const proposalId = actorId(researcher, randHash(ethers));
     const proposalHash = randHash(ethers);
     const solutionHash = randHash(ethers);
 
@@ -232,7 +233,7 @@ describe("AuditRegistry fuzz", function () {
 
     for (let i = 1; i < Math.min(wallets.length, 6); i += 1) {
       const researcher = wallets[i];
-      const proposalId = randHash(ethers);
+      const proposalId = actorId(researcher, randHash(ethers));
       const proposalHash = randHash(ethers);
       const solutionHash = randHash(ethers);
       await commitProposalAtCurrentRevision(
@@ -254,7 +255,7 @@ describe("AuditRegistry fuzz", function () {
     const { ethers, wallets, registry } = await setup();
     const [owner, researcher] = wallets;
     const opportunityId = await openPosting(ethers, registry, owner);
-    const proposalId = randHash(ethers);
+    const proposalId = actorId(researcher, randHash(ethers));
     const proposalHash = randHash(ethers);
     const solutionHash = randHash(ethers);
 

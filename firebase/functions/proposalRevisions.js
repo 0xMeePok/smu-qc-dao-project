@@ -1,3 +1,4 @@
+import { writeRegistryRevision } from "./registryRetirement.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 
 // Frozen content list, mirroring the fields AuditRegistry hashes (see
@@ -80,8 +81,6 @@ export async function recordProposalRevision({ db, proposalId, eventId, before, 
 
   // Keyed on the event id, not an auto id: Firestore retries a failed trigger,
   // and an append-only trail that double-counts one edit is misleading evidence.
-  await db.collection("proposals").doc(proposalId)
-    .collection("revisions").doc(eventId)
-    .set(entry);
+  await writeRegistryRevision({ db, scope: "proposals", id: proposalId, eventId, entry });
   return entry;
 }

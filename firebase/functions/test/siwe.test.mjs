@@ -25,7 +25,7 @@ const BASE =
 
 // `origin` is overridable (and omittable, via null) so the SIWE domain-binding tests
 // below can pose as a browser on some other site.
-async function call(fn, data, { origin = "http://localhost:5173", testSource = null } = {}) {
+async function call(fn, data, { origin = "http://localhost:5173", testSource = data?.address ?? "siwe-test" } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (origin !== null) headers.Origin = origin;
   if (testSource) headers["X-Emulator-Test-Source"] = testSource;
@@ -435,5 +435,40 @@ describe("hosting origins, including CD preview channels", () => {
     } finally {
       await ref.delete();
     }
+  });
+});
+
+
+describe("QCDAO-138 bounded verification work", () => {
+  it("caps concurrent invalid signatures per nonce without consuming it", async () => {
+    const wallet = privateKeyToAccount(generatePrivateKey());
+    await call("getSiweNonce", { address: wallet.address });
+    const results = await Promise.all(Array.from({ length: 15 }, () => call("verifySiweSignature", {
+      address: wallet.address, signature: `0x${"11".repeat(65)}`,
+    })));
+    assert.equal(results.filter((result) => result.error?.status === "RESOURCE_EXHAUSTED").length, 5);
+    const saved = (await db.collection("siweNonces").doc(wallet.address.toLowerCase()).get()).data();
+    assert.equal(saved.verificationAttempts, 10);
+    assert.equal(saved.consumed, false);
+  });
+  it("caps one source rotating addresses before signature verification", async () => {
+    const testSource = `verify-source-${Date.now()}`;
+    for (let i = 0; i < 35; i++) {
+      const result = await call("verifySiweSignature", {
+        address: privateKeyToAccount(generatePrivateKey()).address,
+        signature: `0x${"11".repeat(65)}`,
+      }, { testSource });
+      assert.equal(result.error?.status, i < 30 ? "FAILED_PRECONDITION" : "RESOURCE_EXHAUSTED");
+    }
+  });
+  it("rejects malformed and oversized signatures before charging verification", async () => {
+    const wallet = privateKeyToAccount(generatePrivateKey());
+    await call("getSiweNonce", { address: wallet.address });
+    for (const signature of ["0xz1", `0x${"11".repeat(2049)}`]) {
+      const result = await call("verifySiweSignature", { address: wallet.address, signature });
+      assert.equal(result.error?.status, "INVALID_ARGUMENT");
+    }
+    const saved = (await db.collection("siweNonces").doc(wallet.address.toLowerCase()).get()).data();
+    assert.equal(saved.verificationAttempts, undefined);
   });
 });

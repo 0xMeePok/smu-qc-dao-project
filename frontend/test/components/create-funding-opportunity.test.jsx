@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   auditShouldFail: false,
   connectedAddress: `0x${"a".repeat(40)}`,
   events: [],
+  publications: [],
   resumed: null,
   saveDraft: vi.fn(),
   navigate: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("../../src/lib/fundingOpportunities.js", () => ({
   }),
   createFundingOpportunity: async (args) => {
     mocks.events.push("firestore");
+    mocks.publications.push(args);
     return { id: args.opportunityId, ...args.record };
   },
   updateFundingOpportunity: vi.fn(),
@@ -51,6 +53,7 @@ vi.mock("../../src/lib/fundingOpportunities.js", () => ({
   saveFundingDraft: (...args) => mocks.saveDraft(...args),
   publishFundingDraft: async (args) => {
     mocks.events.push("firestore");
+    mocks.publications.push(args);
     return { id: args.opportunityId, ...args.record };
   },
 }));
@@ -111,6 +114,7 @@ beforeEach(() => {
   mocks.auditShouldFail = false;
   mocks.connectedAddress = `0x${"a".repeat(40)}`;
   mocks.events = [];
+  mocks.publications = [];
   mocks.resumed = null;
   mocks.navigate.mockReset();
   mocks.uploader.onPendingChange = null;
@@ -149,6 +153,7 @@ describe("[QCDAO-51] create open funding", () => {
 
     expect(await screen.findByText("Funding opportunity submitted")).toBeTruthy();
     expect(mocks.events).toEqual(["audit", "firestore"]);
+    expect(mocks.publications.at(-1).audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
     expect(screen.getAllByText("Open funding opportunity submitted")).toHaveLength(2);
     expect(screen.getByText("Funder")).toBeTruthy();
   });

@@ -1,0 +1,17 @@
+{
+  "entityIdScheme": 2,
+  "network": "arbitrumSepolia",
+  "chainId": 421614,
+  "address": "0x47dA28cAEf8021dD88fe18B80e367746e0036964",
+  "transactionHash": "0x02f73510e1b9e1753c14f6c2c2a0ca7ce213c94f31fee101fa7b436f59a2d36a",
+  "blockNumber": 308652359,
+  "deployer": "0x8B23B3837565BD326153381d3CEAFCA14B7745Bc",
+  "deploymentStatus": "confirmed",
+  "deployedAt": "2026-09-14T02:09:29.344Z",
+  "verification": {
+    "provider": "etherscan",
+    "status": "verified",
+    "verifiedAt": "2026-09-14T02:09:37.470Z",
+    "url": "https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code"
+  }
+}

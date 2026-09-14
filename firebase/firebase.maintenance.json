@@ -1,0 +1,4 @@
+{
+  "firestore": { "rules": "maintenance/firestore.rules" },
+  "storage": { "rules": "maintenance/storage.rules" }
+}

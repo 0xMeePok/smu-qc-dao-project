@@ -1,3 +1,4 @@
+import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
 import { OPPORTUNITY_KIND } from "../config/auditRegistry.js";
 import {
   configuredAuditRegistryAddress,
@@ -39,6 +40,7 @@ export async function anchorOpportunityWithdrawal(record, { account, adapters, r
   return withdrawOpportunityAudit(
     prepareOpportunityWithdrawal({
       recordId: record.id, ownerId: record.ownerId, reason,
+      actor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.ownerId : undefined,
     }),
     { address, account, adapters, onStatus },
   );

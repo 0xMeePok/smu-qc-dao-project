@@ -31,26 +31,39 @@ export function MyProblems({ onNavigate }) {
   const [data, setData] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const cursor = useRef(null);
+  const generation = useRef(0);
+  const loadingPage = useRef(false);
+  const [hasMore, setHasMore] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (append = false) => {
     if (!user?.id || !db) {
       setLoading(false);
       return;
     }
+    if (append && loadingPage.current) return;
+    const version = append ? generation.current : ++generation.current;
+    loadingPage.current = true;
     setLoading(true);
     try {
-      setData(await listOwnPostings(user.id));
+      const page = await listOwnPostings(user.id, { cursor: append ? cursor.current : null });
+      if (version !== generation.current) return;
+      cursor.current = page.cursor;
+      setHasMore(page.hasMore);
+      setData((previous) => append
+        ? [...previous, ...page.items.filter((item) => !previous.some((old) => old.id === item.id))]
+        : page.items);
       setError(null);
     } catch (err) {
       setError(err);
     } finally {
-      setLoading(false);
+      if (version === generation.current) { loadingPage.current = false; setLoading(false); }
     }
   }, [user?.id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setData([]); setHasMore(false); load(); return () => { generation.current++; }; }, [load]);
 
   const drafts = data.filter((item) => item.status === POSTING_STATUS_DRAFT);
   const published = data.filter((item) => item.status !== POSTING_STATUS_DRAFT);
@@ -158,6 +171,9 @@ export function MyProblems({ onNavigate }) {
         )}
       </div>
 
+      {hasMore && <button type="button" className="secondary" disabled={loading} onClick={() => load(true)}>
+        {loading ? "Loading…" : "Load older opportunities"}
+      </button>}
       <ProposalList received onNavigate={onNavigate} />
 
       {pendingDelete && (

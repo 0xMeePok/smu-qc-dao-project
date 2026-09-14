@@ -1,3 +1,4 @@
+import { attestPublication, reserveResource } from "./publication.js";
 import { httpsCallable } from "firebase/functions";
 import { collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db, functions } from "./firebase.js";
@@ -83,6 +84,7 @@ export async function saveProposalDraft({ proposalId, researcherId, posting, for
     const { createdAt, ...rest } = record;
     await updateDoc(proposalRef(proposalId), rest);
   } else {
+    await reserveResource("proposals", proposalId);
     await setDoc(proposalRef(proposalId), record);
   }
   return findProposal(proposalId);
@@ -102,6 +104,8 @@ export async function deleteProposalDraft(proposal) {
 export async function submitProposal({ proposalId, researcherId, posting, form, attachments = [], fromDraft = false, record: preparedRecord = null, audit = null }) {
   requireFirebase();
   const uid = researcherId.toLowerCase();
+  const prepared = preparedRecord ?? buildProposalDocument({ researcherId: uid, posting, form, attachments });
+  await attestPublication("proposals", proposalId, { ...prepared, ...(audit ? { audit } : {}) });
   await runTransaction(db, async (transaction) => {
     const parent = await transaction.get(doc(db, "problems", posting.id));
     const current = parent.exists() ? { id: parent.id, ...parent.data() } : null;
@@ -139,6 +143,7 @@ export async function updateProposal({ proposalId, researcherId, posting, form, 
   // The receipt for the amendment that was just anchored. Without one the stored
   // receipt would still describe the content this edit replaced, so it is cleared
   // rather than left to mislead.
+  await attestPublication("proposals", proposalId, { ...record, audit });
   await updateDoc(proposalRef(proposalId), {
     ...record, audit: audit ? { ...audit } : deleteField(),
   });
