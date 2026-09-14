@@ -156,7 +156,10 @@ export async function createPosting({
   const record = preparedRecord
     ? { ...preparedRecord }
     : buildPostingDocument({ ownerId, organisation, form, attachments, audit });
-  await attestPublication("problems", postingId, { ...record, audit: audit ?? record.audit });
+  // Persist the same receipt sent for server attestation: the rules bind its
+  // transaction hash to the proof, including initial writes and draft promotion.
+  if (audit) record.audit = { ...audit };
+  await attestPublication("problems", postingId, record);
   await setDoc(postingRef(postingId), record);
 
   // Read back rather than returning `record`. createdAt and updatedAt are
@@ -272,7 +275,10 @@ export async function publishDraft({
       ownerId, organisation, form, attachments, status: POSTING_STATUS_SUBMITTED,
     });
   const { createdAt, ...record } = built;
-  await attestPublication("problems", postingId, { ...record, audit: audit ?? record.audit });
+  // Persist the same receipt sent for server attestation: the rules bind its
+  // transaction hash to the proof, including initial writes and draft promotion.
+  if (audit) record.audit = { ...audit };
+  await attestPublication("problems", postingId, record);
   await updateDoc(postingRef(postingId), record);
   return findPosting(postingId);
 }

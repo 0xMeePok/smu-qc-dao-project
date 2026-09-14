@@ -42,6 +42,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AuditReceipt", () => {
+  it("does not treat a stored confirmed label as chain evidence", () => {
+    renderReceipt({ onVerify: undefined });
+    expect(screen.getByText("Verification not checked")).toBeTruthy();
+    expect(screen.queryByText("Transaction confirmation recorded")).toBeNull();
+    expect(screen.queryByText("Verified on Arbitrum Sepolia")).toBeNull();
+  });
   it.each(["queued", "pending", "failed"])("checks a %s receipt without a saved transaction and hides signing for a chain match", async (status) => {
     const retry = vi.fn(), verify = vi.fn(async () => ({ verified: true }));
     renderReceipt({ audit: receipt({ status, transactionHash: "", blockNumber: 0, attemptCount: 3,

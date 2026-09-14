@@ -23,9 +23,10 @@ import {
   updatePosting,
 } from "../lib/postings.js";
 import { deleteAttachment } from "../lib/attachments.js";
-import { auditErrorMessage, messageForFirebaseError } from "../lib/errors.js";
+import { auditErrorMessage, messageForFirebaseError, messageForPublicationSaveError } from "../lib/errors.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
+import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { SubmissionError } from "../components/SubmissionError.jsx";
 import { formatInstant, toDate } from "../lib/datetime.js";
 import {
@@ -179,6 +180,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
   const [auditProgress, setAuditProgress] = useState(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [confirmedAudit, setConfirmedAudit] = useState(null);
   // QCDAO-50 draft state.
   const [draftExists, setDraftExists] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
@@ -362,6 +365,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
 
     setSubmitting(true);
     let latestAudit = auditProgress;
+    let savingRecord = false;
+    setSaveFailed(false);
+    setConfirmedAudit(null);
     try {
       const record = pendingRecordRef.current ?? buildPostingDocument({
         ownerId: address,
@@ -388,6 +394,10 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
         },
       });
 
+      latestAudit = audit;
+      setAuditProgress(audit);
+      setConfirmedAudit(audit);
+      savingRecord = true;
       const posting = editing
         ? await updatePosting({
           postingId, ownerId: address, organisation, form, attachments, record,
@@ -419,8 +429,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
         setAuditProgress(null);
         pendingRecordRef.current = null;
       }
-      setSubmitError(latestAudit?.transactionHash
-        ? messageForFirebaseError(error)
+      setSaveFailed(savingRecord);
+      setSubmitError(savingRecord
+        ? messageForPublicationSaveError(error)
         : auditErrorMessage(error));
     } finally {
       setSubmitting(false);
@@ -482,6 +493,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
     setSubmitError(null);
     setPublished(null);
     setAuditProgress(null);
+    setConfirmedAudit(null);
+    setSaveFailed(false);
     pendingRecordRef.current = null;
     // The new id has no document behind it. Leaving these set sent the next
     // submit down publishDraft(), updating a posting that does not exist.
@@ -734,22 +747,14 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               Your wallet signs updateOpportunity first. The posting is updated only after that transaction is confirmed on Arbitrum Sepolia.
             </p>
           )}
-          {auditProgress?.status === "confirmed" && (
-            <div className="detail-section">
-              <AuditReceipt
-                audit={auditProgress}
-                eventLabel={editing ? "Funded problem statement updated" : "Funded problem statement submitted"}
-                actorRole="Problem owner"
-              />
-            </div>
-          )}
+          <SubmissionProgress audit={confirmedAudit} saving={submitting} entityLabel="Posting" editing={editing} />
           <div className="form-actions">
             <button className="primary" type="submit" disabled={submitting || pendingCount > 0}>
               {submitting
-                ? (auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
+                ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
                 : pendingCount > 0
                   ? "Waiting for attachments…"
-                  : editing ? "Sign and save changes" : "Submit problem statement"}
+                  : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Submit problem statement"}
             </button>
             {!editing && (
             <button
@@ -804,7 +809,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             <div className="preview-card">
               <div className="card-top">
                 <span className="eyebrow">Funded problem</span>
-                <span className="status-dot">Submitted</span>
+                <span className="status-pill">Preview</span>
               </div>
               <h3>{form.title || "Untitled problem statement"}</h3>
               <p>{form.summary || "The problem description will appear here as you type."}</p>

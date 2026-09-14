@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
+import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
@@ -36,7 +37,7 @@ import {
   receiptForWrite,
 } from "../lib/fundingOpportunityAudit.js";
 import { canEditOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
-import { auditErrorMessage, messageForFirebaseError } from "../lib/errors.js";
+import { auditErrorMessage, messageForFirebaseError, messageForPublicationSaveError } from "../lib/errors.js";
 
 const EMPTY_FORM = {
   title: "",
@@ -148,6 +149,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
   const [submitting, setSubmitting] = useState(false);
   const [published, setPublished] = useState(null);
   const [auditProgress, setAuditProgress] = useState(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [confirmedAudit, setConfirmedAudit] = useState(null);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const pendingRecordRef = useRef(null);
   const formTop = useRef(null);
@@ -330,6 +333,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
 
     setSubmitting(true);
     let latestAudit = auditProgress;
+    let savingRecord = false;
+    setSaveFailed(false);
+    setConfirmedAudit(null);
     try {
       const record = pendingRecordRef.current ?? buildFundingOpportunityDocument({
         ownerId: address,
@@ -356,6 +362,10 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         },
       });
 
+      latestAudit = audit;
+      setAuditProgress(audit);
+      setConfirmedAudit(audit);
+      savingRecord = true;
       const opportunity = editing
         ? await updateFundingOpportunity({
           opportunityId, ownerId: address, organisation, form, attachments, record,
@@ -385,8 +395,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         setAuditProgress(null);
         pendingRecordRef.current = null;
       }
-      setSubmitError(latestAudit?.transactionHash
-        ? messageForFirebaseError(error)
+      setSaveFailed(savingRecord);
+      setSubmitError(savingRecord
+        ? messageForPublicationSaveError(error)
         : auditErrorMessage(error));
     } finally {
       setSubmitting(false);
@@ -400,6 +411,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
     setSubmitError(null);
     setPublished(null);
     setAuditProgress(null);
+    setConfirmedAudit(null);
+    setSaveFailed(false);
     pendingRecordRef.current = null;
   };
 
@@ -613,22 +626,14 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
               Your wallet signs updateOpportunity first. The opportunity is updated only after that transaction is confirmed on Arbitrum Sepolia.
             </p>
           )}
-          {auditProgress?.status === "confirmed" && (
-            <div className="detail-section">
-              <AuditReceipt
-                audit={auditProgress}
-                eventLabel={editing ? "Open funding opportunity updated" : "Open funding opportunity submitted"}
-                actorRole="Funder"
-              />
-            </div>
-          )}
+          <SubmissionProgress audit={confirmedAudit} saving={submitting} entityLabel="Opportunity" editing={editing} />
           <div className="form-actions">
             <button className="primary" type="submit" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0}>
               {submitting
-                ? (auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
+                ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
                 : pendingCount > 0
                   ? "Waiting for attachments…"
-                  : editing ? "Sign and save changes" : "Submit funding opportunity"}
+                  : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Submit funding opportunity"}
             </button>
             {!editing && (
             <button className="secondary" type="button" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0} onClick={persistDraft}>
@@ -676,7 +681,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             <div className="preview-card">
               <div className="card-top">
                 <span className="eyebrow">Open funding</span>
-                <span className="status-dot">Submitted</span>
+                <span className="status-pill">Preview</span>
               </div>
               <h3>{form.title || "Untitled funding opportunity"}</h3>
               <p>{form.fundingThesis || "Your funding thesis will appear here as you type."}</p>

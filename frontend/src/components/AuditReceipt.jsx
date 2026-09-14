@@ -5,7 +5,7 @@ const STATUS_COPY = {
   queued: "Queued for wallet submission",
   submitted: "Submitted to Arbitrum Sepolia",
   pending: "Waiting for block confirmation",
-  confirmed: "Transaction confirmation recorded",
+  confirmed: "Verification not checked",
   failed: "Posting saved; verification needs attention",
   checking: "Reading AuditRegistry",
   verified: "Verified on Arbitrum Sepolia",

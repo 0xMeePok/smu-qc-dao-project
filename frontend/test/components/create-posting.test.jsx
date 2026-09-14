@@ -200,6 +200,39 @@ describe("funding amount input", () => {
 });
 
 describe("no data loss on a failed submit", () => {
+  it("labels an unsaved form as a preview, never submitted", () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    expect(screen.getByLabelText("Live preview").textContent).toContain("Preview");
+    expect(screen.getByLabelText("Live preview").textContent).not.toContain("Submitted");
+    expect(screen.queryByLabelText("Submission progress")).toBeNull();
+  });
+  it("does not claim confirmation when permission is denied before an anchor returns", async () => {
+    mocks.auditError = Object.assign(new Error("permission-denied"), { code: "permission-denied" });
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    await screen.findByRole("alert");
+    expect(screen.queryByLabelText("Submission progress")).toBeNull();
+    expect(screen.queryByText(/transaction confirmed|transaction confirmation recorded/i)).toBeNull();
+    expect(mocks.created).toHaveLength(0);
+    expect(document.getElementById("title").value).toBe("Cold-chain route optimisation");
+  });
+  it("distinguishes a confirmed transaction from a rejected save and retries", async () => {
+    mocks.createShouldFail = true;
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/save was rejected by the service's security checks/i);
+    expect(alert.textContent).not.toMatch(/sign out|already registered/i);
+    expect(screen.getByRole("heading", { name: "Transaction confirmed; posting not saved" })).toBeTruthy();
+    expect(screen.queryByText("Funded problem statement submitted")).toBeNull();
+    expect(screen.queryByText("Verified on Arbitrum Sepolia")).toBeNull();
+    mocks.createShouldFail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+    await waitFor(() => expect(mocks.created).toHaveLength(1));
+    expect(mocks.auditCalls[1].posting.audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
+  });
   it("explains a removed deployment module and preserves the user's posting", async () => {
     mocks.auditError = new Error('An unknown error occurred while executing opportunityRevisionCount', {
       cause: new TypeError('Failed to fetch dynamically imported module: https://example.test/assets/ccip-old.js'),

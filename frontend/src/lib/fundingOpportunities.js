@@ -95,7 +95,10 @@ export async function publishFundingDraft({
     ? { ...preparedRecord, status: FUNDING_STATUS_SUBMITTED }
     : buildFundingOpportunityDocument({ ownerId, organisation, form, attachments });
   const { createdAt, ...record } = built;
-  await attestPublication("problems", opportunityId, { ...record, audit: audit ?? record.audit });
+  // Persist the same receipt sent for server attestation: the rules bind its
+  // transaction hash to the proof, including initial writes and draft promotion.
+  if (audit) record.audit = { ...audit };
+  await attestPublication("problems", opportunityId, record);
   await updateDoc(fundingOpportunityRef(opportunityId), record);
   return findPosting(opportunityId);
 }
@@ -113,7 +116,10 @@ export async function createFundingOpportunity({
   const record = preparedRecord
     ? { ...preparedRecord }
     : buildFundingOpportunityDocument({ ownerId, organisation, form, attachments });
-  await attestPublication("problems", opportunityId, { ...record, audit: audit ?? record.audit });
+  // Persist the same receipt sent for server attestation: the rules bind its
+  // transaction hash to the proof, including initial writes and draft promotion.
+  if (audit) record.audit = { ...audit };
+  await attestPublication("problems", opportunityId, record);
   await setDoc(fundingOpportunityRef(opportunityId), record);
   return (await findPosting(opportunityId)) ?? { id: opportunityId, ...record };
 }
