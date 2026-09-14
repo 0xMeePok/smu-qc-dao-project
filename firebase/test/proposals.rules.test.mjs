@@ -315,28 +315,52 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     await assertSucceeds(submit(db, "anchored-first", record(id, { audit: anchored })));
   });
 
-  it("stays inside the expression budget for the heaviest SUBMISSION", async () => {
-    // Reported from the preview channel: an open-funding proposal with one
-    // attachment wrote fine before the receipt moved into the create, and
-    // permission-denied afterwards. Chain-first put the audit map on the same
-    // write as the full open-funding schema and the attachment entry.
-    const db = env.authenticatedContext(AUTHOR).firestore();
-    const id = await parent({ opportunityType: "open-funding" });
-    const framing = { opportunityType: "open-funding", proposedProblem: "Improve emergency routing", relevance: "Faster response", thesisFit: "Resilient public systems" };
-    const files = (...ids) => ids.map((id) => ({
-      id, name: "proposal.pdf", contentType: "application/pdf", size: 7603202, sha256: ATTACHMENT_DIGEST,
-    }));
-    await assertSucceeds(submit(db, "heaviest-submit", record(id, {
-      ...framing, attachments: files("fileaaa1", "fileaaa2"),
-    })));
-    // The receipt lands in its own write. Carrying it on the create as well is
-    // what crossed the cap, so the client writes it second; see
-    // CreateProposalPage. This asserts the write that actually happens.
-    await assertSucceeds(updateDoc(doc(db, "proposals", "heaviest-submit"), {
-      audit: receipt({ status: "pending", transactionHash: `0x${"8".repeat(64)}`, blockNumber: 306630536, attemptCount: 1 }),
-      updatedAt: serverTimestamp(),
-    }));
-  });
+  for (const opportunityType of ["business-problem", "open-funding"]) {
+    for (const promoteDraft of [false, true]) {
+      it(`publishes ${opportunityType} ${promoteDraft ? "draft" : "create"} with its mined receipt and two PDFs atomically`, async () => {
+        const db = env.authenticatedContext(AUTHOR).firestore();
+        const problemId = await parent({ opportunityType });
+        const proposalId = `chain-first-${opportunityType}-${promoteDraft}`;
+        const ref = doc(db, "proposals", proposalId);
+        const framing = opportunityType === "open-funding"
+          ? { proposedProblem: "Improve emergency routing", relevance: "Faster response", thesisFit: "Resilient public systems" }
+          : {};
+        const data = record(problemId, {
+          opportunityType, ...framing,
+          attachments: ["fileaaa1", "fileaaa2"].map((id) => ({
+            id, name: "proposal.pdf", contentType: "application/pdf", size: 10 * 1024 * 1024, sha256: ATTACHMENT_DIGEST,
+          })),
+          audit: receipt({ status: "pending", transactionHash: `0x${"8".repeat(64)}`, blockNumber: 306630536, attemptCount: 1 }),
+        });
+        if (promoteDraft) {
+          await assertSucceeds(setDoc(ref, {
+            researcherId: AUTHOR, problemId, status: "draft", title: "First pass",
+            createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          }));
+        }
+        const { createdAt, ...update } = data;
+        const patch = promoteDraft ? update : data;
+        // Use the real nonempty attested hash, then bypass fixture wrappers:
+        // omitting the receipt must fail, and the author slot must stay absent.
+        await seedPublicationFixture(env, ref, patch, promoteDraft);
+        const commit = (payload) => {
+          const batch = writeBatch(db);
+          if (promoteDraft) batch.update(ref, payload);
+          else batch.set(ref, payload);
+          batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+          return batch.commit();
+        };
+        const { audit, ...withoutReceipt } = patch;
+        await assertFails(commit(withoutReceipt));
+        await assertFails(commit({ ...patch, audit: { ...audit, transactionHash: `0x${"9".repeat(64)}` } }));
+        await env.withSecurityRulesDisabled(async (ctx) => {
+          const slot = await getDoc(doc(ctx.firestore(), "problems", problemId, "proposalAuthors", AUTHOR));
+          if (slot.exists()) throw new Error("Rejected publication left an author slot behind");
+        });
+        await assertSucceeds(commit(patch));
+      });
+    }
+  }
 
   it("stays inside the expression budget for the heaviest correction", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();

@@ -1,7 +1,27 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { auditErrorMessage, isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, fieldForFirebaseError, OnboardingError } from "../../src/lib/errors.js";
+import { auditErrorMessage, isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, messageForPublicationSaveError, fieldForFirebaseError, OnboardingError } from "../../src/lib/errors.js";
 import { messageForProposalError } from "../../src/lib/proposalValidation.js";
+
+describe("publication errors stay separate from sign-in errors", () => {
+  it("does not interpret a publication precondition as a missing sign-in nonce", () => {
+    const error = { code: "functions/failed-precondition", message: "The content could not be verified against its mined transaction. Wait for confirmation and retry." };
+    assert.match(messageForPublicationSaveError(error), /server could not verify this submission/);
+    assert.doesNotMatch(messageForPublicationSaveError(error), /sign.in/);
+    assert.match(messageForFirebaseError(error), /No sign-in request/);
+  });
+  for (const [message, expected] of [
+    ["Registry maintenance or retirement prevents publication.", /maintenance/],
+    ["An attachment reservation does not match the published file.", /attachment could not be verified/],
+    ["An attachment was removed. Select it again.", /attachment was removed/],
+  ]) it(`preserves actionable publication guidance: ${message}`, () => {
+    assert.match(messageForPublicationSaveError({ code: "functions/failed-precondition", message }), expected);
+  });
+  it("maps only actual authentication failures to sign-in guidance", () => {
+    assert.match(messageForPublicationSaveError({ code: "functions/unauthenticated" }), /session has expired/);
+    assert.doesNotMatch(messageForPublicationSaveError({ code: "functions/internal" }), /sign.in|nonce/);
+  });
+});
 
 describe("App files missing after a deployment", () => {
   for (const message of [

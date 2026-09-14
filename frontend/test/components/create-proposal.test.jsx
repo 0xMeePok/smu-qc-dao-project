@@ -21,7 +21,7 @@ vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, add
 vi.mock("../../src/lib/proposalAudit.js", () => ({
   proposalAuditReceipt: () => ({ status: "queued" }),
   anchorProposalBeforeWrite: (...args) => mocks.anchor(...args),
-  receiptForWrite: (audit) => audit,
+  receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
 }));
 vi.mock("../../src/components/AttachmentUploader.jsx", () => ({ AttachmentUploader: ({ scope, onPendingChange }) => <button type="button" onClick={() => onPendingChange(true)}>Upload {scope} PDF</button> }));
 vi.mock("../../src/pages/ProposalDetailPage.jsx", () => ({ default: ({ proposalId }) => <h1>Saved {proposalId}</h1> }));
@@ -42,6 +42,30 @@ const fill = (extra = []) => {
   fireEvent.change(screen.getByLabelText("Requested funding amount (USDC)"), { target: { value: "1000" } });
 };
 describe("proposal submission form", () => {
+  it.each([false, true])("includes the mined receipt in the first submission (open funding=%s)", async (openFunding) => {
+    if (openFunding) mocks.posting.opportunityType = "open-funding";
+    mocks.submit.mockImplementation(async ({ audit }) => {
+      if (!audit?.transactionHash) throw Object.assign(new Error("The content could not be verified against its mined transaction."), { code: "functions/failed-precondition" });
+      return { id: "proposal1" };
+    });
+    await renderForm(); fill(openFunding ? PROBLEM_FRAMING_FIELDS : []);
+    fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    await screen.findByRole("heading", { name: "Saved proposal1" });
+    expect(mocks.submit.mock.calls[0][0].audit).toMatchObject({ status: "pending", transactionHash: `0x${"3".repeat(64)}` });
+    expect(mocks.receipt).not.toHaveBeenCalled();
+  });
+  it("describes failed publication verification without telling the user to restart sign-in", async () => {
+    mocks.submit.mockRejectedValueOnce(Object.assign(new Error("The content could not be verified against its mined transaction. Wait for confirmation and retry."), { code: "functions/failed-precondition" }));
+    await renderForm(); fill();
+    fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    const banner = await screen.findByRole("alert");
+    expect(banner.textContent).toMatch(/server could not verify this submission against its mined transaction/i);
+    expect(banner.textContent).not.toMatch(/sign.in request|start.*sign.in/i);
+    expect(screen.getByLabelText("Proposal title").value).toBe("Proposal title content");
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+    await screen.findByRole("heading", { name: "Saved proposal1" });
+    expect(mocks.anchor.mock.calls[1][0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
+  });
   it("submits a complete problem proposal and shows saved confirmation", async () => {
     await renderForm(); fill(); fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
     await screen.findByRole("heading", { name: "Saved proposal1" });

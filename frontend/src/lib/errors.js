@@ -135,11 +135,24 @@ export function auditErrorMessage(error) {
 }
 
 export function messageForPublicationSaveError(error) {
+  if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   const code = String(error?.code ?? "").split("/").pop();
   if (code === "permission-denied") {
     return "The save was rejected by the service's security checks. This error does not identify which check failed. Keep this page open and retry saving once the issue is resolved.";
   }
-  return messageForFirebaseError(error);
+  if (code === "failed-precondition") {
+    const detail = String(error?.message ?? "");
+    if (/maintenance|retirement prevents publication/i.test(detail)) return "Publication is paused for registry maintenance. Keep this page open and retry saving when maintenance is complete.";
+    if (/attachment.*removed/i.test(detail)) return "An attachment was removed. Select it again before submitting.";
+    if (/attachment reservation/i.test(detail)) return "An attachment could not be verified against the uploaded file. Check the attachments before submitting.";
+    return "The server could not verify this submission against its mined transaction. Keep this page open and retry saving. If it still fails, share the transaction reference with an administrator.";
+  }
+  if (code === "unauthenticated") return "Your session has expired. Sign in again before retrying the save.";
+  if (code === "resource-exhausted") return "Too many publication attempts. Wait one minute before retrying the save.";
+  if (["unavailable", "deadline-exceeded", "internal", "not-found"].includes(code)) {
+    return "The publication service could not complete the save. Keep this page open and try again shortly.";
+  }
+  return error?.message || "The submission could not be saved. Keep this page open and try again.";
 }
 
 export function messageForFirebaseError(error) {

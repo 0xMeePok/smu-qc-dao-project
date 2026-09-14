@@ -304,7 +304,7 @@ service cloud.firestore {
     }
 
     function hasProposalSchema(data) {
-      return data.keys().hasOnly([
+      return data.keys().toSet().hasOnly([
         'researcherId', 'problemId', 'title', 'summary', 'amount',
         'status', 'audit', 'createdAt', 'updatedAt',
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
@@ -348,12 +348,19 @@ service cloud.firestore {
       // An already-stored receipt may stay as-is, including a legacy
       // `confirmed` value. A changed audit must pass validAuditRecord, which
       // rejects new client `confirmed` writes.
-      return !data.keys().hasAny(['audit'])
-        || (resource != null && resource.data.get('audit', {}) == data.audit)
-        || validAuditRecord(data.audit);
+      let audit = data.get('audit', null);
+      return audit == null
+        ? !data.keys().hasAny(['audit'])
+        : ((resource != null && resource.data.get('audit', {}) == audit)
+          || validAuditRecord(audit));
     }
 
     function validAuditRecord(audit) {
+      let transactionHash = audit.transactionHash;
+      let status = audit.status;
+      let blockNumber = audit.blockNumber;
+      let attemptCount = audit.attemptCount;
+      let lastError = audit.lastError;
       return (audit is map
           // keys().size() == 9, not hasOnly + hasAll on the same nine names. Those
           // two list comparisons cost enough that a posting carrying both an audit
@@ -370,17 +377,17 @@ service cloud.firestore {
           // researcher or sponsor who could set it would mint a forged receipt.
           // queued/submitted/pending/failed stay writable so a known hash is
           // never rebroadcast. The Admin SDK may still store `confirmed`.
-          && audit.status in ['queued', 'submitted', 'pending', 'failed']
-          && audit.transactionHash is string
-          && (audit.transactionHash == '' || isBytes32(audit.transactionHash))
-          && audit.blockNumber is int && audit.blockNumber >= 0
-          && audit.attemptCount is int
-          && audit.attemptCount >= 0 && audit.attemptCount <= 3
-          && audit.lastError is string && audit.lastError.size() <= 500
-          && (audit.status != 'queued'
-            || (audit.transactionHash == '' && audit.blockNumber == 0))
-          && (!(audit.status in ['submitted', 'pending'])
-            || audit.transactionHash != ''));
+          && status in ['queued', 'submitted', 'pending', 'failed']
+          && transactionHash is string
+          && (transactionHash == '' || isBytes32(transactionHash))
+          && blockNumber is int && blockNumber >= 0
+          && attemptCount is int
+          && attemptCount >= 0 && attemptCount <= 3
+          && lastError is string && lastError.size() <= 500
+          && (status != 'queued'
+            || (transactionHash == '' && blockNumber == 0))
+          && (!(status in ['submitted', 'pending'])
+            || transactionHash != ''));
     }
 
     function stringListItemIsValid(items, index) {
@@ -884,19 +891,26 @@ service cloud.firestore {
     function validSubmittedProposal(data, proposalId) {
       let parent = get(/databases/$(database)/documents/problems/$(data.problemId)).data;
       let slot = getAfter(/databases/$(database)/documents/problems/$(data.problemId)/proposalAuthors/$(request.auth.uid)).data;
+      let methodology = data.methodology;
+      let suitability = data.suitability;
+      let expectedOutcomes = data.expectedOutcomes;
+      let successCriteria = data.successCriteria;
+      let timeline = data.timeline;
+      let milestones = data.milestones;
+      let team = data.team;
       return acceptsProposals(parent)
         && data.postingOwnerId == parent.ownerId
         && data.opportunityType == opportunityType(parent)
         && data.currency == parent.currency
         && data.amount > 0
         && data.category in ['gate-model', 'quantum-inspired', 'quantum-annealing', 'hybrid', 'quantum-adjacent']
-        && isNonEmptyString(data.methodology, 4000)
-        && isNonEmptyString(data.suitability, 4000)
-        && isNonEmptyString(data.expectedOutcomes, 4000)
-        && isNonEmptyString(data.successCriteria, 4000)
-        && isNonEmptyString(data.timeline, 4000)
-        && isNonEmptyString(data.milestones, 4000)
-        && isNonEmptyString(data.team, 4000)
+        && isNonEmptyString(methodology, 4000)
+        && isNonEmptyString(suitability, 4000)
+        && isNonEmptyString(expectedOutcomes, 4000)
+        && isNonEmptyString(successCriteria, 4000)
+        && isNonEmptyString(timeline, 4000)
+        && isNonEmptyString(milestones, 4000)
+        && isNonEmptyString(team, 4000)
         && (data.opportunityType != 'open-funding'
           || (isNonEmptyString(data.proposedProblem, 4000)
             && isNonEmptyString(data.relevance, 4000)
@@ -1198,33 +1212,40 @@ service cloud.firestore {
         && resource.data.researcherId == request.auth.uid
         && resource.data.status == 'draft'
         && resource.data.get('audit', {}).get('transactionHash', '') == '';
-      allow create: if isActiveUser(request.auth.uid)
+      function proposalCreateIsAllowed() {
+        let data = request.resource.data;
+        return isActiveUser(request.auth.uid)
         && hasCompletedProfile(request.auth.uid)
         && reservedRecord("proposals", proposalId)
-        && publicationWriteAllowed("proposals", proposalId, request.resource.data)
+        && publicationWriteAllowed("proposals", proposalId, data)
         && isWalletAddress(request.auth.uid)
-        && request.resource.data.researcherId == request.auth.uid
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time
+        && data.researcherId == request.auth.uid
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
         // Two mutually exclusive shapes, so a create pays for one of them. See
         // validProposalSubmission for why the submitted path is not validProposal.
-        && (request.resource.data.status == 'draft'
-          ? (validProposal(request.resource.data)
-            && validAttachments(request.resource.data, false)
-            && exists(/databases/$(database)/documents/problems/$(request.resource.data.problemId)))
-          : (request.resource.data.status == 'submitted'
-            && validProposalSubmission(request.resource.data, proposalId)));
+        && (data.status == 'draft'
+          ? (validProposal(data)
+            && validAttachments(data, false)
+            && exists(/databases/$(database)/documents/problems/$(data.problemId)))
+          : (data.status == 'submitted'
+            && validProposalSubmission(data, proposalId)));
+      }
+      allow create: if proposalCreateIsAllowed();
       // Submitted proposals may update `audit` so a known transaction hash is
       // never rebroadcast. `confirmed` is not client-writable; validProposal
       // rejects it so a researcher cannot mint a sponsor-facing receipt.
-      allow update: if isActiveUser(request.auth.uid)
-        && publicationWriteAllowed("proposals", proposalId, request.resource.data)
-        && resource.data.researcherId == request.auth.uid
-        && request.resource.data.researcherId == resource.data.researcherId
-        && request.resource.data.problemId == resource.data.problemId
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.updatedAt == request.time
-        && validProposalWithdrawal(resource.data, request.resource.data)
+      function proposalUpdateIsAllowed() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return isActiveUser(request.auth.uid)
+        && publicationWriteAllowed("proposals", proposalId, after)
+        && before.researcherId == request.auth.uid
+        && after.researcherId == before.researcherId
+        && after.problemId == before.problemId
+        && after.createdAt == before.createdAt
+        && after.updatedAt == request.time
+        && validProposalWithdrawal(before, after)
         // Three mutually exclusive shapes, and each write pays for only its own.
         // The content checks in particular are NOT hoisted out: re-validating an
         // untouched document on a withdrawal - twenty-seven schema keys, every
@@ -1232,24 +1253,26 @@ service cloud.firestore {
         // two-attachment proposal past Firestore's 1000-expression cap. The
         // workflow branch is safe without them because proposalWorkflowWrite has
         // already proved that nothing outside those four keys moved.
-        && (resource.data.status == 'draft'
-          ? (validProposal(request.resource.data)
-            && validAttachments(request.resource.data, request.resource.data.status == 'submitted')
-            && preservesProposalReceipt(resource.data, request.resource.data)
-            && (request.resource.data.status in ['draft', 'withdrawn']
-              || (request.resource.data.status == 'submitted'
-                && validSubmittedProposal(request.resource.data, proposalId))))
-          : (proposalWorkflowWrite(resource.data, request.resource.data)
+        && (before.status == 'draft'
+          ? (validProposal(after)
+            && validAttachments(after, after.status == 'submitted')
+            && preservesProposalReceipt(before, after)
+            && (after.status in ['draft', 'withdrawn']
+              || (after.status == 'submitted'
+                && validSubmittedProposal(after, proposalId))))
+          : (proposalWorkflowWrite(before, after)
             // Only the two fields this write may actually move are checked.
             // withdrawalReason is bounded by validProposalWithdrawal above.
-            ? (hasValidAudit(request.resource.data)
-              && validProposalStatus(request.resource.data.status)
-              && preservesProposalReceipt(resource.data, request.resource.data)
-              && (request.resource.data.status == resource.data.status
-                || (resource.data.status in ['submitted', 'under_review']
-                  && request.resource.data.status == 'withdrawn')))
+            ? (hasValidAudit(after)
+              && validProposalStatus(after.status)
+              && preservesProposalReceipt(before, after)
+              && (after.status == before.status
+                || (before.status in ['submitted', 'under_review']
+                  && after.status == 'withdrawn')))
             // A correction validates its own shape; see validProposalCorrection.
-            : validProposalCorrection(resource.data, request.resource.data)));
+            : validProposalCorrection(before, after)));
+      }
+      allow update: if proposalUpdateIsAllowed();
     }
 
     match /proposals/{proposalId}/revisions/{revisionId} {
