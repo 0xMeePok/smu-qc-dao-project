@@ -49,7 +49,10 @@ const flow = createOpportunityAuditFlow({
   persistConfirmed: true,
   enforceWalletRetryLimit: true,
   commitAudit: anchorProposal,
-  verifyAudit: verifyProposalAudit,
+  verifyAudit: (prepared, options) => verifyProposalAudit(prepared, {
+    ...options,
+    useRecordedOpportunityRevision: true,
+  }),
 });
 export function proposalAuditReceipt(record) {
   try {

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { before, after, describe, it } from "node:test";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { collection, doc, getDocs, query, where, limit, setDoc, updateDoc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocs, query, where, limit, setDoc, updateDoc, deleteField, serverTimestamp, writeBatch } from "firebase/firestore";
 import { ref, uploadBytes } from "firebase/storage";
 
 const OWNER = `0x${"d7".repeat(20)}`;
@@ -26,17 +26,63 @@ const problem = (extra = {}) => ({
   categories: ["ai", "quantum"], amount: 1000, currency: "USDC", expiresAt: new Date("2099-01-01"),
   status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
 });
+const publicationAudit = (extra = {}) => ({
+  schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+  contentHash: `0x${"2".repeat(64)}`, status: "pending", transactionHash: `0x${"3".repeat(64)}`,
+  blockNumber: 10, attemptCount: 1, lastError: "", ...extra,
+});
 async function trusted(scope, id, data, proof = true) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const uid = data.ownerId ?? data.researcherId;
     await setDoc(doc(ctx.firestore(), "recordReservations", `${scope}_${id}`), { uid });
     if (proof) {
       const { createdAt, updatedAt, audit, ...record } = data;
-      await setDoc(doc(ctx.firestore(), "publicationProofs", `${scope}_${id}`), { uid, record });
+      await setDoc(doc(ctx.firestore(), "publicationProofs", `${scope}_${id}`), { uid, record, transactionHash: audit?.transactionHash ?? "" });
     }
   });
 }
 describe("QCDAO-131/132/133/134 raw client bypasses", () => {
+  it("denies published-to-draft regression with or without simultaneous content edits", async () => {
+    const db = env.authenticatedContext(OWNER).firestore();
+    for (const status of ["submitted", "open", "in_review", "matched", "funded", "completed", "cancelled"]) {
+      const id = `no-regression-${status}`, data = problem({ status });
+      await trusted("problems", id, data);
+      await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), data));
+      for (const patch of [{ status: "draft" }, { status: "draft", title: "Unattested edit" }]) {
+        await assertFails(updateDoc(doc(db, "problems", id), { ...patch, updatedAt: serverTimestamp() }));
+      }
+    }
+  });
+  it("binds published transaction hashes to proof while allowing receipt progress and reattestation", async () => {
+    const db = env.authenticatedContext(OWNER).firestore();
+    const audit = publicationAudit();
+    const id = "bound-publication-audit", data = problem({ audit }), reference = doc(db, "problems", id);
+    await trusted("problems", id, data);
+    const replacement = { ...audit, transactionHash: `0x${"4".repeat(64)}` };
+    await assertFails(setDoc(reference, { ...data, audit: replacement }));
+    await assertSucceeds(setDoc(reference, data));
+    await assertFails(updateDoc(reference, { audit: replacement, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(reference, { "audit.transactionHash": replacement.transactionHash, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(reference, { audit: { ...audit, status: "queued", transactionHash: "", blockNumber: 0 }, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(reference, { audit: deleteField(), updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(reference, { "audit.status": "failed", "audit.lastError": "RPC unavailable", updatedAt: serverTimestamp() }));
+    await trusted("problems", id, { ...data, audit: replacement, title: "Attested correction" });
+    await assertSucceeds(updateDoc(reference, { title: "Attested correction", audit: replacement, updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(reference, { status: "cancelled", withdrawalReason: "Research priorities changed", updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(reference, { "audit.status": "failed", updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(reference, { "audit.transactionHash": audit.transactionHash, updatedAt: serverTimestamp() }));
+  });
+  it("requires the attested hash on draft promotion and when attaching a legacy receipt", async () => {
+    const db = env.authenticatedContext(OWNER).firestore(), audit = publicationAudit();
+    for (const status of ["draft", "submitted"]) {
+      const id = `bind-missing-audit-${status}`, reference = doc(db, "problems", id);
+      const data = problem({ audit });
+      await trusted("problems", id, data);
+      await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), problem({ status })));
+      await assertFails(updateDoc(reference, { status: "submitted", audit: publicationAudit({ transactionHash: `0x${"4".repeat(64)}` }), updatedAt: serverTimestamp() }));
+      await assertSucceeds(updateDoc(reference, { status: "submitted", audit, updatedAt: serverTimestamp() }));
+    }
+  });
   it("requires a trusted reservation even for a draft", async () => {
     const db = env.authenticatedContext(OWNER).firestore();
     const data = problem({ status: "draft" });
@@ -87,7 +133,7 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
       title: "Quantum routing", summary: "A measurable study", category: "quantum-annealing", methodology: "Compare baselines",
       suitability: "Combinatorial routing", expectedOutcomes: "Improved routing", successCriteria: "Ten percent", timeline: "12 weeks",
       milestones: "Baseline, prototype, validation", team: "Research team", amount: 500, currency: "USDC", status: "submitted",
-      attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+      attachments: [], audit: publicationAudit(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
     const commit = () => { const batch = writeBatch(db);
       batch.set(doc(db, "proposals", "security-proposal"), data);
       batch.set(doc(db, "problems", data.problemId, "proposalAuthors", AUTHOR), { proposalId: "security-proposal" });
@@ -97,6 +143,14 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
     await trusted("proposals", "security-proposal", data);
     await assertSucceeds(commit());
     await assertFails(updateDoc(doc(db, "proposals", "security-proposal"), { title: "Changed without chain", updatedAt: serverTimestamp() }));
+    const reference = doc(db, "proposals", "security-proposal");
+    const correction = { ...data, title: "Verified proposal correction" };
+    await trusted("proposals", "security-proposal", correction);
+    const replacement = publicationAudit({ transactionHash: `0x${"4".repeat(64)}` });
+    await assertFails(updateDoc(reference, { title: correction.title, audit: replacement, updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(reference, { title: correction.title, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(reference, { status: "draft", updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(reference, { status: "withdrawn", withdrawalReason: "Research priorities changed", updatedAt: serverTimestamp() }));
   });
   it("rejects unreserved, expired, sealed, wrong-size and retired PDF uploads", async () => {
     const storage = env.authenticatedContext(OWNER).storage();

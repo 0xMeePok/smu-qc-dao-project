@@ -982,7 +982,7 @@ export const adminSetSuspended = onCall({ region: REGION }, async (request) => {
 /** Clean both namespaces in bounded, resumable pages. Reservations bound new
  * uploads; this job reclaims abandoned charges and objects after the grace period.
  * Sealed published evidence and historical published files are retained. Set
- * ATTACHMENT_SWEEP_ENABLED=false explicitly for an operational dry run.
+ * ATTACHMENT_SWEEP_ENABLED=true explicitly to enable deletion after a dry run.
  */
 export const sweepAttachments = onSchedule(
   {
@@ -997,7 +997,7 @@ export const sweepAttachments = onSchedule(
     await sweepOrphanedAttachments({
       db,
       bucket: getStorage().bucket(),
-      dryRun: process.env.ATTACHMENT_SWEEP_ENABLED === "false",
+      dryRun: process.env.ATTACHMENT_SWEEP_ENABLED !== "true",
     });
   },
 );

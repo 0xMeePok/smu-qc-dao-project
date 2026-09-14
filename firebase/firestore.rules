@@ -572,20 +572,19 @@ service cloud.firestore {
     }
 
     function validFundedPosting(data) {
-      // data.get() with a FAILING default rather than keys().hasAll([...]): a
-      // missing field falls back to a value the check below rejects, so presence
-      // is covered without scanning the key list. That scan was the single
-      // biggest cost here against the 1000-expression cap.
+      // These fields are required: a missing property denies the write just as
+      // an empty default would. Direct access saves the expression budget needed
+      // for publication-proof checks on records carrying attachments.
       return opportunityType(data) == 'business-problem'
-        && isNonEmptyString(data.get('title', ''), 160)
-        && isNonEmptyString(data.get('summary', ''), 4000)
-        && isNonEmptyString(data.get('organisation', ''), 120)
-        && isNonEmptyString(data.get('businessContext', ''), 4000)
-        && isNonEmptyString(data.get('currentApproach', ''), 4000)
-        && isNonEmptyString(data.get('currentLimitations', ''), 4000)
-        && isNonEmptyString(data.get('expectedOutcome', ''), 4000)
-        && isNonEmptyString(data.get('successCriteria', ''), 4000)
-        && isNonEmptyString(data.get('dataAvailability', ''), 4000)
+        && isNonEmptyString(data.title, 160)
+        && isNonEmptyString(data.summary, 4000)
+        && isNonEmptyString(data.organisation, 120)
+        && isNonEmptyString(data.businessContext, 4000)
+        && isNonEmptyString(data.currentApproach, 4000)
+        && isNonEmptyString(data.currentLimitations, 4000)
+        && isNonEmptyString(data.expectedOutcome, 4000)
+        && isNonEmptyString(data.successCriteria, 4000)
+        && isNonEmptyString(data.dataAvailability, 4000)
         // Only what validProblem has NOT already established. It has run on this
         // same write and checked the category set, the currency and the expiry
         // type; repeating them here is what pushed publishing a draft with
@@ -1066,12 +1065,19 @@ service cloud.firestore {
     function verifiedPublication(scope, recordId, data) {
       let proof = get(/databases/$(database)/documents/publicationProofs/$(scope + '_' + recordId)).data;
       return proof.uid == request.auth.uid
+        // Delivery metadata may evolve, but its transaction must be the one
+        // checked by attestPublication, including on creates and corrections.
+        && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
         && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit']);
     }
 
     function publicationWriteAllowed(scope, recordId, data) {
       return data.status == 'draft'
         || (resource != null && resource.data.status != 'draft'
+          // Same-transaction receipt progress and withdrawals need no new proof.
+          // Adding, clearing or replacing the hash must pass verifiedPublication.
+          && data.get('audit', {}).get('transactionHash', '')
+            == resource.data.get('audit', {}).get('transactionHash', '')
           && data.diff(resource.data).affectedKeys().hasOnly(['status', 'withdrawalReason', 'audit', 'updatedAt']))
         || verifiedPublication(scope, recordId, data);
     }

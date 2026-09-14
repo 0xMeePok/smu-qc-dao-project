@@ -21,6 +21,6 @@ export async function seedPublicationFixture(env, reference, patch, update = fal
     if (!uid) return;
     await setDoc(doc(db, "recordReservations", `${scope}_${id}`), { uid });
     const { createdAt, updatedAt, audit, ...record } = next;
-    await setDoc(doc(db, "publicationProofs", `${scope}_${id}`), { uid, record });
+    await setDoc(doc(db, "publicationProofs", `${scope}_${id}`), { uid, record, transactionHash: audit?.transactionHash ?? "" });
   });
 }

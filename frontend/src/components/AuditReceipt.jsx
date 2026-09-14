@@ -58,6 +58,27 @@ function verificationState(result) {
     };
 }
 
+function MismatchDetails({ mismatches = [] }) {
+  if (!mismatches.length) return <p>Hash mismatch: the current content could not be matched to its on-chain record.</p>;
+  return <>
+    <ul className="audit-mismatches">
+      {mismatches.map((entry) => <li key={entry.field}>
+        <p>{entry.message || `${entry.label || entry.field} differs from the on-chain record.`}</p>
+        <details>
+          <summary>Compare {entry.label || entry.field}</summary>
+          <dl className="audit-receipt-grid">
+            <div><dt>Current record</dt><dd><code>{entry.expected == null ? "Not available" : String(entry.expected)}</code></dd></div>
+            <div><dt>On Arbitrum Sepolia</dt><dd><code>{entry.actual == null ? "Not found" : String(entry.actual)}</code></dd></div>
+          </dl>
+        </details>
+      </li>)}
+    </ul>
+    {mismatches.some(({ field }) => /Hash$/.test(field) || field === "anchor") && (
+      <p>Hashes identify which portion differs, but cannot reveal the exact text or field that changed.</p>
+    )}
+  </>;
+}
+
 function unavailableState(error, audit) {
   const code = String(error?.code ?? "");
   const detail = String(error?.message ?? "");
@@ -74,6 +95,7 @@ function unavailableState(error, audit) {
     message = ["submitted", "pending"].includes(audit?.status)
       ? "No matching audit was found yet — the transaction may still be waiting for confirmation. Wait a moment and select Check again."
       : "No matching audit was found in the smart contract on Arbitrum Sepolia. The submission is not verified. Contact the submission owner or an administrator.";
+    return { kind: "unanchored", message };
   }
   return { kind: "unavailable", message };
 }
@@ -96,7 +118,8 @@ export function AuditReceipt({
   const canVerify = Boolean(onVerify);
   // Firestore is not the source of truth for audit state. Always read the
   // configured registry when a record can be verified.
-  const shouldVerifyAutomatically = canVerify && Boolean(audit?.transactionHash || audit?.status === "confirmed");
+  // A missing/stale delivery receipt does not mean the content is unanchored.
+  const shouldVerifyAutomatically = canVerify && Boolean(audit);
 
   const check = async (verify) => {
     const request = ++generation.current;
@@ -133,7 +156,7 @@ export function AuditReceipt({
       })
       .finally(() => { if (active && request === generation.current) setChecking(false); });
     return () => { active = false; ++generation.current; };
-  }, [audit?.entityId, audit?.contentHash, audit?.solutionHash, audit?.transactionHash, audit?.status, shouldVerifyAutomatically]);
+  }, [firebaseReference, audit?.entityId, audit?.contentHash, audit?.solutionHash, audit?.transactionHash, audit?.status, shouldVerifyAutomatically]);
 
   if (!audit) {
     return (
@@ -158,12 +181,17 @@ export function AuditReceipt({
       ? "verified"
       : verification?.kind === "mismatch"
         ? "mismatch"
-        : verification?.kind === "unavailable"
+        : ["unavailable", "unanchored"].includes(verification?.kind)
           ? ["queued", "submitted", "pending", "failed"].includes(audit.status) ? audit.status : "unavailable"
           : audit.status;
   const chainAnchor = verification?.result?.anchor?.anchor;
   const chainTimestamp = chainAnchor?.timestamp ?? chainAnchor?.[5];
   const chainActor = chainAnchor?.actor ?? chainAnchor?.[4];
+  const verified = verification?.kind === "match";
+  // Check the chain before offering another signature. A known in-flight
+  // transaction can still be resumed when its verification service is offline.
+  const canRetry = !checking && (!canVerify || verification?.kind === "unanchored"
+    || (verification?.kind === "unavailable" && Boolean(audit.transactionHash)));
 
   const explorerUrl = audit.transactionHash
     ? `https://sepolia.arbiscan.io/tx/${audit.transactionHash}`
@@ -186,6 +214,14 @@ export function AuditReceipt({
         The receipt proves which version was anchored without putting its contents on-chain.
       </p>
 
+      {audit.lastError && !verified && verification?.kind !== "mismatch" && <p className="audit-warning" role="alert">{audit.lastError}</p>}
+      {verification && (
+        <div className={`audit-verification audit-verification-${verification.kind}`} role={verification.kind === "mismatch" ? "alert" : "status"}>
+          <p>{verification.message}</p>
+          {verification.kind === "mismatch" && <MismatchDetails mismatches={verification.result?.mismatches} />}
+        </div>
+      )}
+
       <dl className="audit-receipt-grid">
         <div><dt>Event</dt><dd>{eventLabel}</dd></div>
         <div><dt>On-chain timestamp</dt><dd>{chainTimestamp
@@ -195,18 +231,11 @@ export function AuditReceipt({
         <div><dt>On-chain actor</dt><dd>{chainActor ? <code>{chainActor}</code> : "Not available"}</dd></div>
         <div><dt>Firebase reference</dt><dd><code>{firebaseReference}</code></dd></div>
         <div><dt>Canonical format</dt><dd>Version {audit.schemaVersion}</dd></div>
-        <div><dt>Receipt block</dt><dd>{audit.blockNumber || "Not confirmed"}</dd></div>
+        <div><dt>Receipt block</dt><dd>{audit.blockNumber || "Not recorded"}</dd></div>
         <CopyValue label="Verification hash" value={verification?.result?.expected?.contentHash ?? audit.contentHash} />
         <CopyValue label="Solution hash" value={verification?.result?.expected?.solutionHash ?? audit.solutionHash} />
         <CopyValue label="Transaction reference" value={audit.transactionHash} />
       </dl>
-
-      {audit.lastError && <p className="audit-warning" role="alert">{audit.lastError}</p>}
-      {verification && (
-        <p className={`audit-verification audit-verification-${verification.kind}`} role={verification.kind === "mismatch" ? "alert" : "status"}>
-          {verification.message}
-        </p>
-      )}
 
       <div className="form-actions">
         {onVerify && (
@@ -214,7 +243,7 @@ export function AuditReceipt({
             {checking ? "Checking…" : "Check again"}
           </button>
         )}
-        {onRetry && (audit.transactionHash || audit.attemptCount < 3) && ["queued", "submitted", "pending", "failed"].includes(audit.status) && (
+        {onRetry && canRetry && (audit.transactionHash || audit.attemptCount < 3) && ["queued", "submitted", "pending", "failed"].includes(audit.status) && (
           <button className="secondary" type="button" onClick={onRetry}>
             {audit.transactionHash ? "Resume verification" : audit.status === "queued" ? "Start verification" : "Retry anchoring"}
           </button>
@@ -225,7 +254,7 @@ export function AuditReceipt({
           </a>
         )}
       </div>
-      {!audit.transactionHash && audit.attemptCount >= 3 && <p role="status">Wallet retry limit reached. Ask an administrator to reset verification attempts. Your submission is still saved.</p>}
+      {canRetry && !audit.transactionHash && audit.attemptCount >= 3 && <p role="status">Wallet retry limit reached. Ask an administrator to reset verification attempts. Your submission is still saved.</p>}
     </section>
   );
 }

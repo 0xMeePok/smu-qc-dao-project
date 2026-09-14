@@ -148,6 +148,34 @@ it("re-verifies a fresh server read and detects a changed proposal", async () =>
   expect(mocks.find).toHaveBeenCalledWith(record.id, { fromServer: true });
   expect(result.verified).toBe(false);
 });
+it("verifies a saved proposal against its recorded nonzero parent revision without signing", async () => {
+  mocks.find.mockResolvedValue(record);
+  const chainRead = vi.fn((request) => request.functionName === "getProposal"
+    ? { ...readContract(request), opportunityRevisionIndex: 3n }
+    : readContract(request));
+  const writeContract = vi.fn();
+  const waitForTransactionReceipt = vi.fn();
+  const result = await readProposalAudit(record, {
+    adapters: { readContract: chainRead, writeContract, waitForTransactionReceipt },
+  });
+  expect(result.verified).toBe(true);
+  expect(result.expected.expectedOpportunityRevisionIndex).toBe(3);
+  expect(chainRead.mock.calls.map(([request]) => request.functionName)).not.toContain("opportunityRevisionCount");
+  expect(writeContract).not.toHaveBeenCalled();
+  expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+});
+it("still detects changed content when the recorded parent revision is nonzero", async () => {
+  mocks.find.mockResolvedValue({ ...record, title: "Tampered" });
+  const chainRead = (request) => request.functionName === "getProposal"
+    ? { ...readContract(request), opportunityRevisionIndex: 3n }
+    : readContract(request);
+  const result = await readProposalAudit(record, {
+    adapters: { readContract: chainRead, writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() },
+  });
+  expect(result.verified).toBe(false);
+  expect(result.mismatches.map(({ field }) => field)).toContain("proposalHash");
+  expect(result.mismatches.map(({ field }) => field)).not.toContain("opportunityRevisionIndex");
+});
 it("does not broadcast beyond the wallet attempt cap", async () => {
   const writeContract = vi.fn();
   await expect(anchorProposalAudit({ ...record, audit: { attemptCount: 3 } }, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: vi.fn() } })).rejects.toThrow(/limit/);
