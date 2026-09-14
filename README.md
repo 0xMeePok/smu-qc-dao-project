@@ -239,7 +239,7 @@ need to redeploy, or want more detail on local emulators, see
 
 | Contract | Address (Arbitrum Sepolia) | Purpose |
 |---|---|---|
-| [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD`](https://sepolia.arbiscan.io/address/0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD#code) | Anchors opportunity and proposal hashes. Deployed in block `304652016`. |
+| [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x47dA28cAEf8021dD88fe18B80e367746e0036964`](https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code) | Anchors opportunity and proposal hashes. Checked-in scheme-2 registry, deployed in block `308652359`; the site transition follows the [cutover notes](docs/registry-cutover.md). |
 | [`QFT.sol`](contracts/qft-tokens/contracts/QFT.sol) | Not yet deployed | Fixed-supply ERC-20 distributed for platform activity |
 
 ## Testing

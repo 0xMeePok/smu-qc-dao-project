@@ -32,7 +32,9 @@ const artifactFile = resolveInput(option("artifact"), path.join(
 ));
 const deploymentFile = resolveInput(option("deployment"), path.join(
   repositoryDirectory,
-  "contracts/audit-registry/deployments/arbitrumSepolia.json",
+  // The active cutover manifest is authoritative. deployments/ contains the
+  // historical registry and must be selected explicitly for a historical build.
+  "contracts/audit-registry/manifests/arbitrumSepolia.json",
 ));
 const outputFile = resolveInput(option("output"), path.join(
   frontendDirectory,

@@ -200,6 +200,23 @@ describe("funding amount input", () => {
 });
 
 describe("no data loss on a failed submit", () => {
+  it("explains a removed deployment module and preserves the user's posting", async () => {
+    mocks.auditError = new Error('An unknown error occurred while executing opportunityRevisionCount', {
+      cause: new TypeError('Failed to fetch dynamically imported module: https://example.test/assets/ccip-old.js'),
+    });
+    const onNavigate = vi.fn();
+    render(<CreatePostingPage onNavigate={onNavigate} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/save your work as a draft or copy your edits, then refresh/i);
+    expect(alert.textContent).not.toMatch(/opportunityRevisionCount|ccip-old|unknown error/i);
+    expect(document.getElementById("title").value).toBe("Cold-chain route optimisation");
+    expect(document.getElementById("summary").value).toBe("Vehicle routing degrades badly under demand spikes.");
+    expect(amountInput().value).toBe("1000000");
+    expect(mocks.created).toHaveLength(0);
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
   it("[FIT-OPD-016] keeps every field when the write is rejected", async () => {
     mocks.createShouldFail = true;
     render(<CreatePostingPage onNavigate={() => {}} />);
