@@ -200,6 +200,77 @@
   visibility: visible;
 }
 
+.chain-legend {
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+.chain-legend > h2,
+.chain-legend > h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.chain-legend > p {
+  max-width: 68ch;
+  margin: 10px 0 18px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.chain-legend-compact {
+  margin-bottom: 24px;
+  padding: 16px 18px;
+}
+.chain-legend-compact > h2,
+.chain-legend-compact > h3 { font-size: 16px; }
+.chain-legend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.chain-legend-panel {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.chain-legend-on { border-color: var(--success-line); }
+.chain-legend-off { border-style: dashed; }
+.chain-legend-panel h3,
+.chain-legend-panel h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.chain-legend-on h3,
+.chain-legend-on h4 { color: var(--success); }
+.chain-legend-off h3,
+.chain-legend-off h4 { color: var(--muted); }
+.chain-legend-panel > p {
+  margin: 4px 0 10px;
+  color: var(--subtle);
+  font-size: 12px;
+}
+.chain-legend-panel ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.chain-legend-panel li + li { margin-top: 4px; }
+.chain-legend .text-button { margin-top: 14px; }
+.architecture-page .chain-legend { margin-bottom: 8px; }
+.architecture-actions { margin-top: 28px; }
+
+@media (max-width: 720px) {
+  .chain-legend-grid { grid-template-columns: 1fr; }
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
@@ -1436,7 +1507,7 @@ footer {
   font-size: 13px;
 }
 footer > p { margin: 0 auto 0 0; }
-.footer-links { display: flex; gap: 2px; }
+.footer-links { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .footer-links button { min-height: 38px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; }
 .footer-links button:hover { color: var(--brand); }
 

@@ -26,6 +26,7 @@ import {
   FundingPortfolio,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import ArchitectureHelpPage from "./pages/ArchitectureHelpPage.jsx";
 import CreatePostingPage from "./pages/CreatePostingPage.jsx";
 import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
 import OpportunityEditPage from "./pages/OpportunityEditPage.jsx";
@@ -240,6 +241,8 @@ function Shell({ route, children }) {
           <strong>QC DAO</strong> — Multi-role quantum funding platform with verifiable on-chain audit trails.
         </div>
         <div className="footer-links">
+          <button type="button" onClick={() => go("architecture")}>On-chain vs off-chain</button>
+          <span>·</span>
           <span>Arbitrum Sepolia (421614)</span>
           <span>·</span>
           <span>Proof of Concept</span>
@@ -925,9 +928,11 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <AdminPage />
+        <AdminPage onNavigate={go} />
       </RouteGuard>
     );
+  } else if (section === "architecture") {
+    pageComponent = <ArchitectureHelpPage onNavigate={go} />;
   } else if (section === "access-denied") {
     pageComponent = <AccessDenied onNavigate={go} />;
   }
