@@ -10,6 +10,7 @@ import { AdminAudit } from "../components/RoleViews.jsx";
 import { ProposalAuditQueue } from "../components/ProposalAuditQueue.jsx";
 import { PostingSubmissionLogs } from "../components/PostingSubmissionLogs.jsx";
 import { FundingSubmissionLogs } from "../components/FundingSubmissionLogs.jsx";
+import { ExpiryAdminUtility } from "../components/ExpiryAdminUtility.jsx";
 
 export default function AdminPage() {
   const { isSignedIn, isChecking, profile, address } = useSession();
@@ -254,6 +255,7 @@ export default function AdminPage() {
             role="tabpanel"
             aria-labelledby="admin-tab-audits"
           >
+            <ExpiryAdminUtility />
             <AdminAudit />
           </div>
         )}

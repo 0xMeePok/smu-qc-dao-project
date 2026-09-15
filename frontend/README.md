@@ -25,9 +25,10 @@ fields are required versus optional, and why.
 npm test
 ```
 
-138 tests, no emulator or network needed. Covers field validation, the default role
-assigned at account creation, the whole-form validator, route-permission resolution,
-and the 15-minute idle session.
+The suite does not need an emulator or network.
+
+Published opportunities use the shared countdown. Owners choose or extend a live
+deadline by 30, 60, 90, or 180 days.
 
 The deploy pipeline runs a narrower set — only the files it owns:
 

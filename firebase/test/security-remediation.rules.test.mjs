@@ -6,6 +6,8 @@ import { ref, uploadBytes } from "firebase/storage";
 
 const OWNER = `0x${"d7".repeat(20)}`;
 const AUTHOR = `0x${"e8".repeat(20)}`;
+// Published expiry must sit in the 30-180 day window firestore.rules enforces.
+const EXPIRES_AT = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
 let env;
 before(async () => {
   env = await initializeTestEnvironment({ projectId: "qc-dao-rules-test",
@@ -23,7 +25,7 @@ const problem = (extra = {}) => ({
   ownerId: OWNER, organisation: "University", title: "Cold-chain routing", summary: "Optimise urban delivery routing.",
   businessContext: "Many deliveries", currentApproach: "Classical optimisation", currentLimitations: "Too slow",
   expectedOutcome: "Faster routing", successCriteria: "Ten percent better", dataAvailability: "Anonymised deliveries",
-  categories: ["ai", "quantum"], amount: 1000, currency: "USDC", expiresAt: new Date("2099-01-01"),
+  categories: ["ai", "quantum"], amount: 1000, currency: "USDC", expiresAt: EXPIRES_AT,
   status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
 });
 const publicationAudit = (extra = {}) => ({

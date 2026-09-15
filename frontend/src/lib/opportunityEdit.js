@@ -1,4 +1,5 @@
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { isExpiredOpenOpportunity } from "../../../firebase/functions/opportunityExpiry.js";
 
 /** Live marketplace statuses a sponsor may still correct. */
 export const EDITABLE_OPPORTUNITY_STATUSES = ["submitted", "open"];
@@ -11,12 +12,12 @@ export const EDITABLE_OPPORTUNITY_STATUSES = ["submitted", "open"];
 export const MATERIAL_POSTING_FIELDS = [
   "title", "summary", "businessContext", "currentApproach", "currentLimitations",
   "expectedOutcome", "successCriteria", "dataAvailability",
-  "categories", "amount", "currency", "expiresAt",
+  "categories", "amount", "currency",
 ];
 
 export const MATERIAL_FUNDING_FIELDS = [
   "title", "fundingThesis", "eligibilityNotes",
-  "categories", "tags", "amount", "currency", "expiresAt",
+  "categories", "tags", "amount", "currency",
 ];
 
 export const NON_MATERIAL_OPPORTUNITY_FIELDS = ["attachments"];
@@ -29,10 +30,15 @@ export function materialFieldsLocked(posting) {
   return opportunityHasProposals(posting);
 }
 
+export function isExpiredOpportunity(posting) {
+  return String(posting?.status ?? "").trim().toLowerCase() === "expired"
+    || isExpiredOpenOpportunity(posting);
+}
+
 export function canEditOpportunity(posting, userId) {
   if (!posting || !userId) return false;
   if (String(posting.ownerId).toLowerCase() !== String(userId).toLowerCase()) return false;
-  return EDITABLE_OPPORTUNITY_STATUSES.includes(posting.status);
+  return EDITABLE_OPPORTUNITY_STATUSES.includes(posting.status) && !isExpiredOpportunity(posting);
 }
 
 export function materialFieldKeys(posting) {

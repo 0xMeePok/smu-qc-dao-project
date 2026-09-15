@@ -62,6 +62,33 @@ describe("QCDAO-57 opportunity edit trail", () => {
     });
     assert.equal(withdrawn.status, "cancelled");
     assert.equal(withdrawn.withdrawalReason, "The budget was withdrawn.");
+
+    const extended = opportunityRevisionEntry({
+      recordId: "posting1",
+      before: posting(),
+      after: posting({ expiresAt: new Date("2027-01-01T00:00:00Z") }),
+      at,
+    });
+    assert.deepEqual(extended.expiryWindow, {
+      previous: "2026-12-01T00:00:00.000Z",
+      next: "2027-01-01T00:00:00.000Z",
+    });
+
+    const lapsed = opportunityRevisionEntry({
+      recordId: "posting1",
+      before: posting(),
+      after: posting({
+        status: "expired",
+        expiryReason: "funding_requirement_not_met",
+        expirySource: "scheduled",
+        expiryActor: "system",
+        expiredAt: at,
+      }),
+      at,
+    });
+    assert.equal(lapsed.actor, "system");
+    assert.equal(lapsed.expiryReason, "funding_requirement_not_met");
+    assert.equal(lapsed.expirySource, "scheduled");
   });
 
   it("writes nothing for a create, a delete, a draft save or a receipt update", async () => {

@@ -11,7 +11,7 @@ vi.mock("../../src/lib/postings.js", () => ({
   },
 }));
 
-const { anchorPostingAudit, preparePostingAudit } = await import("../../src/lib/postingAudit.js");
+const { anchorPostingAudit, assertWithdrawalWindowOpen, preparePostingAudit } = await import("../../src/lib/postingAudit.js");
 const { DEFAULT_AUDIT_REGISTRY_ADDRESS } = await import("../../src/config/auditRegistry.js");
 
 const TX = `0x${"3".repeat(64)}`;
@@ -168,5 +168,30 @@ describe("QCDAO-79 posting audit recovery", () => {
 
     expect(writeRequest.address).toBe(DEFAULT_AUDIT_REGISTRY_ADDRESS);
     expect(mocks.updates.every((audit) => audit.contractAddress === undefined)).toBe(true);
+  });
+});
+
+describe("QCDAO-49 withdrawal window pre-flight", () => {
+  const live = { id: "posting123", status: "open", expiresAt: new Date("2026-12-01T00:00:00Z") };
+  const chainAt = (iso) => ({
+    getBlock: async () => ({ timestamp: BigInt(Math.floor(new Date(iso).getTime() / 1000)) }),
+  });
+
+  it("uses chain time, so a browser clock running behind cannot sign a withdrawal the rules refuse", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T00:00:00Z"));
+    try {
+      await expect(assertWithdrawalWindowOpen(live, chainAt("2026-12-01T00:00:00Z"))).rejects.toThrow(/response window has closed/);
+      await expect(assertWithdrawalWindowOpen(live, chainAt("2026-11-30T23:59:59Z"))).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to the local clock when the node is unreachable, and locks skip statuses after the deadline", async () => {
+    const offline = { getBlock: async () => { throw new Error("fetch failed"); } };
+    await expect(assertWithdrawalWindowOpen({ ...live, expiresAt: new Date(Date.now() - 1000) }, offline)).rejects.toThrow(/will lapse automatically/);
+    await expect(assertWithdrawalWindowOpen({ ...live, status: "in_review", expiresAt: new Date(0) }, offline)).rejects.toThrow(/can no longer be withdrawn/);
+    await expect(assertWithdrawalWindowOpen({ ...live, status: "in_review" }, offline)).resolves.toBeUndefined();
   });
 });

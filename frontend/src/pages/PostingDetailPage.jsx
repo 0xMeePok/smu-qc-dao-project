@@ -17,7 +17,7 @@ import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { PostingProposals } from "../components/PostingProposals.jsx";
 import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
-import { formatInstant, isExpired } from "../lib/datetime.js";
+import { formatInstant } from "../lib/datetime.js";
 import {
   anchorOpportunityWithdrawal,
   anchorPostingAudit,
@@ -30,7 +30,12 @@ import {
   readFundingOpportunityAudit,
 } from "../lib/fundingOpportunityAudit.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
-import { opportunityStatusLabel } from "../config/workflowStatus.js";
+import {
+  expiryReasonLabel,
+  isExpiredOpenOpportunity,
+  isResponseWindowClosed,
+  opportunityStatusLabel,
+} from "../config/workflowStatus.js";
 import { postingActions } from "../lib/postingActions.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
 import { shortenAddress } from "../lib/chain.js";
@@ -192,7 +197,11 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   };
 
   const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
-  const canWithdraw = ownsPosting && ["submitted", "open", "in_review"].includes(posting?.status);
+  // Matches the rules: submitted/open lapse after the deadline; in_review is
+  // also owner-locked once expiresAt passes so it cannot skip that hand-off.
+  const canWithdraw = ownsPosting
+    && ["submitted", "open", "in_review"].includes(posting?.status)
+    && !isResponseWindowClosed(posting);
 
   const withdraw = async () => {
     const withdrawalReason = (anchoredWithdrawal?.reason ?? reason).trim();
@@ -210,6 +219,12 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
       }
       if (!isConnected || connectedAddress?.toLowerCase() !== posting.ownerId?.toLowerCase()) {
         setReasonError("Connect the wallet that published this opportunity to sign the withdrawal.");
+        return;
+      }
+      if (isResponseWindowClosed(posting)) {
+        setReasonError(isExpiredOpenOpportunity(posting)
+          ? `The response window has closed, so this ${entityLabel} will lapse automatically instead.`
+          : `The response window has closed, so this ${entityLabel} can no longer be withdrawn.`);
         return;
       }
     }
@@ -279,7 +294,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     );
   }
 
-  const expired = isExpired(posting.expiresAt);
+  const expired = isResponseWindowClosed(posting);
   const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
   const entityLabel = isOpenFunding ? "funding opportunity" : "problem statement";
   const audit = isOpenFunding
@@ -428,7 +443,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
           <div className="expiry-panel">
             <span className="eyebrow">{expired ? "Closed" : "Time remaining"}</span>
-            <ExpiryCountdown expiresAt={posting.expiresAt} />
+            <ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />
+            {posting.status === "expired" && (
+              <p className="field-hint"><strong>Lapse reason:</strong> {expiryReasonLabel(posting.expiryReason)}.</p>
+            )}
           </div>
 
           {posting.categories.length > 0 && (

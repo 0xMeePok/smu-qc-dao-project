@@ -21,6 +21,7 @@ import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { deleteAttachment, toPostingRecord } from "./attachments.js";
 import { expiryDateFrom } from "../config/postingCategories.js";
+import { toDate } from "./datetime.js";
 
 /**
  * QCDAO-48 - funded business problem statements.
@@ -112,8 +113,9 @@ export { postingAuditPayload } from "../../../firebase/functions/opportunityAudi
  */
 export function buildPostingDocument({
   ownerId, organisation, form, attachments = [], audit = null,
-  status = POSTING_STATUS_SUBMITTED, now = new Date(),
+  status = POSTING_STATUS_SUBMITTED, now = new Date(), expiresAt = null,
 }) {
+  const storedExpiry = toDate(expiresAt) ?? expiryDateFrom(form.expiryDays, now);
   const document = {
     ownerId: String(ownerId).toLowerCase(),
     organisation: trimmed(organisation),
@@ -130,7 +132,7 @@ export function buildPostingDocument({
     currency: form.currency,
     // Stored as a concrete instant, not "90 days", so the expiry does not shift
     // meaning depending on when it is read.
-    expiresAt: Timestamp.fromDate(expiryDateFrom(form.expiryDays, now)),
+    expiresAt: Timestamp.fromDate(storedExpiry),
     status,
     attachments: attachments.map(toPostingRecord),
     createdAt: serverTimestamp(),
@@ -324,7 +326,7 @@ export async function updatePosting({
  * `resource.data`, so an unfiltered list cannot be proven safe and Firestore
  * refuses it outright - the query has to carry the matching filter.
  */
-export const MEMBER_READABLE_REVISION_STATUSES = ["submitted", "open", "cancelled"];
+export const MEMBER_READABLE_REVISION_STATUSES = ["submitted", "open", "cancelled", "expired"];
 
 export async function listOpportunityRevisions(postingId, { uid, isOwner = false } = {}) {
   requireFirebase();

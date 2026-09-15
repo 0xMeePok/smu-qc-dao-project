@@ -367,6 +367,68 @@ describe("adminSetSuspended", () => {
   });
 });
 
+describe("adminForceExpireOpportunity", () => {
+  it("requires an authenticated administrator and an exact lapse reason", async () => {
+    const unauthenticated = await call("adminForceExpireOpportunity", {
+      problemId: "force-expiry-auth", reason: "funding_requirement_not_met",
+    });
+    assert.equal(unauthenticated.error?.status, "UNAUTHENTICATED");
+
+    await db.collection("users").doc(user1Address).update({ role: 0, suspended: false });
+    const userToken = await getIdTokenForAccount(user1Account);
+    const nonAdmin = await call("adminForceExpireOpportunity", {
+      problemId: "force-expiry-auth", reason: "funding_requirement_not_met",
+    }, { token: userToken });
+    assert.equal(nonAdmin.error?.status, "PERMISSION_DENIED");
+
+    const invalidReason = await call("adminForceExpireOpportunity", {
+      problemId: "force-expiry-auth", reason: "other",
+    }, { token: adminToken });
+    assert.equal(invalidReason.error?.status, "INVALID_ARGUMENT");
+  });
+
+  it("records a manual expiry, audit event and refund hand-off without transferring funds", async () => {
+    const problemId = "force-expiry-success";
+    await db.collection("problems").doc(problemId).set({
+      ownerId: user1Address,
+      title: "Force expiry fixture",
+      status: "open",
+      amount: 500,
+      expiresAt: Timestamp.now(),
+    });
+
+    const response = await call("adminForceExpireOpportunity", {
+      problemId,
+      reason: "evaluation_not_completed",
+    }, { token: adminToken });
+    assert.equal(response.result?.changed, true, JSON.stringify(response));
+    assert.equal(response.result?.source, "manual");
+
+    const problem = (await db.collection("problems").doc(problemId).get()).data();
+    assert.equal(problem.status, "expired");
+    assert.equal(problem.expiryReason, "evaluation_not_completed");
+    assert.equal(problem.expirySource, "manual");
+    assert.equal(problem.expiryActor, adminAddress);
+
+    const audits = await db.collection("audits")
+      .where("type", "==", "opportunity_expired")
+      .where("targetId", "==", problemId)
+      .get();
+    assert.equal(audits.size, 1);
+    assert.equal(audits.docs[0].data().action, "OPPORTUNITY_FORCE_EXPIRED");
+    const refund = (await db.collection("escrowRefundTriggers").doc(problemId).get()).data();
+    assert.deepEqual({ status: refund.status, source: refund.source, reason: refund.reason }, {
+      status: "pending", source: "manual", reason: "evaluation_not_completed",
+    });
+
+    const repeated = await call("adminForceExpireOpportunity", {
+      problemId,
+      reason: "evaluation_not_completed",
+    }, { token: adminToken });
+    assert.equal(repeated.error?.status, "FAILED_PRECONDITION");
+  });
+});
+
 describe("revokeOwnSessions", () => {
   it("[QCDAO-129] records immediate invalidation and revokes all refresh tokens", async () => {
     const token = await getIdTokenForAccount(user2Account);

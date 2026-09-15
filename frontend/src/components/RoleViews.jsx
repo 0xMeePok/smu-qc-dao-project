@@ -7,6 +7,8 @@ import { Modal } from "./Modal.jsx";
 import { POSTING_STATUS_DRAFT, deletePosting, listOwnPostings } from "../lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
+import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
+import { expiryReasonLabel } from "../config/workflowStatus.js";
 import { ROLE_LABELS } from "../config/roles.js";
 
 function RoleBadge({ role }) {
@@ -90,10 +92,14 @@ export function MyProblems({ onNavigate }) {
             {isDraft ? "Last saved " : "Submitted "}
             {formatInstant(item.updatedAt)}
           </small>
+          {!isDraft && ["submitted", "open"].includes(item.status) && (
+            <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} />
+          )}
         </div>
         <div className="table-row-actions">
           {isDraft && <span className="draft-badge">Draft</span>}
           {item.status === "cancelled" && <span className="draft-badge">Withdrawn</span>}
+          {item.status === "expired" && <span className="draft-badge">Expired</span>}
           <button
             className="text-button"
             type="button"
@@ -338,6 +344,26 @@ export function FundingPortfolio({ onNavigate }) {
   );
 }
 
+const AUDIT_PAGE_SIZE = 50;
+
+const AUDIT_FILTERS = {
+  all: { label: "All Events", types: null },
+  role_change: { label: "Role Changes", types: ["role_change"] },
+  suspension: { label: "Suspensions & Reinstatements", types: ["suspension_change"] },
+  opportunity_expired: { label: "Opportunity Expiries", types: ["opportunity_expired"] },
+};
+
+function auditBadge(item) {
+  if (item.type === "role_change" || item.action === "ROLE_CHANGE") return ["badge-role-change", "ROLE TRANSITION"];
+  if (item.type === "suspension_change" || item.action?.includes("SUSPEND")) {
+    return ["badge-suspension", item.newState ? "ACCOUNT SUSPENDED" : "ACCOUNT REINSTATED"];
+  }
+  if (item.type === "opportunity_expired") {
+    return ["badge-system", item.action === "OPPORTUNITY_FORCE_EXPIRED" ? "OPPORTUNITY FORCE-EXPIRED" : "OPPORTUNITY LAPSED"];
+  }
+  return ["badge-system", item.action || "SYSTEM EVENT"];
+}
+
 export function AdminAudit() {
   const { user } = useAuth();
   const [data, setData] = useState([]);
@@ -347,7 +373,7 @@ export function AdminAudit() {
   const [hasMore, setHasMore] = useState(false);
   const [filterType, setFilterType] = useState("all");
   const cursorRef = useRef(null);
-  const PAGE_SIZE = 25;
+  const PAGE_SIZE = AUDIT_PAGE_SIZE;
 
   const fetchAudits = async ({ append = false } = {}) => {
     if (!user?.id || !db) {
@@ -364,8 +390,8 @@ export function AdminAudit() {
     setError(null);
     try {
       const constraints = [];
-      if (filterType === "role_change") constraints.push(where("type", "==", "role_change"));
-      if (filterType === "suspension") constraints.push(where("type", "==", "suspension_change"));
+      const { types } = AUDIT_FILTERS[filterType] ?? AUDIT_FILTERS.all;
+      if (types) constraints.push(where("type", "in", types));
       constraints.push(orderBy("timestamp", "desc"));
       if (append && cursorRef.current) constraints.push(startAfter(cursorRef.current));
       constraints.push(limit(PAGE_SIZE));
@@ -391,7 +417,7 @@ export function AdminAudit() {
       <div className="table-header">
         <div>
           <h3>System Audit Trail & Governance Events</h3>
-          <p className="table-subtitle">Immutable log of role transitions, account suspensions, and platform state updates.</p>
+          <p className="table-subtitle">Immutable log of role transitions, account suspensions, opportunity expiries, and platform state updates.</p>
         </div>
         <div className="audit-header-actions">
           <select
@@ -400,9 +426,9 @@ export function AdminAudit() {
             onChange={(e) => setFilterType(e.target.value)}
             aria-label="Filter audit log entries"
           >
-            <option value="all">All Events</option>
-            <option value="role_change">Role Changes</option>
-            <option value="suspension">Suspensions & Reinstatements</option>
+            {Object.entries(AUDIT_FILTERS).map(([value, { label }]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
           <button className="secondary small" type="button" onClick={() => fetchAudits()} title="Refresh Audit Log">
             ↻ Refresh
@@ -422,67 +448,59 @@ export function AdminAudit() {
         </div>
       ) : (
         <>
-        <div className="audit-table-scroll" role="region" aria-label="Governance audit events" tabIndex={0}>
-        <table className="audit-nav-table">
-          <thead>
-            <tr>
-              <th scope="col">Event</th>
-              <th scope="col">Summary</th>
-              <th scope="col">When</th>
-            </tr>
-          </thead>
-          <tbody>
-          {data.map((item) => {
-            const isRoleChange = item.type === "role_change" || item.action === "ROLE_CHANGE";
-            const isSuspension = item.type === "suspension_change" || item.action?.includes("SUSPEND");
-            const dateStr = item.timestamp?.toDate
-              ? formatInstant(item.timestamp)
-              : item.createdAt?.toDate
-              ? formatInstant(item.createdAt)
-              : "Recent";
-            const eventLabel = isRoleChange
-              ? "ROLE TRANSITION"
-              : isSuspension
-                ? item.newState
-                  ? "ACCOUNT SUSPENDED"
-                  : "ACCOUNT REINSTATED"
-                : item.action || "SYSTEM EVENT";
-            const summary = isRoleChange
-              ? `${item.actorName || item.actor} → ${item.targetName || item.targetAddress}`
-              : isSuspension
-                ? `${item.actorName || item.actor} ${item.newState ? "suspended" : "reinstated"} ${item.targetName || item.targetAddress}`
-                : (item.title || item.action || "Audit Record");
+          <div className="audit-table-scroll" role="region" aria-label="Governance audit events" tabIndex={0}>
+            <table className="audit-nav-table">
+              <thead>
+                <tr>
+                  <th scope="col">Event</th>
+                  <th scope="col">Summary</th>
+                  <th scope="col">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((item) => {
+                  const [badgeClass, eventLabel] = auditBadge(item);
+                  const isRoleChange = badgeClass === "badge-role-change";
+                  const isSuspension = badgeClass === "badge-suspension";
+                  const isExpiry = item.type === "opportunity_expired";
+                  const dateStr = item.timestamp?.toDate
+                    ? formatInstant(item.timestamp)
+                    : item.createdAt?.toDate
+                      ? formatInstant(item.createdAt)
+                      : "Recent";
+                  const summary = isExpiry
+                    ? item.targetName || item.targetId || item.title || "Opportunity"
+                    : isRoleChange
+                      ? `${item.actorName || item.actor} → ${item.targetName || item.targetAddress}`
+                      : isSuspension
+                        ? `${item.actorName || item.actor} ${item.newState ? "suspended" : "reinstated"} ${item.targetName || item.targetAddress}`
+                        : (item.title || item.action || "Audit Record");
 
-            return (
-              <tr className="audit-nav-row" key={item.id}>
-                <td>
-                  <span
-                    className={`audit-type-badge ${
-                      isRoleChange
-                        ? "badge-role-change"
-                        : isSuspension
-                          ? "badge-suspension"
-                          : "badge-system"
-                    }`}
-                  >
-                    {eventLabel}
-                  </span>
-                </td>
-                <td>
-                  {summary}
-                  {item.reason && <div className="table-row-meta">{item.reason}</div>}
-                </td>
-                <td>{dateStr}</td>
-              </tr>
-            );
-          })}
-          </tbody>
-        </table>
-        </div>
+                  return (
+                    <tr className="audit-nav-row" key={item.id}>
+                      <td><span className={`audit-type-badge ${badgeClass}`}>{eventLabel}</span></td>
+                      <td>
+                        {summary}
+                        {isExpiry ? (
+                          <>
+                            {item.reason && <div className="table-row-meta">Lapse reason: {expiryReasonLabel(item.reason)}.</div>}
+                            {item.targetId && <div className="table-row-meta">Reference: <code>problems/{item.targetId}</code></div>}
+                          </>
+                        ) : (
+                          item.reason && <div className="table-row-meta">{item.reason}</div>
+                        )}
+                      </td>
+                      <td>{dateStr}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         {hasMore && (
           <div className="submission-log-more">
             <button className="secondary" type="button" disabled={loadingMore} onClick={() => fetchAudits({ append: true })}>
-              {loadingMore ? "Loading more…" : "Load more"}
+              {loadingMore ? "Loading…" : "Load older events"}
             </button>
           </div>
         )}

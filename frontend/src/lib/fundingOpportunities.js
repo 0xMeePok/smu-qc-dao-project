@@ -11,6 +11,7 @@ import {
 import { db } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { expiryDateFrom } from "../config/postingCategories.js";
+import { toDate } from "./datetime.js";
 import { toPostingRecord } from "./attachments.js";
 import {
   fundingTagsFromCategories,
@@ -43,8 +44,9 @@ export { fundingOpportunityAuditPayload } from "../../../firebase/functions/oppo
 
 export function buildFundingOpportunityDocument({
   ownerId, organisation, form, attachments = [], now = new Date(),
-  status = FUNDING_STATUS_SUBMITTED,
+  status = FUNDING_STATUS_SUBMITTED, expiresAt = null,
 }) {
+  const storedExpiry = toDate(expiresAt) ?? expiryDateFrom(form.expiryDays, now);
   return {
     opportunityType: OPEN_FUNDING_TYPE,
     ownerId: trimmed(ownerId).toLowerCase(),
@@ -56,7 +58,7 @@ export function buildFundingOpportunityDocument({
     tags: fundingTagsFromCategories(form.categories),
     amount: Number(form.amount),
     currency: form.currency,
-    expiresAt: Timestamp.fromDate(expiryDateFrom(form.expiryDays, now)),
+    expiresAt: Timestamp.fromDate(storedExpiry),
     status,
     attachments: attachments.map(toPostingRecord),
     createdAt: serverTimestamp(),
