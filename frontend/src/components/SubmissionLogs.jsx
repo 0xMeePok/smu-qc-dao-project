@@ -20,6 +20,7 @@ import {
 } from "../lib/fundingOpportunityAudit.js";
 import { AuditReceipt } from "./AuditReceipt.jsx";
 import { AuditDetailPane } from "./AuditDetailPane.jsx";
+import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 const PAGE_SIZE = 25;
 const MAX_FILTER_SCANS = 8;
@@ -35,22 +36,6 @@ function StatusBadge({ status }) {
   return (
     <span className={`submission-status-badge badge-${status}`}>
       {STATUS_LABELS[status] || status}
-    </span>
-  );
-}
-
-function AuditStatusBadge({ audit }) {
-  if (!audit) return <span className="submission-status-badge badge-none">No receipt</span>;
-  const label = {
-    confirmed: "Confirmed",
-    pending: "Pending",
-    failed: "Needs attention",
-    queued: "Queued",
-    submitted: "Submitted",
-  }[audit.status] || audit.status;
-  return (
-    <span className={`submission-status-badge badge-audit-${audit.status || "none"}`}>
-      {label}
     </span>
   );
 }
@@ -299,7 +284,7 @@ function SubmissionLogs({ kind }) {
                   <div className="table-row-meta"><code>problems/{item.id}</code></div>
                 </td>
                 <td>{item.organisation || "—"}</td>
-                <td><AuditStatusBadge audit={item.audit} /></td>
+                <td><VerifiedBadge audit={item.audit} recordStatus={item.status} /></td>
                 <td>{formatInstant(item.createdAt)}</td>
                 <td>
                   <button type="button" className="secondary small" onClick={() => setSelected(item)}>
