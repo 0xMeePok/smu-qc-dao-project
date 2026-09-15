@@ -42,6 +42,10 @@ service firebase.storage {
     // of the budget rather than a whole read of its own.
     function isActiveMember() {
       let user = firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+      return activeProfile(user);
+    }
+
+    function activeProfile(user) {
       return isSignedIn()
         && user != null
         && !user.data.get('suspended', false)
@@ -61,6 +65,16 @@ service firebase.storage {
     // world on the strength of someone else's posting being public.
     function attachmentRecord(collectionName, recordId) {
       return firestore.get(/databases/(default)/documents/$(collectionName)/$(recordId));
+    }
+
+    // One profile read contains both the session gate and moderation role. An
+    // ordinary reader needs at most one further record lookup; do not fetch the
+    // profile again just to test admin authority (Storage's hard limit is two).
+    function canReadAttachment(scope, recordId, ownerId) {
+      let user = attachmentRecord('users', request.auth.uid);
+      return activeProfile(user)
+        && (user.data.get('role', 0) == 1 || isWallet(ownerId)
+          || (scope == 'problems' ? postingIsPublished(recordId, ownerId) : proposalReader(recordId, ownerId)));
     }
 
     function postingIsPublished(problemId, ownerId) {
@@ -172,8 +186,7 @@ service firebase.storage {
       // TWO reads at most: the profile, then the posting. The owner check is a
       // path comparison and costs nothing, and it is evaluated first so an owner
       // reading their own draft never needs the posting lookup.
-      allow read: if isActiveMember()
-        && (isWallet(ownerId) || postingIsPublished(problemId, ownerId));
+      allow read: if canReadAttachment('problems', problemId, ownerId);
 
       // CREATE ONLY - a stored attachment is immutable for its whole life.
       //
@@ -241,7 +254,7 @@ service firebase.storage {
     }
 
     match /proposals/{ownerId}/{proposalId}/{fileName} {
-      allow read: if isActiveMember() && (isWallet(ownerId) || proposalReader(proposalId, ownerId));
+      allow read: if canReadAttachment('proposals', proposalId, ownerId);
       // Create takes the same gate as delete: submission freezes the prefix, so
       // there is no window in which an id can be re-created with other bytes.
       allow create: if resource == null && isWallet(ownerId) && isActiveMember()

@@ -37,6 +37,7 @@ import {
   receiptForWrite,
 } from "../lib/fundingOpportunityAudit.js";
 import { canEditOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
+import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { auditErrorMessage, messageForFirebaseError, messageForPublicationSaveError } from "../lib/errors.js";
 
 const EMPTY_FORM = {
@@ -337,6 +338,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
     setSaveFailed(false);
     setConfirmedAudit(null);
     try {
+      if (editing && problemMatchingLocked({ matching: (await getMockMatching(opportunityId)).matching })) {
+        throw new Error("Funding or matching has started. This opportunity can no longer be edited.");
+      }
       const record = pendingRecordRef.current ?? buildFundingOpportunityDocument({
         ownerId: address,
         organisation,

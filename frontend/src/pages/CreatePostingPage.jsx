@@ -36,6 +36,7 @@ import {
   receiptForWrite,
 } from "../lib/postingAudit.js";
 import { canEditOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
+import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 
 /**
@@ -369,6 +370,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
     setSaveFailed(false);
     setConfirmedAudit(null);
     try {
+      if (editing && problemMatchingLocked({ matching: (await getMockMatching(postingId)).matching })) {
+        throw new Error("Funding or matching has started. This opportunity can no longer be edited.");
+      }
       const record = pendingRecordRef.current ?? buildPostingDocument({
         ownerId: address,
         organisation,

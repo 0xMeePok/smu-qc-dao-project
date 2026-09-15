@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([disabled])';
 
 /**
  * Dialog shell shared by every modal.
@@ -18,8 +18,14 @@ export function Modal({ labelledBy, describedBy, onDismiss, className = "", init
   const dialogRef = useRef(null);
 
   useEffect(() => {
-    const target = initialFocusRef?.current ?? dialogRef.current?.querySelector(FOCUSABLE);
+    const opener = document.activeElement;
+    const target = initialFocusRef?.current ?? dialogRef.current?.querySelector(FOCUSABLE) ?? dialogRef.current;
     target?.focus();
+    return () => {
+      // Restore keyboard context on Escape, Cancel and successful submission,
+      // but do not focus a trigger removed by navigation while the dialog was open.
+      if (opener?.isConnected) opener.focus?.({ preventScroll: true });
+    };
   }, [initialFocusRef]);
 
   useEffect(() => {
@@ -39,7 +45,11 @@ export function Modal({ labelledBy, describedBy, onDismiss, className = "", init
     if (event.key !== "Tab") return;
 
     const focusable = dialogRef.current?.querySelectorAll(FOCUSABLE);
-    if (!focusable?.length) return;
+    if (!focusable?.length) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
 
@@ -61,6 +71,7 @@ export function Modal({ labelledBy, describedBy, onDismiss, className = "", init
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
         ref={dialogRef}
+        tabIndex={-1}
       >
         {children}
       </div>

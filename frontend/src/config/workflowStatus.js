@@ -44,7 +44,9 @@ function titleStatus(status) {
  * while the posting is still in a response-open state, so funded or cancelled
  * work is not relabelled after the original window closes.
  */
-export function opportunityStatusLabel(status, { expiresAt, now } = {}) {
+export function opportunityStatusLabel(status, { expiresAt, now, matching } = {}) {
+  if (matching?.status === "awaiting_confirmation") return "Awaiting creator confirmation";
+  if (matching?.status === "confirmed") return "Match confirmed";
   const key = String(status ?? "").trim().toLowerCase();
   if (RESPONSE_OPEN_STATUSES.has(key) && isExpired(expiresAt, now)) return "Expired";
   return OPPORTUNITY_STATUS_LABELS[key] || titleStatus(status) || "Open";

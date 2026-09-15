@@ -74,7 +74,12 @@ for (const flow of cases) {
       expect(await screen.findByText("On-chain mismatch")).toBeTruthy();
       expect(screen.getByRole("alert").textContent).toContain("Mismatch detected");
       expect(screen.getAllByText(flow.prepare(mocks.server).contentHash).length).toBeGreaterThan(0);
-      expect(mocks.getServer).toHaveBeenCalledTimes(2);
+      // Proposal reads also fetch the parent problem's matching state. Each
+      // verification must still fetch the audited document itself from server.
+      expect(mocks.getServer.mock.calls.filter(([ref]) => ref.id === base.id)).toHaveLength(2);
+      if (flow.name === "proposal") {
+        expect(mocks.getServer.mock.calls.filter(([ref]) => ref.id === base.problemId)).toHaveLength(2);
+      }
       expect(mocks.getCached.mock.calls.every(([ref]) => ref.collection === "opportunityMetrics")).toBe(true);
       expect(adapters.writeContract).not.toHaveBeenCalled();
     });

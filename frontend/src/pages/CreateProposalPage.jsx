@@ -25,6 +25,7 @@ import { SubmissionError } from "../components/SubmissionError.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { useAccount } from "wagmi";
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../lib/proposalValidation.js";
+import { getMockMatching, proposalMatchingLocked } from "../lib/matching.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
@@ -235,6 +236,14 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     setSaveFailed(false);
     setConfirmedAudit(null);
     try {
+      if (editing) {
+        const current = await getMockMatching(posting.id, { proposalId });
+        const candidate = current.proposals.find((item) => item.id === proposalId);
+        if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
+          || ["awaiting_confirmation", "confirmed"].includes(current.matching.status)) {
+          throw new Error("Funding or matching has started. This proposal can no longer be edited.");
+        }
+      }
       const record = buildProposalDocument({
         researcherId: user.id, posting, form, attachments,
       });
@@ -283,8 +292,8 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   }
   // Nothing may be edited once evaluation begins; firestore.rules enforces the
   // same boundary, so a stale tab cannot write past it either.
-  if (editProposalId && record && !["draft", "submitted"].includes(record.status)) {
-    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">Its status is {record.status}. A proposal is locked once evaluation begins.</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View proposal</button></section>;
+  if (editProposalId && record && (proposalMatchingLocked(record) || !["draft", "submitted"].includes(record.status))) {
+    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{proposalMatchingLocked(record) ? "Funding or matching has started. The proposal is locked to preserve the funders’ commitment." : `Its status is ${record.status}. A proposal is locked once evaluation begins.`}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View proposal</button></section>;
   }
   const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
   const blocked = proposalBlockReason(posting, now);

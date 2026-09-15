@@ -15,6 +15,11 @@ import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { PostingProposals } from "../components/PostingProposals.jsx";
+import { MatchingPanel } from "../components/MatchingPanel.jsx";
+import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
+import { isModerated } from "../lib/moderation.js";
+import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
+import { ReportableComments } from "../components/ReportableComments.jsx";
 import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
 import { formatInstant, isExpired } from "../lib/datetime.js";
@@ -72,7 +77,9 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate }) {
               key={action.id}
               className={action.kind === "primary" ? "primary" : "secondary"}
               type="button"
-              onClick={() => onNavigate(action.route)}
+              onClick={() => action.id === "fund"
+                ? document.getElementById("proposal-funding")?.scrollIntoView({ behavior: "smooth", block: "start" })
+                : onNavigate(action.route)}
             >
               {action.label}
             </button>
@@ -123,6 +130,13 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState("");
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
+
+  useEffect(() => {
+    if (confirm && problemMatchingLocked(posting) && !anchoredWithdrawal && !withdrawing) {
+      setConfirm(false);
+      setError("Funding or matching has started. This opportunity can no longer be withdrawn.");
+    }
+  }, [confirm, posting?.matching, anchoredWithdrawal, withdrawing]);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,7 +206,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   };
 
   const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
-  const canWithdraw = ownsPosting && ["submitted", "open", "in_review"].includes(posting?.status);
+  const canWithdraw = ownsPosting && !problemMatchingLocked(posting) && ["submitted", "open", "in_review"].includes(posting?.status);
 
   const withdraw = async () => {
     const withdrawalReason = (anchoredWithdrawal?.reason ?? reason).trim();
@@ -219,6 +233,13 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     let anchored = anchoredWithdrawal;
     try {
       if (!anchored) {
+        const current = await getMockMatching(posting.id);
+        if (problemMatchingLocked({ matching: current.matching })) {
+          setPosting((previous) => ({ ...previous, matching: current.matching }));
+          setConfirm(false);
+          setError("Funding or matching has started. This opportunity can no longer be withdrawn.");
+          return;
+        }
         await anchorOpportunityWithdrawal(posting, { account: connectedAddress, reason: withdrawalReason });
         anchored = { reason: withdrawalReason };
         setAnchoredWithdrawal(anchored);
@@ -310,9 +331,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <span className="eyebrow">
               {isOpenFunding ? "Open funding opportunity" : "Funded business problem"}
             </span>
-            <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt })}</span>
+            <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
           </div>
           <h1>{posting.title}</h1>
+          <ContentModerationNotice record={posting} />
 
           {isOpenFunding ? (
             <>
@@ -364,6 +386,8 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             proposalCount={proposalCount}
             onNavigate={onNavigate}
           />
+
+          {posting.status !== "draft" && !isModerated(posting) && <><MatchingPanel problemId={posting.id} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} /><ReportContentButton contentType="problem" contentId={posting.id} /><ReportableComments problemId={posting.id} /></>}
 
           <AuditReceipt
             audit={audit}

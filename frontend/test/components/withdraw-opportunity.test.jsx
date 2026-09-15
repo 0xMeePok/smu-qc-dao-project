@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const account = `0x${"a".repeat(40)}`;
 const mocks = vi.hoisted(() => ({
+  matching: vi.fn(),
   posting: null,
   withdraw: vi.fn(),
   anchorWithdrawal: vi.fn(),
@@ -11,6 +12,10 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
 
+vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
+  ...await importOriginal(),
+  getMockMatching: (...args) => mocks.matching(...args),
+}));
 vi.mock("wagmi", () => ({
   useAccount: () => ({ isConnected: mocks.connected, address: account }),
 }));
@@ -59,6 +64,11 @@ const problem = {
 };
 
 beforeEach(() => {
+  mocks.matching.mockReset().mockResolvedValue({
+    matching: { status: "funding", totalFundedMinor: 0 },
+    proposals: [{ id: "proposal1", status: "submitted", fundedAmount: 0, matching: { status: "funding" } }],
+    contributions: [],
+  });
   mocks.posting = { ...problem };
   mocks.connected = true;
   mocks.navigate.mockReset();
@@ -68,6 +78,19 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("withdrawing a posted opportunity", () => {
+  it("prevents wallet signing when a contribution arrives after the withdrawal dialog opens", async () => {
+    render(<PostingDetailPage postingId="posting1" onNavigate={mocks.navigate} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw problem statement" }));
+    await screen.findByRole("heading", { name: "Withdraw this problem statement?" });
+    fireEvent.change(screen.getByLabelText("Why are you withdrawing?"), { target: { value: "The budget was withdrawn." } });
+    mocks.matching.mockResolvedValue({ matching: { status: "funding", totalFundedMinor: 1000 }, proposals: [], contributions: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and withdraw" }));
+    expect(await screen.findByText("Funding or matching has started. This opportunity can no longer be withdrawn.")).toBeTruthy();
+    expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("will not withdraw without a reason, then signs before saving", async () => {
     render(<PostingDetailPage postingId="posting1" onNavigate={mocks.navigate} />);
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw problem statement" }));
