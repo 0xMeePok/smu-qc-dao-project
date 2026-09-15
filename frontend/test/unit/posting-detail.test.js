@@ -43,6 +43,7 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.equal(opportunityStatusLabel("submitted", { expiresAt: PAST, now: NOW }), "Expired");
     assert.equal(opportunityStatusLabel("funded", { expiresAt: PAST, now: NOW }), "Funded");
     assert.equal(opportunityStatusLabel("cancelled", { expiresAt: PAST, now: NOW }), "Withdrawn");
+    assert.equal(opportunityStatusLabel("expired", { expiresAt: PAST, now: NOW }), "Expired");
   });
 
   it("[FUT-OPD-121] uses the same opportunity statuses firestore.rules will accept", () => {
@@ -52,7 +53,7 @@ describe("[QCDAO-54] view posting detail page", () => {
       .split("}")[0];
     const stored = Object.values(OPPORTUNITY_STATUSES);
     assert.deepEqual(stored, [
-      "draft", "submitted", "open", "in_review", "matched", "funded", "completed", "cancelled",
+      "draft", "submitted", "open", "in_review", "matched", "funded", "completed", "cancelled", "expired",
     ]);
     for (const status of stored) {
       assert.ok(allowed.includes(`'${status}'`), `${status} is missing from firestore.rules`);
@@ -85,6 +86,9 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.ok(actionIds(OPEN_POSTING, PARTICIPANT).includes("fund"));
     assert.ok(!actionIds(OPEN_POSTING, { ...PARTICIPANT, id: OWNER }).includes("fund"));
     assert.ok(!actionIds({ ...OPEN_POSTING, status: "completed" }, PARTICIPANT).includes("fund"));
+    assert.ok(!actionIds({ ...OPEN_POSTING, status: "expired" }, PARTICIPANT).includes("fund"));
+    assert.ok(!actionIds({ ...OPEN_POSTING, expiresAt: PAST }, PARTICIPANT).includes("fund"));
+    assert.ok(!actionIds({ ...OPEN_POSTING, status: "in_review", expiresAt: PAST }, PARTICIPANT).includes("evaluate"));
 
     assert.ok(!actionIds(OPEN_POSTING, PARTICIPANT).includes("evaluate"));
     assert.ok(actionIds({ ...OPEN_POSTING, status: "in_review" }, PARTICIPANT).includes("evaluate"));
@@ -141,4 +145,12 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.ok(paths.includes("problemId+researcherId"));
     assert.ok(paths.includes("problemId+postingOwnerId"));
   });
+});
+
+it('preserves mock proposal funding after the submission cutoff but pauses it during mutual approval', () => {
+  const posting = { ...OPEN_POSTING, expiresAt: PAST, matching: { mode: 'mock', status: 'open' } };
+  assert.ok(actionIds(posting, PARTICIPANT).includes('fund'));
+  for (const status of ['awaiting_confirmation', 'confirmed']) {
+    assert.ok(!actionIds({ ...posting, matching: { mode: 'mock', status } }, PARTICIPANT).includes('fund'));
+  }
 });

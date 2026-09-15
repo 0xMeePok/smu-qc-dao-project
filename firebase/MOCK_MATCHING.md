@@ -13,6 +13,8 @@ This implementation follows Jira QCDAO-81–89 and the requested server-side moc
 
 Funding alone does not constitute matching. The parties must be different accounts. The listing expiry is the deadline for submitting new proposals. Existing proposals remain fundable and selectable after that deadline while the problem remains open. The full seven-day confirmation window also remains available if the submission deadline passes during it.
 
+Once `problems.matching.mode` is `mock`, scheduled and manual legacy opportunity expiry leave settlement to the matching service. This prevents the legacy escrow workflow from expiring a pending match or stranding mock contributions. Opportunities without an initialized mock workflow retain the normal posting-expiry behavior.
+
 ## Money and state
 
 All amounts are simulated. No wallet transaction, token transfer, actual escrow, payout or real refund occurs. `mockFunding` is a separate server-owned ledger. Its records never enter `funding`, verified marketplace funding totals or chain audit receipts. Amounts have two decimal places; contributions exceeding the remaining target are rejected.

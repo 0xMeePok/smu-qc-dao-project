@@ -7,10 +7,12 @@ import { useDraftGuard } from "../lib/draftGuard.js";
 import { useSession } from "../context/SessionContext.jsx";
 import {
   CURRENCIES,
+  DEFAULT_EXPIRY_DAYS,
   EXPIRY_WINDOWS,
   MAX_CATEGORIES,
   POSTING_CATEGORIES,
   categoryLabel,
+  extendExpiryDate,
   expiryDateFrom,
 } from "../config/postingCategories.js";
 import {
@@ -35,7 +37,7 @@ import {
   readPostingAudit,
   receiptForWrite,
 } from "../lib/postingAudit.js";
-import { canEditOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
+import { canEditOpportunity, isExpiredOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 
@@ -70,7 +72,8 @@ const EMPTY_FORM = {
   categories: [],
   amount: "",
   currency: CURRENCIES[0],
-  expiryDays: 90,
+  expiryDays: DEFAULT_EXPIRY_DAYS,
+  expiryExtensionDays: "",
 };
 
 function DraftStatus({ savedAt, saving }) {
@@ -161,6 +164,7 @@ function formFromPosting(posting) {
     amount: posting.amount ? String(posting.amount) : "",
     currency: posting.currency ?? EMPTY_FORM.currency,
     expiryDays: windowFromExpiry(posting.expiresAt, posting.createdAt),
+    expiryExtensionDays: "",
   };
 }
 
@@ -225,7 +229,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
         }
         if (editPostingId) {
           if (!canEditOpportunity(posting, address)) {
-            setEditBlocked(posting.status === "draft"
+            setEditBlocked(isExpiredOpportunity(posting)
+              ? "This posting has expired and can no longer be edited."
+              : posting.status === "draft"
               ? "Resume this posting from My Problems — drafts are not edited here."
               : `This posting can no longer be edited. Its status is ${posting.status}.`);
             return;
@@ -293,13 +299,14 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
 
   // Same UTC-to-the-second format the posting will be stored and displayed in, so
   // what the form promises and what the detail page shows cannot disagree.
-  const expiryPreview = useMemo(
-    () => formatInstant(expiryDateFrom(
-      form.expiryDays,
-      editing ? (toDate(existing?.createdAt) ?? new Date()) : new Date(),
-    )),
-    [form.expiryDays, editing, existing?.createdAt],
-  );
+  const expiryPreview = useMemo(() => {
+    if (!editing) return formatInstant(expiryDateFrom(form.expiryDays, new Date()));
+    const currentExpiry = toDate(existing?.expiresAt);
+    const extension = form.expiryExtensionDays
+      ? extendExpiryDate(currentExpiry, form.expiryExtensionDays)
+      : currentExpiry;
+    return formatInstant(extension ?? currentExpiry);
+  }, [form.expiryDays, form.expiryExtensionDays, editing, existing?.expiresAt]);
 
   // Keeps only digits, so separators from a pasted "1,000,000" are stripped rather
   // than reaching Number() as NaN, and letters cannot be typed at all.
@@ -380,7 +387,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
         attachments,
         ...(editing ? {
           status: existing?.status ?? "submitted",
-          now: toDate(existing?.createdAt) ?? new Date(),
+          expiresAt: form.expiryExtensionDays
+            ? extendExpiryDate(existing?.expiresAt, form.expiryExtensionDays)
+            : existing?.expiresAt,
         } : {}),
       });
       pendingRecordRef.current = record;
@@ -721,7 +730,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
                 {errors.currency && <p className="field-error" role="alert">{errors.currency}</p>}
               </div>
             </div>
-            <div className={`field ${errors.expiryDays ? "field-invalid" : ""}`}>
+            {!editing && <div className={`field ${errors.expiryDays ? "field-invalid" : ""}`}>
               <label htmlFor="expiryDays">Open for</label>
               <p className="field-hint">Closes on {expiryPreview}.</p>
               <select id="expiryDays" name="expiryDays" value={form.expiryDays} onChange={update}>
@@ -730,11 +739,28 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
                 ))}
               </select>
               {errors.expiryDays && <p className="field-error" role="alert">{errors.expiryDays}</p>}
-            </div>
+            </div>}
           </Section>
 
+          {editing && <Section
+            step="6"
+            legend="Extend the response window"
+            hint="The current deadline remains unchanged unless you add a documented window. Extensions are added to the current UTC deadline and are available only while the posting is live."
+          >
+            <div className={`field ${errors.expiryExtensionDays ? "field-invalid" : ""}`}>
+              <label htmlFor="expiryExtensionDays">Extend by</label>
+              <p className="field-hint">{form.expiryExtensionDays ? `New deadline: ${expiryPreview}.` : `Current deadline: ${expiryPreview}.`}</p>
+              <select id="expiryExtensionDays" name="expiryExtensionDays" value={form.expiryExtensionDays} onChange={update}>
+                <option value="">Keep the current deadline</option>
+                {EXPIRY_WINDOWS.map((window) => (
+                  <option key={window.value} value={window.value}>{window.label}</option>
+                ))}
+              </select>
+              {errors.expiryExtensionDays && <p className="field-error" role="alert">{errors.expiryExtensionDays}</p>}
+            </div>
+          </Section>}
 
-          <Section step="6" legend="Supporting documents" hint="Optional. PDF only, up to 10 MB each.">
+          <Section step={editing ? "7" : "6"} legend="Supporting documents" hint="Optional. PDF only, up to 10 MB each.">
             <AttachmentUploader
               ownerId={address}
               problemId={postingId}

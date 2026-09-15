@@ -2,11 +2,13 @@ import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { ROLES } from "../config/roles.js";
 import { OPPORTUNITY_STATUSES } from "../config/workflowStatus.js";
 import { proposalBlockReason } from "./proposalValidation.js";
+import { isExpired } from "./datetime.js";
 
 const FUND_CLOSED_STATUSES = new Set([
   OPPORTUNITY_STATUSES.DRAFT,
   OPPORTUNITY_STATUSES.CANCELLED,
   OPPORTUNITY_STATUSES.COMPLETED,
+  OPPORTUNITY_STATUSES.EXPIRED,
 ]);
 
 const EVALUABLE_STATUSES = new Set([
@@ -41,6 +43,7 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
   const owns = sameWallet(user?.id, posting.ownerId);
   const status = postingStatus(posting);
   const blocked = proposalBlockReason(posting);
+  const deadlinePassed = isExpired(posting.expiresAt);
   const actions = [];
 
   if (!blocked && roles.includes(ROLES.RESEARCHER)) {
@@ -65,6 +68,7 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
     && !owns
     && !FUND_CLOSED_STATUSES.has(status)
     && !["awaiting_confirmation", "confirmed"].includes(posting.matching?.status)
+    && (!deadlinePassed || posting.matching?.mode === "mock")
   ) {
     actions.push({
       id: "fund",
@@ -74,7 +78,7 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
     });
   }
 
-  if (isAuthenticated && roles.includes(ROLES.EVALUATOR) && EVALUABLE_STATUSES.has(status)) {
+  if (isAuthenticated && roles.includes(ROLES.EVALUATOR) && EVALUABLE_STATUSES.has(status) && !deadlinePassed) {
     actions.push({
       id: "evaluate",
       label: "Evaluate",

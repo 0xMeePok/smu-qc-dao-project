@@ -61,7 +61,7 @@ async function readContext({ db, tx, problemId, uid, proposalId, cursor }) {
   if (uid && (!profile?.exists || profile.data().suspended)) fail("permission-denied", "Complete your active member profile first.");
   if (!problem.exists) fail("not-found", "Problem not found.");
   if (uid && moderated(problem.data())) fail("permission-denied", "This problem is under moderation.");
-  if (uid && problem.data().ownerId !== uid && !["submitted", "open", "cancelled"].includes(problem.data().status)) {
+  if (uid && problem.data().ownerId !== uid && !["submitted", "open", "cancelled", "expired"].includes(problem.data().status)) {
     fail("permission-denied", "This problem is not available.");
   }
   if (funding.size > MAX_CONTRIBUTIONS) {
