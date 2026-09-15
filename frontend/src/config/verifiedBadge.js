@@ -10,6 +10,10 @@ export const VERIFIED_STATES = Object.freeze({
   NOT_ANCHORED: "not-anchored",
 });
 
+/** One-sentence explanation reused on every verified badge tooltip. */
+export const VERIFIED_BADGE_HINT =
+  "Hashes, timestamps, and the submitting wallet are recorded on Arbitrum Sepolia; the record body, attachments, and workflow stay off-chain in Firestore.";
+
 export const VERIFIED_BADGE_COPY = Object.freeze({
   [VERIFIED_STATES.VERIFIED]: {
     label: "Verified",

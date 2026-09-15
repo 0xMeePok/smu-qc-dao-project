@@ -1,5 +1,7 @@
+import { useId } from "react";
 import {
   VERIFIED_BADGE_COPY,
+  VERIFIED_BADGE_HINT,
   VERIFIED_STATES,
   verifiedStateFromAudit,
 } from "../config/verifiedBadge.js";
@@ -49,22 +51,44 @@ const STATE_ICONS = {
 
 /**
  * Compact verification indicator. Pass a stored audit receipt, or an explicit
- * state when the caller has already mapped it.
+ * state when the caller has already mapped it. Hover, focus, or tap reveals
+ * what was anchored versus what stays off-chain; Escape dismisses it.
  */
 export function VerifiedBadge({ audit, recordStatus, state, className = "" }) {
+  const tooltipId = useId();
   const resolved = VERIFIED_BADGE_COPY[state]
     ? state
     : verifiedStateFromAudit(audit, { recordStatus });
   const copy = VERIFIED_BADGE_COPY[resolved];
   const Icon = STATE_ICONS[resolved];
 
+  const dismissOnEscape = (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.blur();
+  };
+
+  const keepParentFromActivating = (event) => {
+    event.stopPropagation();
+  };
+
   return (
-    <span
-      className={`verified-badge verified-badge-${resolved}${className ? ` ${className}` : ""}`}
-      aria-label={copy.ariaLabel}
-    >
-      <Icon />
-      <span className="verified-badge-label">{copy.label}</span>
+    <span className={`verified-badge-wrap${className ? ` ${className}` : ""}`}>
+      <button
+        type="button"
+        className={`verified-badge verified-badge-${resolved}`}
+        aria-label={copy.ariaLabel}
+        aria-describedby={tooltipId}
+        onKeyDown={dismissOnEscape}
+        onClick={keepParentFromActivating}
+      >
+        <Icon />
+        <span className="verified-badge-label">{copy.label}</span>
+      </button>
+      <span className="verified-badge-tooltip" id={tooltipId} role="tooltip">
+        {VERIFIED_BADGE_HINT}
+      </span>
     </span>
   );
 }
