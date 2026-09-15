@@ -1,4 +1,5 @@
-import { useId } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   VERIFIED_BADGE_COPY,
   VERIFIED_BADGE_HINT,
@@ -56,17 +57,50 @@ const STATE_ICONS = {
  */
 export function VerifiedBadge({ audit, recordStatus, state, className = "" }) {
   const tooltipId = useId();
+  const wrapRef = useRef(null);
+  const tooltipRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
   const resolved = VERIFIED_BADGE_COPY[state]
     ? state
     : verifiedStateFromAudit(audit, { recordStatus });
   const copy = VERIFIED_BADGE_COPY[resolved];
   const Icon = STATE_ICONS[resolved];
 
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const trigger = wrapRef.current;
+      const tooltip = tooltipRef.current;
+      if (!trigger || !tooltip) return;
+      const rect = trigger.getBoundingClientRect();
+      const tip = tooltip.getBoundingClientRect();
+      const gap = 6;
+      const margin = 8;
+      let top = rect.top - tip.height - gap;
+      let left = rect.left;
+      if (top < margin) top = rect.bottom + gap;
+      if (left + tip.width > window.innerWidth - margin) {
+        left = window.innerWidth - tip.width - margin;
+      }
+      if (left < margin) left = margin;
+      setCoords({ top, left });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+
   const dismissOnEscape = (event) => {
     if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.blur();
+    setOpen(false);
   };
 
   const keepParentFromActivating = (event) => {
@@ -74,7 +108,12 @@ export function VerifiedBadge({ audit, recordStatus, state, className = "" }) {
   };
 
   return (
-    <span className={`verified-badge-wrap${className ? ` ${className}` : ""}`}>
+    <span
+      ref={wrapRef}
+      className={`verified-badge-wrap${className ? ` ${className}` : ""}`}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
       <button
         type="button"
         className={`verified-badge verified-badge-${resolved}`}
@@ -82,13 +121,24 @@ export function VerifiedBadge({ audit, recordStatus, state, className = "" }) {
         aria-describedby={tooltipId}
         onKeyDown={dismissOnEscape}
         onClick={keepParentFromActivating}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
       >
         <Icon />
         <span className="verified-badge-label">{copy.label}</span>
       </button>
-      <span className="verified-badge-tooltip" id={tooltipId} role="tooltip">
-        {VERIFIED_BADGE_HINT}
-      </span>
+      {createPortal(
+        <span
+          ref={tooltipRef}
+          className={`verified-badge-tooltip${open ? " is-open" : ""}`}
+          id={tooltipId}
+          role="tooltip"
+          style={{ top: coords.top, left: coords.left }}
+        >
+          {VERIFIED_BADGE_HINT}
+        </span>,
+        document.body,
+      )}
     </span>
   );
 }

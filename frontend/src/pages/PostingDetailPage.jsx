@@ -38,6 +38,7 @@ import {
 } from "../config/workflowStatus.js";
 import { postingActions } from "../lib/postingActions.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
+import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { shortenAddress } from "../lib/chain.js";
 import { canEditOpportunity } from "../lib/opportunityEdit.js";
 import { OpportunityRevisionTrail } from "../components/OpportunityRevisionTrail.jsx";
@@ -325,7 +326,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <span className="eyebrow">
               {isOpenFunding ? "Open funding opportunity" : "Funded business problem"}
             </span>
-            <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt })}</span>
+            <div className="trust-status-row">
+              <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt })}</span>
+              <VerifiedBadge audit={posting.audit} recordStatus={posting.status} />
+            </div>
           </div>
           <h1>{posting.title}</h1>
 

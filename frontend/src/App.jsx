@@ -34,6 +34,7 @@ import { listPublishedPostings } from "./lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
 import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
 import { ExpiryCountdown } from "./components/ExpiryCountdown.jsx";
+import { VerifiedBadge } from "./components/VerifiedBadge.jsx";
 import { opportunityStatusLabel } from "./config/workflowStatus.js";
 import {
   DEFAULT_DISCOVERY_FILTERS,
@@ -315,7 +316,13 @@ function OpportunityCard({ item }) {
   const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt });
 
   return (
-    <button className="opportunity-card" type="button" onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}>
+    <div className="opportunity-card">
+      <button
+        className="opportunity-card-hit"
+        type="button"
+        onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}
+        aria-label={`View ${item.title}`}
+      />
       <span className="opportunity-mark">
         <OpportunityIcon type={item.type} />
       </span>
@@ -337,7 +344,10 @@ function OpportunityCard({ item }) {
         </span>
       </div>
       <div className="opportunity-activity">
-        <span className="status-dot">{statusLabel}</span>
+        <div className="trust-status-row">
+          <span className="status-dot">{statusLabel}</span>
+          <VerifiedBadge audit={item.audit} recordStatus={item.status} />
+        </div>
         <small>{proposalLabel}</small>
       </div>
       <div className="opportunity-funding">
@@ -353,7 +363,7 @@ function OpportunityCard({ item }) {
       <span className="row-arrow">
         <ArrowIcon />
       </span>
-    </button>
+    </div>
   );
 }
 

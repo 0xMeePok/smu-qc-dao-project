@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatInstant } from "../lib/datetime.js";
 import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
+import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 function proposalStatusLabel(status) {
   return String(status ?? "")
@@ -23,6 +24,7 @@ function Row({ item, onNavigate }) {
       </div>
       <div className="table-row-actions">
         {isDraft ? <span className="draft-badge">Draft</span> : null}
+        <VerifiedBadge audit={item.audit} recordStatus={item.status} />
         <button
           className="text-button"
           type="button"

@@ -10,6 +10,7 @@ import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { expiryReasonLabel } from "../config/workflowStatus.js";
 import { ROLE_LABELS } from "../config/roles.js";
+import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 function RoleBadge({ role }) {
   return <span className="role-chip">{ROLE_LABELS[role] || role}</span>;
@@ -100,6 +101,7 @@ export function MyProblems({ onNavigate }) {
           {isDraft && <span className="draft-badge">Draft</span>}
           {item.status === "cancelled" && <span className="draft-badge">Withdrawn</span>}
           {item.status === "expired" && <span className="draft-badge">Expired</span>}
+          <VerifiedBadge audit={item.audit} recordStatus={item.status} />
           <button
             className="text-button"
             type="button"
