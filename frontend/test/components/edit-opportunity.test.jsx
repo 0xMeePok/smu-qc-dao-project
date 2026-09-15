@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const account = `0x${"a".repeat(40)}`;
 const mocks = vi.hoisted(() => ({
+  matching: vi.fn(),
   posting: null,
   update: vi.fn(),
   updateFunding: vi.fn(),
@@ -12,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
 
+vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
+  ...await importOriginal(),
+  getMockMatching: (...args) => mocks.matching(...args),
+}));
 vi.mock("wagmi", () => ({
   useAccount: () => ({ isConnected: true, address: account }),
 }));
@@ -108,6 +113,11 @@ const live = {
 };
 
 beforeEach(() => {
+  mocks.matching.mockReset().mockResolvedValue({
+    matching: { status: "funding", totalFundedMinor: 0 },
+    proposals: [{ id: "proposal1", status: "submitted", fundedAmount: 0, matching: { status: "funding" } }],
+    contributions: [],
+  });
   mocks.posting = { ...live };
   mocks.navigate.mockReset();
   mocks.update.mockReset().mockResolvedValue({ ...live, title: "Corrected title" });
@@ -123,6 +133,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("editing a published posting", () => {
+  it("does not sign an edit when funding arrives after the form loads", async () => {
+    render(<CreatePostingPage editPostingId="posting1" onNavigate={mocks.navigate} />);
+    await screen.findByRole("heading", { name: "Edit your problem statement" });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Corrected title" } });
+    mocks.matching.mockResolvedValue({ matching: { status: "funding", totalFundedMinor: 1000 }, proposals: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and save changes" }));
+    expect(await screen.findByText(/Funding or matching has started/)).toBeTruthy();
+    expect(mocks.audit).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
   it("signs updateOpportunity before saving when no proposal has arrived", async () => {
     render(<CreatePostingPage editPostingId="posting1" onNavigate={mocks.navigate} />);
     await screen.findByRole("heading", { name: "Edit your problem statement" });
@@ -182,6 +203,18 @@ const funding = {
 };
 
 describe("editing a published funding opportunity", () => {
+  it("does not sign an edit when a proposal is selected after the form loads", async () => {
+    mocks.posting = { ...funding };
+    render(<CreateFundingOpportunityPage editOpportunityId="funding1" onNavigate={mocks.navigate} />);
+    await screen.findByRole("heading", { name: "Edit your funding opportunity" });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Corrected title" } });
+    mocks.matching.mockResolvedValue({ matching: { status: "awaiting_confirmation", totalFundedMinor: 1000 }, proposals: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and save changes" }));
+    expect(await screen.findByText(/Funding or matching has started/)).toBeTruthy();
+    expect(mocks.fundingAudit).not.toHaveBeenCalled();
+    expect(mocks.updateFunding).not.toHaveBeenCalled();
+  });
+
   it("signs updateOpportunity before saving when no proposal has arrived", async () => {
     mocks.posting = { ...funding };
     mocks.updateFunding.mockResolvedValue({ ...funding, title: "Corrected title" });

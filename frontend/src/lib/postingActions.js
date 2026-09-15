@@ -67,7 +67,8 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
     && roles.includes(ROLES.FUNDER)
     && !owns
     && !FUND_CLOSED_STATUSES.has(status)
-    && !deadlinePassed
+    && !["awaiting_confirmation", "confirmed"].includes(posting.matching?.status)
+    && (!deadlinePassed || posting.matching?.mode === "mock")
   ) {
     actions.push({
       id: "fund",

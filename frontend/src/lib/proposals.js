@@ -22,6 +22,27 @@ const proposalRef = (id) => doc(db, "proposals", id);
 const authorRef = (problemId, uid) => doc(db, "problems", problemId, "proposalAuthors", uid.toLowerCase());
 const revisionsRef = (id) => collection(db, "proposals", id, "revisions");
 
+// Unfunded siblings inherit cancellation from their parent's confirmed match.
+// This avoids an unbounded server transaction while keeping every list truthful.
+async function withMatchingState(rows, { fromServer = false } = {}) {
+  const ids = [...new Set(rows.filter((row) => row.status !== "draft").map((row) => row.problemId).filter(Boolean))];
+  const parents = new Map();
+  await Promise.all(ids.map(async (id) => {
+    try {
+      const snapshot = await (fromServer ? getDocFromServer : getDoc)(doc(db, "problems", id));
+      if (snapshot.exists()) parents.set(id, snapshot.data().matching);
+    } catch { /* Existing proposal content remains readable if its parent is unavailable. */ }
+  }));
+  return rows.map((row) => {
+    const problemMatching = parents.get(row.problemId);
+    if (!problemMatching) return row;
+    const cancelled = problemMatching.status === "confirmed" && problemMatching.proposalId !== row.id
+      && ["submitted", "under_review"].includes(row.status)
+      && !["voided", "cancelled", "declined"].includes(row.matching?.status);
+    return { ...row, problemMatching, ...(cancelled ? { matching: { ...row.matching, status: "cancelled" } } : {}) };
+  });
+}
+
 function amountOf(value) {
   const amount = Number(value);
   return Number.isFinite(amount) && amount >= 0 ? amount : 0;
@@ -71,7 +92,9 @@ export async function findProposalDraft(problemId, uid) {
 export async function findProposal(id, { fromServer = false } = {}) {
   requireFirebase();
   const snapshot = await (fromServer ? getDocFromServer : getDoc)(proposalRef(id));
-  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
+  if (!snapshot.exists()) return null;
+  const [record] = await withMatchingState([{ id: snapshot.id, ...snapshot.data() }], { fromServer });
+  return record;
 }
 
 export async function saveProposalDraft({ proposalId, researcherId, posting, form, attachments = [], exists = false }) {
@@ -173,7 +196,7 @@ export async function updateProposalReceipt({ recordId, audit }) {
 export async function listProposals(field, uid) {
   requireFirebase();
   const snapshot = await getDocs(query(collection(db, "proposals"), where(field, "==", uid.toLowerCase())));
-  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+  return withMatchingState(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
 }
 
 function proposalTime(value) {
@@ -209,7 +232,7 @@ export async function listProposalsForPosting({ problemId, viewerId, postingOwne
       byId.set(item.id, { id: item.id, ...item.data() });
     }
   }
-  return [...byId.values()].sort((left, right) => proposalTime(right.createdAt) - proposalTime(left.createdAt));
+  return withMatchingState([...byId.values()].sort((left, right) => proposalTime(right.createdAt) - proposalTime(left.createdAt)));
 }
 
 export async function listProposalRevisions(proposalId, { field = "researcherId", uid }) {

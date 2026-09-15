@@ -5,10 +5,15 @@ import { PROPOSAL_FIELDS } from "../../src/config/proposal.js";
 
 const account = `0x${"a".repeat(40)}`;
 const mocks = vi.hoisted(() => ({
+  matching: vi.fn(),
   posting: null, active: null, draft: null, record: null,
   submit: vi.fn(), saveDraft: vi.fn(), update: vi.fn(), withdraw: vi.fn(),
   find: vi.fn(), revisions: [], anchor: vi.fn(), anchorWithdrawal: vi.fn(),
   connected: true, navigate: vi.fn(), receipt: vi.fn(),
+}));
+vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
+  ...await importOriginal(),
+  getMockMatching: (...args) => mocks.matching(...args),
 }));
 vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, address: account }) }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: account } }) }));
@@ -50,6 +55,11 @@ const submittedProposal = {
   ...Object.fromEntries(PROPOSAL_FIELDS.slice(2).map(([key]) => [key, `${key} content`])),
 };
 beforeEach(() => {
+  mocks.matching.mockReset().mockResolvedValue({
+    matching: { status: "funding", totalFundedMinor: 0 },
+    proposals: [{ id: "proposal1", status: "submitted", fundedAmount: 0, matching: { status: "funding" } }],
+    contributions: [],
+  });
   window.scrollTo = vi.fn();
   Element.prototype.scrollIntoView = vi.fn();
   mocks.posting = posting; mocks.active = null; mocks.draft = null; mocks.record = null; mocks.revisions = [];
@@ -122,6 +132,17 @@ describe("saving a proposal over several sittings", () => {
 });
 
 describe("correcting a proposal before it is evaluated", () => {
+  it("does not sign an edit when funding arrives after the edit form loads", async () => {
+    render(<CreateProposalPage proposalId="proposal1" onNavigate={vi.fn()} />);
+    await screen.findByRole("heading", { name: "Edit your proposal" });
+    fireEvent.change(screen.getByLabelText("Delivery timeline"), { target: { value: "16 weeks instead of 12" } });
+    mocks.matching.mockResolvedValue({ matching: { status: "funding" }, proposals: [{ id: "proposal1", fundedAmount: 10, matching: { status: "funding" } }] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and save changes" }));
+    expect(await screen.findByText("Funding or matching has started. This proposal can no longer be edited.")).toBeTruthy();
+    expect(mocks.anchor).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
   it("loads the submitted proposal into the form and saves it as an edit", async () => {
     render(<CreateProposalPage proposalId="proposal1" onNavigate={vi.fn()} />);
     await screen.findByRole("heading", { name: "Edit your proposal" });
@@ -167,6 +188,22 @@ describe("correcting a proposal before it is evaluated", () => {
 });
 
 describe("withdrawing a proposal", () => {
+  it.each([
+    { label: "funding arrives", fundedAmount: 10, status: "funding" },
+    { label: "a sibling is selected", fundedAmount: 0, status: "awaiting_confirmation" },
+  ])("prevents wallet signing when $label after the withdrawal dialog opens", async ({ fundedAmount, status }) => {
+    render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw proposal" }));
+    await screen.findByRole("heading", { name: "Withdraw this proposal?" });
+    fireEvent.change(screen.getByLabelText("Why are you withdrawing?"), { target: { value: "The costing was wrong." } });
+    mocks.matching.mockResolvedValue({ matching: { status }, proposals: [{ id: "proposal1", fundedAmount, matching: { status: "funding" } }], contributions: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and withdraw" }));
+    expect(await screen.findByText("Funding or matching has started. This proposal can no longer be withdrawn.")).toBeTruthy();
+    expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
+    expect(mocks.withdraw).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("will not withdraw without a reason, and sends the reason once given", async () => {
     render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw proposal" }));

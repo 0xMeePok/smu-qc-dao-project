@@ -5,6 +5,7 @@ import {
   PENDING_PROPOSAL_STATUSES,
   RESPONSE_OPEN_STATUSES,
   expiryReasonFromFacts,
+  hasMockMatchingLifecycle,
   isExpiredOpenOpportunity,
 } from "./opportunityExpiry.js";
 
@@ -185,6 +186,9 @@ export async function expireOpportunity({
 
   const initialProblem = snapshotData(initial);
   if (!isOpenOpportunity(initialProblem)) return openStatusResult(initialProblem);
+  // This legacy path hands refunds to on-chain escrow. Mock pledges and their
+  // full seven-day creator window must instead be settled by matching.js.
+  if (hasMockMatchingLifecycle(initialProblem)) return result("mock-matching-managed");
 
   let reason;
   if (expirySource === EXPIRY_SOURCES.MANUAL) {
@@ -204,6 +208,8 @@ export async function expireOpportunity({
 
     const problem = snapshotData(current);
     if (!isOpenOpportunity(problem)) return openStatusResult(problem);
+    // Funding/selection can initialise matching after the preflight read.
+    if (hasMockMatchingLifecycle(problem)) return result("mock-matching-managed");
     if (expirySource === EXPIRY_SOURCES.SCHEDULED && !isExpiredOpenOpportunity(problem, timestamp)) {
       return result("not-due");
     }

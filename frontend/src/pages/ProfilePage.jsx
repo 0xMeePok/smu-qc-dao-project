@@ -5,6 +5,7 @@ import { ROLE_LABELS } from "../config/roles.js";
 import { shortenAddress } from "../lib/chain.js";
 import { fieldForFirebaseError, messageForFirebaseError } from "../lib/errors.js";
 import { validateProfile } from "../lib/validation.js";
+import { ModerationNotifications } from "../components/ModerationNotifications.jsx";
 
 function formatDate(value) {
   if (!value) return "Not available";
@@ -110,6 +111,8 @@ export default function ProfilePage() {
         <h1>Your profile</h1>
         <p>Keep the details stakeholders use to understand your work and expertise up to date.</p>
       </div>
+
+      <ModerationNotifications userId={address} />
 
       <div className="profile-layout">
         <article className="profile-card profile-summary-card">

@@ -168,6 +168,50 @@ function pathValues(store, prefix) {
 }
 
 describe("opportunity expiry persistence", () => {
+  for (const source of ["scheduled", "manual"]) {
+    for (const status of ["open", "awaiting_confirmation", "confirmed"]) {
+      it(`preserves ${status} mock matching and its funds during ${source} legacy expiry`, async () => {
+        const problem = openProblem({ matching: {
+          mode: "mock", status, proposalId: status === "open" ? null : "proposal-1",
+          deadlineAt: status === "awaiting_confirmation" ? FUTURE : null,
+          totalFundedMinor: 100_000,
+        } });
+        const pledge = { problemId: "problem-1", proposalId: "proposal-1", amountMinor: 100_000,
+          status: status === "confirmed" ? "locked" : "pledged" };
+        const database = memoryFirestore([
+          ["problems/problem-1", problem], ["mockFunding/pledge-1", pledge],
+        ]);
+        assert.deepEqual(await expireOpportunity({
+          db: database.db, problemId: "problem-1", now: NOW, source,
+          forceReason: EXPIRY_REASONS.FUNDING_REQUIREMENT_NOT_MET,
+        }), { changed: false, outcome: "mock-matching-managed" });
+        assert.deepEqual(database.store.get("problems/problem-1"), problem);
+        assert.deepEqual(database.store.get("mockFunding/pledge-1"), pledge);
+        assert.equal(database.transactionCount(), 0);
+        assert.equal(database.reads().length, 0, "do not use unrelated legacy funding to assess mock funds");
+        assert.equal(pathValues(database.store, "audits/").length, 0);
+        assert.equal(database.store.has("escrowRefundTriggers/problem-1"), false);
+      });
+    }
+
+    it(`rechecks mock lifecycle inside the ${source} expiry transaction`, async () => {
+      const matching = { mode: "mock", status: "awaiting_confirmation", proposalId: "proposal-1", deadlineAt: FUTURE };
+      const database = memoryFirestore(recordsForNormalExpiry(), {
+        beforeTransaction(store) {
+          store.set("problems/problem-1", openProblem({ matching }));
+        },
+      });
+      assert.deepEqual(await expireOpportunity({
+        db: database.db, problemId: "problem-1", now: NOW, source,
+        forceReason: EXPIRY_REASONS.FUNDING_REQUIREMENT_NOT_MET,
+      }), { changed: false, outcome: "mock-matching-managed" });
+      assert.equal(database.transactionCount(), 1);
+      assert.deepEqual(database.store.get("problems/problem-1"), openProblem({ matching }));
+      assert.equal(pathValues(database.store, "audits/").length, 0);
+      assert.equal(database.store.has("escrowRefundTriggers/problem-1"), false);
+    });
+  }
+
   it("persists a scheduled lapse, durable audit, and pending refund hand-off together", async () => {
     const database = memoryFirestore(recordsForNormalExpiry());
 
@@ -360,6 +404,18 @@ describe("lapsing every due opportunity", () => {
   ]);
   const expiredCount = (store) => pathValues(store, "problems/")
     .filter(([, data]) => data.status === "expired").length;
+
+  it("skips mock-managed records without starving legacy expiries on later pages", async () => {
+    const database = memoryFirestore([
+      ["problems/a-mock", openProblem({ expiresAt: new Date(PAST.getTime() - 999_000), matching: { mode: "mock", status: "confirmed" } })],
+      ...due(3),
+    ]);
+    const summary = await lapseDueOpportunities({ db: database.db, now: NOW, pageSize: 1, concurrency: 1 });
+    assert.equal(summary.complete, true);
+    assert.equal(summary.visited, 4);
+    assert.equal(summary.expired, 3);
+    assert.equal(database.store.get("problems/a-mock").status, "open");
+  });
 
   it("visits every due posting across pages and both live statuses, not just the oldest page", async () => {
     const submitted = due(120, "s").map(([path, data]) => [path, { ...data, status: "submitted" }]);

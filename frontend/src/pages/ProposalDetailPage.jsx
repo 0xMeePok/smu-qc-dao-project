@@ -14,6 +14,11 @@ import { Field } from "../components/Field.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { MatchingPanel } from "../components/MatchingPanel.jsx";
+import { getMockMatching, MATCHING_LABELS, proposalMatchingLocked } from "../lib/matching.js";
+import { isModerated } from "../lib/moderation.js";
+import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
+import { ReportableComments } from "../components/ReportableComments.jsx";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
@@ -35,6 +40,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   // withdrawProposal that would revert — and so the anchored reason cannot be
   // edited into something the receipt no longer describes.
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
+  useEffect(() => {
+    if (confirm && !anchoredWithdrawal && !withdrawing && (proposalMatchingLocked(proposal)
+      || ["awaiting_confirmation", "confirmed"].includes(proposal?.problemMatching?.status))) {
+      setConfirm(false);
+      setError("Funding or matching has started. This proposal can no longer be withdrawn.");
+    }
+  }, [confirm, proposal?.matching, proposal?.problemMatching, anchoredWithdrawal, withdrawing]);
   const anchorInFlight = useRef(new Set());
   const activeProposalId = useRef(proposalId);
   activeProposalId.current = proposalId;
@@ -67,7 +79,10 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     let active = true;
     const timer = setInterval(() => {
       findProposal(proposalId, { fromServer: true }).then((current) => {
-        if (active && current) setProposal(current);
+        if (active && current) setProposal((previous) => ({ ...current,
+          matching: current.matching || previous?.matching,
+          problemMatching: current.problemMatching || previous?.problemMatching,
+        }));
       }).catch(() => { /* Keep the saved record visible while offline. */ });
     }, 10_000);
     return () => { active = false; clearInterval(timer); };
@@ -88,6 +103,14 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     let anchored = anchoredWithdrawal;
     try {
       if (!anchored) {
+        const current = await getMockMatching(proposal.problemId, { proposalId });
+        const candidate = current.proposals.find((item) => item.id === proposalId);
+        if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
+          || ["awaiting_confirmation", "confirmed"].includes(current.matching.status)) {
+          setConfirm(false);
+          setError("Funding or matching has started. This proposal can no longer be withdrawn.");
+          return;
+        }
         await anchorProposalWithdrawal(proposal, { account: address, reason: withdrawalReason });
         anchored = { reason: withdrawalReason };
         setAnchoredWithdrawal(anchored);
@@ -120,18 +143,24 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
     <div className="detail-layout"><article className="detail-main"><span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span><h1>{proposal.title}</h1><p className="lead">{proposal.summary}</p>
       {isOpenFunding && <p>The funder acts as the problem owner for selection. This proposal follows the same evaluation, selection and approval process as proposals for funded problems.</p>}
+      <ContentModerationNotice record={proposal} />
       {[...PROPOSAL_FIELDS.slice(2), ...(isOpenFunding ? PROBLEM_FRAMING_FIELDS : [])].map(([key, label]) => proposal[key] && <div className="detail-section" key={key}><h2>{label}</h2><p className="proposal-text">{proposal[key]}</p></div>)}
       {proposal.attachments?.length > 0 && <div className="detail-section"><h2>Supporting attachments</h2>{proposal.attachments.map((item) => <p key={item.id}><button className="text-button" onClick={() => download(item)}>Download {item.name}</button></p>)}</div>}
       {proposal.status === "withdrawn" && proposal.withdrawalReason && <div className="detail-section"><h2>Withdrawal reason</h2><p className="proposal-text">{proposal.withdrawalReason}</p></div>}
+      {proposal.status !== "draft" && !isModerated(proposal) && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onChange={(next) => {
+        const updated = next.proposals.find((item) => item.id === proposal.id);
+        if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
+      }} />}
+      {proposal.status !== "draft" && !isModerated(proposal) && <><ReportContentButton contentType="proposal" contentId={proposal.id} /><ReportableComments problemId={proposal.problemId} proposalId={proposal.id} /></>}
       {(owns || sponsors) && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
       {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
-    </article><aside className="context-panel"><span className="status-dot">{proposal.status}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
+    </article><aside className="context-panel"><span className="status-dot">{MATCHING_LABELS[proposal.matching?.status] || proposal.status}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
           that point on. */}
-      {owns && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
-      {owns && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
+      {owns && !proposalMatchingLocked(proposal) && !["awaiting_confirmation", "confirmed"].includes(proposal.problemMatching?.status) && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
+      {owns && !proposalMatchingLocked(proposal) && !["awaiting_confirmation", "confirmed"].includes(proposal.problemMatching?.status) && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
       {owns && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(`submit-proposal/${proposal.problemId}`)}>Submit a replacement</button>}
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
