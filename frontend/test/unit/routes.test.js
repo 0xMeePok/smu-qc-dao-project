@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ROLES } from "../../src/config/roles.js";
 import {
-  ROUTES_CONFIG,
+  evaluateRouteAccess,
   getRouteConfig,
   getPermittedNavRoutes,
 } from "../../src/config/routes.js";
@@ -117,5 +117,31 @@ describe("Unit Tests: Route Configurations & Navigation Filtering", () => {
 
     const emptyConfig = getRouteConfig("");
     assert.equal(emptyConfig, undefined);
+  });
+
+  it("[FUT-BAV-140] should expose architecture help as a public route outside header navigation", () => {
+    const config = getRouteConfig("architecture");
+    assert.ok(config);
+    assert.equal(config.authRequired, false);
+    assert.equal(config.allowedRoles, null);
+    assert.equal(config.showInNav, false);
+
+    const guestAccess = evaluateRouteAccess("architecture", null);
+    assert.equal(guestAccess.status, 200);
+    assert.equal(guestAccess.allowed, true);
+    assert.equal(guestAccess.action, "RENDER");
+
+    const guestNav = getPermittedNavRoutes([]).map((route) => route.key);
+    const memberNav = getPermittedNavRoutes([
+      ROLES.OWNER,
+      ROLES.RESEARCHER,
+      ROLES.EVALUATOR,
+      ROLES.FUNDER,
+    ]).map((route) => route.key);
+    const adminNav = getPermittedNavRoutes([ROLES.ADMIN]).map((route) => route.key);
+
+    assert.ok(!guestNav.includes("architecture"));
+    assert.ok(!memberNav.includes("architecture"));
+    assert.ok(!adminNav.includes("architecture"));
   });
 });
