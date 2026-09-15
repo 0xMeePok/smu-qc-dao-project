@@ -24,6 +24,8 @@ import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, verifyMinedProp
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { recordProposalRevision } from "./proposalRevisions.js";
 import { recordOpportunityRevision } from "./opportunityRevisions.js";
+import { EXPIRY_REASONS } from "./opportunityExpiry.js";
+import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
@@ -650,6 +652,25 @@ function auditProposalId(request) {
   return id;
 }
 
+function expiryOpportunityId(request) {
+  const id = request.data?.problemId;
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    throw new HttpsError("invalid-argument", "A valid opportunity reference is required.");
+  }
+  return id;
+}
+
+function forceExpiryReason(request) {
+  const reason = request.data?.reason;
+  if (!Object.values(EXPIRY_REASONS).includes(reason)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Choose one of the prescribed expiry reasons before forcing expiry.",
+    );
+  }
+  return reason;
+}
+
 async function recoverAudit(proposalId, manual = false) {
   return recoverProposalAudit({ db, client: publicClient, proposalId, manual, now: Timestamp.now(), Timestamp });
 }
@@ -699,6 +720,15 @@ export const retryPendingProposalAudits = onSchedule(
     for (const job of jobs.docs) {
       try { await recoverAudit(job.id); } catch (error) { console.warn("Proposal audit recovery:", job.id, error.message); }
     }
+  },
+);
+
+/** Lapses every due opportunity; an unfinished run resumes from its checkpoint. */
+export const lapseExpiredOpportunities = onSchedule(
+  { schedule: "every 1 minutes", region: REGION, maxInstances: 1, timeoutSeconds: 540 },
+  async () => {
+    const summary = await lapseDueOpportunities({ db, Timestamp });
+    console.log("Opportunity lapse run", summary);
   },
 );
 
@@ -812,6 +842,31 @@ export const adminRetryProposalAudit = onCall({ region: REGION, maxInstances: 3 
   await enqueueProposalAudit({ db, record: { ...record, id }, now: Timestamp.now() });
   try { await recoverAudit(id, true); return { message: "Verification confirmed and receipt saved." }; }
   catch (error) { throw new HttpsError("unavailable", error.message); }
+});
+
+/** Admin-only force expiry. */
+export const adminForceExpireOpportunity = onCall({ region: REGION, maxInstances: 3 }, async (request) => {
+  const { uid, adminUser } = await requireAdmin(request);
+  const problemId = expiryOpportunityId(request);
+  const reason = forceExpiryReason(request);
+  const outcome = await expireOpportunity({
+    db,
+    Timestamp,
+    problemId,
+    now: Timestamp.now(),
+    source: EXPIRY_SOURCES.MANUAL,
+    actorId: uid,
+    actorName: adminUser.fullName,
+    forceReason: reason,
+  });
+
+  if (outcome.outcome === "not-found") {
+    throw new HttpsError("not-found", "This opportunity no longer exists.");
+  }
+  if (!outcome.changed) {
+    throw new HttpsError("failed-precondition", "Only a response-open opportunity can be force-expired.");
+  }
+  return { ...outcome, problemId };
 });
 
 /**
