@@ -115,6 +115,56 @@
   .audit-receipt-grid { grid-template-columns: 1fr; }
 }
 
+/* QCDAO-80 — compact on-chain verification badge.
+   Squared chip + unique icon per state so it is not a colour-only pill
+   and cannot be confused with workflow .status-dot, .draft-badge, or .role-chip. */
+.verified-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.verified-badge svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.verified-badge-label { min-width: 0; }
+.verified-badge-verified {
+  background: var(--success-soft);
+  border-color: var(--success-line);
+  color: var(--success);
+}
+.verified-badge-pending {
+  background: var(--warning-soft);
+  border-color: var(--warning-line);
+  color: var(--warning);
+}
+.verified-badge-failed {
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+  color: var(--danger);
+}
+.verified-badge-not-anchored {
+  background: var(--surface-muted);
+  border-color: var(--line-strong);
+  border-style: dashed;
+  color: var(--muted);
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
