@@ -234,3 +234,12 @@ test("timestamp cursors reject malformed seconds/nanoseconds and out-of-range da
     await assert.rejects(() => listReportableComments({ db, uid: "member", problemId: "p", cursor: { id: "c1", ...patch } }), { code: "invalid-argument" });
   }
 });
+
+test('members may report expired public postings while hidden expired content stays private', async () => {
+  const db = fixture();
+  db.records.get('problems/p').status = 'expired';
+  await report(db);
+  assert.equal(rows(db, 'contentReports').length, 1);
+  await act(db);
+  await assert.rejects(() => submitContentReport({ db, uid: 'author', contentType: 'problem', contentId: 'p', reason: 'misleading', now }), { code: 'permission-denied' });
+});

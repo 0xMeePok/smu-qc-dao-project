@@ -177,3 +177,13 @@ for (const first of ['confirm', 'decline']) {
     assert.equal(rows(db).find(row => row.proposalId === 'b').status, first === 'confirm' ? 'refunded' : 'pledged');
   });
 }
+
+test('expired public postings retain read-only matching visibility without funding or selection', async () => {
+  const db = fixture();
+  db.records.get('problems/problem').status = 'expired';
+  const view = await getMockMatching({ db, uid: 'funder', problemId: 'problem', now });
+  assert.ok(view.proposals.length > 0);
+  assert.ok(view.proposals.every(item => !item.canFund && !item.canSelect && !item.canCompleteEvaluation));
+  await assert.rejects(() => fund(db), { code: 'failed-precondition' });
+  await assert.rejects(() => select(db), { code: 'failed-precondition' });
+});

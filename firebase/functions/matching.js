@@ -7,6 +7,7 @@ const MAX_PROPOSALS = 200;
 const MAX_CONTRIBUTIONS = 200;
 const ELIGIBLE = new Set(["submitted", "under_review"]);
 const TERMINAL = new Set(["confirmed", "voided", "declined", "cancelled"]);
+const FUNDING_EVENTS = new Set(["funding_contributed", "funding_target_reached"]);
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const millis = (value) => value?.toMillis?.() ?? 0;
 const iso = (value) => value?.toDate?.().toISOString() ?? null;
@@ -45,6 +46,17 @@ function contributionView(doc) {
     createdAt: iso(data.createdAt), settledAt: iso(data.settledAt) };
 }
 
+function historyView(doc, isAdmin) {
+  const data = doc.data();
+  // Funding identities belong to the private ledger and administrator audit.
+  // Project safe fields instead of spreading internal metadata into member views.
+  const visible = !isAdmin && FUNDING_EVENTS.has(data.type)
+    ? { problemId: data.problemId, proposalId: data.proposalId, type: data.type,
+      actorId: null, reason: null, mode: data.mode, chainStatus: data.chainStatus }
+    : data;
+  return { ...visible, id: doc.id, createdAt: iso(data.createdAt), deadlineAt: iso(data.deadlineAt) };
+}
+
 // Every mutation reads and writes the parent. Concurrent selection, funding and
 // expiry therefore conflict and retry against the same authoritative state.
 // Hard caps keep a complete atomic settlement below Firestore's 500-write limit.
@@ -61,7 +73,7 @@ async function readContext({ db, tx, problemId, uid, proposalId, cursor }) {
   if (uid && (!profile?.exists || profile.data().suspended)) fail("permission-denied", "Complete your active member profile first.");
   if (!problem.exists) fail("not-found", "Problem not found.");
   if (uid && moderated(problem.data())) fail("permission-denied", "This problem is under moderation.");
-  if (uid && problem.data().ownerId !== uid && !["submitted", "open", "cancelled"].includes(problem.data().status)) {
+  if (uid && problem.data().ownerId !== uid && !["submitted", "open", "cancelled", "expired"].includes(problem.data().status)) {
     fail("permission-denied", "This problem is not available.");
   }
   if (funding.size > MAX_CONTRIBUTIONS) {
@@ -146,7 +158,7 @@ export async function getMockMatching({ db, uid, problemId, proposalId, cursor, 
     const open = isOpen(ctx.problem);
     return { problemId, mode: "mock", matching,
       canForceExpire: ctx.isAdmin && matching.status === "awaiting_confirmation",
-      history: history.docs.slice(0, 100).map(doc => ({ ...doc.data(), id: doc.id, createdAt: iso(doc.data().createdAt), deadlineAt: iso(doc.data().deadlineAt) })),
+      history: history.docs.slice(0, 100).map(doc => historyView(doc, ctx.isAdmin)),
       historyTruncated: history.size > 100, truncated: ctx.truncated, nextCursor: ctx.nextCursor,
       proposals: ctx.proposals.filter((doc) => !moderated(doc.data()) && (ELIGIBLE.has(doc.data().status) || doc.data().matching)).map((doc) => {
         const proposal = doc.data();

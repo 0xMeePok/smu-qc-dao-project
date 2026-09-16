@@ -324,3 +324,12 @@ describe("mock funding portfolio", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+it.each(['funding_contributed', 'funding_target_reached'])('labels redacted %s actors as private contributors', async (type) => {
+  mocks.read.mockResolvedValue(waiting({ history: [{ id: 'private-funding', type, actorId: null, proposalId: 'proposal-1', createdAt: '2026-09-15T00:00:00Z' }] }));
+  render(<MatchingPanel problemId="problem-1" />);
+  await screen.findByRole('heading', { name: 'Decision record' });
+  const record = document.getElementById('matching-event-private-funding');
+  expect(within(record).getByText('Private contributor')).toBeTruthy();
+  expect(within(record).queryByText('Scheduled expiry')).toBeNull();
+});

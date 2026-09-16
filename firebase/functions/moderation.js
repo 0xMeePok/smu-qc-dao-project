@@ -61,7 +61,7 @@ async function activeProfile(tx, db, uid, admin = false) {
 async function canReadContent(tx, db, type, data, uid, profile) {
   if (profile.role === 1 || owner(type, data) === uid) return true;
   if (BLOCKED.has(data.moderationStatus) || !isPublished(type, data)) return false;
-  if (type === "problem") return ["submitted", "open", "cancelled"].includes(data.status);
+  if (type === "problem") return ["submitted", "open", "cancelled", "expired"].includes(data.status);
   if (type === "proposal") return data.postingOwnerId === uid;
   const parentType = data.proposalId ? "proposal" : "problem";
   const parentId = data.proposalId || data.problemId;

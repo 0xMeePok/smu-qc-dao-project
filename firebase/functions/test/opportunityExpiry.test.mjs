@@ -77,6 +77,19 @@ describe("opportunity expiry helpers", () => {
     }
   });
 
+  it("keeps mock matching separate from the closed submission window in every phase", () => {
+    for (const status of ["open", "awaiting_confirmation", "confirmed"]) {
+      const problem = opportunity({ matching: { mode: "mock", status } });
+      assert.equal(isExpiredOpenOpportunity(problem, NOW), true, status);
+      assert.equal(isResponseWindowClosed(problem, NOW), true, status);
+      assert.equal(expiryReason({ opportunity: problem, now: NOW }), null, status);
+      assert.equal(expiryReasonFromFacts({ opportunity: problem, now: NOW }), null, status);
+    }
+    assert.equal(expiryReason({
+      opportunity: opportunity({ matching: { mode: "onchain", status: "open" } }), now: NOW,
+    }), EXPIRY_REASONS.FUNDING_REQUIREMENT_NOT_MET);
+  });
+
   it("gives unmet funding the first precedence", () => {
     assert.equal(expiryReason({
       opportunity: opportunity(),

@@ -146,3 +146,11 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.ok(paths.includes("problemId+postingOwnerId"));
   });
 });
+
+it('preserves mock proposal funding after the submission cutoff but pauses it during mutual approval', () => {
+  const posting = { ...OPEN_POSTING, expiresAt: PAST, matching: { mode: 'mock', status: 'open' } };
+  assert.ok(actionIds(posting, PARTICIPANT).includes('fund'));
+  for (const status of ['awaiting_confirmation', 'confirmed']) {
+    assert.ok(!actionIds({ ...posting, matching: { mode: 'mock', status } }, PARTICIPANT).includes('fund'));
+  }
+});
