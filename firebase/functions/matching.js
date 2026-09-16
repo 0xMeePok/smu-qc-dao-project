@@ -60,6 +60,20 @@ function historyView(doc, isAdmin) {
 // Every mutation reads and writes the parent. Concurrent selection, funding and
 // expiry therefore conflict and retry against the same authoritative state.
 // Hard caps keep a complete atomic settlement below Firestore's 500-write limit.
+// A contended transaction can be aborted while its reads are still in flight;
+// the late read returns INVALID_ARGUMENT, which the SDK never retries.
+const CLOSED_TRANSACTION = /Transaction is invalid or closed/i;
+async function runContendedTransaction(db, body, attempts = 5) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await db.runTransaction(body);
+    } catch (error) {
+      if (attempt >= attempts || !CLOSED_TRANSACTION.test(String(error?.message ?? ""))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt + Math.floor(Math.random() * 25)));
+    }
+  }
+}
+
 async function readContext({ db, tx, problemId, uid, proposalId, cursor }) {
   const ref = db.collection("problems").doc(problemId);
   let candidateQuery = db.collection("proposals").where("problemId", "==", problemId)
@@ -126,7 +140,7 @@ function expireContext(tx, ctx, now) {
 
 export async function settleExpiredMockMatch({ db, problemId, now }) {
   validId(problemId, "problem");
-  return db.runTransaction(async (tx) => expireContext(tx, await readContext({ db, tx, problemId }), now || Timestamp.now()));
+  return runContendedTransaction(db, async (tx) => expireContext(tx, await readContext({ db, tx, problemId }), now || Timestamp.now()));
 }
 
 export async function sweepExpiredMockMatches({ db, now }) {
@@ -143,14 +157,14 @@ export async function sweepExpiredMockMatches({ db, now }) {
 async function prepare({ db, problemId, uid, now }) {
   validId(problemId, "problem");
   if (!uid) fail("unauthenticated", "Sign in with your wallet.");
-  await db.runTransaction(async (tx) => expireContext(tx, await readContext({ db, tx, problemId, uid }), now || Timestamp.now()));
+  await runContendedTransaction(db, async (tx) => expireContext(tx, await readContext({ db, tx, problemId, uid }), now || Timestamp.now()));
 }
 
 export async function getMockMatching({ db, uid, problemId, proposalId, cursor, now }) {
   if (proposalId) validId(proposalId, "proposal");
   if (cursor) validId(cursor, "cursor");
   await prepare({ db, uid, problemId, now });
-  return db.runTransaction(async (tx) => {
+  return runContendedTransaction(db, async (tx) => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId, cursor });
     const history = await tx.get(db.collection("matchingEvents").where("problemId", "==", problemId).orderBy("createdAt", "desc").limit(101));
     const at = now || Timestamp.now();
@@ -187,7 +201,7 @@ export async function fundMockProposal({ db, uid, problemId, proposalId, amount,
   const amountMinor = minorUnits(amount);
   await prepare({ db, uid, problemId, now });
   const id = createHash("sha256").update(`${uid}:${requestId}`).digest("hex");
-  const result = await db.runTransaction(async (tx) => {
+  const result = await runContendedTransaction(db, async (tx) => {
     const ref = db.collection("mockFunding").doc(id);
     const [ctx, previous] = await Promise.all([readContext({ db, tx, problemId, uid, proposalId }), tx.get(ref)]);
     const at = now || Timestamp.now();
@@ -239,7 +253,7 @@ export async function selectMockProposal({ db, uid, problemId, proposalId, ratio
   rationale = explanation(rationale, "Selection rationale");
   validId(proposalId, "proposal");
   await prepare({ db, uid, problemId, now });
-  const result = await db.runTransaction(async (tx) => {
+  const result = await runContendedTransaction(db, async (tx) => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId });
     const at = now || Timestamp.now();
     if (ctx.problem.ownerId !== uid) fail("permission-denied", "Only the problem owner can select a proposal.");
@@ -273,7 +287,7 @@ export async function selectMockProposal({ db, uid, problemId, proposalId, ratio
 export async function confirmMockProposal({ db, uid, problemId, proposalId, now }) {
   validId(proposalId, "proposal");
   await prepare({ db, uid, problemId, now });
-  const result = await db.runTransaction(async (tx) => {
+  const result = await runContendedTransaction(db, async (tx) => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId });
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find((doc) => doc.id === proposalId);
@@ -316,7 +330,7 @@ export async function declineMockProposal({ db, uid, problemId, proposalId, reas
   validId(proposalId, "proposal");
   reason = explanation(reason, "Decline reason");
   await prepare({ db, uid, problemId, now });
-  const result = await db.runTransaction(async (tx) => {
+  const result = await runContendedTransaction(db, async (tx) => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId });
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
@@ -336,7 +350,7 @@ export async function declineMockProposal({ db, uid, problemId, proposalId, reas
 export async function completeMockEvaluation({ db, uid, problemId, proposalId, now }) {
   validId(proposalId, "proposal");
   await prepare({ db, uid, problemId, now });
-  return db.runTransaction(async tx => {
+  return runContendedTransaction(db, async tx => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId });
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can complete a mock evaluation.");
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
@@ -357,7 +371,7 @@ export async function completeMockEvaluation({ db, uid, problemId, proposalId, n
 export async function forceExpireMockMatch({ db, uid, problemId, now }) {
   validId(problemId, "problem");
   if (!uid) fail("unauthenticated", "Sign in with your wallet.");
-  return db.runTransaction(async tx => {
+  return runContendedTransaction(db, async tx => {
     const ctx = await readContext({ db, tx, problemId, uid });
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can force-expire a mock window.");
     if (ctx.problem.matching?.status !== "awaiting_confirmation") return { ok: true, expired: false };

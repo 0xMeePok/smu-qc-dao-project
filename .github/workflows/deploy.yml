@@ -145,6 +145,18 @@ jobs:
       # authorised by storage.rules, and hosting must never go live with an
       # uploader whose bucket rules are still the previous revision.
       # --force acknowledges the retry policy on queueProposalAudit in CI.
+      # Functions read their environment from this file at deploy time. Without it
+      # publication verification falls back to the rate-limited public node.
+      - name: Provide the functions runtime environment
+        env:
+          ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.ARBITRUM_SEPOLIA_RPC_URL || secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
+        run: |
+          if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
+            echo "::error::ARBITRUM_SEPOLIA_RPC_URL is required for on-chain publication verification."
+            exit 1
+          fi
+          printf 'ARBITRUM_SEPOLIA_RPC_URL=%s\n' "$ARBITRUM_SEPOLIA_RPC_URL" > firebase/functions/.env
+
       - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase
         run: |
