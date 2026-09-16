@@ -1,4 +1,5 @@
 import { ProposalList } from "./ProposalList.jsx";
+import { MockFundingPortfolio } from "./MockFundingPortfolio.jsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { collection, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
@@ -183,6 +184,8 @@ export function MyProblems({ onNavigate }) {
         {loading ? "Loading…" : "Load older opportunities"}
       </button>}
       <ProposalList received onNavigate={onNavigate} />
+
+      <MockFundingPortfolio onNavigate={onNavigate} />
 
       {pendingDelete && (
         <Modal

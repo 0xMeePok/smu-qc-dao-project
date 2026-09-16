@@ -559,4 +559,27 @@ describe("proposal supporting PDFs", () => {
     await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), forgedPath)));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), forgedPath)));
   });
+
+  it("lets active moderators inspect hidden PDFs while withholding them from former sponsors and suspended admins", async () => {
+    const admin = `0x${"c3".repeat(20)}`, suspendedAdmin = `0x${"b3".repeat(20)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", admin), { role: 1, suspended: false });
+      await setDoc(doc(ctx.firestore(), "users", suspendedAdmin), { role: 1, suspended: true });
+      for (const scope of ["problems", "proposals"]) {
+        const id = `moderated-pdf-${scope}`;
+        const path = `${scope}/${OWNER}/${id}/support01.pdf`;
+        await rawUploadBytes(ref(ctx.storage(), path), PDF_BYTES, pdfMetadata({ customMetadata: { problemId: id } }));
+        await setDoc(doc(ctx.firestore(), scope, id), {
+          ownerId: OWNER, researcherId: OWNER, postingOwnerId: "", status: "moderated_hidden", moderationStatus: "hidden",
+        });
+      }
+    });
+    for (const scope of ["problems", "proposals"]) {
+      const path = `${scope}/${OWNER}/moderated-pdf-${scope}/support01.pdf`;
+      await assertSucceeds(getBytes(ref(env.authenticatedContext(admin).storage(), path)));
+      await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), path)));
+      await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
+      await assertFails(getBytes(ref(env.authenticatedContext(suspendedAdmin).storage(), path)));
+    }
+  });
 });

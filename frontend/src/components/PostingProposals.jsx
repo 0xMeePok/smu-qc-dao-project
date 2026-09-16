@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatInstant } from "../lib/datetime.js";
 import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
+import { MATCHING_LABELS } from "../lib/matching.js";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 function proposalStatusLabel(status) {
@@ -19,7 +20,7 @@ function Row({ item, onNavigate }) {
         <small className="table-row-meta">
           {isDraft
             ? `Last saved ${formatInstant(item.updatedAt)}`
-            : `${proposalStatusLabel(item.status)} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
+            : `${MATCHING_LABELS[item.matching?.status] || proposalStatusLabel(item.status)} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
         </small>
       </div>
       <div className="table-row-actions">

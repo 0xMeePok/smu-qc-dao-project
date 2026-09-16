@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { PROPOSAL_STATUS_DRAFT, deleteProposalDraft, listProposals } from "../lib/proposals.js";
 import { formatInstant } from "../lib/datetime.js";
 import { Modal } from "./Modal.jsx";
+import { MATCHING_LABELS } from "../lib/matching.js";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 function Row({ item, onNavigate, onDelete }) {
@@ -14,7 +15,7 @@ function Row({ item, onNavigate, onDelete }) {
       <small className="table-row-meta">
         {isDraft
           ? `Last saved ${formatInstant(item.updatedAt)}`
-          : `${item.status} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
+          : `${MATCHING_LABELS[item.matching?.status] || item.status} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
       </small>
     </div>
     <div className="table-row-actions">

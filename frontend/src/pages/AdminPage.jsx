@@ -10,6 +10,8 @@ import { AdminAudit } from "../components/RoleViews.jsx";
 import { ProposalAuditQueue } from "../components/ProposalAuditQueue.jsx";
 import { PostingSubmissionLogs } from "../components/PostingSubmissionLogs.jsx";
 import { FundingSubmissionLogs } from "../components/FundingSubmissionLogs.jsx";
+import { ModerationQueue } from "../components/ModerationQueue.jsx";
+import { listModerationQueue } from "../lib/moderation.js";
 import { ExpiryAdminUtility } from "../components/ExpiryAdminUtility.jsx";
 import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
 
@@ -29,6 +31,16 @@ export default function AdminPage({ onNavigate }) {
   const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState(null);
   const [successBanner, setSuccessBanner] = useState(null);
+  const [pendingModeration, setPendingModeration] = useState(null);
+
+  useEffect(() => {
+    if (!isSignedIn || !isAdmin(profile?.role) || profile?.suspended) return undefined;
+    let active = true;
+    listModerationQueue({ status: "pending", sort: "oldest" })
+      .then((data) => { if (active) setPendingModeration(data.pendingCount ?? 0); })
+      .catch(() => { if (active) setPendingModeration(null); });
+    return () => { active = false; };
+  }, [isSignedIn, profile?.role, profile?.suspended]);
 
   const bannerTimerRef = useRef(null);
 
@@ -134,6 +146,7 @@ export default function AdminPage({ onNavigate }) {
       )}
 
       <div className="admin-tabs-nav" role="tablist" aria-label="Administrator sections">
+        <button type="button" id="admin-tab-moderation" role="tab" aria-selected={activeTab === "moderation"} aria-controls="admin-panel-moderation" className={`admin-tab-btn ${activeTab === "moderation" ? "active" : ""}`} onClick={() => setActiveTab("moderation")}>Content moderation{pendingModeration !== null ? ` (${pendingModeration})` : ""}</button>
         <button
           type="button"
           id="admin-tab-users"
@@ -192,6 +205,7 @@ export default function AdminPage({ onNavigate }) {
       </div>
 
       <div className="admin-tab-content">
+        {activeTab === "moderation" && <div id="admin-panel-moderation" role="tabpanel" aria-labelledby="admin-tab-moderation"><ModerationQueue onCountChange={setPendingModeration} /></div>}
         {activeTab === "users" && (
           <div
             id="admin-panel-users"

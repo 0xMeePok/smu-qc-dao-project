@@ -61,6 +61,10 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/users/$(address));
     }
 
+    function isModerationAdmin(address) {
+      return get(/databases/$(database)/documents/users/$(address)).data.get('role', 0) == 1;
+    }
+
     function isWalletAddress(value) {
       return value is string && value.matches('^0x[0-9a-f]{40}$');
     }
@@ -789,6 +793,12 @@ service cloud.firestore {
       let content = changed.difference(['expiresAt'].toSet());
       return validOpportunityWithdrawal(before, after)
         && hasValidAudit(after)
+        // A confirmed receipt cannot be downgraded or rewritten for the same
+        // transaction. A replacement transaction is permitted only after the
+        // enclosing publicationWriteAllowed check validates its server proof.
+        && (before.get('audit', {}).get('status', '') != 'confirmed'
+          || after.get('audit', {}) == before.audit
+          || after.get('audit', {}).get('transactionHash', '') != before.audit.get('transactionHash', ''))
         // A stored receipt is the record's on-chain linkage. It may be REPLACED by
         // a re-anchor, never dropped: hasValidAudit passes an absent map, so an
         // edit could otherwise erase the receipt and leave nothing pointing at it.
@@ -918,6 +928,7 @@ service cloud.firestore {
     // client bypasses the form or two tabs submit concurrently.
     function acceptsProposals(parent) {
       return parent.status in ['submitted', 'open']
+        && parent.get('matching', {}).get('status', 'open') == 'open'
         && parent.expiresAt > request.time
         && parent.get('acceptedProposalId', '') == ''
         && parent.get('acceptedSolutionId', '') == ''
@@ -959,6 +970,30 @@ service cloud.firestore {
     function proposalWorkflowWrite(before, after) {
       return after.diff(before).affectedKeys()
         .hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason']);
+    }
+
+    // Mock funding has the same authority boundary as the future escrow. Once
+    // money is committed, clients cannot change the funded terms or withdraw
+    // around the server's refund/confirmation transaction. Receipt delivery
+    // may still finish, subject to the enclosing update rule's audit, publication
+    // proof and timestamp validation. These helpers are AND gates, not standalone
+    // write permissions. Matching maps themselves are absent from every client
+    // create schema and update whitelist, so only the server can write them.
+    function preservesMockProposalCommitment(before, after) {
+      let matching = before.get('matching', {});
+      return (matching.get('fundedMinor', 0) == 0
+          && !matching.get('evaluationComplete', false)
+          && !(matching.get('status', '') in ['awaiting_confirmation', 'confirmed', 'voided', 'cancelled', 'declined'])
+          && get(/databases/$(database)/documents/problems/$(before.problemId)).data
+            .get('matching', {}).get('status', 'open') == 'open')
+        || after.diff(before).affectedKeys().hasOnly(['audit', 'updatedAt']);
+    }
+
+    function preservesMockProblemCommitment(before, after) {
+      let matching = before.get('matching', {});
+      return (matching.get('totalFundedMinor', 0) == 0
+          && !(matching.get('status', '') in ['awaiting_confirmation', 'confirmed']))
+        || after.diff(before).affectedKeys().hasOnly(['audit', 'updatedAt']);
     }
 
     // A withdrawal carries the author's reason. It is required on the way in -
@@ -1135,7 +1170,14 @@ service cloud.firestore {
         // Delivery metadata may evolve, but its transaction must be the one
         // checked by attestPublication, including on creates and corrections.
         && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
-        && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit']);
+        // These server-owned maps are deliberately absent from a client's
+        // canonical publication payload. Client schemas and update whitelists
+        // separately forbid changing them, so preserving them must not make a
+        // valid post-restoration correction differ from its exact proof.
+        // Keep the common create/draft-publish check short: the heaviest atomic
+        // submission sits close to Firestore's 1,000-expression ceiling.
+        && (data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit'])
+          || data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit', 'matching', 'moderationStatus', 'moderation']));
     }
 
     function publicationWriteAllowed(scope, recordId, data) {
@@ -1161,11 +1203,13 @@ service cloud.firestore {
       // also matches the posting detail route, which has always required one.
       allow get: if isActiveUser(request.auth.uid)
         && (resource.data.ownerId == request.auth.uid
+          || isModerationAdmin(request.auth.uid)
           || (resource.data.status in ['submitted', 'open', 'cancelled', 'expired']
             && hasCompletedProfile(request.auth.uid)));
       allow list: if request.query.limit != null && request.query.limit <= 50
         && isActiveUser(request.auth.uid)
         && (resource.data.ownerId == request.auth.uid
+          || isModerationAdmin(request.auth.uid)
           || (resource.data.status in ['submitted', 'open', 'cancelled'] && hasCompletedProfile(request.auth.uid)));
       // Drafts only. Deleting a published document would make storage.rules
       // treat the prefix as pre-save again (posting == null), which re-opens
@@ -1198,6 +1242,7 @@ service cloud.firestore {
         let before = resource.data;
         let after = request.resource.data;
         return isActiveUser(request.auth.uid)
+        && preservesMockProblemCommitment(before, after)
         && publicationWriteAllowed("problems", problemId, after)
         && resource != null
         && before.ownerId == request.auth.uid
@@ -1228,12 +1273,13 @@ service cloud.firestore {
     }
 
     match /problems/{problemId}/revisions/{revisionId} {
-      // Server-owned edit trail. Copied ownerId and status let this mirror the
-      // parent read rule without a lookup: a member sees the trail only for the
-      // statuses at which they can see the posting itself.
+      // The historical status controls ordinary revision visibility; checking
+      // current moderation prevents old revisions exposing hidden content.
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.ownerId == request.auth.uid
+          || isModerationAdmin(request.auth.uid)
           || (resource.data.get('status', '') in ['submitted', 'open', 'cancelled', 'expired']
+            && !(get(/databases/$(database)/documents/problems/$(problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
             && hasCompletedProfile(request.auth.uid)));
       allow write: if false;
     }
@@ -1259,6 +1305,7 @@ service cloud.firestore {
       // except on the submitted path that binds it to the parent owner.
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.researcherId == request.auth.uid
+          || isModerationAdmin(request.auth.uid)
           || resource.data.get('postingOwnerId', '') == request.auth.uid);
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
@@ -1314,7 +1361,8 @@ service cloud.firestore {
               : (after.status in ['draft', 'withdrawn']
                 && validProposal(after)
                 && validAttachments(after, false))))
-          : (proposalWorkflowWrite(before, after)
+          : (preservesMockProposalCommitment(before, after)
+            && (proposalWorkflowWrite(before, after)
             // Only the two fields this write may actually move are checked.
             // withdrawalReason is bounded by validProposalWithdrawal above.
             ? (hasValidAudit(after)
@@ -1324,23 +1372,27 @@ service cloud.firestore {
                 || (before.status in ['submitted', 'under_review']
                   && after.status == 'withdrawn')))
             // A correction validates its own shape; see validProposalCorrection.
-            : validProposalCorrection(before, after)));
+            : validProposalCorrection(before, after))));
       }
       allow update: if proposalUpdateIsAllowed();
     }
 
     match /proposals/{proposalId}/revisions/{revisionId} {
-      // Both parties are copied onto every entry by the trigger that writes it,
-      // so reading a trail costs no document lookups and a long history stays
-      // inside Firestore's per-query document-access limit. Queries must carry
-      // the matching equality filter; see listProposalRevisions.
+      // Copied parties support scoped queries. A sponsor must retain access to
+      // the current proposal too, so its old revisions cannot bypass hiding.
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.researcherId == request.auth.uid
-          || resource.data.get('postingOwnerId', '') == request.auth.uid);
+          || isModerationAdmin(request.auth.uid)
+          || (resource.data.get('postingOwnerId', '') == request.auth.uid
+            && get(/databases/$(database)/documents/proposals/$(proposalId)).data.get('postingOwnerId', '') == request.auth.uid));
       allow write: if false;
     }
 
     match /evaluations/{evaluationId} {
+      function proposalAvailableForEvaluation() {
+        return exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
+          && !(get(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed']);
+      }
       allow read: if isActiveUser(request.auth.uid) && resource.data.evaluatorId == request.auth.uid;
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.evaluatorId == request.auth.uid
@@ -1352,6 +1404,7 @@ service cloud.firestore {
         && request.resource.data.status == 'draft'
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
+        && proposalAvailableForEvaluation()
         && proposalAllowsTimeBoundActions(request.resource.data.proposalId);
       allow update: if isActiveUser(request.auth.uid)
         && resource != null
@@ -1362,6 +1415,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
         && validEvaluationTransition(resource.data.status, request.resource.data.status)
+        && proposalAvailableForEvaluation()
         && proposalAllowsTimeBoundActions(request.resource.data.proposalId);
     }
     
@@ -1371,6 +1425,24 @@ service cloud.firestore {
       // Client intentions must never become public evidence of paid funding.
       allow write: if false;
     }
+
+    // Accessible only through authenticated matching callables, which return
+    // each funder's own ledger and public-safe proposal totals separately.
+    match /mockFunding/{fundId} {
+      allow read, write: if false;
+    }
+
+    // Reports include the reporter's identity. Queue, evidence, history and
+    // author notifications are returned by scoped callables, never enumerable
+    // through browser SDKs. Moderation and report counters are server-owned.
+    match /moderationQueue/{id} { allow read, write: if false; }
+    match /contentReports/{id} { allow read, write: if false; }
+    match /moderationEvents/{id} { allow read, write: if false; }
+    match /moderationNotifications/{id} { allow read, write: if false; }
+    match /moderationReportLimits/{id} { allow read, write: if false; }
+    match /moderationStats/{id} { allow read, write: if false; }
+    match /matchingEvents/{id} { allow read, write: if false; }
+    match /matchingNotificationJobs/{id} { allow read, write: if false; }
 
     // Public-safe counters derived by Cloud Functions from role-scoped proposal
     // and funding records. Clients can read metrics only when they can browse the

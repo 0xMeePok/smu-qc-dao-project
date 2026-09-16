@@ -10,6 +10,8 @@ import { arbitrumSepolia } from "viem/chains";
 import { createSiweMessage, parseSiweMessage, validateSiweMessage } from "viem/siwe";
 import { createHash, randomBytes } from "node:crypto";
 import { resolveDomain } from "./siweOrigin.js";
+import { registerModerationCallables } from "./moderationFunctions.js";
+import { registerMatchingNotificationFunctions } from "./matchingNotifications.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
   applyRoleChangeTransaction,
@@ -27,6 +29,10 @@ import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
+import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
+  selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
+  getMockFundingPortfolio as readMockFundingPortfolio, sweepExpiredMockMatches,
+  declineMockProposal as rejectMockProposal, completeMockEvaluation as finishMockEvaluation, forceExpireMockMatch as forceExpireMockWindow } from "./matching.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -105,6 +111,8 @@ const NONCE_MAX_INSTANCES = 10;
 // database location. Otherwise every sign-in crosses regions.
 const REGION = "asia-southeast1";
 
+export const { notifyMatchingEvent, resumeMatchingNotificationDelivery } = registerMatchingNotificationFunctions({ db, region: REGION });
+
 async function syncOpportunityMetrics(event, collectionName, recordId) {
   if (!affectsMetrics(collectionName, event)) return;
   await syncMetricContribution({ db, collectionName, recordId, updatedAt: Timestamp.now() });
@@ -162,6 +170,54 @@ async function requireMember(request) {
 
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
+
+export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
+  listModerationNotifications, markModerationNotificationRead, listReportableComments,
+  screenProblemContent, screenProposalContent, screenCommentContent } = registerModerationCallables({
+  db, requireMember, requireAdmin, options: MEMBER_CALL_OPTIONS, region: REGION,
+});
+
+// Mock escrow is a server-only ledger. No real tokens move and these records
+// never enter the verified funding collection or marketplace funding metrics.
+export const getMockMatching = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return readMockMatching({ db, uid, problemId: request.data?.problemId, proposalId: request.data?.proposalId, cursor: request.data?.cursor });
+});
+export const fundMockProposal = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  const { problemId, proposalId, amount, requestId } = request.data ?? {};
+  return contributeMockFunding({ db, uid, problemId, proposalId, amount, requestId });
+});
+export const selectMockProposal = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return chooseMockProposal({ db, uid, problemId: request.data?.problemId, proposalId: request.data?.proposalId, rationale: request.data?.rationale });
+});
+export const confirmMockProposal = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return acceptMockProposal({ db, uid, problemId: request.data?.problemId, proposalId: request.data?.proposalId });
+});
+export const declineMockProposal = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return rejectMockProposal({ db, uid, problemId: request.data?.problemId, proposalId: request.data?.proposalId, reason: request.data?.reason });
+});
+export const completeMockEvaluation = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  await requireAdmin(request);
+  return finishMockEvaluation({ db, uid, problemId: request.data?.problemId, proposalId: request.data?.proposalId });
+});
+export const forceExpireMockMatch = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  await requireAdmin(request);
+  return forceExpireMockWindow({ db, uid, problemId: request.data?.problemId });
+});
+export const getMockFundingPortfolio = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return readMockFundingPortfolio({ db, uid });
+});
+export const expireMockMatchingWindows = onSchedule(
+  { schedule: "every 5 minutes", region: REGION, maxInstances: 1, retryCount: 3 },
+  () => sweepExpiredMockMatches({ db }),
+);
 
 export const reserveResource = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);

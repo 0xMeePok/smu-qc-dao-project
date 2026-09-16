@@ -99,6 +99,11 @@ function hasSelectedSolution(opportunity) {
   );
 }
 
+/** Mock matches own their funding/confirmation deadlines and refund settlement. */
+export function hasMockMatchingLifecycle(opportunity) {
+  return opportunity?.matching?.mode === "mock";
+}
+
 /** First applicable reason from summarised facts, so callers never load every related record. */
 export function expiryReasonFromFacts({
   opportunity,
@@ -108,6 +113,9 @@ export function expiryReasonFromFacts({
   now = new Date(),
 } = {}) {
   if (!isExpiredOpenOpportunity(opportunity, now)) return null;
+  // expiresAt closes new submissions; existing mock proposals may still be funded
+  // and selected, including after an unconfirmed selection is voided.
+  if (hasMockMatchingLifecycle(opportunity)) return null;
   if (nonNegativeAmount(fundedAmount) < nonNegativeAmount(opportunity?.amount)) {
     return EXPIRY_REASONS.FUNDING_REQUIREMENT_NOT_MET;
   }

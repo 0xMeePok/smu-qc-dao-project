@@ -37,6 +37,8 @@ export function isExpiredOpportunity(posting) {
 
 export function canEditOpportunity(posting, userId) {
   if (!posting || !userId) return false;
+  if (Number(posting.matching?.totalFundedMinor ?? 0) > 0) return false;
+  if (["awaiting_confirmation", "confirmed"].includes(posting.matching?.status)) return false;
   if (String(posting.ownerId).toLowerCase() !== String(userId).toLowerCase()) return false;
   return EDITABLE_OPPORTUNITY_STATUSES.includes(posting.status) && !isExpiredOpportunity(posting);
 }

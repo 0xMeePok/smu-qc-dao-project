@@ -13,19 +13,19 @@ export function memoryDb(initial = {}) {
   });
   const comparable = (value) => value?.toMillis?.() ?? value;
   const collection = (name, filters = [], cap = Infinity, orders = [], cursor = []) => {
-    const fieldValue = (path, field) => field === "__name__" ? path.split("/").at(-1) : comparable(records.get(path)[field]);
+    const fieldValue = (path, field) => field === "__name__" ? path.split("/").at(-1) : comparable(field.split(".").reduce((value, key) => value?.[key], records.get(path)));
     return {
       doc: (id) => reference(`${name}/${id}`),
       where: (field, op, value) => collection(name, [...filters, [field, op, value]], cap, orders, cursor),
       limit: (n) => collection(name, filters, n, orders, cursor),
-      orderBy: (field) => collection(name, filters, cap, [...orders, field], cursor),
+      orderBy: (field, direction = "asc") => collection(name, filters, cap, [...orders, { field, direction }], cursor),
       startAfter: (...values) => collection(name, filters, cap, orders, values.map(comparable)),
       get: async () => {
         const paths = [...records.keys()].filter((path) => path.startsWith(`${name}/`) && path.split("/").length === 2
           && filters.every(([field, op, value]) => op === "==" ? fieldValue(path, field) === comparable(value)
-            : fieldValue(path, field) < comparable(value)))
-          .sort((a, b) => { for (const field of orders) { const x = fieldValue(a, field), y = fieldValue(b, field); if (x !== y) return x < y ? -1 : 1; } return 0; })
-          .filter((path) => { if (!cursor.length) return true; for (let i = 0; i < orders.length; i++) { const value = fieldValue(path, orders[i]); if (value !== cursor[i]) return value > cursor[i]; } return false; }).slice(0, cap);
+            : op === "in" ? value.includes(fieldValue(path, field)) : fieldValue(path, field) < comparable(value)))
+          .sort((a, b) => { for (const { field, direction } of orders) { const x = fieldValue(a, field), y = fieldValue(b, field); if (x !== y) return (x < y ? -1 : 1) * (direction === "desc" ? -1 : 1); } return 0; })
+          .filter((path) => { if (!cursor.length) return true; for (let i = 0; i < orders.length; i++) { const value = fieldValue(path, orders[i].field); if (value !== cursor[i]) return orders[i].direction === "desc" ? value < cursor[i] : value > cursor[i]; } return false; }).slice(0, cap);
         return { docs: paths.map(snapshot), size: paths.length, empty: !paths.length };
       },
     };
