@@ -793,6 +793,12 @@ service cloud.firestore {
       let content = changed.difference(['expiresAt'].toSet());
       return validOpportunityWithdrawal(before, after)
         && hasValidAudit(after)
+        // A confirmed receipt cannot be downgraded or rewritten for the same
+        // transaction. A replacement transaction is permitted only after the
+        // enclosing publicationWriteAllowed check validates its server proof.
+        && (before.get('audit', {}).get('status', '') != 'confirmed'
+          || after.get('audit', {}) == before.audit
+          || after.get('audit', {}).get('transactionHash', '') != before.audit.get('transactionHash', ''))
         // A stored receipt is the record's on-chain linkage. It may be REPLACED by
         // a re-anchor, never dropped: hasValidAudit passes an absent map, so an
         // edit could otherwise erase the receipt and leave nothing pointing at it.
@@ -969,7 +975,9 @@ service cloud.firestore {
     // Mock funding has the same authority boundary as the future escrow. Once
     // money is committed, clients cannot change the funded terms or withdraw
     // around the server's refund/confirmation transaction. Receipt delivery
-    // may still finish. Matching maps themselves are absent from every client
+    // may still finish, subject to the enclosing update rule's audit, publication
+    // proof and timestamp validation. These helpers are AND gates, not standalone
+    // write permissions. Matching maps themselves are absent from every client
     // create schema and update whitelist, so only the server can write them.
     function preservesMockProposalCommitment(before, after) {
       let matching = before.get('matching', {});
