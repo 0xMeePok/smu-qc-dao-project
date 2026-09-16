@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   countdownParts,
+  expiryUrgency,
   formatCountdown,
   formatInstant,
   formatInstantDate,
@@ -49,12 +50,12 @@ describe("[QCDAO-48] instant formatting", () => {
 describe("[QCDAO-48] expiry countdown", () => {
   const now = new Date("2026-09-01T00:00:00Z");
 
-  it("[FUT-OPD-088] formats days plus a clock while more than a day remains", () => {
-    assert.equal(formatCountdown(new Date("2026-09-13T04:33:12Z"), now), "12d 04:33:12 left");
+  it("[FUT-OPD-088] formats days, hours and minutes while more than a day remains", () => {
+    assert.equal(formatCountdown(new Date("2026-09-13T04:33:12Z"), now), "12d 04h 33m left");
   });
 
-  it("[FUT-OPD-089] drops the day part inside the final day", () => {
-    assert.equal(formatCountdown(new Date("2026-09-01T04:33:12Z"), now), "04:33:12 left");
+  it("[FUT-OPD-089] retains an explicit zero-day value inside the final day", () => {
+    assert.equal(formatCountdown(new Date("2026-09-01T04:33:12Z"), now), "0d 04h 33m left");
   });
 
   it("[FUT-OPD-090] reports expiry at the instant itself, not a second later", () => {
@@ -66,5 +67,12 @@ describe("[QCDAO-48] expiry countdown", () => {
     assert.equal(countdownParts(null, now), null);
     assert.equal(formatCountdown(null, now), "—");
     assert.equal(isExpired(null, now), false);
+  });
+
+  it("[FUT-OPD-130] classifies the normal, approaching, critical and expired boundaries", () => {
+    assert.equal(expiryUrgency(new Date("2026-09-15T00:00:00.001Z"), now), "normal");
+    assert.equal(expiryUrgency(new Date("2026-09-15T00:00:00Z"), now), "approaching");
+    assert.equal(expiryUrgency(new Date("2026-09-03T00:00:00Z"), now), "critical");
+    assert.equal(expiryUrgency(now, now), "expired");
   });
 });

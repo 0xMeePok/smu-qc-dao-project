@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import {
   CATEGORY_VALUES,
   CURRENCIES,
+  DEFAULT_EXPIRY_DAYS,
   MAX_CATEGORIES,
+  MAX_EXPIRY_DAYS,
+  MIN_EXPIRY_DAYS,
   POSTING_CATEGORIES,
   categoryLabel,
   expiryDateFrom,
@@ -139,6 +142,15 @@ describe("[QCDAO-48] funding, currency and expiry", () => {
     assert.ok(expiry > now);
     assert.equal(validateExpiry(90), null);
     assert.match(validateExpiry(0), /how long/);
+  });
+
+  it("[FUT-OPD-131] documents the default and only permits the configured response windows", () => {
+    assert.equal(DEFAULT_EXPIRY_DAYS, 90);
+    assert.equal(MIN_EXPIRY_DAYS, 30);
+    assert.equal(MAX_EXPIRY_DAYS, 180);
+    for (const value of [30, 60, 90, 180]) assert.equal(validateExpiry(value), null);
+    assert.match(validateExpiry(31), /documented response windows/);
+    assert.match(validateExpiry(181), /documented response windows/);
   });
 });
 

@@ -1,4 +1,13 @@
-import { isExpired } from "../lib/datetime.js";
+import {
+  CLOSED_OPPORTUNITY_STATUSES,
+  EXPIRY_REASONS,
+  RESPONSE_OPEN_STATUSES,
+  deadlinePassed,
+  isExpiredOpenOpportunity,
+  isResponseWindowClosed,
+} from "../../../firebase/functions/opportunityExpiry.js";
+
+export { RESPONSE_OPEN_STATUSES, isExpiredOpenOpportunity, isResponseWindowClosed };
 
 /**
  * Opportunity workflow statuses stored on `problems/{id}.status`.
@@ -13,6 +22,7 @@ export const OPPORTUNITY_STATUSES = {
   FUNDED: "funded",
   COMPLETED: "completed",
   CANCELLED: "cancelled",
+  EXPIRED: "expired",
 };
 
 export const OPPORTUNITY_STATUS_LABELS = {
@@ -25,13 +35,18 @@ export const OPPORTUNITY_STATUS_LABELS = {
   [OPPORTUNITY_STATUSES.COMPLETED]: "Completed",
   // The stored status stays `cancelled`; the word users act on is "withdraw".
   [OPPORTUNITY_STATUSES.CANCELLED]: "Withdrawn",
+  [OPPORTUNITY_STATUSES.EXPIRED]: "Expired",
 };
 
-/** Statuses that still accept responses, so a passed deadline is shown as Expired. */
-export const RESPONSE_OPEN_STATUSES = new Set([
-  OPPORTUNITY_STATUSES.SUBMITTED,
-  OPPORTUNITY_STATUSES.OPEN,
-]);
+export const EXPIRY_REASON_LABELS = {
+  [EXPIRY_REASONS.FUNDING_REQUIREMENT_NOT_MET]: "Funding requirement was not met",
+  [EXPIRY_REASONS.EVALUATION_NOT_COMPLETED]: "Evaluation was not completed",
+  [EXPIRY_REASONS.NO_SOLUTION_SELECTED]: "No solution was selected",
+};
+
+export function expiryReasonLabel(reason) {
+  return EXPIRY_REASON_LABELS[String(reason ?? "")] ?? "Expiry requirements were not completed";
+}
 
 function titleStatus(status) {
   return String(status ?? "")
@@ -48,6 +63,12 @@ export function opportunityStatusLabel(status, { expiresAt, now, matching } = {}
   if (matching?.status === "awaiting_confirmation") return "Awaiting creator confirmation";
   if (matching?.status === "confirmed") return "Match confirmed";
   const key = String(status ?? "").trim().toLowerCase();
-  if (RESPONSE_OPEN_STATUSES.has(key) && isExpired(expiresAt, now)) return "Expired";
+  if (RESPONSE_OPEN_STATUSES.has(key) && deadlinePassed(expiresAt, now)) return "Expired";
   return OPPORTUNITY_STATUS_LABELS[key] || titleStatus(status) || "Open";
+}
+
+/** Label for a status whose response window no longer applies, or null. */
+export function closedStatusLabel(status) {
+  const key = String(status ?? "").trim().toLowerCase();
+  return CLOSED_OPPORTUNITY_STATUSES.has(key) ? OPPORTUNITY_STATUS_LABELS[key] : null;
 }

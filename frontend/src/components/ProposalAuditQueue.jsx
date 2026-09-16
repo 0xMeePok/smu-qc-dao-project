@@ -3,6 +3,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase.js";
 import { AuditReceipt } from "./AuditReceipt.jsx";
 import { AuditDetailPane } from "./AuditDetailPane.jsx";
+import { VerifiedBadge } from "./VerifiedBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { postingAuditReceipt, readPostingAudit } from "../lib/postingAudit.js";
@@ -186,7 +187,14 @@ export function ProposalAuditQueue() {
             <tbody>
               {group.items.map((item) => (
                 <tr className="audit-nav-row" key={item.id}>
-                  <td><span className={`submission-status-badge badge-audit-${item.status || "none"}`}>{LABELS[item.status] || item.status}</span></td>
+                  <td>
+                    <div className="audit-status-cell">
+                      <VerifiedBadge audit={item.audit} />
+                      {item.status === "waiting-wallet" ? (
+                        <span className="table-row-meta">{LABELS[item.status]}</span>
+                      ) : null}
+                    </div>
+                  </td>
                   <td>
                     <strong>{item.title}</strong>
                     <div className="table-row-meta"><code>proposals/{item.id}</code></div>

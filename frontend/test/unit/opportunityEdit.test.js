@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   canEditOpportunity,
+  isExpiredOpportunity,
   materialFieldsLocked,
   MATERIAL_POSTING_FIELDS,
   NON_MATERIAL_OPPORTUNITY_FIELDS,
@@ -24,5 +25,11 @@ describe("opportunity edit policy", () => {
     assert.equal(canEditOpportunity({ ownerId: OWNER, status: "open", proposalCount: 2 }, OWNER), true);
     assert.equal(canEditOpportunity({ ownerId: OWNER, status: "cancelled", proposalCount: 0 }, OWNER), false);
     assert.equal(canEditOpportunity({ ownerId: OWNER, status: "submitted" }, `0x${"b".repeat(40)}`), false);
+  });
+
+  it("treats an elapsed deadline as expired even before the scheduler persists the status", () => {
+    assert.equal(isExpiredOpportunity({ status: "submitted", expiresAt: new Date(0) }), true);
+    assert.equal(isExpiredOpportunity({ status: "expired", expiresAt: new Date("2099-01-01") }), true);
+    assert.equal(isExpiredOpportunity({ status: "submitted", expiresAt: new Date("2099-01-01") }), false);
   });
 });

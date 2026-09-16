@@ -1,21 +1,6 @@
-/**
- * QCDAO-48 - one way to record and show an instant.
- *
- * Postings are read across organisations and time zones, so "1/9/2026" is
- * ambiguous (1 September or 9 January, and in whose day?) and a bare local time
- * says nothing about which offset it was written in. Everything stored and
- * displayed here is UTC, ISO-8601 ordered, to the nearest SECOND:
- *
- *     2026-12-01 09:30:00 UTC
- *
- * Seconds matter because `createdAt` is the audit record of when a funded problem
- * statement was posted, and `expiresAt` is the instant responses stop being
- * accepted. Rounding either to the minute would make two postings a few seconds
- * apart look simultaneous.
- *
- * These are pure functions on purpose - the countdown component is the only part
- * that needs a clock, and it passes `now` in.
- */
+import { deadlinePassed } from "../../../firebase/functions/opportunityExpiry.js";
+
+/** UTC date and countdown formatters. */
 
 /**
  * Normalises the several shapes an instant arrives in: a Firestore Timestamp (has
@@ -68,7 +53,7 @@ export function countdownParts(target, now = new Date()) {
   if (!end || !from) return null;
 
   const remainingMs = end.getTime() - from.getTime();
-  if (remainingMs <= 0) {
+  if (deadlinePassed(end, from)) {
     return { expired: true, remainingMs: 0, days: 0, hours: 0, minutes: 0, seconds: 0 };
   }
 
@@ -83,20 +68,35 @@ export function countdownParts(target, now = new Date()) {
   };
 }
 
-/**
- * Human countdown. Days are dropped once there are none left, so the last day
- * reads "04:33:12 left" rather than "0d 04h 33m 12s left" - the shorter string is
- * also the more urgent one, which is when it matters most.
- */
+/** Format remaining time to the minute. */
 export function formatCountdown(target, now = new Date()) {
   const parts = countdownParts(target, now);
   if (!parts) return "—";
   if (parts.expired) return "Expired";
 
-  const clock = `${pad(parts.hours)}:${pad(parts.minutes)}:${pad(parts.seconds)}`;
-  return parts.days > 0 ? `${parts.days}d ${clock} left` : `${clock} left`;
+  return `${parts.days}d ${pad(parts.hours)}h ${pad(parts.minutes)}m left`;
 }
 
 export function isExpired(target, now = new Date()) {
-  return countdownParts(target, now)?.expired ?? false;
+  return deadlinePassed(target, now);
+}
+
+/** Shared countdown urgency. */
+export function expiryUrgency(target, now = new Date()) {
+  const parts = countdownParts(target, now);
+  if (!parts) return "unknown";
+  if (parts.expired) return "expired";
+  if (parts.remainingMs <= 48 * 60 * 60 * 1000) return "critical";
+  if (parts.remainingMs <= 14 * 24 * 60 * 60 * 1000) return "approaching";
+  return "normal";
+}
+
+export function expiryUrgencyLabel(urgency) {
+  return {
+    normal: "Open",
+    approaching: "Approaching deadline",
+    critical: "Deadline imminent",
+    expired: "Expired",
+    unknown: "Deadline unavailable",
+  }[urgency] ?? "Deadline unavailable";
 }

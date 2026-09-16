@@ -23,13 +23,17 @@ firebase/
 │   └── storage.rules.test.mjs   # Attachment rules tests via the Storage emulator
 └── functions/
     ├── index.js                 # Callable, scheduled, and Firestore-triggered functions
+    ├── opportunityExpiry.js      # Deadline helpers
+    ├── opportunityExpiryService.js # Expiry service
     ├── opportunityMetrics.js    # Public-safe Discover aggregates from private records
     ├── attachmentSweeper.js     # Deletes objects no posting references
     ├── scripts/mock_data.mjs    # Seeds three sample postings - see below
     ├── package.json
     └── test/
         ├── siwe.test.mjs        # Adversarial replay, signature, origin, and quota tests
-        └── attachmentSweeper.test.mjs
+        ├── attachmentSweeper.test.mjs
+        ├── opportunityExpiry.test.mjs
+        └── opportunityExpiryService.test.mjs
 ```
 
 ### What the Cloud Functions do
@@ -51,6 +55,9 @@ because one of these functions verified a real signature first:
 Administrative role and suspension changes are also callable functions. They update
 the user and matching audit record transactionally; suspension additionally records
 and retries Firebase credential revocation.
+
+Scheduled and administrator expiry flows record the terminal status, audit event, and
+refund hand-off; it does not transfer funds.
 
 Firestore triggers also rebuild `opportunityMetrics/{problemId}` whenever an
 opportunity, proposal, or funding record changes. Discover reads those safe totals

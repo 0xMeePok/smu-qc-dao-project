@@ -8,10 +8,12 @@ import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import {
   CURRENCIES,
+  DEFAULT_EXPIRY_DAYS,
   EXPIRY_WINDOWS,
   MAX_CATEGORIES,
   POSTING_CATEGORIES,
   categoryLabel,
+  extendExpiryDate,
   expiryDateFrom,
 } from "../config/postingCategories.js";
 import { fundingTagsFromCategories } from "../config/fundingOpportunity.js";
@@ -36,7 +38,7 @@ import {
   readFundingOpportunityAudit,
   receiptForWrite,
 } from "../lib/fundingOpportunityAudit.js";
-import { canEditOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
+import { canEditOpportunity, isExpiredOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { auditErrorMessage, messageForFirebaseError, messageForPublicationSaveError } from "../lib/errors.js";
 
@@ -47,7 +49,8 @@ const EMPTY_FORM = {
   categories: [],
   amount: "",
   currency: CURRENCIES[0],
-  expiryDays: 90,
+  expiryDays: DEFAULT_EXPIRY_DAYS,
+  expiryExtensionDays: "",
 };
 
 function Section({ step, legend, hint, disabled, children }) {
@@ -109,6 +112,7 @@ function formFromOpportunity(opportunity) {
     amount: opportunity.amount ? String(opportunity.amount) : "",
     currency: opportunity.currency ?? EMPTY_FORM.currency,
     expiryDays: expiryWindowFor(opportunity.expiresAt, opportunity.createdAt) ?? EMPTY_FORM.expiryDays,
+    expiryExtensionDays: "",
   };
 }
 
@@ -174,7 +178,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         }
         if (editOpportunityId) {
           if (!canEditOpportunity(opportunity, address)) {
-            setEditBlocked(opportunity.status === "draft"
+            setEditBlocked(isExpiredOpportunity(opportunity)
+              ? "This funding opportunity has expired and can no longer be edited."
+              : opportunity.status === "draft"
               ? "Resume this funding call from My Problems — drafts are not edited here."
               : `This funding opportunity can no longer be edited. Its status is ${opportunity.status}.`);
             return;
@@ -270,13 +276,14 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
     goTo("discover");
   };
 
-  const expiryPreview = useMemo(
-    () => formatInstant(expiryDateFrom(
-      form.expiryDays,
-      editing ? (toDate(existing?.createdAt) ?? new Date()) : new Date(),
-    )),
-    [form.expiryDays, editing, existing?.createdAt],
-  );
+  const expiryPreview = useMemo(() => {
+    if (!editing) return formatInstant(expiryDateFrom(form.expiryDays, new Date()));
+    const currentExpiry = toDate(existing?.expiresAt);
+    const extension = form.expiryExtensionDays
+      ? extendExpiryDate(currentExpiry, form.expiryExtensionDays)
+      : currentExpiry;
+    return formatInstant(extension ?? currentExpiry);
+  }, [form.expiryDays, form.expiryExtensionDays, editing, existing?.expiresAt]);
   const generatedTags = useMemo(
     () => fundingTagsFromCategories(form.categories),
     [form.categories],
@@ -348,7 +355,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         attachments,
         ...(editing ? {
           status: existing?.status ?? "submitted",
-          now: toDate(existing?.createdAt) ?? new Date(),
+          expiresAt: form.expiryExtensionDays
+            ? extendExpiryDate(existing?.expiresAt, form.expiryExtensionDays)
+            : existing?.expiresAt,
         } : {}),
       });
       pendingRecordRef.current = record;
@@ -601,7 +610,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
                 {errors.currency ? <p className="field-error" role="alert">{errors.currency}</p> : null}
               </div>
             </div>
-            <div className={`field ${errors.expiryDays ? "field-invalid" : ""}`}>
+            {!editing && <div className={`field ${errors.expiryDays ? "field-invalid" : ""}`}>
               <label htmlFor="expiryDays">Open for</label>
               <p className="field-hint">Closes on {expiryPreview}.</p>
               <select id="expiryDays" name="expiryDays" value={form.expiryDays} onChange={update}>
@@ -610,10 +619,28 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
                 ))}
               </select>
               {errors.expiryDays ? <p className="field-error" role="alert">{errors.expiryDays}</p> : null}
-            </div>
+            </div>}
           </Section>
 
-          <Section step="5" legend="Supporting material" hint="Optional. Terms, scope notes or an application pack, as PDFs.">
+          {editing ? <Section
+            step="5"
+            legend="Extend the response window"
+            hint="The current deadline remains unchanged unless you add a documented window. Extensions are added to the current UTC deadline and are available only while the opportunity is live."
+          >
+            <div className={`field ${errors.expiryExtensionDays ? "field-invalid" : ""}`}>
+              <label htmlFor="expiryExtensionDays">Extend by</label>
+              <p className="field-hint">{form.expiryExtensionDays ? `New deadline: ${expiryPreview}.` : `Current deadline: ${expiryPreview}.`}</p>
+              <select id="expiryExtensionDays" name="expiryExtensionDays" value={form.expiryExtensionDays} onChange={update}>
+                <option value="">Keep the current deadline</option>
+                {EXPIRY_WINDOWS.map((window) => (
+                  <option key={window.value} value={window.value}>{window.label}</option>
+                ))}
+              </select>
+              {errors.expiryExtensionDays ? <p className="field-error" role="alert">{errors.expiryExtensionDays}</p> : null}
+            </div>
+          </Section> : null}
+
+          <Section step={editing ? "6" : "5"} legend="Supporting material" hint="Optional. Terms, scope notes or an application pack, as PDFs.">
             <AttachmentUploader
               ownerId={address}
               problemId={opportunityId}

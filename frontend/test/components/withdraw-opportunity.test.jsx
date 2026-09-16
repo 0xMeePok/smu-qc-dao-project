@@ -144,4 +144,20 @@ describe("withdrawing a posted opportunity", () => {
     await waitFor(() => expect(mocks.anchorWithdrawal).toHaveBeenCalled());
     expect(mocks.withdraw).not.toHaveBeenCalled();
   });
+
+  it("[QCDAO-49] does not offer withdrawal once a live posting's deadline has passed", async () => {
+    mocks.posting = { ...problem, expiresAt: new Date(Date.now() - 60 * 1000) };
+    render(<PostingDetailPage postingId="posting1" onNavigate={vi.fn()} />);
+    expect(await screen.findByRole("heading", { name: problem.title })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Withdraw problem statement" })).toBeNull();
+    expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
+  });
+
+  it("[QCDAO-49] does not offer withdrawal on a posting under review after its deadline", async () => {
+    mocks.posting = { ...problem, status: "in_review", expiresAt: new Date(Date.now() - 60 * 1000) };
+    render(<PostingDetailPage postingId="posting1" onNavigate={vi.fn()} />);
+    expect(await screen.findByRole("heading", { name: problem.title })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Withdraw problem statement" })).toBeNull();
+    expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
+  });
 });

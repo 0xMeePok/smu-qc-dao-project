@@ -1,3 +1,13 @@
+import {
+  DEFAULT_EXPIRY_DAYS,
+  EXPIRY_WINDOW_DAYS,
+  MAX_EXPIRY_DAYS,
+  MIN_EXPIRY_DAYS,
+  expiryFrom,
+  extendExpiry,
+  isExpiryWindow,
+} from "../../../firebase/functions/opportunityExpiry.js";
+
 /**
  * QCDAO-48 - the technology areas a posting can ask for help in.
  *
@@ -35,25 +45,13 @@ export const MAX_CATEGORIES = 6;
 
 export const CURRENCIES = ["USDT", "USDC", "XSGD"];
 
-/** How long a posting stays open for responses. Written as a concrete expiry date. */
-export const EXPIRY_WINDOWS = [
-  { value: 30, label: "30 days" },
-  { value: 60, label: "60 days" },
-  { value: 90, label: "90 days" },
-  { value: 180, label: "180 days" },
-];
+/** Response windows come from the shared expiry helper, so the rule is defined once. */
+export const EXPIRY_WINDOWS = EXPIRY_WINDOW_DAYS.map((value) => ({ value, label: `${value} days` }));
+
+export { DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS, MIN_EXPIRY_DAYS, isExpiryWindow };
+export const expiryDateFrom = expiryFrom;
+export const extendExpiryDate = extendExpiry;
 
 export function categoryLabel(value) {
   return POSTING_CATEGORIES.find((category) => category.value === value)?.label ?? value;
-}
-
-export function expiryDateFrom(days, now = new Date()) {
-  const expiry = new Date(now);
-  expiry.setDate(expiry.getDate() + Number(days));
-  // Exact to the second. The stored expiry is the instant responses stop being
-  // accepted and is shown next to a live countdown, so carrying whatever
-  // millisecond the form happened to be submitted on is noise that only makes two
-  // postings created together look different.
-  expiry.setMilliseconds(0);
-  return expiry;
 }

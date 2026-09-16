@@ -5,6 +5,7 @@ import { PROPOSAL_STATUS_DRAFT, deleteProposalDraft, listProposals } from "../li
 import { formatInstant } from "../lib/datetime.js";
 import { Modal } from "./Modal.jsx";
 import { MATCHING_LABELS } from "../lib/matching.js";
+import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 function Row({ item, onNavigate, onDelete }) {
   const isDraft = item.status === PROPOSAL_STATUS_DRAFT;
@@ -19,6 +20,7 @@ function Row({ item, onNavigate, onDelete }) {
     </div>
     <div className="table-row-actions">
       {isDraft && <span className="draft-badge">Draft</span>}
+      <VerifiedBadge audit={item.audit} recordStatus={item.status} />
       <button className="text-button" type="button" onClick={() => onNavigate(isDraft ? `edit-proposal/${item.id}` : `proposal/${item.id}`)}>
         {isDraft ? "Resume editing" : "View proposal"}
       </button>

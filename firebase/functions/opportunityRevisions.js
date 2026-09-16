@@ -5,11 +5,13 @@ export const TRACKED_POSTING_FIELDS = [
   "title", "summary", "businessContext", "currentApproach", "currentLimitations",
   "expectedOutcome", "successCriteria", "dataAvailability",
   "categories", "amount", "currency", "expiresAt", "attachments",
+  "expiryReason", "expirySource", "expiryActor", "expiryActorName", "expiredAt",
 ];
 
 export const TRACKED_FUNDING_FIELDS = [
   "title", "fundingThesis", "eligibilityNotes",
   "categories", "tags", "amount", "currency", "expiresAt", "attachments",
+  "expiryReason", "expirySource", "expiryActor", "expiryActorName", "expiredAt",
 ];
 
 function trimmed(value) {
@@ -121,7 +123,9 @@ export function opportunityRevisionEntry({ recordId, before, after, at }) {
   if (!changedFields.length && !statusChanged) return null;
 
   const entry = {
-    actor: after.ownerId ?? before.ownerId ?? "",
+    actor: after.status === "expired"
+      ? (after.expiryActor ?? (after.expirySource === "scheduled" ? "system" : "administrator"))
+      : (after.ownerId ?? before.ownerId ?? ""),
     ownerId: after.ownerId ?? before.ownerId ?? "",
     changedFields,
     previousStatus: before.status ?? "",
@@ -132,6 +136,17 @@ export function opportunityRevisionEntry({ recordId, before, after, at }) {
   };
   if (statusChanged && after.status === "cancelled") {
     entry.withdrawalReason = String(after.withdrawalReason ?? "").slice(0, 1000);
+  }
+  if (changedFields.includes("expiresAt")) {
+    entry.expiryWindow = {
+      previous: canonical(before.expiresAt),
+      next: canonical(after.expiresAt),
+    };
+  }
+  if (statusChanged && after.status === "expired") {
+    entry.expiryReason = String(after.expiryReason ?? "");
+    entry.expirySource = String(after.expirySource ?? "");
+    entry.expiredAt = after.expiredAt ?? at;
   }
   return entry;
 }

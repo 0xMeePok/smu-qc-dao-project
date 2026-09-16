@@ -26,6 +26,7 @@ import {
   FundingPortfolio,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import ArchitectureHelpPage from "./pages/ArchitectureHelpPage.jsx";
 import CreatePostingPage from "./pages/CreatePostingPage.jsx";
 import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
 import OpportunityEditPage from "./pages/OpportunityEditPage.jsx";
@@ -33,7 +34,9 @@ import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { listPublishedPostings } from "./lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
 import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
-import { formatCountdown } from "./lib/datetime.js";
+import { ExpiryCountdown } from "./components/ExpiryCountdown.jsx";
+import { VerifiedBadge } from "./components/VerifiedBadge.jsx";
+import { opportunityStatusLabel } from "./config/workflowStatus.js";
 import {
   DEFAULT_DISCOVERY_FILTERS,
   DISCOVERY_SORT_OPTIONS,
@@ -238,6 +241,8 @@ function Shell({ route, children }) {
           <strong>QC DAO</strong> — Multi-role quantum funding platform with verifiable on-chain audit trails.
         </div>
         <div className="footer-links">
+          <button type="button" onClick={() => go("architecture")}>On-chain vs off-chain</button>
+          <span>·</span>
           <span>Arbitrum Sepolia (421614)</span>
           <span>·</span>
           <span>Proof of Concept</span>
@@ -311,12 +316,16 @@ function StakeholderIcon({ type }) {
 
 function OpportunityCard({ item }) {
   const proposalLabel = `${item.proposalCount} ${item.proposalCount === 1 ? "proposal" : "proposals"}`;
-  const statusLabel = String(item.status ?? "open")
-    .replaceAll("_", " ")
-    .replace(/^./, (letter) => letter.toUpperCase());
+  const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt });
 
   return (
-    <button className="opportunity-card" type="button" onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}>
+    <div className="opportunity-card">
+      <button
+        className="opportunity-card-hit"
+        type="button"
+        onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}
+        aria-label={`View ${item.title}`}
+      />
       <span className="opportunity-mark">
         <OpportunityIcon type={item.type} />
       </span>
@@ -338,7 +347,10 @@ function OpportunityCard({ item }) {
         </span>
       </div>
       <div className="opportunity-activity">
-        <span className="status-dot">{statusLabel}</span>
+        <div className="trust-status-row">
+          <span className="status-dot">{statusLabel}</span>
+          <VerifiedBadge audit={item.audit} recordStatus={item.status} />
+        </div>
         <small>{proposalLabel}</small>
       </div>
       <div className="opportunity-funding">
@@ -349,13 +361,12 @@ function OpportunityCard({ item }) {
         <small>{item.fundingProgressPercent}% funded</small>
       </div>
       <div className="opportunity-deadline">
-        <strong>{formatCountdown(item.expiresAt)}</strong>
-        <small>{item.deadline}</small>
+        <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} />
       </div>
       <span className="row-arrow">
         <ArrowIcon />
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -917,9 +928,11 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <AdminPage />
+        <AdminPage onNavigate={go} />
       </RouteGuard>
     );
+  } else if (section === "architecture") {
+    pageComponent = <ArchitectureHelpPage onNavigate={go} />;
   } else if (section === "access-denied") {
     pageComponent = <AccessDenied onNavigate={go} />;
   }

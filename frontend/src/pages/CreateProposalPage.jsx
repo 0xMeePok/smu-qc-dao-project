@@ -354,7 +354,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           />
         )}
       </form>
-      <aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong>{posting.currency} {Number(posting.amount).toLocaleString()}</strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>
+      <aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong>{posting.currency} {Number(posting.amount).toLocaleString()}</strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>
     </div>
   </section>;
 }

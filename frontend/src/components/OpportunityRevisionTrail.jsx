@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listOpportunityRevisions } from "../lib/postings.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { formatInstant } from "../lib/datetime.js";
+import { expiryReasonLabel } from "../config/workflowStatus.js";
 
 const FIELD_LABELS = {
   title: "Title",
@@ -29,6 +30,10 @@ function shortWallet(address) {
 
 function summary(entry) {
   if (entry.status === "cancelled" && entry.previousStatus !== "cancelled") return "Withdrawn from the marketplace";
+  if (entry.status === "expired" && entry.previousStatus !== "expired") {
+    return `Lapsed: ${expiryReasonLabel(entry.expiryReason)}`;
+  }
+  if (entry.expiryWindow) return "Response window extended";
   if (entry.status !== entry.previousStatus) return `Status changed from ${entry.previousStatus} to ${entry.status}`;
   return "Edited after submission";
 }
@@ -67,6 +72,12 @@ export function OpportunityRevisionTrail({ postingId, uid, isOwner = false }) {
               </p>
             )}
             {entry.withdrawalReason && <p className="proposal-text">Reason: {entry.withdrawalReason}</p>}
+            {entry.expiryWindow && (
+              <p className="proposal-text">
+                Deadline: {formatInstant(entry.expiryWindow.previous)} → {formatInstant(entry.expiryWindow.next)}
+              </p>
+            )}
+            {entry.expirySource && <p className="table-row-meta">Expiry source: {entry.expirySource}</p>}
           </li>
         ))}
       </ol>

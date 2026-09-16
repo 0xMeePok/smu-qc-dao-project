@@ -7,7 +7,7 @@ immutable. Amounts are numbers from 0 through 1,000,000,000.
 
 | Collection | Required fields | Optional fields | Initial status |
 | --- | --- | --- | --- |
-| `problems` | Shared: `ownerId`, `organisation`, `title`, `amount`, `currency`, `categories`, `expiresAt`, `status`, `createdAt`, `updatedAt`; business problem: `summary`, `businessContext`, `currentApproach`, `currentLimitations`, `expectedOutcome`, `successCriteria`, `dataAvailability`; open funding: `opportunityType: "open-funding"`, `fundingThesis`, `eligibilityNotes`, `tags` | Both: `attachments`, `audit`, `withdrawalReason`; legacy drafts retain the older optional fields | `draft` or complete form submission as `submitted` |
+| `problems` | Shared: `ownerId`, `organisation`, `title`, `amount`, `currency`, `categories`, `expiresAt`, `status`, `createdAt`, `updatedAt`; business problem: `summary`, `businessContext`, `currentApproach`, `currentLimitations`, `expectedOutcome`, `successCriteria`, `dataAvailability`; open funding: `opportunityType: "open-funding"`, `fundingThesis`, `eligibilityNotes`, `tags` | `attachments`, `audit`, `withdrawalReason`; server-only: `expiryReason`, `expirySource`, `expiryActor`, `expiryActorName`, `expiredAt`; legacy drafts retain the older optional fields | `draft` or complete form submission as `submitted` |
 | `proposals` | `researcherId`, `problemId`, `status`, `createdAt`, `updatedAt`; from `submitted` onwards also `title`, `summary`, `amount`, `postingOwnerId`, `opportunityType`, `category`, `currency`, and every approach field | `outcomes`, `deliverables`, `attachments`, `audit`, `withdrawalReason` | `draft` or complete form submission as `submitted` |
 | `evaluations` | `evaluatorId`, `proposalId`, `title`, `score`, `feedback`, `status`, `createdAt`, `updatedAt` | none | `draft` |
 | `funding` | `funderId`, `proposalId`, `problemId`, `title`, `amount`, `status`, `createdAt`, `updatedAt` | `tranches` | `pledged` |
@@ -20,9 +20,10 @@ queue before it was sent. It is bound to the parent opportunity's owner on the
 `submitted` path and may not be introduced on any other.
 
 A `problems` document in `submitted` or `open` must additionally carry every
-optional field above, with non-empty text, at least one category, an amount above
-zero, a future expiry, and an `organisation` matching the owner's profile. Drafts
-are exempt, which is what lets an unfinished form save. At most two attachments.
+required published-content field for its type, with non-empty text, at least one
+category, an amount above zero, a future expiry, and an `organisation` matching the
+owner's profile. Drafts are exempt, which is what lets an unfinished form save. At
+most two attachments.
 
 Both opportunity kinds have that exemption. Open funding did not until QCDAO-57:
 every field was required on every write, so an unfinished funding call had
@@ -72,7 +73,7 @@ because it maps to the immutable `OpportunityKind` stored by `AuditRegistry`.
 
 Allowed status transitions:
 
-- Opportunities: `draft → submitted/open/cancelled`; `submitted → open/in_review/cancelled`; `open → in_review/matched/cancelled`; `in_review → open/matched/cancelled`; `matched → funded/completed/cancelled`; `funded → completed/cancelled`.
+- Opportunities: `draft → submitted/open`; `submitted → open/cancelled`; `open → cancelled`; `in_review → cancelled`. `submitted` and `open` may transition to server-only `expired`. Clients cannot move a live posting to `in_review` or `matched` (those leave the lapse query and marketplace read ACL). `expired` is terminal.
 - Proposals: `draft → submitted/withdrawn`; `submitted → under_review/withdrawn`; `under_review → accepted/rejected/withdrawn`.
 - Evaluations: `draft → submitted → accepted`.
 - Funding: `pledged → approved/cancelled`; `approved → disbursing/cancelled`; `disbursing → completed/cancelled`.
@@ -111,8 +112,8 @@ The post-publication edit trail for both problem statements and open funding
 calls. **Server-owned**: `recordOpportunityEdit` computes the diff with the
 Admin SDK, and no client may create, update or delete an entry. Each entry
 carries `changedFields`, `actor`, `at`, `previousStatus`, `status`, the content
-hash before and after, and `withdrawalReason` on a withdrawal. Draft saves are
-absent.
+hash before and after, `withdrawalReason` on a withdrawal, and expiry fields when
+applicable. Draft saves are absent.
 
 ## Correcting and withdrawing a proposal (QCDAO-57)
 

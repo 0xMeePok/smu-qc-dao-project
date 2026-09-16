@@ -26,6 +26,14 @@ export const ROUTES_CONFIG = [
     showInNav: true,
   },
   {
+    key: "architecture",
+    path: "architecture",
+    label: "Architecture",
+    allowedRoles: null,
+    authRequired: false,
+    showInNav: false,
+  },
+  {
     key: "profile",
     path: "profile",
     label: "Profile",

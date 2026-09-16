@@ -119,14 +119,14 @@ Put your real project id in `firebase/.firebaserc`.
 cd firebase
 npm install
 npm --prefix functions install
-firebase deploy --only firestore:rules,functions --project YOUR_PROJECT_ID
+firebase deploy --only firestore:rules,firestore:indexes,functions --project YOUR_PROJECT_ID
 ```
 
 **Both halves are mandatory.** Without the rules, production mode denies every write.
 Without the functions, nothing can verify a signature and nobody can sign in.
 
-The first deploy asks to enable the `cloudfunctions`, `cloudbuild`, `artifactregistry`
-and `eventarc` APIs — accept. It takes several minutes.
+The first deploy asks to enable the `cloudfunctions`, `cloudbuild`, `artifactregistry`,
+`eventarc`, and `cloudscheduler` APIs — accept. It takes several minutes.
 
 ### Verify the deploy actually worked
 
@@ -266,12 +266,11 @@ The emulators accept any project id and placeholder keys.
 ## Running the tests
 
 ```bash
-npm test --prefix frontend      # 17 validation tests, no emulator needed
-npm test --prefix firebase      # 18 Firestore rules tests (boots the emulator, needs Java)
+npm test --prefix frontend      # Frontend unit and component tests; no emulator needed
+npm test --prefix firebase      # Firestore rules tests (boots the emulator; needs Java)
 
-# Adversarial signature tests, with the functions emulator running:
-cd firebase && npx firebase emulators:start --only functions,firestore,auth,storage --project qc-dao-demo
-cd firebase/functions && npm test    # 7 attack tests
+# Cloud Functions tests boot their emulator; no separate emulator process is needed:
+npm test --prefix firebase/functions
 ```
 
 ---
