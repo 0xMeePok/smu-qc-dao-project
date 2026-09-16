@@ -14,6 +14,7 @@ import { Field } from "../components/Field.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
@@ -126,7 +127,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       {(owns || sponsors) && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
       {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
-    </article><aside className="context-panel"><span className="status-dot">{proposal.status}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
+    </article><aside className="context-panel"><div className="trust-status-row"><span className="status-dot">{proposal.status}</span><VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} /></div><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
           that point on. */}

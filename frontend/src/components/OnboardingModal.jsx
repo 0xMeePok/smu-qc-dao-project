@@ -148,8 +148,9 @@ export function OnboardingModal() {
                 aria-describedby={errors.acceptedTerms ? "acceptedTerms-error" : undefined}
               />
               <span>
-                I accept the platform terms and understand that proposal hashes and
-                evaluation outcomes are recorded publicly on Arbitrum Sepolia.
+                I accept the platform terms and understand that proposal hashes
+                are recorded on Arbitrum Sepolia, while evaluations stay off-chain
+                in Firestore.
               </span>
             </label>
             {errors.acceptedTerms ? (

@@ -11,8 +11,9 @@ import { ProposalAuditQueue } from "../components/ProposalAuditQueue.jsx";
 import { PostingSubmissionLogs } from "../components/PostingSubmissionLogs.jsx";
 import { FundingSubmissionLogs } from "../components/FundingSubmissionLogs.jsx";
 import { ExpiryAdminUtility } from "../components/ExpiryAdminUtility.jsx";
+import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
 
-export default function AdminPage() {
+export default function AdminPage({ onNavigate }) {
   const { isSignedIn, isChecking, profile, address } = useSession();
 
   const [activeTab, setActiveTab] = useState("users"); // "users" | "proposals" | "postings" | "funding" | "audits"
@@ -228,6 +229,7 @@ export default function AdminPage() {
             role="tabpanel"
             aria-labelledby="admin-tab-proposals"
           >
+            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
             <ProposalAuditQueue />
           </div>
         )}
@@ -237,6 +239,7 @@ export default function AdminPage() {
             role="tabpanel"
             aria-labelledby="admin-tab-postings"
           >
+            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
             <PostingSubmissionLogs />
           </div>
         )}
@@ -246,6 +249,7 @@ export default function AdminPage() {
             role="tabpanel"
             aria-labelledby="admin-tab-funding"
           >
+            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
             <FundingSubmissionLogs />
           </div>
         )}
@@ -255,6 +259,7 @@ export default function AdminPage() {
             role="tabpanel"
             aria-labelledby="admin-tab-audits"
           >
+            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
             <ExpiryAdminUtility />
             <AdminAudit />
           </div>
