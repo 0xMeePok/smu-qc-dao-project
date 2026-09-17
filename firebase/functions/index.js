@@ -35,6 +35,7 @@ import { getMockMatching as readMockMatching, fundMockProposal as contributeMock
   declineMockProposal as rejectMockProposal, completeMockEvaluation as finishMockEvaluation, forceExpireMockMatch as forceExpireMockWindow } from "./matching.js";
 import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
+import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -177,6 +178,11 @@ export const { submitContentReport, listModerationQueue, getModerationContext, m
   listModerationNotifications, markModerationNotificationRead, listReportableComments,
   screenProblemContent, screenProposalContent, screenCommentContent } = registerModerationCallables({
   db, requireMember, requireAdmin, options: MEMBER_CALL_OPTIONS, region: REGION,
+});
+
+export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return listPostedProposalsForProblem({ db, uid, problemId: request.data?.problemId });
 });
 
 export const createComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {

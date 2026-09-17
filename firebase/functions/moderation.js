@@ -8,6 +8,9 @@ const TYPES = { problem: "problems", proposal: "proposals", comment: "comments" 
 const ACTION_STATUS = { hide: "hidden", remove: "removed", restore: "restored" };
 const BLOCKED = new Set(["hidden", "removed"]);
 const PAGE_SIZE = 50;
+const MEMBER_VISIBLE_PROPOSAL = ["submitted", "under_review", "accepted", "rejected", "withdrawn"];
+const POSTED_PROPOSAL_CAP = 200;
+const BROWSABLE_PROBLEM_STATUS = new Set(["submitted", "open", "cancelled", "expired"]);
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const owner = (type, data) => type === "problem" ? data.ownerId : type === "proposal" ? data.researcherId : data.authorId || data.userId || data.ownerId;
@@ -58,6 +61,40 @@ async function activeProfile(tx, db, uid, admin = false) {
   }
   return profile.data();
 }
+
+export function problemIsMemberBrowsable(data) {
+  return Boolean(data && BROWSABLE_PROBLEM_STATUS.has(data.status) && !BLOCKED.has(data.moderationStatus));
+}
+
+function stampProposalBrowsable(tx, doc, problemBrowsable, now) {
+  const data = doc.data();
+  if (!data || data.status === "draft" || data.problemBrowsable === problemBrowsable) return;
+  tx.update(doc.ref, { problemBrowsable, updatedAt: now });
+}
+
+export async function syncProposalParentVisibility({ db, proposalId, now = Timestamp.now() }) {
+  return db.runTransaction(async (tx) => {
+    const proposal = await tx.get(db.collection("proposals").doc(proposalId));
+    if (!proposal.exists || proposal.data().status === "draft") return { ok: true };
+    const problemId = proposal.data().problemId;
+    const parent = problemId ? await tx.get(db.collection("problems").doc(problemId)) : null;
+    stampProposalBrowsable(tx, proposal, problemIsMemberBrowsable(parent?.exists ? parent.data() : null), now);
+    return { ok: true };
+  });
+}
+
+export async function syncProblemProposalsBrowsable({ db, problemId, now = Timestamp.now() }) {
+  return db.runTransaction(async (tx) => {
+    const parent = await tx.get(db.collection("problems").doc(problemId));
+    if (!parent.exists) return { ok: true };
+    const problemBrowsable = problemIsMemberBrowsable(parent.data());
+    const rows = await tx.get(db.collection("proposals").where("problemId", "==", problemId)
+      .where("status", "in", MEMBER_VISIBLE_PROPOSAL).limit(POSTED_PROPOSAL_CAP + 1));
+    for (const doc of rows.docs.slice(0, POSTED_PROPOSAL_CAP)) stampProposalBrowsable(tx, doc, problemBrowsable, now);
+    return { ok: true };
+  });
+}
+
 export async function canReadContent(tx, db, type, data, uid, profile) {
   if (profile.role === 1 || owner(type, data) === uid) return true;
   if (BLOCKED.has(data.moderationStatus) || !isPublished(type, data)) return false;
@@ -318,7 +355,33 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
         moderationStatus: data.moderationStatus || "visible", moderation: serialise(data.moderation || null) };
     });
     const last = page.at(-1);
+    if (parentType === "proposal") {
+      const problem = parent.data().problemId
+        ? await tx.get(db.collection("problems").doc(parent.data().problemId)) : null;
+      stampProposalBrowsable(tx, parent, problemIsMemberBrowsable(problem?.exists ? problem.data() : null), Timestamp.now());
+    }
     return { items, truncated: rows.size > 100,
       nextCursor: rows.size > 100 ? timestampCursor(last.id, last.data().createdAt) : null };
+  });
+}
+
+export async function listPostedProposals({ db, uid, problemId }) {
+  validateContent("problem", problemId);
+  return db.runTransaction(async (tx) => {
+    const profile = await activeProfile(tx, db, uid);
+    const parent = await tx.get(db.collection("problems").doc(problemId));
+    if (!parent.exists || !await canReadContent(tx, db, "problem", parent.data(), uid, profile)) {
+      fail("permission-denied", "This opportunity is not available.");
+    }
+    const rows = await tx.get(db.collection("proposals").where("problemId", "==", problemId)
+      .where("status", "in", MEMBER_VISIBLE_PROPOSAL).limit(POSTED_PROPOSAL_CAP + 1));
+    const problemBrowsable = problemIsMemberBrowsable(parent.data());
+    const visible = rows.docs.filter((doc) => !BLOCKED.has(doc.data().moderationStatus)
+      || owner("proposal", doc.data()) === uid || profile.role === 1);
+    for (const doc of rows.docs.slice(0, POSTED_PROPOSAL_CAP)) stampProposalBrowsable(tx, doc, problemBrowsable, Timestamp.now());
+    return {
+      items: visible.slice(0, POSTED_PROPOSAL_CAP).map((doc) => ({ id: doc.id, ...serialise(doc.data()), problemBrowsable })),
+      truncated: rows.size > POSTED_PROPOSAL_CAP,
+    };
   });
 }

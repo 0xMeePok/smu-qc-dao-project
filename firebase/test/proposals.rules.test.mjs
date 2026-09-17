@@ -100,6 +100,17 @@ describe("QCDAO-59/60 submitted proposals", () => {
     await assertSucceeds(getDocs(query(collection(sponsor, "proposals"), where("postingOwnerId", "==", SPONSOR))));
     await assertSucceeds(getDoc(doc(env.authenticatedContext(OUTSIDER).firestore(), "proposals", "proposal-full")));
   });
+  it("lets onboarded members get a submitted proposal but not list the collection", async () => {
+    const problemId = await parent();
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", "member-get-no-list"), record(problemId)));
+    const outsider = env.authenticatedContext(OUTSIDER).firestore();
+    const visible = ["submitted", "under_review", "accepted", "rejected", "withdrawn"];
+    await assertSucceeds(getDoc(doc(outsider, "proposals", "member-get-no-list")));
+    await assertFails(getDocs(query(collection(outsider, "proposals"), where("status", "in", visible))));
+    await assertFails(getDocs(query(collection(outsider, "proposals"), where("problemId", "==", problemId), where("status", "in", visible))));
+    await assertSucceeds(getDocs(query(collection(env.authenticatedContext(SPONSOR).firestore(), "proposals"), where("postingOwnerId", "==", SPONSOR))));
+    await assertSucceeds(getDocs(query(collection(env.authenticatedContext(AUTHOR).firestore(), "proposals"), where("researcherId", "==", AUTHOR))));
+  });
   it("keeps submitted proposals readable after the parent is cancelled or expired", async () => {
     const cancelledParent = await parent({ status: "cancelled", withdrawalReason: "Programme closed." });
     const expiredParent = await parent({ status: "expired" });

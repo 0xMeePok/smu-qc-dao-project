@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { Timestamp } from "firebase-admin/firestore";
 import { memoryDb } from "./memoryDb.mjs";
 import { submitContentReport, listModerationQueue, getModerationContext, moderateContent, flagSubmittedContent,
-  listModerationNotifications, markModerationNotificationRead, listReportableComments } from "../moderation.js";
+  listModerationNotifications, markModerationNotificationRead, listReportableComments, listPostedProposals,
+  syncProposalParentVisibility, syncProblemProposalsBrowsable } from "../moderation.js";
 import { prepareModerationMatching, fundMockProposal, selectMockProposal, confirmMockProposal } from "../matching.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
@@ -191,4 +192,32 @@ test("report validation and daily limit bound distinct-report abuse without pena
   await assert.rejects(() => report(db, { uid: "funder", contentType: "problem", contentId: "problem" }), { code: "resource-exhausted" });
   assert.equal((await report(db, { uid: "funder", contentType: "problem", contentId: "p0" })).alreadyReported, true);
   assert.equal((await report(db, { uid: "funder", contentType: "problem", contentId: "problem", now: later(86400000) })).ok, true);
+});
+
+test("posted proposal lists are scoped to a readable parent and omit other problems", async () => {
+  const db = fixture();
+  db.records.set("proposals/other", { researcherId: "alice", postingOwnerId: "owner", problemId: "hidden",
+    title: "Other problem", status: "submitted", createdAt: now });
+  db.records.set("problems/hidden", { ownerId: "owner", status: "moderated_hidden", moderationStatus: "hidden" });
+  db.records.set("proposals/draft", { researcherId: "alice", problemId: "problem", status: "draft", createdAt: now });
+  const listed = await listPostedProposals({ db, uid: "funder", problemId: "problem" });
+  assert.deepEqual(listed.items.map((item) => item.id).sort(), ["a", "b"]);
+  assert.equal(listed.truncated, false);
+  assert.equal(db.records.get("proposals/a").problemBrowsable, true);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, true);
+  assert.equal(Object.hasOwn(db.records.get("proposals/other"), "problemBrowsable"), false);
+  await assert.rejects(() => listPostedProposals({ db, uid: "funder", problemId: "hidden" }), { code: "permission-denied" });
+  await assert.rejects(() => listPostedProposals({ db, uid: "missing", problemId: "problem" }), { code: "permission-denied" });
+  await assert.rejects(() => listPostedProposals({ db, uid: "funder", problemId: "../problem" }), { code: "invalid-argument" });
+});
+
+test("parent visibility stamps fail closed for hidden problems and unstamped proposals", async () => {
+  const db = fixture();
+  await syncProposalParentVisibility({ db, proposalId: "a", now });
+  assert.equal(db.records.get("proposals/a").problemBrowsable, true);
+  db.records.get("problems/problem").moderationStatus = "hidden";
+  db.records.get("problems/problem").status = "moderated_hidden";
+  await syncProblemProposalsBrowsable({ db, problemId: "problem", now: later(1000) });
+  assert.equal(db.records.get("proposals/a").problemBrowsable, false);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, false);
 });

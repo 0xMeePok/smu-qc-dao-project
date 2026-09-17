@@ -121,13 +121,13 @@ describe("[QCDAO-54] view posting detail page", () => {
     }
   });
 
-  it("[FUT-OPD-127] scopes proposal reads to the author and to submitted proposals on the posting", () => {
+  it("[FUT-OPD-127] scopes proposal reads to the author and a posting-scoped callable", () => {
     const listing = source("../../src/lib/proposals.js")
       .split("export async function listProposalsForPosting")[1]
       .split("export async function listProposalRevisions")[0];
     assert.match(listing, /where\("researcherId"/);
-    assert.match(listing, /where\("status"/);
-    assert.match(listing, /MEMBER_VISIBLE_PROPOSAL_STATUSES/);
+    assert.match(listing, /listPostedProposals/);
+    assert.doesNotMatch(listing, /where\("status"/);
   });
 
   it("[FUT-OPD-128] issues no proposal reads without a viewer or posting", () => {

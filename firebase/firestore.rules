@@ -1308,6 +1308,11 @@ service cloud.firestore {
       // so stakeholders can still open solutions and comment after the response
       // window closes. Discover does not list expired postings; hidden/removed
       // parents are not browsable.
+      //
+      // Member list is intentionally narrower than get. Firestore cannot require
+      // a problemId equality filter, so putting submittedProposalVisibleToMembers
+      // on `read` would let any member query every submitted proposal
+      // platform-wide. Per-posting lists go through listPostedProposals.
       function submittedProposalVisibleToMembers() {
         return hasCompletedProfile(request.auth.uid)
           && resource.data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
@@ -1322,11 +1327,14 @@ service cloud.firestore {
             )
           );
       }
-      allow read: if isActiveUser(request.auth.uid)
-        && (resource.data.researcherId == request.auth.uid
-          || isModerationAdmin(request.auth.uid)
-          || resource.data.get('postingOwnerId', '') == request.auth.uid
-          || submittedProposalVisibleToMembers());
+      function proposalOwnedByViewer() {
+        return isActiveUser(request.auth.uid)
+          && (resource.data.researcherId == request.auth.uid
+            || isModerationAdmin(request.auth.uid)
+            || resource.data.get('postingOwnerId', '') == request.auth.uid);
+      }
+      allow get: if proposalOwnedByViewer() || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers());
+      allow list: if proposalOwnedByViewer();
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
         && resource.data.status == 'draft'

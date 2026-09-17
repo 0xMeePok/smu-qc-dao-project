@@ -441,7 +441,9 @@ describe("proposal supporting PDFs", () => {
     const author = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(uploadBytes(ref(author, path), PDF_BYTES, metadata));
     await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
-    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), { researcherId: OWNER, postingOwnerId: OTHER, status: "submitted" }));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), {
+      researcherId: OWNER, postingOwnerId: OTHER, status: "submitted", problemBrowsable: true,
+    }));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(MEMBER).storage(), path)));
     await assertSucceeds(getBytes(ref(author, path)));
@@ -566,6 +568,19 @@ describe("proposal supporting PDFs", () => {
     await assertFails(getBytes(ref(env.authenticatedContext(MEMBER).storage(), hiddenPath)));
     await assertFails(getBytes(ref(env.authenticatedContext(SUSPENDED).storage(), hiddenPath)));
     await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), hiddenPath)));
+  });
+
+  it("withholds member downloads when problemBrowsable has not been stamped", async () => {
+    const unstampedId = "storage-unstamped-parent-59";
+    const unstampedPath = `proposals/${OWNER}/${unstampedId}/support01.pdf`;
+    const unstampedMetadata = pdfMetadata({ customMetadata: { problemId: unstampedId } });
+    await assertSucceeds(uploadBytes(ref(env.authenticatedContext(OWNER).storage(), unstampedPath), PDF_BYTES, unstampedMetadata));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", unstampedId), {
+      researcherId: OWNER, postingOwnerId: OTHER, status: "submitted",
+    }));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), unstampedPath)));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), unstampedPath)));
+    await assertFails(getBytes(ref(env.authenticatedContext(MEMBER).storage(), unstampedPath)));
   });
 
   it("refuses sponsor downloads against a draft that forges postingOwnerId", async () => {

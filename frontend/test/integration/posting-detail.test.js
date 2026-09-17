@@ -6,7 +6,6 @@ import { opportunityStatusLabel } from "../../src/config/workflowStatus.js";
 import { shortenAddress } from "../../src/lib/chain.js";
 import { postingActions } from "../../src/lib/postingActions.js";
 import { normaliseOpportunityMetrics } from "../../src/lib/postings.js";
-import { MEMBER_VISIBLE_PROPOSAL_STATUSES } from "../../src/lib/proposals.js";
 import { ROLE_ADMIN, ROLE_EVALUATOR, ROLE_USER, capabilitiesForAccessLevel } from "../../src/lib/roles.js";
 
 /** QCDAO-54 - view a posting detail page with full metadata and countdown. */
@@ -62,7 +61,7 @@ function proposalReadsForPosting({ problemId, viewerId }) {
   if (!problemId || !uid) return [];
   return [
     { problemId, field: "researcherId", value: uid },
-    { problemId, field: "status", values: MEMBER_VISIBLE_PROPOSAL_STATUSES },
+    { callable: "listPostedProposals", problemId },
   ];
 }
 
@@ -182,12 +181,12 @@ describe("[QCDAO-54] view posting detail page", () => {
     const member = viewPosting(OPEN_POSTING, participant);
     assert.deepEqual(member.proposalReads, [
       { problemId: "posting123", field: "researcherId", value: MEMBER },
-      { problemId: "posting123", field: "status", values: MEMBER_VISIBLE_PROPOSAL_STATUSES },
+      { callable: "listPostedProposals", problemId: "posting123" },
     ]);
     const poster = viewPosting(OPEN_POSTING, ownerSession);
     assert.deepEqual(poster.proposalReads, [
       { problemId: "posting123", field: "researcherId", value: OWNER },
-      { problemId: "posting123", field: "status", values: MEMBER_VISIBLE_PROPOSAL_STATUSES },
+      { callable: "listPostedProposals", problemId: "posting123" },
     ]);
     const guest = viewPosting(OPEN_POSTING, { isSignedIn: false, profile: null });
     assert.deepEqual(guest.proposalReads, []);
