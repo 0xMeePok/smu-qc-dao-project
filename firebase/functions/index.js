@@ -188,7 +188,7 @@ export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) =
 export const createComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return writeComment({ db, uid, now: Timestamp.now(), proposalId: request.data?.proposalId,
-    body: request.data?.body, recommendation: request.data?.recommendation });
+    body: request.data?.body, recommendation: request.data?.recommendation, parentId: request.data?.parentId });
 });
 export const editComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);

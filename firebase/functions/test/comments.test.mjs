@@ -92,7 +92,6 @@ test("members can comment on a submitted proposal; evaluators must recommend and
     authorId: "alice",
     badge: "evaluator",
     qftGrade: 5,
-    parentId: "forged",
   });
   assert.equal(evaluator.authorId, "evaluator");
   assert.equal(evaluator.authorRole, "evaluator");
@@ -100,26 +99,69 @@ test("members can comment on a submitted proposal; evaluators must recommend and
   assert.equal(evaluator.recommendation, "recommend_with_revisions");
   assert.equal(evaluator.qualifying, true);
   assert.equal(evaluator.parentId, null);
+  assert.equal(evaluator.replyCount, 0);
   assert.equal(db.records.get(`comments/${evaluator.id}`).qftGrade, null);
   assert.equal(db.records.get(`comments/${evaluator.id}`).parentId, null);
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+  await assert.rejects(() => create(db, { parentId: "forged" }), { code: "not-found" });
+});
+
+test("members can reply once under a top-level comment; replies never qualify", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  assert.equal(parent.replyCount, 0);
+  const reply = await create(db, { uid: "alice", body: "Agree on the benchmark.", parentId: parent.id });
+  assert.equal(reply.parentId, parent.id);
+  assert.equal(reply.qualifying, false);
+  assert.equal(reply.recommendation, null);
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 1);
+  const evaluatorReply = await create(db, {
+    uid: "evaluator",
+    body: "Need the cited figure as well.",
+    parentId: parent.id,
+  });
+  assert.equal(evaluatorReply.parentId, parent.id);
+  assert.equal(evaluatorReply.qualifying, false);
+  assert.equal(evaluatorReply.recommendation, null);
+  assert.equal(evaluatorReply.badge, "evaluator");
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 2);
+  assert.equal(db.records.get("proposals/a").matching?.evaluationComplete === true, false);
+  await assert.rejects(() => create(db, { parentId: reply.id, body: "Nested reply." }), {
+    code: "failed-precondition",
+  });
+  await assert.rejects(
+    () => create(db, { uid: "evaluator", parentId: parent.id, recommendation: "recommend", body: "Spoof." }),
+    { code: "invalid-argument" },
+  );
 });
 
 test("listing resolves public names, recommendation fields and newest-first order", async () => {
   const db = fixture();
   db.records.set("publicProfiles/funder", { fullName: "Funder" });
   db.records.set("publicProfiles/evaluator", { fullName: "Assigned evaluator" });
+  db.records.set("publicProfiles/alice", { fullName: "Alice" });
   const member = await create(db);
   const evaluator = await create(db, { uid: "evaluator", recommendation: "recommend",
     body: "Evaluator view.", now: later(1000) });
+  const reply = await create(db, { uid: "alice", body: "Need the cited figure.", parentId: member.id, now: later(2000) });
   const oldest = await listReportableComments({ db, uid: "funder", proposalId: "a" });
+  assert.equal(oldest.items.length, 2);
   assert.equal(oldest.items[0].id, member.id);
   assert.equal(oldest.items[0].authorName, "Funder");
+  assert.equal(oldest.items[0].parentId, null);
+  assert.equal(oldest.items[0].replyCount, 1);
+  assert.equal(oldest.items[0].replies.length, 1);
+  assert.equal(oldest.items[0].replies[0].id, reply.id);
+  assert.equal(oldest.items[0].replies[0].parentId, member.id);
+  assert.equal(oldest.items[0].replies[0].authorName, "Alice");
   assert.equal(oldest.items[1].authorName, "Assigned evaluator");
   assert.equal(oldest.items[1].qualifying, true);
   assert.equal(oldest.items[1].recommendation, "recommend");
+  assert.deepEqual(oldest.items[1].replies, []);
+  assert.equal(oldest.items.some((item) => item.id === reply.id), false);
   const newest = await listReportableComments({ db, uid: "funder", proposalId: "a", sort: "newest" });
   assert.equal(newest.items.map((item) => item.id).join(","), `${evaluator.id},${member.id}`);
+  assert.equal(newest.items.find((item) => item.id === member.id).replies[0].id, reply.id);
   await assert.rejects(() => listReportableComments({ db, uid: "funder", proposalId: "a", sort: "popular" }),
     { code: "invalid-argument" });
 });
@@ -298,6 +340,34 @@ test("authors can soft-delete anytime; listing hides the record and qualifying i
       }),
     { code: "failed-precondition" },
   );
+});
+
+test("deleting a parent with replies keeps a placeholder; deleting the last reply drops the thread", async () => {
+  const db = fixture();
+  db.records.set("publicProfiles/funder", { fullName: "Funder" });
+  db.records.set("publicProfiles/alice", { fullName: "Alice" });
+  const parent = await create(db);
+  const reply = await create(db, { uid: "alice", body: "Agree on the benchmark.", parentId: parent.id });
+  await deleteComment({ db, uid: "funder", commentId: parent.id, now: later(1000) });
+  const listed = await listReportableComments({ db, uid: "funder", proposalId: "a" });
+  assert.equal(listed.items.length, 1);
+  assert.equal(listed.items[0].id, parent.id);
+  assert.equal(listed.items[0].deleted, true);
+  assert.equal(listed.items[0].body, "");
+  assert.equal(listed.items[0].authorName, "");
+  assert.equal(listed.items[0].replyCount, 1);
+  assert.equal(listed.items[0].replies.length, 1);
+  assert.equal(listed.items[0].replies[0].id, reply.id);
+  assert.equal(listed.items[0].replies[0].body, "Agree on the benchmark.");
+  const extra = await create(db, { uid: "alice", body: "Still on this thread.", parentId: parent.id, now: later(2000) });
+  assert.equal(extra.parentId, parent.id);
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 2);
+  await deleteComment({ db, uid: "alice", commentId: reply.id, now: later(3000) });
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 1);
+  assert.equal((await listReportableComments({ db, uid: "funder", proposalId: "a" })).items[0].replies.length, 1);
+  await deleteComment({ db, uid: "alice", commentId: extra.id, now: later(4000) });
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 0);
+  assert.equal((await listReportableComments({ db, uid: "funder", proposalId: "a" })).items.length, 0);
 });
 
 test("evaluationComplete stays true while any qualifying comment remains and clears when the last one is removed", async () => {

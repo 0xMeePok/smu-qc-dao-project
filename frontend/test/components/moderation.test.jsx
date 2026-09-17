@@ -183,6 +183,54 @@ describe("author notices and reportable comments", () => {
     expect(screen.queryByText(/\d+ reports/)).toBeNull();
   });
 
+  it("keeps replies collapsed until expanded and posts a reply without a recommendation", async () => {
+    mocks.user = { id: "evaluator", roles: ["evaluator"] };
+    mocks.comments.mockResolvedValue({ items: [{
+      id: "comment1", body: "The claimed latency needs a cited benchmark.", authorName: "Researcher",
+      createdAt: row.createdAt, proposalId: "proposal1", parentId: null, replyCount: 1,
+      replies: [{ id: "reply1", body: "Agree on the benchmark.", authorName: "Alice", parentId: "comment1",
+        createdAt: row.createdAt, proposalId: "proposal1" }],
+    }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    await screen.findByText("The claimed latency needs a cited benchmark.");
+    expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
+    expect(screen.queryByLabelText("Write a reply")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 reply" }));
+    expect(screen.getByText("Agree on the benchmark.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reply", hidden: false })).toBeTruthy();
+    expect(within(screen.getByText("Agree on the benchmark.").closest("article")).queryByRole("button", { name: "Reply" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Write a reply"), { target: { value: "Need the cited figure as well." } });
+    fireEvent.click(screen.getByRole("button", { name: "Post reply" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
+      proposalId: "proposal1", body: "Need the cited figure as well.", parentId: "comment1",
+    }));
+    expect(mocks.create.mock.calls[0][0].recommendation).toBeUndefined();
+    fireEvent.click(screen.getByRole("button", { name: "Hide replies" }));
+    expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
+  });
+
+  it("keeps a removed parent placeholder so replies stay reachable", async () => {
+    mocks.comments.mockResolvedValue({ items: [{
+      id: "comment1", body: "", deleted: true, authorName: "", parentId: null, replyCount: 1, proposalId: "proposal1",
+      replies: [{ id: "reply1", body: "Agree on the benchmark.", authorName: "Alice", parentId: "comment1",
+        createdAt: row.createdAt, proposalId: "proposal1" }],
+    }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    expect(await screen.findByText("This comment was removed")).toBeTruthy();
+    expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit comment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete comment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Report this comment" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 reply" }));
+    expect(screen.getByText("Agree on the benchmark.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reply" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Write a reply"), { target: { value: "Still on this thread." } });
+    fireEvent.click(screen.getByRole("button", { name: "Post reply" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
+      proposalId: "proposal1", body: "Still on this thread.", parentId: "comment1",
+    }));
+  });
+
   it("lets a member post on a proposal and requires a recommendation from assigned evaluators", async () => {
     render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
     fireEvent.change(await screen.findByLabelText("Write a comment"), { target: { value: "The claimed latency needs a cited benchmark." } });
@@ -238,6 +286,7 @@ it("does not offer a composer on posting-level discussion", async () => {
   await screen.findByText("A later public comment");
   expect(screen.queryByLabelText("Write a comment")).toBeNull();
   expect(screen.queryByRole("button", { name: "Post comment" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
 });
 
 it("reaches public comments after a filtered empty page and retries pagination", async () => {

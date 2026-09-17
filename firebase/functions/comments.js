@@ -37,8 +37,12 @@ function presentation(role) {
   return { authorRole: "user", badge: null };
 }
 
-function recommendationFor(role, value, previous = null) {
+function recommendationFor(role, value, previous = null, { reply = false } = {}) {
   const provided = value != null && value !== "";
+  if (reply) {
+    if (provided) fail("invalid-argument", "Replies cannot include a recommendation.");
+    return null;
+  }
   if (role === ROLE_EVALUATOR) {
     const recommendation = provided ? value : previous;
     if (!RECOMMENDATIONS.has(recommendation)) {
@@ -66,6 +70,7 @@ function view(id, data) {
     proposalId: data.proposalId,
     problemId: data.problemId,
     parentId: data.parentId ?? null,
+    replyCount: data.replyCount ?? 0,
     body: data.body,
     authorRole: data.authorRole,
     badge: data.badge,
@@ -75,6 +80,7 @@ function view(id, data) {
     updatedAt: iso(data.updatedAt),
     editedAt: iso(data.editedAt),
     deletedAt: iso(data.deletedAt),
+    deleted: Boolean(data.deletedAt),
   };
 }
 
@@ -138,23 +144,44 @@ function authoredComment(tx, db, uid, commentId) {
   });
 }
 
-export async function createComment({ db, uid, proposalId, body, recommendation, now = Timestamp.now() }) {
+function replyParentId(value) {
+  if (value == null || value === "") return null;
+  validId(value, "parent comment");
+  return value;
+}
+
+async function loadReplyParent(tx, db, proposalId, parentId) {
+  if (!parentId) return null;
+  const ref = db.collection("comments").doc(parentId);
+  const parent = await tx.get(ref);
+  if (!parent.exists) fail("not-found", "This comment is not available.");
+  const data = parent.data();
+  if (data.proposalId !== proposalId) fail("invalid-argument", "Reply to a comment on this solution.");
+  if ((data.parentId ?? null) != null) fail("failed-precondition", "Replies can only be added to a top-level comment.");
+  if (BLOCKED.has(data.moderationStatus)) fail("failed-precondition", "This comment is not available.");
+  return parent;
+}
+
+export async function createComment({ db, uid, proposalId, body, recommendation, parentId, now = Timestamp.now() }) {
   validId(proposalId, "proposal");
   const text = commentBody(body);
+  const replyTo = replyParentId(parentId);
   const ref = db.collection("comments").doc(randomBytes(12).toString("hex"));
   return db.runTransaction(async (tx) => {
     const profile = await loadMember(tx, db, uid);
     const proposal = await loadReadableProposal(tx, db, uid, profile, proposalId);
+    const parent = await loadReplyParent(tx, db, proposalId, replyTo);
     const role = accessLevel(profile);
     const shown = presentation(role);
     const record = {
       authorId: uid,
       proposalId,
       problemId: proposal.data().problemId,
-      parentId: null,
+      parentId: replyTo,
+      replyCount: 0,
       body: text,
       ...shown,
-      recommendation: recommendationFor(role, recommendation),
+      recommendation: recommendationFor(role, recommendation, null, { reply: Boolean(replyTo) }),
       qualifying: false,
       ...GRADING,
       moderationStatus: "visible",
@@ -165,6 +192,7 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     record.qualifying = commentIsQualifying(record, role);
     const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying });
     tx.set(ref, record);
+    if (parent) tx.update(parent.ref, { replyCount: (parent.data().replyCount || 0) + 1 });
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     return view(ref.id, record);
   });
@@ -218,6 +246,7 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
     await loadMember(tx, db, uid);
     const { ref, data } = await authoredComment(tx, db, uid, commentId);
     if (data.deletedAt) return view(ref.id, data);
+    const parent = data.parentId ? await tx.get(db.collection("comments").doc(data.parentId)) : null;
     const next = {
       ...data,
       qualifying: false,
@@ -228,6 +257,9 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
     };
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: false });
     tx.set(ref, next);
+    if (parent?.exists) {
+      tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
+    }
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     return view(ref.id, next);
   });
