@@ -94,11 +94,11 @@ describe("QCDAO-59/60 submitted proposals", () => {
     }));
   });
 
-  it("allows sponsor dashboard reads and denies unrelated wallets", async () => {
+  it("allows sponsor dashboard reads and onboarded members to read a submitted proposal", async () => {
     const sponsor = env.authenticatedContext(SPONSOR).firestore();
     await assertSucceeds(getDoc(doc(sponsor, "proposals", "proposal-full")));
     await assertSucceeds(getDocs(query(collection(sponsor, "proposals"), where("postingOwnerId", "==", SPONSOR))));
-    await assertFails(getDoc(doc(env.authenticatedContext(OUTSIDER).firestore(), "proposals", "proposal-full")));
+    await assertSucceeds(getDoc(doc(env.authenticatedContext(OUTSIDER).firestore(), "proposals", "proposal-full")));
   });
   it("blocks concurrent duplicate submissions and permits a replacement after withdrawal", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();

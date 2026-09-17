@@ -1300,13 +1300,28 @@ service cloud.firestore {
     }
 
     match /proposals/{proposalId} {
-      // Sponsor list queries filter only on postingOwnerId. Drafts are kept
-      // out of that inbox by trustedPostingOwner, which refuses a new value
-      // except on the submitted path that binds it to the parent owner.
+      // Author, sponsor and admins keep their existing get/list paths. Drafts stay
+      // author-only. Submitted (and later) proposals on a browsable opportunity
+      // are readable by onboarded members so stakeholders can comment.
+      function submittedProposalVisibleToMembers() {
+        return hasCompletedProfile(request.auth.uid)
+          && resource.data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
+          && !(resource.data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
+          && resource.data.keys().hasAny(['problemId'])
+          && exists(/databases/$(database)/documents/problems/$(resource.data.problemId))
+          && (
+            get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.ownerId == request.auth.uid
+            || (
+              get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
+              && !(get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
+            )
+          );
+      }
       allow read: if isActiveUser(request.auth.uid)
         && (resource.data.researcherId == request.auth.uid
           || isModerationAdmin(request.auth.uid)
-          || resource.data.get('postingOwnerId', '') == request.auth.uid);
+          || resource.data.get('postingOwnerId', '') == request.auth.uid
+          || submittedProposalVisibleToMembers());
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
         && resource.data.status == 'draft'

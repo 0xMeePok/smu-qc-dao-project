@@ -224,15 +224,16 @@ service firebase.storage {
       allow delete: if false; // removeAttachment retires the reservation before deleting.
     }
 
-    // Proposal files are private to the submitting wallet and the sponsor. A
-    // correction may add or drop files; the bytes behind any one id never change.
-    // Sponsor reads require a non-draft record so a forged draft
-    // `postingOwnerId` cannot open another member's download path.
+    // Proposal files stay private while the record is a draft. Once submitted and
+    // not moderated, onboarded members may download the same bytes they can read
+    // on the proposal detail page. Author reads still use isWallet(ownerId), so a
+    // forged draft postingOwnerId cannot open another member's prefix. Storage
+    // allows only two Firestore reads, so this cannot also load the parent posting.
     function proposalReader(proposalId, ownerId) {
       let proposal = attachmentRecord('proposals', proposalId);
       return proposal != null && proposal.data.researcherId == ownerId
         && proposal.data.status != 'draft'
-        && proposal.data.postingOwnerId == request.auth.uid;
+        && !(proposal.data.get('moderationStatus', 'visible') in ['hidden', 'removed']);
     }
 
     // Drafts (and the pre-save path where no document exists yet) may gain and

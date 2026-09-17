@@ -11,6 +11,15 @@ import { proposalBlockReason, validateProposal } from "./proposalValidation.js";
 export const PROPOSAL_STATUS_DRAFT = "draft";
 export const PROPOSAL_STATUS_SUBMITTED = "submitted";
 
+/** Statuses onboarded members may list on a browsable posting. Drafts stay author-only. */
+export const MEMBER_VISIBLE_PROPOSAL_STATUSES = [
+  PROPOSAL_STATUS_SUBMITTED,
+  "under_review",
+  "accepted",
+  "rejected",
+  "withdrawn",
+];
+
 /** Statuses the author may still correct. `under_review` is where the lock falls. */
 export const EDITABLE_PROPOSAL_STATUSES = [PROPOSAL_STATUS_DRAFT, PROPOSAL_STATUS_SUBMITTED];
 
@@ -205,26 +214,19 @@ function proposalTime(value) {
 
 /**
  * Proposals on one posting that the signed-in wallet is allowed to read.
- * Poster: submitted inbox (`postingOwnerId`). Author: their own rows, including drafts.
- * Anyone else gets an empty list; the public count lives on opportunityMetrics.
+ * Author: their own rows, including drafts. Onboarded members: submitted
+ * (and later) proposals on that posting. Drafts of other authors stay hidden.
  */
-export async function listProposalsForPosting({ problemId, viewerId, postingOwnerId }) {
+export async function listProposalsForPosting({ problemId, viewerId }) {
   requireFirebase();
   const uid = String(viewerId ?? "").toLowerCase();
-  const owner = String(postingOwnerId ?? "").toLowerCase();
   if (!problemId || !uid) return [];
 
   const proposals = collection(db, "proposals");
   const reads = [
     getDocs(query(proposals, where("problemId", "==", problemId), where("researcherId", "==", uid))),
+    getDocs(query(proposals, where("problemId", "==", problemId), where("status", "in", MEMBER_VISIBLE_PROPOSAL_STATUSES))),
   ];
-  if (uid === owner) {
-    reads.push(getDocs(query(
-      proposals,
-      where("problemId", "==", problemId),
-      where("postingOwnerId", "==", uid),
-    )));
-  }
 
   const byId = new Map();
   for (const snapshot of await Promise.all(reads)) {

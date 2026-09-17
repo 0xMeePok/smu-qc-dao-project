@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPEN_FUNDING_TYPE } from "../../src/config/fundingOpportunity.js";
-import { ROLES } from "../../src/config/roles.js";
 import { evaluateRouteAccess } from "../../src/config/routes.js";
 import { opportunityStatusLabel } from "../../src/config/workflowStatus.js";
 import { shortenAddress } from "../../src/lib/chain.js";
 import { postingActions } from "../../src/lib/postingActions.js";
 import { normaliseOpportunityMetrics } from "../../src/lib/postings.js";
+import { MEMBER_VISIBLE_PROPOSAL_STATUSES } from "../../src/lib/proposals.js";
 import { ROLE_ADMIN, ROLE_EVALUATOR, ROLE_USER, capabilitiesForAccessLevel } from "../../src/lib/roles.js";
 
 /** QCDAO-54 - view a posting detail page with full metadata and countdown. */
@@ -57,13 +57,13 @@ function posterByline({ ownerId, organisation, poster }) {
 }
 
 /** Mirrors listProposalsForPosting ACL filters without touching Firestore. */
-function proposalReadsForPosting({ problemId, viewerId, postingOwnerId }) {
+function proposalReadsForPosting({ problemId, viewerId }) {
   const uid = String(viewerId ?? "").toLowerCase();
-  const owner = String(postingOwnerId ?? "").toLowerCase();
   if (!problemId || !uid) return [];
-  const reads = [{ problemId, field: "researcherId", value: uid }];
-  if (uid === owner) reads.push({ problemId, field: "postingOwnerId", value: uid });
-  return reads;
+  return [
+    { problemId, field: "researcherId", value: uid },
+    { problemId, field: "status", values: MEMBER_VISIBLE_PROPOSAL_STATUSES },
+  ];
 }
 
 function viewPosting(posting, session, { publicProfile, now = NOW } = {}) {
@@ -86,7 +86,6 @@ function viewPosting(posting, session, { publicProfile, now = NOW } = {}) {
     proposalReads: proposalReadsForPosting({
       problemId: posting.id,
       viewerId: auth.user?.id,
-      postingOwnerId: posting.ownerId,
     }),
   };
 }
@@ -179,15 +178,16 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.equal(admin.actions[0].route, "admin");
   });
 
-  it("[FIT-OPD-036] should let an author read their own proposals and the poster read the inbox", () => {
+  it("[FIT-OPD-036] should let signed-in members list their own rows and submitted proposals on the posting", () => {
     const member = viewPosting(OPEN_POSTING, participant);
     assert.deepEqual(member.proposalReads, [
       { problemId: "posting123", field: "researcherId", value: MEMBER },
+      { problemId: "posting123", field: "status", values: MEMBER_VISIBLE_PROPOSAL_STATUSES },
     ]);
     const poster = viewPosting(OPEN_POSTING, ownerSession);
     assert.deepEqual(poster.proposalReads, [
       { problemId: "posting123", field: "researcherId", value: OWNER },
-      { problemId: "posting123", field: "postingOwnerId", value: OWNER },
+      { problemId: "posting123", field: "status", values: MEMBER_VISIBLE_PROPOSAL_STATUSES },
     ]);
     const guest = viewPosting(OPEN_POSTING, { isSignedIn: false, profile: null });
     assert.deepEqual(guest.proposalReads, []);

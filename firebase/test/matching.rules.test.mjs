@@ -162,7 +162,7 @@ describe("QCDAO-81..89 server-owned mock matching", () => {
     await assertFails(getDocs(collection(db, "mockFunding")));
     await assertFails(updateDoc(doc(db, "mockFunding", id), { status: "locked" }));
     await assertFails(setDoc(doc(db, "mockFunding", `${id}-forged`), { funderId: FUNDER, amountMinor: 999999 }));
-    await assertFails(getDoc(doc(db, "proposals", id)));
+    await assertSucceeds(getDoc(doc(db, "proposals", id)));
     await assertSucceeds(getDoc(doc(env.authenticatedContext(OWNER).firestore(), "proposals", id)));
   });
 });

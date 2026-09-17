@@ -121,13 +121,13 @@ describe("[QCDAO-54] view posting detail page", () => {
     }
   });
 
-  it("[FUT-OPD-127] scopes proposal reads to the author, and to the poster inbox", () => {
+  it("[FUT-OPD-127] scopes proposal reads to the author and to submitted proposals on the posting", () => {
     const listing = source("../../src/lib/proposals.js")
       .split("export async function listProposalsForPosting")[1]
       .split("export async function listProposalRevisions")[0];
     assert.match(listing, /where\("researcherId"/);
-    assert.match(listing, /where\("postingOwnerId"/);
-    assert.match(listing, /uid === owner/);
+    assert.match(listing, /where\("status"/);
+    assert.match(listing, /MEMBER_VISIBLE_PROPOSAL_STATUSES/);
   });
 
   it("[FUT-OPD-128] issues no proposal reads without a viewer or posting", () => {
@@ -144,6 +144,7 @@ describe("[QCDAO-54] view posting detail page", () => {
       .map((index) => index.fields.map((field) => field.fieldPath).join("+"));
     assert.ok(paths.includes("problemId+researcherId"));
     assert.ok(paths.includes("problemId+postingOwnerId"));
+    assert.ok(paths.includes("problemId+status"));
   });
 });
 

@@ -435,7 +435,7 @@ describe("proposal supporting PDFs", () => {
   const proposalId = "storage-proposal-59";
   const path = `proposals/${OWNER}/${proposalId}/support01.pdf`;
   const metadata = pdfMetadata({ customMetadata: { problemId: proposalId } });
-  it("uploads before submission, then permits only the author and sponsor to read", async () => {
+  it("uploads before submission, then permits author and onboarded members to read once submitted", async () => {
     const author = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(uploadBytes(ref(author, path), PDF_BYTES, metadata));
     await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));

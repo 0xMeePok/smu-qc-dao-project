@@ -29,7 +29,6 @@ const select = (db) => selectMockProposal({ db, uid: "owner", problemId: "proble
 
 test("reports use existing content access, enforce one per member/item, and aggregate reasons atomically", async () => {
   const db = fixture();
-  await assert.rejects(() => report(db, { uid: "funder" }), { code: "permission-denied" });
   await assert.rejects(() => report(db, { uid: "missing" }), { code: "permission-denied" });
   await assert.rejects(() => report(db, { uid: "suspended" }), { code: "permission-denied" });
   const [one, retry] = await Promise.all([report(db), report(db)]);
@@ -139,7 +138,7 @@ test("comments inherit parent access and support report/hide/restore without a c
   const db = fixture();
   db.records.set("comments/private", { authorId: "alice", problemId: "problem", proposalId: "a", text: "Private proposal comment", createdAt: now });
   assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem" })).items.length, 1);
-  await assert.rejects(() => listReportableComments({ db, uid: "funder", problemId: "problem", proposalId: "a" }), { code: "permission-denied" });
+  assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem", proposalId: "a" })).items[0].body, "Private proposal comment");
   await assert.rejects(() => listReportableComments({ db, uid: "owner", problemId: "wrong", proposalId: "a" }), { code: "permission-denied" });
   assert.equal((await listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "a" })).items[0].body, "Private proposal comment");
   await report(db, { uid: "funder", contentType: "comment", contentId: "comment", reason: "off_topic" });

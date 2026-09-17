@@ -330,7 +330,7 @@
         }
       ]
     },
-    {
+      {
       "collectionGroup": "proposals",
       "queryScope": "COLLECTION",
       "fields": [
@@ -340,6 +340,20 @@
         },
         {
           "fieldPath": "postingOwnerId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "proposals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "problemId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
           "order": "ASCENDING"
         }
       ]
