@@ -80,6 +80,7 @@ function view(id, data) {
     updatedAt: iso(data.updatedAt),
     editedAt: iso(data.editedAt),
     deletedAt: iso(data.deletedAt),
+    deleted: Boolean(data.deletedAt),
   };
 }
 
@@ -245,6 +246,7 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
     await loadMember(tx, db, uid);
     const { ref, data } = await authoredComment(tx, db, uid, commentId);
     if (data.deletedAt) return view(ref.id, data);
+    const parent = data.parentId ? await tx.get(db.collection("comments").doc(data.parentId)) : null;
     const next = {
       ...data,
       qualifying: false,
@@ -255,6 +257,9 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
     };
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: false });
     tx.set(ref, next);
+    if (parent?.exists) {
+      tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
+    }
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     return view(ref.id, next);
   });

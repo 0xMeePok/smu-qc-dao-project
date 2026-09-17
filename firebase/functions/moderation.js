@@ -315,21 +315,23 @@ export async function markModerationNotificationRead({ db, uid, notificationId, 
 }
 
 function commentVisible(data, { uid, profile, proposalScoped }) {
-  return (proposalScoped || !data.proposalId) && isPublished("comment", data)
-    && !data.deletedAt
-    && (!BLOCKED.has(data.moderationStatus) || owner("comment", data) === uid || profile.role === 1);
+  if (!(proposalScoped || !data.proposalId) || !isPublished("comment", data)) return false;
+  if (BLOCKED.has(data.moderationStatus) && owner("comment", data) !== uid && profile.role !== 1) return false;
+  if (!data.deletedAt) return true;
+  return proposalScoped && (data.parentId ?? null) == null && (data.replyCount || 0) > 0;
 }
 
 function commentListItem(doc, names) {
   const data = doc.data();
+  const removed = Boolean(data.deletedAt);
   const authorId = owner("comment", data) || "";
-  return { id: doc.id, authorId, authorName: names.get(authorId) || "",
-    authorRole: data.authorRole || null, badge: data.badge || null,
-    recommendation: data.recommendation || null, qualifying: data.qualifying === true,
+  return { id: doc.id, authorId: removed ? "" : authorId, authorName: removed ? "" : names.get(authorId) || "",
+    authorRole: removed ? null : data.authorRole || null, badge: removed ? null : data.badge || null,
+    recommendation: removed ? null : data.recommendation || null, qualifying: !removed && data.qualifying === true,
     problemId: data.problemId || null, proposalId: data.proposalId || null,
-    parentId: data.parentId ?? null, replyCount: data.replyCount ?? 0,
-    body: String(data.body || data.text || data.content || ""),
-    createdAt: serialise(data.createdAt || null), editedAt: serialise(data.editedAt || null),
+    parentId: data.parentId ?? null, replyCount: data.replyCount ?? 0, deleted: removed,
+    body: removed ? "" : String(data.body || data.text || data.content || ""),
+    createdAt: serialise(data.createdAt || null), editedAt: removed ? null : serialise(data.editedAt || null),
     moderationStatus: data.moderationStatus || "visible", moderation: serialise(data.moderation || null) };
 }
 

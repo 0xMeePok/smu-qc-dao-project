@@ -156,7 +156,8 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
 function CommentItem({ item, user, editing, editingId, canReply, expanded, onToggle, onReply, onEdit, onCancel, onChanged, nested }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const mine = sameAuthor(user, item);
+  const removed = Boolean(item.deleted || item.deletedAt);
+  const mine = !removed && sameAuthor(user, item);
   const editable = mine && canEditComment(item);
   const replies = item.replies || [];
   const count = replyCount(item);
@@ -169,15 +170,17 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
   };
   const role = roleText(item.authorRole);
   return <article className={nested ? "matching-candidate comment-reply" : "matching-candidate"}>
-    {editing ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
+    {editing && !removed ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
       onPosted={onChanged} onCancel={onCancel} /> : <>
-      <p className="proposal-text">{item.body || item.text || item.content}</p>
-      <div className="comment-meta">
+      <p className={removed ? "proposal-text comment-removed" : "proposal-text"}>
+        {removed ? "This comment was removed" : (item.body || item.text || item.content)}
+      </p>
+      {!removed && <div className="comment-meta">
         <small>{item.authorName || item.authorId} · {formatInstant(item.createdAt)}{item.editedAt ? " · Edited" : ""}</small>
         {role && <span className={`role-chip ${roleChip(item.authorRole)}`}>{role}</span>}
         {item.qualifying && item.badge === "evaluator" && <span className="user-role-badge evaluator-badge">Evaluator</span>}
         {item.qualifying && recommendationLabel(item.recommendation) && <span className="comment-recommendation">{recommendationLabel(item.recommendation)}</span>}
-      </div>
+      </div>}
       {error && <p role="alert" className="field-hint">{error}</p>}
       <div className="comment-actions">
         {editable && <button type="button" className="text-button" disabled={busy} onClick={() => onEdit(item.id)}>Edit comment</button>}
@@ -185,7 +188,7 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
         {parent && canReply && <button type="button" className="text-button" onClick={onReply}>Reply</button>}
         {parent && count > 0 && <button type="button" className="text-button" aria-expanded={expanded}
           onClick={onToggle}>{expanded ? "Hide replies" : count === 1 ? "Show 1 reply" : `Show ${count} replies`}</button>}
-        <ReportContentButton contentType="comment" contentId={item.id} />
+        {!removed && <ReportContentButton contentType="comment" contentId={item.id} />}
       </div>
     </>}
     {parent && expanded && <div className="comment-replies">

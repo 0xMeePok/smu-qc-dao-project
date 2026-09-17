@@ -342,6 +342,34 @@ test("authors can soft-delete anytime; listing hides the record and qualifying i
   );
 });
 
+test("deleting a parent with replies keeps a placeholder; deleting the last reply drops the thread", async () => {
+  const db = fixture();
+  db.records.set("publicProfiles/funder", { fullName: "Funder" });
+  db.records.set("publicProfiles/alice", { fullName: "Alice" });
+  const parent = await create(db);
+  const reply = await create(db, { uid: "alice", body: "Agree on the benchmark.", parentId: parent.id });
+  await deleteComment({ db, uid: "funder", commentId: parent.id, now: later(1000) });
+  const listed = await listReportableComments({ db, uid: "funder", proposalId: "a" });
+  assert.equal(listed.items.length, 1);
+  assert.equal(listed.items[0].id, parent.id);
+  assert.equal(listed.items[0].deleted, true);
+  assert.equal(listed.items[0].body, "");
+  assert.equal(listed.items[0].authorName, "");
+  assert.equal(listed.items[0].replyCount, 1);
+  assert.equal(listed.items[0].replies.length, 1);
+  assert.equal(listed.items[0].replies[0].id, reply.id);
+  assert.equal(listed.items[0].replies[0].body, "Agree on the benchmark.");
+  const extra = await create(db, { uid: "alice", body: "Still on this thread.", parentId: parent.id, now: later(2000) });
+  assert.equal(extra.parentId, parent.id);
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 2);
+  await deleteComment({ db, uid: "alice", commentId: reply.id, now: later(3000) });
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 1);
+  assert.equal((await listReportableComments({ db, uid: "funder", proposalId: "a" })).items[0].replies.length, 1);
+  await deleteComment({ db, uid: "alice", commentId: extra.id, now: later(4000) });
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 0);
+  assert.equal((await listReportableComments({ db, uid: "funder", proposalId: "a" })).items.length, 0);
+});
+
 test("evaluationComplete stays true while any qualifying comment remains and clears when the last one is removed", async () => {
   const db = fixture();
   const first = await create(db, {
