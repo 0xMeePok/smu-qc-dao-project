@@ -92,7 +92,6 @@ test("members can comment on a submitted proposal; evaluators must recommend and
     authorId: "alice",
     badge: "evaluator",
     qftGrade: 5,
-    parentId: "forged",
   });
   assert.equal(evaluator.authorId, "evaluator");
   assert.equal(evaluator.authorRole, "evaluator");
@@ -100,9 +99,40 @@ test("members can comment on a submitted proposal; evaluators must recommend and
   assert.equal(evaluator.recommendation, "recommend_with_revisions");
   assert.equal(evaluator.qualifying, true);
   assert.equal(evaluator.parentId, null);
+  assert.equal(evaluator.replyCount, 0);
   assert.equal(db.records.get(`comments/${evaluator.id}`).qftGrade, null);
   assert.equal(db.records.get(`comments/${evaluator.id}`).parentId, null);
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+  await assert.rejects(() => create(db, { parentId: "forged" }), { code: "not-found" });
+});
+
+test("members can reply once under a top-level comment; replies never qualify", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  assert.equal(parent.replyCount, 0);
+  const reply = await create(db, { uid: "alice", body: "Agree on the benchmark.", parentId: parent.id });
+  assert.equal(reply.parentId, parent.id);
+  assert.equal(reply.qualifying, false);
+  assert.equal(reply.recommendation, null);
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 1);
+  const evaluatorReply = await create(db, {
+    uid: "evaluator",
+    body: "Need the cited figure as well.",
+    parentId: parent.id,
+  });
+  assert.equal(evaluatorReply.parentId, parent.id);
+  assert.equal(evaluatorReply.qualifying, false);
+  assert.equal(evaluatorReply.recommendation, null);
+  assert.equal(evaluatorReply.badge, "evaluator");
+  assert.equal(db.records.get(`comments/${parent.id}`).replyCount, 2);
+  assert.equal(db.records.get("proposals/a").matching?.evaluationComplete === true, false);
+  await assert.rejects(() => create(db, { parentId: reply.id, body: "Nested reply." }), {
+    code: "failed-precondition",
+  });
+  await assert.rejects(
+    () => create(db, { uid: "evaluator", parentId: parent.id, recommendation: "recommend", body: "Spoof." }),
+    { code: "invalid-argument" },
+  );
 });
 
 test("listing resolves public names, recommendation fields and newest-first order", async () => {
