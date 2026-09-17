@@ -7,7 +7,7 @@ import { opportunityStatusLabel } from "../../src/config/workflowStatus.js";
 import { shortenAddress } from "../../src/lib/chain.js";
 import { postingActions } from "../../src/lib/postingActions.js";
 import { normaliseOpportunityMetrics } from "../../src/lib/postings.js";
-import { ROLE_ADMIN, ROLE_USER, isAdmin } from "../../src/lib/roles.js";
+import { ROLE_ADMIN, ROLE_EVALUATOR, ROLE_USER, capabilitiesForAccessLevel } from "../../src/lib/roles.js";
 
 /** QCDAO-54 - view a posting detail page with full metadata and countdown. */
 
@@ -31,18 +31,15 @@ const OPEN_POSTING = {
 };
 
 /**
- * Mirrors AuthContext.jsx: a signed-in participant is multi-role; admin is isolated.
+ * Mirrors AuthContext.jsx: capabilities come from the Firestore access level.
  */
 function deriveAuthState(session) {
   if (!session?.isSignedIn || !session?.profile) {
     return { user: null, isAuthenticated: false };
   }
-  const admin = isAdmin(session.profile.role);
   const user = {
     id: session.address,
-    roles: admin
-      ? [ROLES.ADMIN]
-      : [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER],
+    roles: capabilitiesForAccessLevel(session.profile.role),
   };
   return { user, isAuthenticated: true };
 }
@@ -165,10 +162,17 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.ok(!actionIds(viewPosting(OPEN_POSTING, ownerSession)).includes("fund"));
   });
 
-  it("[FIT-OPD-035] should show Evaluate in review and Moderate only to an administrator", () => {
+    it("[FIT-OPD-035] should show Evaluate only to an assigned evaluator in review, and Moderate only to an administrator", () => {
     const review = viewPosting({ ...OPEN_POSTING, status: "in_review" }, participant);
-    assert.ok(actionIds(review).includes("evaluate"));
-    assert.equal(review.actions.find((action) => action.id === "evaluate").route, "evaluations");
+    assert.ok(!actionIds(review).includes("evaluate"));
+
+    const evaluatorSession = {
+      ...participant,
+      profile: { ...participant.profile, role: ROLE_EVALUATOR },
+    };
+    const evaluatorReview = viewPosting({ ...OPEN_POSTING, status: "in_review" }, evaluatorSession);
+    assert.ok(actionIds(evaluatorReview).includes("evaluate"));
+    assert.equal(evaluatorReview.actions.find((action) => action.id === "evaluate").route, "evaluations");
 
     const admin = viewPosting(OPEN_POSTING, adminSession);
     assert.deepEqual(actionIds(admin), ["moderate"]);

@@ -558,6 +558,12 @@ h1, h2, h3 { color: var(--ink); font-weight: 700; letter-spacing: -0.022em; line
   border: 1px solid #fbcfe8;
 }
 
+.evaluator-badge {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
 .signout-btn, .signin-nav-btn {
   min-height: 30px;
   padding: 3px 12px;
@@ -2002,6 +2008,16 @@ footer > p { margin: 0 auto 0 0; }
   background: rgba(59, 130, 246, 0.12);
   color: #93c5fd;
   border: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-block;
+}
+.role-chip-evaluator {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
   padding: 4px 10px;
   border-radius: 9999px;
   font-size: 12px;

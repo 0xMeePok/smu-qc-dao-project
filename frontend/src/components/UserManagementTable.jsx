@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { shortenAddress } from "../lib/chain.js";
-import { roleLabel } from "../lib/roles.js";
+import { roleChipClass, roleLabel } from "../lib/roles.js";
 
 export function UserManagementTable({
   users,
@@ -99,6 +99,7 @@ export function UserManagementTable({
             >
               <option value="">All Roles</option>
               <option value="0">Standard Users (0)</option>
+              <option value="2">Assigned Evaluators (2)</option>
               <option value="1">Administrators (1)</option>
             </select>
           </div>
@@ -172,7 +173,7 @@ export function UserManagementTable({
                       <span className="org-text">{u.organisation || "—"}</span>
                     </td>
                     <td>
-                      <span className={`role-chip ${u.role === 1 ? "role-chip-admin" : "role-chip-user"}`}>
+                      <span className={`role-chip ${roleChipClass(u.role)}`}>
                         {roleLabel(u.role)}
                       </span>
                     </td>

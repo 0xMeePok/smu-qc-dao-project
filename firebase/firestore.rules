@@ -8,11 +8,11 @@ rules_version = '2';
 // A browser cannot forge one. That is why `request.auth.uid == address` below is a
 // real proof of wallet ownership rather than a claim the client made about itself.
 //
-// `role` is 0 (user) or 1 (administrator) - see frontend/src/lib/roles.js. It is
-// fixed to 0 on create and immutable on every client update below, so becoming an
-// administrator is only ever done by hand in the Firestore console (or via the
-// Admin SDK), which bypasses these rules entirely. No amount of frontend code can
-// grant it.
+// `role` is 0 (user), 1 (administrator), or 2 (assigned evaluator) - see
+// frontend/src/lib/roles.js. It is fixed to 0 on create and immutable on every
+// client update below, so becoming an administrator or evaluator is only ever
+// done via the Admin SDK, which bypasses these rules entirely. No amount of
+// frontend code can grant it.
 service cloud.firestore {
   match /databases/{database}/documents {
 

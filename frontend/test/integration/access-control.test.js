@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ROLES } from "../../src/config/roles.js";
-import { ROUTES_CONFIG, evaluateRouteAccess, getRouteConfig } from "../../src/config/routes.js";
-import { ROLE_ADMIN, ROLE_USER, isAdmin } from "../../src/lib/roles.js";
+import { evaluateRouteAccess, getRouteConfig } from "../../src/config/routes.js";
+import { ROLE_ADMIN, ROLE_EVALUATOR, ROLE_USER, capabilitiesForAccessLevel, primaryCapability } from "../../src/lib/roles.js";
 import { shortenAddress } from "../../src/lib/chain.js";
 
 /**
@@ -12,15 +12,13 @@ import { shortenAddress } from "../../src/lib/chain.js";
 function deriveAuthState(session) {
   let user = null;
   if (session?.isSignedIn && session?.profile) {
-    const isUserAdmin = isAdmin(session.profile.role);
+    const accessLevel = session.profile.role;
     user = {
       id: session.address,
       name: session.profile.fullName || shortenAddress(session.address),
       org: session.profile.organisation || "QC Network",
-      role: isUserAdmin ? ROLES.ADMIN : ROLES.OWNER,
-      roles: isUserAdmin
-        ? [ROLES.ADMIN]
-        : [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER],
+      role: primaryCapability(accessLevel),
+      roles: capabilitiesForAccessLevel(accessLevel),
     };
   }
 
@@ -145,7 +143,7 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
       assert.equal(auth.hasRole(ROLES.ADMIN), false);
     });
 
-    it("[INT-AUTH-002] should resolve participant session into multi-role capability set (owner, researcher, evaluator, funder)", () => {
+    it("[INT-AUTH-002] should resolve a platform user into owner, researcher, and funder capabilities without evaluator", () => {
       const auth = deriveAuthState(participantSession);
       assert.equal(auth.isAuthenticated, true);
       assert.ok(auth.user);
@@ -156,13 +154,28 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
       assert.deepEqual(auth.roles, [
         ROLES.OWNER,
         ROLES.RESEARCHER,
-        ROLES.EVALUATOR,
         ROLES.FUNDER,
       ]);
       assert.equal(auth.hasRole(ROLES.OWNER), true);
       assert.equal(auth.hasRole(ROLES.RESEARCHER), true);
-      assert.equal(auth.hasRole(ROLES.EVALUATOR), true);
+      assert.equal(auth.hasRole(ROLES.EVALUATOR), false);
       assert.equal(auth.hasRole(ROLES.FUNDER), true);
+      assert.equal(auth.hasRole(ROLES.ADMIN), false);
+    });
+
+    it("[INT-AUTH-002b] should grant evaluator capability only to an admin-assigned evaluator (role 2)", () => {
+      const auth = deriveAuthState({
+        ...participantSession,
+        profile: { ...participantSession.profile, role: ROLE_EVALUATOR },
+      });
+      assert.deepEqual(auth.roles, [
+        ROLES.OWNER,
+        ROLES.RESEARCHER,
+        ROLES.EVALUATOR,
+        ROLES.FUNDER,
+      ]);
+      assert.equal(auth.user.role, ROLES.EVALUATOR);
+      assert.equal(auth.hasRole(ROLES.EVALUATOR), true);
       assert.equal(auth.hasRole(ROLES.ADMIN), false);
     });
 
@@ -217,9 +230,9 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
       }
     });
 
-    it("[INT-GUARD-002] should allow multi-role participant into all participant workspaces and Create Brief", () => {
+    it("[INT-GUARD-002] should allow a platform user into owner, researcher, and funder workspaces but not Evaluation Queue", () => {
       const auth = deriveAuthState(participantSession);
-      const participantRoutes = ["create", "my-problems", "proposals", "evaluations", "funding"];
+      const participantRoutes = ["create", "my-problems", "proposals", "funding"];
 
       for (const route of participantRoutes) {
         const config = getRouteConfig(route);
@@ -238,6 +251,15 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
         assert.equal(result.rendered, "Children");
         assert.equal(navigatedTo, null, "Should not trigger any redirect for authorized route");
       }
+
+      const evaluations = getRouteConfig("evaluations");
+      const denied = runRouteGuard({
+        targetRoute: "evaluations",
+        allowedRoles: evaluations.allowedRoles,
+        authRequired: evaluations.authRequired,
+        authState: auth,
+      });
+      assert.equal(denied.outcome, "ACCESS_DENIED");
     });
 
     it("[INT-GUARD-003] should render AccessDenied when multi-role participant attempts to access Admin Audit route", () => {
@@ -392,9 +414,9 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
       }
     });
 
-    it("[FIT-AAR-003] should grant multi-role participant access across all 4 workspaces and Create Brief", () => {
+    it("[FIT-AAR-003] should grant a platform user access to owner, researcher, and funder workspaces, not Evaluation Queue", () => {
       const memberAuth = deriveAuthState(participantSession);
-      const workspaces = ["create", "my-problems", "proposals", "evaluations", "funding"];
+      const workspaces = ["create", "my-problems", "proposals", "funding"];
 
       for (const ws of workspaces) {
         const decision = evaluateRouteAccess(ws, memberAuth.user);
@@ -402,6 +424,18 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
         assert.equal(decision.allowed, true);
         assert.equal(decision.action, "RENDER");
       }
+
+      const evaluations = evaluateRouteAccess("evaluations", memberAuth.user);
+      assert.equal(evaluations.status, 403);
+      assert.equal(evaluations.action, "DENY_403");
+
+      const evaluatorAuth = deriveAuthState({
+        ...participantSession,
+        profile: { ...participantSession.profile, role: ROLE_EVALUATOR },
+      });
+      const evaluatorQueue = evaluateRouteAccess("evaluations", evaluatorAuth.user);
+      assert.equal(evaluatorQueue.status, 200);
+      assert.equal(evaluatorQueue.allowed, true);
     });
 
     it("[FIT-AAR-004] should isolate DAO Admin from participant workspaces and grant Admin Audit", () => {

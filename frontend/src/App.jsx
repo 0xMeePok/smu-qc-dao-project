@@ -8,7 +8,7 @@ import { getPermittedNavRoutes, getRouteConfig } from "./config/routes.js";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { useSession } from "./context/SessionContext.jsx";
 import { shortenAddress } from "./lib/chain.js";
-import { isAdmin } from "./lib/roles.js";
+import { isAdmin, isAssignedEvaluator } from "./lib/roles.js";
 import { ResponsiveHeader } from "./components/ResponsiveHeader.jsx";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
@@ -197,8 +197,12 @@ function AccountControls() {
             <div className="role-tags-row">
               {isDaoAdmin ? (
                 <span className="user-role-badge admin-badge">DAO Admin</span>
+              ) : isAssignedEvaluator(profile?.role) ? (
+                <span className="user-role-badge evaluator-badge" title="Owner · Researcher · Evaluator · Funder">
+                  Evaluator
+                </span>
               ) : (
-                <span className="user-role-badge member-badge" title="Owner · Researcher · Evaluator · Funder">
+                <span className="user-role-badge member-badge" title="Owner · Researcher · Funder">
                   Platform Member
                 </span>
               )}
