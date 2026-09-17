@@ -3307,6 +3307,19 @@ footer > p { margin: 0 auto 0 0; }
 .matching-approval dd, .matching-history dd { margin: 4px 0 14px; overflow-wrap: anywhere; }
 .matching-history details { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .matching-history summary { cursor: pointer; text-transform: capitalize; }
+.comment-thread-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.comment-thread-heading h2 { margin: 0; }
+.comment-sort { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+.comment-sort select { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.comment-composer { margin: 0 0 20px; }
+.comment-composer textarea { display: block; width: 100%; padding: 12px; margin: 8px 0 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.comment-recommendations { display: grid; gap: 8px; margin: 0 0 16px; border: 0; padding: 0; }
+.comment-recommendations legend { font-weight: 600; margin-bottom: 4px; }
+.comment-recommendations label { display: flex; align-items: center; gap: 8px; }
+.comment-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.comment-recommendation { font-size: 13px; font-weight: 600; color: var(--ink); }
+.comment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.comment-actions .content-report { margin-block: 0; }
 .content-report { margin-block: 20px; }
 .content-report select, .content-report textarea, .moderation-review-body select, .moderation-review-body textarea, .matching-panel textarea { display: block; width: 100%; padding: 12px; margin: 8px 0 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
 .moderation-filters { display: flex; flex-wrap: wrap; gap: 16px; margin-block: 20px; }

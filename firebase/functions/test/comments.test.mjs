@@ -105,6 +105,25 @@ test("members can comment on a submitted proposal; evaluators must recommend and
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
 });
 
+test("listing resolves public names, recommendation fields and newest-first order", async () => {
+  const db = fixture();
+  db.records.set("publicProfiles/funder", { fullName: "Funder" });
+  db.records.set("publicProfiles/evaluator", { fullName: "Assigned evaluator" });
+  const member = await create(db);
+  const evaluator = await create(db, { uid: "evaluator", recommendation: "recommend",
+    body: "Evaluator view.", now: later(1000) });
+  const oldest = await listReportableComments({ db, uid: "funder", proposalId: "a" });
+  assert.equal(oldest.items[0].id, member.id);
+  assert.equal(oldest.items[0].authorName, "Funder");
+  assert.equal(oldest.items[1].authorName, "Assigned evaluator");
+  assert.equal(oldest.items[1].qualifying, true);
+  assert.equal(oldest.items[1].recommendation, "recommend");
+  const newest = await listReportableComments({ db, uid: "funder", proposalId: "a", sort: "newest" });
+  assert.equal(newest.items.map((item) => item.id).join(","), `${evaluator.id},${member.id}`);
+  await assert.rejects(() => listReportableComments({ db, uid: "funder", proposalId: "a", sort: "popular" }),
+    { code: "invalid-argument" });
+});
+
 test("non-evaluators cannot spoof a recommendation; administrators are not assigned evaluators", async () => {
   const db = fixture();
   await assert.rejects(() => create(db, { recommendation: "recommend" }), {
