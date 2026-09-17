@@ -6,6 +6,7 @@ import { requireFirebase } from "./authFlow.js";
 import { deleteAttachment, toPostingRecord } from "./attachments.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { proposalBlockReason, validateProposal } from "./proposalValidation.js";
 import { toDate } from "./datetime.js";
 
 export const PROPOSAL_STATUS_DRAFT = "draft";
