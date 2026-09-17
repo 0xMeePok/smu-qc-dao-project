@@ -355,11 +355,14 @@ export async function completeMockEvaluation({ db, uid, problemId, proposalId, n
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can complete a mock evaluation.");
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
     if (!chosen || !ELIGIBLE.has(chosen.data().status) || moderated(chosen.data())) fail("failed-precondition", "This proposal is not available for evaluation.");
-    if (chosen.data().matching?.evaluationComplete === true) return { ok: true };
+    if (chosen.data().matching?.evaluationMockComplete === true) return { ok: true };
     assertOpen(ctx.problem);
     if (TERMINAL.has(proposalState(chosen.data()))) fail("failed-precondition", "This proposal is no longer active.");
     const at = now || Timestamp.now();
-    updateProposal(tx, chosen, proposalState(chosen.data()), at, { evaluationComplete: true, evaluationCompletedAt: at, evaluationCompletedBy: uid });
+    updateProposal(tx, chosen, proposalState(chosen.data()), at, {
+      evaluationComplete: true, evaluationCompletedAt: chosen.data().matching?.evaluationCompletedAt || at,
+      evaluationCompletedBy: uid, evaluationMockComplete: true,
+    });
     // Also touch the parent so this gate is serialized with funding/selection.
     tx.update(ctx.ref, { matching: { mode: "mock", status: "open", proposalId: null, deadlineAt: null,
       ...ctx.problem.matching, updatedAt: at } });
@@ -399,6 +402,13 @@ export async function prepareModerationMatching({ tx, db, contentType, contentId
   return { summary: { refundedAmount: action === "restore" ? 0 : refundedMinor / 100,
     refundedCount: action === "restore" ? 0 : refunds.length, currency: ctx.problem.currency || null },
     apply() {
+      // Storage cannot get() the parent problem (two-read cap: profile + record).
+      // Stamp parent marketplace visibility onto every loaded child so proposal
+      // PDFs stay aligned with submittedProposalVisibleToMembers() in firestore.rules.
+      if (problemScope && ["hide", "remove", "restore"].includes(action)) {
+        const problemBrowsable = action === "restore";
+        for (const doc of ctx.proposals) tx.update(doc.ref, { problemBrowsable, updatedAt: at });
+      }
       if (action === "restore") {
         if (matching.status === "confirmed") return;
         for (const doc of ctx.proposals) {

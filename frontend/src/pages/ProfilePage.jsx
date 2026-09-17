@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Field } from "../components/Field.jsx";
 import { useSession } from "../context/SessionContext.jsx";
-import { ROLE_LABELS } from "../config/roles.js";
+import { roleLabel } from "../lib/roles.js";
 import { shortenAddress } from "../lib/chain.js";
 import { fieldForFirebaseError, messageForFirebaseError } from "../lib/errors.js";
 import { validateProfile } from "../lib/validation.js";
@@ -19,7 +19,7 @@ function formatDate(value) {
 }
 
 function formatRole(role) {
-  return role === 1 ? ROLE_LABELS.admin : ROLE_LABELS.owner;
+  return roleLabel(role);
 }
 
 function formFromProfile(profile) {

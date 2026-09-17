@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { Timestamp } from "firebase-admin/firestore";
 import { memoryDb } from "./memoryDb.mjs";
 import { submitContentReport, listModerationQueue, getModerationContext, moderateContent, flagSubmittedContent,
-  listModerationNotifications, markModerationNotificationRead, listReportableComments } from "../moderation.js";
+  listModerationNotifications, markModerationNotificationRead, listReportableComments, listPostedProposals,
+  syncProposalParentVisibility, syncProblemProposalsBrowsable } from "../moderation.js";
 import { prepareModerationMatching, fundMockProposal, selectMockProposal, confirmMockProposal } from "../matching.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
@@ -29,7 +30,6 @@ const select = (db) => selectMockProposal({ db, uid: "owner", problemId: "proble
 
 test("reports use existing content access, enforce one per member/item, and aggregate reasons atomically", async () => {
   const db = fixture();
-  await assert.rejects(() => report(db, { uid: "funder" }), { code: "permission-denied" });
   await assert.rejects(() => report(db, { uid: "missing" }), { code: "permission-denied" });
   await assert.rejects(() => report(db, { uid: "suspended" }), { code: "permission-denied" });
   const [one, retry] = await Promise.all([report(db), report(db)]);
@@ -79,6 +79,8 @@ test("admin hide/remove/restore preserves original workflow and sponsor access w
   assert.equal(db.records.get("proposals/a").status, "moderated_hidden");
   assert.equal(db.records.get("proposals/a").postingOwnerId, "");
   assert.equal(db.records.get("proposals/a").moderation.originalPostingOwnerId, "owner");
+  assert.equal(Object.hasOwn(db.records.get("proposals/a"), "problemBrowsable"), false);
+  assert.equal(Object.hasOwn(db.records.get("proposals/b"), "problemBrowsable"), false);
   assert.equal((await queue(db)).pendingCount, 0);
   assert.equal((await act(db)).unchanged, true);
   await act(db, "remove", { now: later(1000) });
@@ -122,9 +124,13 @@ test("hiding a whole problem refunds all pledged funds but never releases confir
   await report(db, { contentType: "problem", contentId: "problem", uid: "funder" });
   await act(db, "hide", { queueId: "problem_problem" });
   assert.equal(db.records.get("problems/problem").matching.totalFundedMinor, 0);
+  assert.equal(db.records.get("proposals/a").problemBrowsable, false);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, false);
   assert.ok([...db.records.entries()].filter(([path]) => path.startsWith("mockFunding/")).every(([, row]) => row.status === "refunded"));
   await act(db, "restore", { queueId: "problem_problem", reason: "appeal_accepted" });
   assert.equal(db.records.get("proposals/a").matching.fundedMinor, 0);
+  assert.equal(db.records.get("proposals/a").problemBrowsable, true);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, true);
   const locked = fixture();
   await fund(locked, "a"); await select(locked);
   await confirmMockProposal({ db: locked, uid: "alice", problemId: "problem", proposalId: "a", now });
@@ -139,7 +145,7 @@ test("comments inherit parent access and support report/hide/restore without a c
   const db = fixture();
   db.records.set("comments/private", { authorId: "alice", problemId: "problem", proposalId: "a", text: "Private proposal comment", createdAt: now });
   assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem" })).items.length, 1);
-  await assert.rejects(() => listReportableComments({ db, uid: "funder", problemId: "problem", proposalId: "a" }), { code: "permission-denied" });
+  assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem", proposalId: "a" })).items[0].body, "Private proposal comment");
   await assert.rejects(() => listReportableComments({ db, uid: "owner", problemId: "wrong", proposalId: "a" }), { code: "permission-denied" });
   assert.equal((await listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "a" })).items[0].body, "Private proposal comment");
   await report(db, { uid: "funder", contentType: "comment", contentId: "comment", reason: "off_topic" });
@@ -186,4 +192,32 @@ test("report validation and daily limit bound distinct-report abuse without pena
   await assert.rejects(() => report(db, { uid: "funder", contentType: "problem", contentId: "problem" }), { code: "resource-exhausted" });
   assert.equal((await report(db, { uid: "funder", contentType: "problem", contentId: "p0" })).alreadyReported, true);
   assert.equal((await report(db, { uid: "funder", contentType: "problem", contentId: "problem", now: later(86400000) })).ok, true);
+});
+
+test("posted proposal lists are scoped to a readable parent and omit other problems", async () => {
+  const db = fixture();
+  db.records.set("proposals/other", { researcherId: "alice", postingOwnerId: "owner", problemId: "hidden",
+    title: "Other problem", status: "submitted", createdAt: now });
+  db.records.set("problems/hidden", { ownerId: "owner", status: "moderated_hidden", moderationStatus: "hidden" });
+  db.records.set("proposals/draft", { researcherId: "alice", problemId: "problem", status: "draft", createdAt: now });
+  const listed = await listPostedProposals({ db, uid: "funder", problemId: "problem" });
+  assert.deepEqual(listed.items.map((item) => item.id).sort(), ["a", "b"]);
+  assert.equal(listed.truncated, false);
+  assert.equal(db.records.get("proposals/a").problemBrowsable, true);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, true);
+  assert.equal(Object.hasOwn(db.records.get("proposals/other"), "problemBrowsable"), false);
+  await assert.rejects(() => listPostedProposals({ db, uid: "funder", problemId: "hidden" }), { code: "permission-denied" });
+  await assert.rejects(() => listPostedProposals({ db, uid: "missing", problemId: "problem" }), { code: "permission-denied" });
+  await assert.rejects(() => listPostedProposals({ db, uid: "funder", problemId: "../problem" }), { code: "invalid-argument" });
+});
+
+test("parent visibility stamps fail closed for hidden problems and unstamped proposals", async () => {
+  const db = fixture();
+  await syncProposalParentVisibility({ db, proposalId: "a", now });
+  assert.equal(db.records.get("proposals/a").problemBrowsable, true);
+  db.records.get("problems/problem").moderationStatus = "hidden";
+  db.records.get("problems/problem").status = "moderated_hidden";
+  await syncProblemProposalsBrowsable({ db, problemId: "problem", now: later(1000) });
+  assert.equal(db.records.get("proposals/a").problemBrowsable, false);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, false);
 });

@@ -330,7 +330,7 @@
         }
       ]
     },
-    {
+      {
       "collectionGroup": "proposals",
       "queryScope": "COLLECTION",
       "fields": [
@@ -340,6 +340,20 @@
         },
         {
           "fieldPath": "postingOwnerId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "proposals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "problemId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
           "order": "ASCENDING"
         }
       ]
@@ -509,8 +523,32 @@
       "collectionGroup": "comments",
       "queryScope": "COLLECTION",
       "fields": [
+        {"fieldPath": "problemId", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION",
+      "fields": [
         {"fieldPath": "proposalId", "order": "ASCENDING"},
         {"fieldPath": "createdAt", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "proposalId", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "proposalId", "order": "ASCENDING"},
+        {"fieldPath": "qualifying", "order": "ASCENDING"}
       ]
     },
     {

@@ -194,8 +194,9 @@ test("discussion page99/100/101 boundaries and tied timestamps produce no skips 
   }
 });
 
-test("discussion cursor cannot bypass parent privacy and malformed cursors reject", async () => {
+test("discussion cursor cannot bypass hidden-proposal privacy and malformed cursors reject", async () => {
   const db = fixture(), cursor = { id: "private", value: now.toDate().toISOString() };
+  db.records.get("proposals/a").moderationStatus = "hidden";
   await assert.rejects(() => listReportableComments({ db, uid: "member", problemId: "p", proposalId: "a", cursor }), { code: "permission-denied" });
   for (const bad of [{ id: "../private", value: cursor.value }, { id: "private", value: "bad" }, { id: "private", value: null }])
     await assert.rejects(() => listReportableComments({ db, uid: "member", problemId: "p", cursor: bad }), { code: "invalid-argument" });

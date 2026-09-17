@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo } from "react";
 import { ROLES } from "../config/roles.js";
 import { useSession } from "./SessionContext.jsx";
 import { shortenAddress } from "../lib/chain.js";
-import { isAdmin } from "../lib/roles.js";
+import { capabilitiesForAccessLevel, primaryCapability } from "../lib/roles.js";
 
 const AuthContext = createContext(null);
 
@@ -26,15 +26,13 @@ export function AuthProvider({ children }) {
           isSuspended: true,
         };
       }
-      const isUserAdmin = isAdmin(session.profile.role);
+      const accessLevel = session.profile.role;
       return {
         id: session.address,
         name: session.profile.fullName || shortenAddress(session.address),
         org: session.profile.organisation || "QC Network",
-        role: isUserAdmin ? ROLES.ADMIN : ROLES.OWNER,
-        roles: isUserAdmin
-          ? [ROLES.ADMIN]
-          : [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER],
+        role: primaryCapability(accessLevel),
+        roles: capabilitiesForAccessLevel(accessLevel),
       };
     }
     return null;

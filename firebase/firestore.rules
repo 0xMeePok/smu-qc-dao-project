@@ -8,11 +8,11 @@ rules_version = '2';
 // A browser cannot forge one. That is why `request.auth.uid == address` below is a
 // real proof of wallet ownership rather than a claim the client made about itself.
 //
-// `role` is 0 (user) or 1 (administrator) - see frontend/src/lib/roles.js. It is
-// fixed to 0 on create and immutable on every client update below, so becoming an
-// administrator is only ever done by hand in the Firestore console (or via the
-// Admin SDK), which bypasses these rules entirely. No amount of frontend code can
-// grant it.
+// `role` is 0 (user), 1 (administrator), or 2 (assigned evaluator) - see
+// frontend/src/lib/roles.js. It is fixed to 0 on create and immutable on every
+// client update below, so becoming an administrator or evaluator is only ever
+// done via the Admin SDK, which bypasses these rules entirely. No amount of
+// frontend code can grant it.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -1192,9 +1192,11 @@ service cloud.firestore {
     }
 
     match /problems/{problemId} {
-      // The marketplace is open to MEMBERS, not to the open internet. A submitted
-      // or open posting is readable by any active wallet that has finished
-      // onboarding (a /users document); a draft stays private to its owner.
+      // The marketplace is open to MEMBERS, not to the open internet. Discover
+      // lists live `submitted`/`open` rows. Member get() also includes cancelled
+      // (withdrawn) and expired so a closed opportunity stays reachable by id —
+      // posting detail, revisions, comments and matching history. A draft stays
+      // private to its owner.
       //
       // Authenticated rather than public because a posting carries a sponsor's
       // business context, their limitations and their budget. That is competitive
@@ -1300,13 +1302,39 @@ service cloud.firestore {
     }
 
     match /proposals/{proposalId} {
-      // Sponsor list queries filter only on postingOwnerId. Drafts are kept
-      // out of that inbox by trustedPostingOwner, which refuses a new value
-      // except on the submitted path that binds it to the parent owner.
-      allow read: if isActiveUser(request.auth.uid)
-        && (resource.data.researcherId == request.auth.uid
-          || isModerationAdmin(request.auth.uid)
-          || resource.data.get('postingOwnerId', '') == request.auth.uid);
+      // Author, sponsor and admins keep their existing get/list paths. Drafts stay
+      // author-only. Submitted (and later) proposals follow the parent problem's
+      // member get() ACL — submitted, open, cancelled (withdrawn) and expired —
+      // so stakeholders can still open solutions and comment after the response
+      // window closes. Discover does not list expired postings; hidden/removed
+      // parents are not browsable.
+      //
+      // Member list is intentionally narrower than get. Firestore cannot require
+      // a problemId equality filter, so putting submittedProposalVisibleToMembers
+      // on `read` would let any member query every submitted proposal
+      // platform-wide. Per-posting lists go through listPostedProposals.
+      function submittedProposalVisibleToMembers() {
+        return hasCompletedProfile(request.auth.uid)
+          && resource.data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
+          && !(resource.data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
+          && resource.data.keys().hasAny(['problemId'])
+          && exists(/databases/$(database)/documents/problems/$(resource.data.problemId))
+          && (
+            get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.ownerId == request.auth.uid
+            || (
+              get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
+              && !(get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
+            )
+          );
+      }
+      function proposalOwnedByViewer() {
+        return isActiveUser(request.auth.uid)
+          && (resource.data.researcherId == request.auth.uid
+            || isModerationAdmin(request.auth.uid)
+            || resource.data.get('postingOwnerId', '') == request.auth.uid);
+      }
+      allow get: if proposalOwnedByViewer() || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers());
+      allow list: if proposalOwnedByViewer();
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
         && resource.data.status == 'draft'
@@ -1443,6 +1471,7 @@ service cloud.firestore {
     match /moderationStats/{id} { allow read, write: if false; }
     match /matchingEvents/{id} { allow read, write: if false; }
     match /matchingNotificationJobs/{id} { allow read, write: if false; }
+    match /comments/{id} { allow read, write: if false; }
 
     // Public-safe counters derived by Cloud Functions from role-scoped proposal
     // and funding records. Clients can read metrics only when they can browse the

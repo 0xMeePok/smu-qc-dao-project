@@ -10,7 +10,7 @@ import {
 } from "../../src/config/verifiedBadge.js";
 import { opportunityStatusLabel } from "../../src/config/workflowStatus.js";
 import { toOpportunityListItem } from "../../src/lib/opportunityPresentation.js";
-import { ROLE_ADMIN, ROLE_USER, isAdmin } from "../../src/lib/roles.js";
+import { ROLE_ADMIN, ROLE_USER, capabilitiesForAccessLevel, isAdmin } from "../../src/lib/roles.js";
 
 /** QCDAO-80 - trust indicator treatment across lists, records, and help. */
 
@@ -52,7 +52,7 @@ function navKeys(roles) {
 function architectureHelp(session) {
   const user = session?.isSignedIn && session?.profile
     ? {
-      roles: isAdmin(session.profile.role) ? [ROLES.ADMIN] : [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER],
+      roles: capabilitiesForAccessLevel(session.profile.role),
     }
     : null;
   return {

@@ -7,9 +7,20 @@ import { deleteAttachment, toPostingRecord } from "./attachments.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { proposalBlockReason, validateProposal } from "./proposalValidation.js";
+import { toDate } from "./datetime.js";
 
 export const PROPOSAL_STATUS_DRAFT = "draft";
 export const PROPOSAL_STATUS_SUBMITTED = "submitted";
+
+/** Statuses onboarded members may see on a browsable posting. Drafts stay author-only.
+ *  Keep in lockstep with listPostedProposals in firebase/functions/moderation.js. */
+export const MEMBER_VISIBLE_PROPOSAL_STATUSES = [
+  PROPOSAL_STATUS_SUBMITTED,
+  "under_review",
+  "accepted",
+  "rejected",
+  "withdrawn",
+];
 
 /** Statuses the author may still correct. `under_review` is where the lock falls. */
 export const EDITABLE_PROPOSAL_STATUSES = [PROPOSAL_STATUS_DRAFT, PROPOSAL_STATUS_SUBMITTED];
@@ -200,38 +211,28 @@ export async function listProposals(field, uid) {
 }
 
 function proposalTime(value) {
-  return value?.toMillis?.() || (value instanceof Date ? value.getTime() : 0);
+  return toDate(value)?.getTime() || 0;
 }
 
 /**
  * Proposals on one posting that the signed-in wallet is allowed to read.
- * Poster: submitted inbox (`postingOwnerId`). Author: their own rows, including drafts.
- * Anyone else gets an empty list; the public count lives on opportunityMetrics.
+ * Author: their own rows, including drafts, via a researcherId list.
+ * Onboarded members: submitted (and later) proposals on that posting, via
+ * listPostedProposals so a client query cannot enumerate the whole collection.
  */
-export async function listProposalsForPosting({ problemId, viewerId, postingOwnerId }) {
+export async function listProposalsForPosting({ problemId, viewerId }) {
   requireFirebase();
   const uid = String(viewerId ?? "").toLowerCase();
-  const owner = String(postingOwnerId ?? "").toLowerCase();
   if (!problemId || !uid) return [];
 
-  const proposals = collection(db, "proposals");
-  const reads = [
-    getDocs(query(proposals, where("problemId", "==", problemId), where("researcherId", "==", uid))),
-  ];
-  if (uid === owner) {
-    reads.push(getDocs(query(
-      proposals,
-      where("problemId", "==", problemId),
-      where("postingOwnerId", "==", uid),
-    )));
-  }
+  const [own, posted] = await Promise.all([
+    getDocs(query(collection(db, "proposals"), where("problemId", "==", problemId), where("researcherId", "==", uid))),
+    httpsCallable(functions, "listPostedProposals")({ problemId }),
+  ]);
 
   const byId = new Map();
-  for (const snapshot of await Promise.all(reads)) {
-    for (const item of snapshot.docs) {
-      byId.set(item.id, { id: item.id, ...item.data() });
-    }
-  }
+  for (const item of own.docs) byId.set(item.id, { id: item.id, ...item.data() });
+  for (const item of posted.data?.items ?? []) byId.set(item.id, item);
   return withMatchingState([...byId.values()].sort((left, right) => proposalTime(right.createdAt) - proposalTime(left.createdAt)));
 }
 
