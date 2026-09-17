@@ -100,6 +100,21 @@ describe("QCDAO-59/60 submitted proposals", () => {
     await assertSucceeds(getDocs(query(collection(sponsor, "proposals"), where("postingOwnerId", "==", SPONSOR))));
     await assertSucceeds(getDoc(doc(env.authenticatedContext(OUTSIDER).firestore(), "proposals", "proposal-full")));
   });
+  it("keeps submitted proposals readable after the parent is cancelled or expired", async () => {
+    const cancelledParent = await parent({ status: "cancelled", withdrawalReason: "Programme closed." });
+    const expiredParent = await parent({ status: "expired" });
+    const hiddenParent = await parent({ status: "moderated_hidden", moderationStatus: "hidden" });
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "proposals", "member-read-cancelled"), record(cancelledParent));
+      await setDoc(doc(db, "proposals", "member-read-expired"), record(expiredParent));
+      await setDoc(doc(db, "proposals", "member-read-hidden-parent"), record(hiddenParent));
+    });
+    const outsider = env.authenticatedContext(OUTSIDER).firestore();
+    await assertSucceeds(getDoc(doc(outsider, "proposals", "member-read-cancelled")));
+    await assertSucceeds(getDoc(doc(outsider, "proposals", "member-read-expired")));
+    await assertFails(getDoc(doc(outsider, "proposals", "member-read-hidden-parent")));
+  });
   it("blocks concurrent duplicate submissions and permits a replacement after withdrawal", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     const id = await parent();

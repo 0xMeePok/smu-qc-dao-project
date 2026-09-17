@@ -78,6 +78,8 @@ test("admin hide/remove/restore preserves original workflow and sponsor access w
   assert.equal(db.records.get("proposals/a").status, "moderated_hidden");
   assert.equal(db.records.get("proposals/a").postingOwnerId, "");
   assert.equal(db.records.get("proposals/a").moderation.originalPostingOwnerId, "owner");
+  assert.equal(Object.hasOwn(db.records.get("proposals/a"), "problemBrowsable"), false);
+  assert.equal(Object.hasOwn(db.records.get("proposals/b"), "problemBrowsable"), false);
   assert.equal((await queue(db)).pendingCount, 0);
   assert.equal((await act(db)).unchanged, true);
   await act(db, "remove", { now: later(1000) });
@@ -121,9 +123,13 @@ test("hiding a whole problem refunds all pledged funds but never releases confir
   await report(db, { contentType: "problem", contentId: "problem", uid: "funder" });
   await act(db, "hide", { queueId: "problem_problem" });
   assert.equal(db.records.get("problems/problem").matching.totalFundedMinor, 0);
+  assert.equal(db.records.get("proposals/a").problemBrowsable, false);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, false);
   assert.ok([...db.records.entries()].filter(([path]) => path.startsWith("mockFunding/")).every(([, row]) => row.status === "refunded"));
   await act(db, "restore", { queueId: "problem_problem", reason: "appeal_accepted" });
   assert.equal(db.records.get("proposals/a").matching.fundedMinor, 0);
+  assert.equal(db.records.get("proposals/a").problemBrowsable, true);
+  assert.equal(db.records.get("proposals/b").problemBrowsable, true);
   const locked = fixture();
   await fund(locked, "a"); await select(locked);
   await confirmMockProposal({ db: locked, uid: "alice", problemId: "problem", proposalId: "a", now });
