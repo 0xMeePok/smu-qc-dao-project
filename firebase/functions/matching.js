@@ -355,11 +355,14 @@ export async function completeMockEvaluation({ db, uid, problemId, proposalId, n
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can complete a mock evaluation.");
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
     if (!chosen || !ELIGIBLE.has(chosen.data().status) || moderated(chosen.data())) fail("failed-precondition", "This proposal is not available for evaluation.");
-    if (chosen.data().matching?.evaluationComplete === true) return { ok: true };
+    if (chosen.data().matching?.evaluationMockComplete === true) return { ok: true };
     assertOpen(ctx.problem);
     if (TERMINAL.has(proposalState(chosen.data()))) fail("failed-precondition", "This proposal is no longer active.");
     const at = now || Timestamp.now();
-    updateProposal(tx, chosen, proposalState(chosen.data()), at, { evaluationComplete: true, evaluationCompletedAt: at, evaluationCompletedBy: uid });
+    updateProposal(tx, chosen, proposalState(chosen.data()), at, {
+      evaluationComplete: true, evaluationCompletedAt: chosen.data().matching?.evaluationCompletedAt || at,
+      evaluationCompletedBy: uid, evaluationMockComplete: true,
+    });
     // Also touch the parent so this gate is serialized with funding/selection.
     tx.update(ctx.ref, { matching: { mode: "mock", status: "open", proposalId: null, deadlineAt: null,
       ...ctx.problem.matching, updatedAt: at } });

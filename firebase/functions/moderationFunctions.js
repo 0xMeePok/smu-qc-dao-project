@@ -2,6 +2,7 @@ import { onCall } from "firebase-functions/v2/https";
 import { Timestamp } from "firebase-admin/firestore";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { prepareModerationMatching } from "./matching.js";
+import { prepareCommentEvaluationGate } from "./comments.js";
 import { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
   listModerationNotifications, markModerationNotificationRead, flagSubmittedContent, listReportableComments } from "./moderation.js";
 
@@ -23,7 +24,9 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
     submitContentReport: member(submitContentReport),
     listModerationQueue: admin(listModerationQueue),
     getModerationContext: admin(getModerationContext),
-    moderateContent: admin((args) => moderateContent({ ...args, prepareMatching: prepareModerationMatching })),
+    moderateContent: admin((args) => moderateContent({
+      ...args, prepareMatching: prepareModerationMatching, prepareCommentGate: prepareCommentEvaluationGate,
+    })),
     listModerationNotifications: member(listModerationNotifications),
     markModerationNotificationRead: member(markModerationNotificationRead),
     listReportableComments: member(listReportableComments),

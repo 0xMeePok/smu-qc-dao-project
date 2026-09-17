@@ -528,6 +528,14 @@
       ]
     },
     {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "proposalId", "order": "ASCENDING"},
+        {"fieldPath": "qualifying", "order": "ASCENDING"}
+      ]
+    },
+    {
       "collectionGroup": "matchingNotificationJobs",
       "queryScope": "COLLECTION",
       "fields": [

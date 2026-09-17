@@ -207,7 +207,7 @@ export async function getModerationContext({ db, uid, queueId }) {
   });
 }
 
-export async function moderateContent({ db, uid, queueId, action, reason, details, prepareMatching, now = Timestamp.now() }) {
+export async function moderateContent({ db, uid, queueId, action, reason, details, prepareMatching, prepareCommentGate, now = Timestamp.now() }) {
   const { contentType, contentId } = parseQueueId(queueId);
   if (!Object.hasOwn(ACTION_STATUS, action) || !MODERATION_REASONS.includes(reason)) fail("invalid-argument", "Choose a moderation action and reason.");
   const note = validDetails(details);
@@ -227,15 +227,19 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
     // write closure, so settlement and visibility commit in one transaction.
     const settlement = prepareMatching && contentType !== "comment"
       ? await prepareMatching({ db, tx, contentType, contentId, action, actorId: uid, now }) : null;
+    const commentGate = prepareCommentGate && contentType === "comment"
+      ? await prepareCommentGate({ db, tx, contentId, data, action, now }) : null;
     const hidden = BLOCKED.has(data.moderationStatus);
     const previousStatus = hidden ? data.moderation.previousStatus : data.status || "submitted";
     const originalPostingOwnerId = hidden ? data.moderation?.originalPostingOwnerId : data.postingOwnerId;
     const moderation = { ...data.moderation, previousStatus, lastAction: action, reason, details: note, moderatorId: uid, moderatedAt: now, sequence };
     if (contentType === "proposal") moderation.originalPostingOwnerId = originalPostingOwnerId || "";
     settlement?.apply?.();
+    commentGate?.apply?.();
     tx.update(ref, { status: action === "restore" ? previousStatus : `moderated_${ACTION_STATUS[action]}`,
       moderationStatus: action === "restore" ? "visible" : ACTION_STATUS[action], moderation,
-      ...(contentType === "proposal" ? { postingOwnerId: action === "restore" ? originalPostingOwnerId || "" : "" } : {}), updatedAt: now });
+      ...(contentType === "proposal" ? { postingOwnerId: action === "restore" ? originalPostingOwnerId || "" : "" } : {}),
+      ...(commentGate ? { qualifying: commentGate.qualifying } : {}), updatedAt: now });
     tx.update(queueRef, { status: ACTION_STATUS[action], lastAction: action, lastReason: reason, updatedAt: now });
     writeStats(tx, statsRef, stats, pendingDelta(previous, ACTION_STATUS[action]), now);
     tx.set(db.collection("moderationEvents").doc(eventId), {

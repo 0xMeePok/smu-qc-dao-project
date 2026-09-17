@@ -98,7 +98,34 @@ async function loadReadableProposal(tx, db, uid, profile, proposalId) {
   if (!await canReadContent(tx, db, "proposal", data, uid, profile)) {
     fail("permission-denied", "This discussion is not available.");
   }
-  return data;
+  return proposal;
+}
+
+function isMockEvaluation(matching = {}) {
+  return matching.evaluationMockComplete === true || Boolean(matching.evaluationCompletedBy);
+}
+
+async function evaluationGateReads(tx, db, { proposalId, commentId, qualifying }) {
+  if (!proposalId) return { proposal: null, complete: qualifying };
+  const proposalRef = db.collection("proposals").doc(proposalId);
+  if (qualifying) return { proposal: await tx.get(proposalRef), complete: true };
+  const [proposal, rows] = await Promise.all([
+    tx.get(proposalRef),
+    tx.get(db.collection("comments").where("proposalId", "==", proposalId).where("qualifying", "==", true).limit(5)),
+  ]);
+  return { proposal: proposal.exists ? proposal : null,
+    complete: rows.docs.some((doc) => doc.id !== commentId) };
+}
+
+function applyEvaluationComplete(tx, proposal, { complete, now }) {
+  if (!proposal?.exists) return;
+  const matching = { ...(proposal.data().matching || {}) };
+  const evaluationComplete = complete || isMockEvaluation(matching);
+  if (evaluationComplete === (matching.evaluationComplete === true)) return;
+  matching.evaluationComplete = evaluationComplete;
+  matching.evaluationCompletedAt = evaluationComplete ? (matching.evaluationCompletedAt || now) : null;
+  matching.updatedAt = now;
+  tx.update(proposal.ref, { matching });
 }
 
 function authoredComment(tx, db, uid, commentId) {
@@ -123,7 +150,7 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     const record = {
       authorId: uid,
       proposalId,
-      problemId: proposal.problemId,
+      problemId: proposal.data().problemId,
       parentId: null,
       body: text,
       ...shown,
@@ -136,7 +163,9 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
       updatedAt: now,
     };
     record.qualifying = commentIsQualifying(record, role);
+    const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying });
     tx.set(ref, record);
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     return view(ref.id, record);
   });
 }
@@ -166,9 +195,22 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
       revisions: [...(data.revisions || []), revision("edit", data, now)],
     };
     next.qualifying = commentIsQualifying(next, role);
+    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: next.qualifying });
     tx.set(ref, next);
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     return view(ref.id, next);
   });
+}
+
+export async function prepareCommentEvaluationGate({ tx, db, contentId, data, action, now }) {
+  const moderationStatus = action === "restore" ? "visible"
+    : action === "hide" ? "hidden"
+    : action === "remove" ? "removed"
+    : data.moderationStatus;
+  const author = data.authorId ? await tx.get(db.collection("users").doc(data.authorId)) : null;
+  const qualifying = commentIsQualifying({ ...data, moderationStatus }, accessLevel(author?.data()));
+  const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId, qualifying });
+  return { qualifying, apply() { applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now }); } };
 }
 
 export async function deleteComment({ db, uid, commentId, now = Timestamp.now() }) {
@@ -184,7 +226,9 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
       updatedAt: now,
       revisions: [...(data.revisions || []), revision("delete", data, now)],
     };
+    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: false });
     tx.set(ref, next);
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     return view(ref.id, next);
   });
 }
