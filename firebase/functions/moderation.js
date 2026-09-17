@@ -58,7 +58,7 @@ async function activeProfile(tx, db, uid, admin = false) {
   }
   return profile.data();
 }
-async function canReadContent(tx, db, type, data, uid, profile) {
+export async function canReadContent(tx, db, type, data, uid, profile) {
   if (profile.role === 1 || owner(type, data) === uid) return true;
   if (BLOCKED.has(data.moderationStatus) || !isPublished(type, data)) return false;
   if (type === "problem") return ["submitted", "open", "cancelled", "expired"].includes(data.status);
@@ -290,6 +290,7 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
     const rows = await tx.get(query.limit(101));
     const page = rows.docs.slice(0, 100);
     const items = page.filter((doc) => (proposalId || !doc.data().proposalId) && isPublished("comment", doc.data())
+      && !doc.data().deletedAt
       && (!BLOCKED.has(doc.data().moderationStatus) || owner("comment", doc.data()) === uid || profile.role === 1))
       .map((doc) => {
         const data = doc.data();
