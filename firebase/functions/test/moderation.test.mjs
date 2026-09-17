@@ -143,7 +143,7 @@ test("hiding a whole problem refunds all pledged funds but never releases confir
 
 test("comments inherit parent access and support report/hide/restore without a commenting write API", async () => {
   const db = fixture();
-  db.records.set("comments/private", { authorId: "alice", problemId: "problem", proposalId: "a", text: "Private proposal comment", createdAt: now });
+  db.records.set("comments/private", { authorId: "alice", problemId: "problem", proposalId: "a", parentId: null, text: "Private proposal comment", createdAt: now });
   assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem" })).items.length, 1);
   assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem", proposalId: "a" })).items[0].body, "Private proposal comment");
   await assert.rejects(() => listReportableComments({ db, uid: "owner", problemId: "wrong", proposalId: "a" }), { code: "permission-denied" });

@@ -314,6 +314,36 @@ export async function markModerationNotificationRead({ db, uid, notificationId, 
   });
 }
 
+function commentVisible(data, { uid, profile, proposalScoped }) {
+  return (proposalScoped || !data.proposalId) && isPublished("comment", data)
+    && !data.deletedAt
+    && (!BLOCKED.has(data.moderationStatus) || owner("comment", data) === uid || profile.role === 1);
+}
+
+function commentListItem(doc, names) {
+  const data = doc.data();
+  const authorId = owner("comment", data) || "";
+  return { id: doc.id, authorId, authorName: names.get(authorId) || "",
+    authorRole: data.authorRole || null, badge: data.badge || null,
+    recommendation: data.recommendation || null, qualifying: data.qualifying === true,
+    problemId: data.problemId || null, proposalId: data.proposalId || null,
+    parentId: data.parentId ?? null, replyCount: data.replyCount ?? 0,
+    body: String(data.body || data.text || data.content || ""),
+    createdAt: serialise(data.createdAt || null), editedAt: serialise(data.editedAt || null),
+    moderationStatus: data.moderationStatus || "visible", moderation: serialise(data.moderation || null) };
+}
+
+async function loadCommentReplies(tx, db, parentIds) {
+  if (!parentIds.length) return [];
+  const pages = await Promise.all(Array.from({ length: Math.ceil(parentIds.length / 10) }, (_, index) =>
+    tx.get(db.collection("comments").where("parentId", "in", parentIds.slice(index * 10, index * 10 + 10)))));
+  return pages.flatMap((page) => page.docs).sort((a, b) => {
+    const at = a.data().createdAt?.toMillis?.() ?? 0, bt = b.data().createdAt?.toMillis?.() ?? 0;
+    if (at !== bt) return at - bt;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+
 export async function listReportableComments({ db, uid, problemId, proposalId, cursor, sort }) {
   const parentType = proposalId ? "proposal" : "problem", parentId = proposalId || problemId;
   validateContent(parentType, parentId);
@@ -329,30 +359,30 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
     if (!parent.exists || !await canReadContent(tx, db, parentType, parent.data(), uid, profile)) fail("permission-denied", "This discussion is not available.");
     if (proposalId && problemId && parent.data().problemId !== problemId) fail("permission-denied", "This proposal does not belong to that problem.");
     const direction = newest ? "desc" : "asc";
-    let query = db.collection("comments").where(proposalId ? "proposalId" : "problemId", "==", parentId)
-      .orderBy("createdAt", direction).orderBy("__name__", direction);
+    let query = db.collection("comments").where(proposalId ? "proposalId" : "problemId", "==", parentId);
+    if (proposalId) query = query.where("parentId", "==", null);
+    query = query.orderBy("createdAt", direction).orderBy("__name__", direction);
     if (cursor) query = query.startAfter(cursorTimestamp(cursor), cursor.id);
     const rows = await tx.get(query.limit(101));
     const page = rows.docs.slice(0, 100);
-    const visible = page.filter((doc) => (proposalId || !doc.data().proposalId) && isPublished("comment", doc.data())
-      && !doc.data().deletedAt
-      && (!BLOCKED.has(doc.data().moderationStatus) || owner("comment", doc.data()) === uid || profile.role === 1));
-    const authorIds = [...new Set(visible.map((doc) => owner("comment", doc.data()) || "").filter(Boolean))];
+    const visible = page.filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: Boolean(proposalId) }));
+    const replyDocs = proposalId ? await loadCommentReplies(tx, db, visible.map((doc) => doc.id)) : [];
+    const visibleReplies = replyDocs.filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: true }));
+    const authorIds = [...new Set([...visible, ...visibleReplies].map((doc) => owner("comment", doc.data()) || "").filter(Boolean))];
     const names = new Map();
     await Promise.all(authorIds.map(async (id) => {
       const publicProfile = await tx.get(db.collection("publicProfiles").doc(id));
       names.set(id, publicProfile.data()?.fullName || "");
     }));
+    const repliesByParent = new Map();
+    for (const doc of visibleReplies) {
+      const replyParentId = doc.data().parentId;
+      if (!repliesByParent.has(replyParentId)) repliesByParent.set(replyParentId, []);
+      repliesByParent.get(replyParentId).push(commentListItem(doc, names));
+    }
     const items = visible.map((doc) => {
-      const data = doc.data();
-      const authorId = owner("comment", data) || "";
-      return { id: doc.id, authorId, authorName: names.get(authorId) || "",
-        authorRole: data.authorRole || null, badge: data.badge || null,
-        recommendation: data.recommendation || null, qualifying: data.qualifying === true,
-        problemId: data.problemId || null, proposalId: data.proposalId || null,
-        body: String(data.body || data.text || data.content || ""),
-        createdAt: serialise(data.createdAt || null), editedAt: serialise(data.editedAt || null),
-        moderationStatus: data.moderationStatus || "visible", moderation: serialise(data.moderation || null) };
+      const item = commentListItem(doc, names);
+      return proposalId ? { ...item, replies: repliesByParent.get(doc.id) || [] } : item;
     });
     const last = page.at(-1);
     if (parentType === "proposal") {

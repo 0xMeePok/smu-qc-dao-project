@@ -139,17 +139,29 @@ test("listing resolves public names, recommendation fields and newest-first orde
   const db = fixture();
   db.records.set("publicProfiles/funder", { fullName: "Funder" });
   db.records.set("publicProfiles/evaluator", { fullName: "Assigned evaluator" });
+  db.records.set("publicProfiles/alice", { fullName: "Alice" });
   const member = await create(db);
   const evaluator = await create(db, { uid: "evaluator", recommendation: "recommend",
     body: "Evaluator view.", now: later(1000) });
+  const reply = await create(db, { uid: "alice", body: "Need the cited figure.", parentId: member.id, now: later(2000) });
   const oldest = await listReportableComments({ db, uid: "funder", proposalId: "a" });
+  assert.equal(oldest.items.length, 2);
   assert.equal(oldest.items[0].id, member.id);
   assert.equal(oldest.items[0].authorName, "Funder");
+  assert.equal(oldest.items[0].parentId, null);
+  assert.equal(oldest.items[0].replyCount, 1);
+  assert.equal(oldest.items[0].replies.length, 1);
+  assert.equal(oldest.items[0].replies[0].id, reply.id);
+  assert.equal(oldest.items[0].replies[0].parentId, member.id);
+  assert.equal(oldest.items[0].replies[0].authorName, "Alice");
   assert.equal(oldest.items[1].authorName, "Assigned evaluator");
   assert.equal(oldest.items[1].qualifying, true);
   assert.equal(oldest.items[1].recommendation, "recommend");
+  assert.deepEqual(oldest.items[1].replies, []);
+  assert.equal(oldest.items.some((item) => item.id === reply.id), false);
   const newest = await listReportableComments({ db, uid: "funder", proposalId: "a", sort: "newest" });
   assert.equal(newest.items.map((item) => item.id).join(","), `${evaluator.id},${member.id}`);
+  assert.equal(newest.items.find((item) => item.id === member.id).replies[0].id, reply.id);
   await assert.rejects(() => listReportableComments({ db, uid: "funder", proposalId: "a", sort: "popular" }),
     { code: "invalid-argument" });
 });
