@@ -9,6 +9,8 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract QFT is ERC20 {
     error ZeroInitialSupply();
 
+    // Token constructor must not accept ETH; payable would only save deploy gas.
+    // nosemgrep: solidity.performance.non-payable-constructor.non-payable-constructor
     constructor(
         address initialHolder,
         uint256 initialSupply

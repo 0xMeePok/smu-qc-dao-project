@@ -6,7 +6,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title MockFaucetToken
 /// @notice Six-decimal test token with owner-sponsored claims and an on-chain cooldown.
-contract MockFaucetToken is ERC20, Ownable {
+/// @dev Constructor Ownable is enough for this mock; 2-step ownership is unnecessary.
+contract MockFaucetToken is ERC20, Ownable { // nosemgrep: solidity.best-practice.use-ownable2step.use-ownable2step
     uint8 private constant TOKEN_DECIMALS = 6;
     uint256 public constant CLAIM_AMOUNT = 10_000 * 10 ** TOKEN_DECIMALS;
     uint256 public constant COOLDOWN = 1 hours;
@@ -18,6 +19,8 @@ contract MockFaucetToken is ERC20, Ownable {
     error CooldownActive(uint256 nextClaimAt);
     error MaxSupplyReached();
 
+    // Mock token must not accept ETH at deploy.
+    // nosemgrep: solidity.performance.non-payable-constructor.non-payable-constructor
     constructor(
         string memory tokenName,
         string memory tokenSymbol,
