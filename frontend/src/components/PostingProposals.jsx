@@ -2,16 +2,10 @@ import { useEffect, useState } from "react";
 import { formatInstant } from "../lib/datetime.js";
 import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
-import { MATCHING_LABELS } from "../lib/matching.js";
+import { proposalFundingLabel } from "../lib/matching.js";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
-function proposalStatusLabel(status) {
-  return String(status ?? "")
-    .replaceAll("_", " ")
-    .replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function Row({ item, onNavigate }) {
+function Row({ item, onNavigate, problemMatching }) {
   const isDraft = item.status === PROPOSAL_STATUS_DRAFT;
   return (
     <div className="table-row">
@@ -20,7 +14,7 @@ function Row({ item, onNavigate }) {
         <small className="table-row-meta">
           {isDraft
             ? `Last saved ${formatInstant(item.updatedAt)}`
-            : `${MATCHING_LABELS[item.matching?.status] || proposalStatusLabel(item.status)} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
+            : `${proposalFundingLabel(item, problemMatching)} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
         </small>
       </div>
       <div className="table-row-actions">
@@ -61,7 +55,7 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
       .catch((err) => { if (!cancelled) { setItems([]); setError(messageForProposalError(err)); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [posting?.id, viewerId]);
+  }, [posting?.id, posting?.matching?.status, posting?.matching?.proposalId, viewerId]);
 
   const countLabel = `${proposalCount} ${proposalCount === 1 ? "proposal" : "proposals"} received`;
 
@@ -75,7 +69,7 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
         <p className="error-banner" role="alert">{error}</p>
       ) : items.length > 0 ? (
         <div className="card-table posting-proposals">
-          {items.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} />)}
+          {items.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} problemMatching={posting.matching} />)}
         </div>
       ) : (
         <p className="table-empty">

@@ -67,14 +67,22 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
     && roles.includes(ROLES.FUNDER)
     && !owns
     && !FUND_CLOSED_STATUSES.has(status)
-    && !["awaiting_confirmation", "confirmed"].includes(posting.matching?.status)
-    && (!deadlinePassed || posting.matching?.mode === "mock")
+    && !["awaiting_confirmation", "confirmed", "invalidated"].includes(posting.matching?.status)
+    && !deadlinePassed
   ) {
     actions.push({
       id: "fund",
-      label: "Fund this posting",
+      label: "View proposals to fund",
       route: "funding",
       kind: "secondary",
+    });
+  }
+
+  if (isAuthenticated && owns && status !== OPPORTUNITY_STATUSES.DRAFT && !["hidden", "removed"].includes(posting.moderationStatus)) {
+    actions.push({
+      id: "review-proposals",
+      label: "Review proposals",
+      kind: "primary",
     });
   }
 

@@ -359,10 +359,7 @@ function OpportunityCard({ item }) {
       </div>
       <div className="opportunity-funding">
         <span className="opportunity-amount">{item.amount}</span>
-        <span className="funding-progress" aria-label={`${item.fundingProgressPercent}% funded`}>
-          <span style={{ width: `${item.fundingProgressPercent}%` }} />
-        </span>
-        <small>{item.fundingProgressPercent}% funded</small>
+        <small>{item.type === "Open funding" ? "Funding available" : "Indicative proposal budget"}</small>
       </div>
       <div className="opportunity-deadline">
         <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} />
