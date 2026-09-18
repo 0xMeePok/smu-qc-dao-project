@@ -269,7 +269,7 @@ describe("author notices and reportable comments", () => {
     }] });
     render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
     expect(await screen.findByText("Recommend")).toBeTruthy();
-    expect(screen.getAllByText("Evaluator").length).toBeGreaterThan(1);
+    expect(screen.getAllByText("Evaluator")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Edit comment" }));
     fireEvent.change(screen.getByLabelText("Edit comment"), { target: { value: "Updated review." } });
     fireEvent.click(screen.getByLabelText("Recommend"));

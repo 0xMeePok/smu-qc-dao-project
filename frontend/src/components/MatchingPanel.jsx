@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
-import { completeMockEvaluation, confirmMockProposal, declineMockProposal, forceExpireMockMatch, fundMockProposal, getMockMatching, MATCHING_LABELS, matchingError, selectMockProposal } from "../lib/matching.js";
+import { completeMockEvaluation, confirmMockProposal, declineMockProposal, forceExpireMockMatch, fundMockProposal, getMockMatching, MATCHING_LABELS, matchingError, matchingStatusLabel, selectMockProposal } from "../lib/matching.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { Modal } from "./Modal.jsx";
@@ -124,7 +124,7 @@ export function MatchingPanel({ problemId, proposalId, onChange }) {
     {loading && !state ? <p role="status">Loading funding status…</p> : null}
     {state && items.length === 0 && <p>No proposals available for funding yet.</p>}
     <div className="matching-candidates">{items.map((item) => <article className="matching-candidate" key={item.id}>
-      <h3>{item.title}</h3><span className="status-dot">{MATCHING_LABELS[item.matching?.status] || "Open for funding"}</span>
+      <h3>{item.title}</h3><span className="status-dot">{matchingStatusLabel(item.matching?.status)}</span>
       <p><strong>{money(item.currency, item.fundedAmount)}</strong> of {money(item.currency, item.amount)}</p>
       <p className="field-hint">Expert evaluation: {item.matching?.evaluationComplete ? "Complete" : "Pending"} · Funding target: {item.fundedAmount >= item.amount ? "Met" : "Not yet met"}</p>
       {receiptFor("mock_evaluation_completed", item.id) && <button type="button" className="text-button" onClick={() => showReceipt(receiptFor("mock_evaluation_completed", item.id))}>View evaluation record</button>}

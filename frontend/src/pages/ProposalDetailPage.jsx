@@ -15,7 +15,7 @@ import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
-import { getMockMatching, MATCHING_LABELS, proposalMatchingLocked } from "../lib/matching.js";
+import { getMockMatching, matchingStatusLabel, mergeMatchingState, proposalMatchingLocked } from "../lib/matching.js";
 import { isModerated } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
 import { ReportableComments } from "../components/ReportableComments.jsx";
@@ -81,7 +81,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     const timer = setInterval(() => {
       findProposal(proposalId, { fromServer: true }).then((current) => {
         if (active && current) setProposal((previous) => ({ ...current,
-          matching: current.matching || previous?.matching,
+          matching: mergeMatchingState(previous?.matching, current.matching),
           problemMatching: current.problemMatching || previous?.problemMatching,
         }));
       }).catch(() => { /* Keep the saved record visible while offline. */ });
@@ -158,7 +158,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       {(owns || sponsors) && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
       {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
-    </article><aside className="context-panel"><div className="trust-status-row"><span className="status-dot">{MATCHING_LABELS[proposal.matching?.status] || proposal.status}</span><VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} /></div><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
+    </article><aside className="context-panel"><div className="trust-status-row"><span className="status-dot">{matchingStatusLabel(proposal.matching?.status)}</span><VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} /></div><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
           that point on. */}

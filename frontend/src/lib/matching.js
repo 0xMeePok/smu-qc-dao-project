@@ -31,6 +31,16 @@ export const MATCHING_LABELS = {
   refunded: "Refunded",
 };
 
+export function matchingStatusLabel(status) {
+  return MATCHING_LABELS[status] || MATCHING_LABELS.funding;
+}
+
+export function mergeMatchingState(previous, current) {
+  if (!current) return previous;
+  if (!previous) return current;
+  return { ...previous, ...current };
+}
+
 export function matchingError(error) {
   const code = String(error?.code ?? "").split("/").pop();
   if (code === "unauthenticated") return "Sign in again to continue.";

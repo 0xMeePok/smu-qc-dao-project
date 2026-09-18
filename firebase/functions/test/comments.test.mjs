@@ -464,7 +464,7 @@ test("hiding the last qualifying comment clears the gate; restore revalidates it
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
 });
 
-test("recommendations stay advisory and never select, reject, score, or reorder proposals", async () => {
+test("[BUT-SPER-23] recommendations stay advisory and never select, reject, score, or reorder proposals", async () => {
   const matchingSource = readFileSync(new URL("../matching.js", import.meta.url), "utf8");
   assert.equal(matchingSource.includes("recommendation"), false);
   const db = matchingReady(fixture());
@@ -501,7 +501,7 @@ test("recommendations stay advisory and never select, reject, score, or reorder 
   assert.ok(view.proposals.every((item) => item.canSelect === false));
 });
 
-test("a qualifying evaluator comment does not unlock selection while funding is short", async () => {
+test("[BUT-SPER-24] a qualifying evaluator comment does not unlock selection while funding is short", async () => {
   const db = matchingReady(fixture());
   await create(db, { uid: "evaluator", recommendation: "recommend" });
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
@@ -532,7 +532,7 @@ test("a qualifying evaluator comment does not unlock selection while funding is 
   assert.equal(db.records.get("proposals/a").matching.status, "funding");
 });
 
-test("removing one qualifying comment keeps the gate; removing the last clears it", async () => {
+test("[BUT-SPER-25] removing one qualifying comment keeps the gate; removing the last clears it", async () => {
   const db = fixture();
   const first = await create(db, { uid: "evaluator", recommendation: "recommend" });
   const second = await create(db, {
@@ -570,7 +570,7 @@ test("removing one qualifying comment keeps the gate; removing the last clears i
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
 });
 
-test("evaluator comments stay off-chain and never write audit or matching history", async () => {
+test("[BUT-SPER-26] evaluator comments stay off-chain and never write audit or matching history", async () => {
   const commentsSource = readFileSync(new URL("../comments.js", import.meta.url), "utf8");
   assert.equal(/viem|auditRegistry|writeContract/.test(commentsSource), false);
   const db = fixture();
