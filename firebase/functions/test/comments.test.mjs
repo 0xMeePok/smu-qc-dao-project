@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Timestamp } from "firebase-admin/firestore";
 import { memoryDb } from "./memoryDb.mjs";
 import {
@@ -11,6 +12,7 @@ import {
   prepareCommentEvaluationGate,
 } from "../comments.js";
 import { listReportableComments, moderateContent } from "../moderation.js";
+import { fundMockProposal, getMockMatching, selectMockProposal } from "../matching.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
 const later = (ms) => Timestamp.fromMillis(now.toMillis() + ms);
@@ -58,6 +60,11 @@ const create = (db, patch = {}) =>
   });
 const comments = (db) =>
   [...db.records.entries()].filter(([path]) => path.startsWith("comments/"));
+function matchingReady(db) {
+  Object.assign(db.records.get("problems/problem"), { currency: "SGD", status: "open" });
+  Object.assign(db.records.get("proposals/a"), { amount: 100, currency: "SGD" });
+  return db;
+}
 
 test("members can comment on a submitted proposal; evaluators must recommend and receive a server badge", async () => {
   const db = fixture();
@@ -455,4 +462,132 @@ test("hiding the last qualifying comment clears the gate; restore revalidates it
   await act("restore", "no_violation");
   assert.equal(db.records.get(`comments/${created.id}`).qualifying, true);
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+});
+
+test("recommendations stay advisory and never select, reject, score, or reorder proposals", async () => {
+  const matchingSource = readFileSync(new URL("../matching.js", import.meta.url), "utf8");
+  assert.equal(matchingSource.includes("recommendation"), false);
+  const db = matchingReady(fixture());
+  db.records.set("proposals/b", {
+    researcherId: "alice",
+    postingOwnerId: "owner",
+    problemId: "problem",
+    title: "Proposal B",
+    status: "submitted",
+    amount: 100,
+    currency: "SGD",
+    createdAt: now,
+  });
+  await create(db, { uid: "evaluator", recommendation: "do_not_recommend" });
+  await create(db, {
+    uid: "evaluator",
+    proposalId: "b",
+    recommendation: "recommend",
+    body: "A stronger independent recommendation.",
+  });
+  const rejected = db.records.get("proposals/a");
+  const endorsed = db.records.get("proposals/b");
+  assert.equal(rejected.status, "submitted");
+  assert.equal(endorsed.status, "submitted");
+  assert.equal(rejected.matching.evaluationComplete, true);
+  assert.equal(endorsed.matching.evaluationComplete, true);
+  assert.equal(rejected.matching.status, undefined);
+  assert.equal(endorsed.matching.status, undefined);
+  assert.equal(db.records.get("problems/problem").acceptedProposalId, undefined);
+  const view = await getMockMatching({ db, uid: "owner", problemId: "problem", now });
+  assert.deepEqual(view.proposals.map((item) => item.id), ["a", "b"]);
+  assert.equal(view.matching.status, "open");
+  assert.equal(view.matching.proposalId, null);
+  assert.ok(view.proposals.every((item) => item.canSelect === false));
+});
+
+test("a qualifying evaluator comment does not unlock selection while funding is short", async () => {
+  const db = matchingReady(fixture());
+  await create(db, { uid: "evaluator", recommendation: "recommend" });
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+  await fundMockProposal({
+    db,
+    uid: "funder",
+    problemId: "problem",
+    proposalId: "a",
+    amount: 40,
+    requestId: "request_short_fund",
+    now,
+  });
+  const view = await getMockMatching({ db, uid: "owner", problemId: "problem", now });
+  assert.equal(view.proposals.find((item) => item.id === "a").canSelect, false);
+  await assert.rejects(
+    () =>
+      selectMockProposal({
+        db,
+        uid: "owner",
+        problemId: "problem",
+        proposalId: "a",
+        rationale: "This approach meets our requirements.",
+        now,
+      }),
+    { code: "failed-precondition", message: "Select a fully funded, active proposal." },
+  );
+  assert.equal(db.records.get("problems/problem").matching?.status || "open", "open");
+  assert.equal(db.records.get("proposals/a").matching.status, "funding");
+});
+
+test("removing one qualifying comment keeps the gate; removing the last clears it", async () => {
+  const db = fixture();
+  const first = await create(db, { uid: "evaluator", recommendation: "recommend" });
+  const second = await create(db, {
+    uid: "evaluator",
+    recommendation: "do_not_recommend",
+    body: "A second independent recommendation.",
+  });
+  const queue = (id) => {
+    db.records.set(`moderationQueue/comment_${id}`, {
+      contentType: "comment",
+      contentId: id,
+      status: "pending",
+    });
+  };
+  queue(first.id);
+  queue(second.id);
+  const act = (id, action, reason) =>
+    moderateContent({
+      db,
+      uid: "admin",
+      queueId: `comment_${id}`,
+      action,
+      reason,
+      now,
+      prepareCommentGate: prepareCommentEvaluationGate,
+    });
+  await act(first.id, "remove", "off_topic");
+  assert.equal(db.records.get(`comments/${first.id}`).qualifying, false);
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+  await act(second.id, "remove", "off_topic");
+  assert.equal(db.records.get(`comments/${second.id}`).qualifying, false);
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, false);
+  await act(second.id, "restore", "no_violation");
+  assert.equal(db.records.get(`comments/${second.id}`).qualifying, true);
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+});
+
+test("evaluator comments stay off-chain and never write audit or matching history", async () => {
+  const commentsSource = readFileSync(new URL("../comments.js", import.meta.url), "utf8");
+  assert.equal(/viem|auditRegistry|writeContract/.test(commentsSource), false);
+  const db = fixture();
+  const created = await create(db, {
+    uid: "evaluator",
+    recommendation: "recommend",
+    body: "Advisory review stays off-chain.",
+  });
+  const stored = db.records.get(`comments/${created.id}`);
+  assert.equal(stored.body, "Advisory review stays off-chain.");
+  assert.equal(stored.recommendation, "recommend");
+  assert.equal(stored.transactionHash, undefined);
+  assert.equal(stored.chainStatus, undefined);
+  assert.equal(db.records.get("proposals/a").audit, undefined);
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+  assert.equal(
+    [...db.records.keys()].some((path) => path.startsWith("matchingEvents/")),
+    false,
+  );
 });
