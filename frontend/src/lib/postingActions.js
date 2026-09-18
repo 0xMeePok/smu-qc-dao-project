@@ -34,7 +34,7 @@ function postingStatus(posting) {
 
 /**
  * Role- and workflow-gated actions for a posting detail page.
- * Destinations are existing routes; Comment is omitted (no comments backend).
+ * Destinations are existing routes; Comment is omitted (composer lives on proposal detail).
  */
 export function postingActions(posting, user, { isAuthenticated = Boolean(user) } = {}) {
   if (!posting) return [];

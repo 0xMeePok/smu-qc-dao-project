@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Modal } from "./Modal.jsx";
 import { shortenAddress } from "../lib/chain.js";
-import { roleLabel } from "../lib/roles.js";
+import { defaultRoleAssignment, roleChipClass, roleLabel } from "../lib/roles.js";
 import { updateUserRole } from "../lib/admin.js";
 
 export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
-  const [newRole, setNewRole] = useState(targetUser?.role === 1 ? 0 : 1);
+  const [newRole, setNewRole] = useState(defaultRoleAssignment(targetUser?.role));
   const [reason, setReason] = useState("");
   const [step, setStep] = useState("form"); // "form" | "confirm"
   const [submitting, setSubmitting] = useState(false);
@@ -78,7 +78,7 @@ export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
           <div className="modal-section">
             <label className="field-label">Current Role</label>
             <div className="current-role-badge">
-              <span className={`role-badge role-${currentRole === 1 ? "admin" : "user"}`}>
+              <span className={`role-badge ${roleChipClass(currentRole)}`}>
                 {roleLabel(currentRole)}
               </span>
             </div>
@@ -100,7 +100,22 @@ export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
                 />
                 <div>
                   <strong>Platform User (0)</strong>
-                  <small>Standard participant access across problem ownership, research, and evaluation</small>
+                  <small>Standard participant access for problem ownership, research, and funding</small>
+                </div>
+              </label>
+
+              <label className={`radio-pill ${newRole === 2 ? "selected" : ""}`}>
+                <input
+                  type="radio"
+                  name="newRole"
+                  value={2}
+                  checked={newRole === 2}
+                  onChange={() => setNewRole(2)}
+                  disabled={currentRole === 2}
+                />
+                <div>
+                  <strong>Assigned Evaluator (2)</strong>
+                  <small>Participant access plus evaluator authorisation for recommendation comments</small>
                 </div>
               </label>
 

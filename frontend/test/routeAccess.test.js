@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ADMIN, AUTHENTICATED, PUBLIC, accessFor, allows, canAccess, landingFor } from "../src/lib/routeAccess.js";
-import { ROLE_ADMIN, ROLE_USER } from "../src/lib/roles.js";
+import { ROLE_ADMIN, ROLE_EVALUATOR, ROLE_USER } from "../src/lib/roles.js";
 
 describe("route access levels", () => {
   it("treats unlisted routes as public", () => {
@@ -89,6 +89,7 @@ describe("canAccess", () => {
 
     it("admits any signed-in user regardless of role", () => {
       assert.equal(allows(AUTHENTICATED, { isSignedIn: true, role: ROLE_USER }), true);
+      assert.equal(allows(AUTHENTICATED, { isSignedIn: true, role: ROLE_EVALUATOR }), true);
       assert.equal(allows(AUTHENTICATED, { isSignedIn: true, role: ROLE_ADMIN }), true);
     });
 
@@ -99,6 +100,7 @@ describe("canAccess", () => {
 
     it("still gates admin and opens public through the same function", () => {
       assert.equal(allows(ADMIN, { isSignedIn: true, role: ROLE_USER }), false);
+      assert.equal(allows(ADMIN, { isSignedIn: true, role: ROLE_EVALUATOR }), false);
       assert.equal(allows(ADMIN, { isSignedIn: true, role: ROLE_ADMIN }), true);
       assert.equal(allows(PUBLIC, { isSignedIn: false }), true);
     });
@@ -116,6 +118,7 @@ describe("post-login landing", () => {
 
   it("sends an ordinary user home", () => {
     assert.equal(landingFor(ROLE_USER), "home");
+    assert.equal(landingFor(ROLE_EVALUATOR), "home");
   });
 
   it("sends an unknown role home rather than to the admin screen", () => {

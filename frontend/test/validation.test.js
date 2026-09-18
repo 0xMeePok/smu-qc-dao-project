@@ -8,7 +8,7 @@ import {
   validateWallet,
 } from "../src/lib/validation.js";
 import { initialStats, statKeys, withDefaults } from "../src/lib/stats.js";
-import { isAdmin, roleLabel, ROLE_ADMIN, ROLE_USER } from "../src/lib/roles.js";
+import { isAdmin, isAssignedEvaluator, roleLabel, ROLE_ADMIN, ROLE_EVALUATOR, ROLE_USER } from "../src/lib/roles.js";
 
 const VALID_ADDRESS = `0x${"a".repeat(40)}`;
 
@@ -44,19 +44,28 @@ describe("terms", () => {
 });
 
 describe("roles", () => {
-  it("has exactly two levels: 0 (user) and 1 (administrator)", () => {
+  it("has three access levels: 0 (user), 1 (administrator), and 2 (assigned evaluator)", () => {
     assert.equal(ROLE_USER, 0);
     assert.equal(ROLE_ADMIN, 1);
+    assert.equal(ROLE_EVALUATOR, 2);
   });
 
   it("only recognises the admin constant as an admin", () => {
     assert.equal(isAdmin(ROLE_ADMIN), true);
     assert.equal(isAdmin(ROLE_USER), false);
+    assert.equal(isAdmin(ROLE_EVALUATOR), false);
     assert.equal(isAdmin(undefined), false);
+  });
+
+  it("only recognises access level 2 as an assigned evaluator", () => {
+    assert.equal(isAssignedEvaluator(ROLE_EVALUATOR), true);
+    assert.equal(isAssignedEvaluator(ROLE_USER), false);
+    assert.equal(isAssignedEvaluator(ROLE_ADMIN), false);
   });
 
   it("labels each level for display", () => {
     assert.equal(roleLabel(ROLE_ADMIN), "Administrator");
+    assert.equal(roleLabel(ROLE_EVALUATOR), "Evaluator");
     assert.equal(roleLabel(ROLE_USER), "User");
   });
 });

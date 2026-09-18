@@ -224,15 +224,26 @@ service firebase.storage {
       allow delete: if false; // removeAttachment retires the reservation before deleting.
     }
 
-    // Proposal files are private to the submitting wallet and the sponsor. A
-    // correction may add or drop files; the bytes behind any one id never change.
-    // Sponsor reads require a non-draft record so a forged draft
-    // `postingOwnerId` cannot open another member's download path.
+    // Proposal files stay private while the record is a draft. Once submitted and
+    // not moderated, onboarded members may download the same bytes they can read
+    // on the proposal detail page, but only while the parent is still member-
+    // gettable (submitted, open, cancelled, expired — not hidden or removed).
+    // postingOwnerId. Storage allows only two Firestore reads (profile + record),
+    // so this cannot get() the parent posting. prepareModerationMatching stamps
+    // problemBrowsable onto child proposals when a problem is hidden, removed or
+    // restored; write triggers and posting lists backfill the same field from the
+    // live parent. Absent or false denies member downloads (fail closed).
+    // activeProfile already enforces the same onboarding/suspension gate as
+    // hasCompletedProfile + isActiveUser in firestore.rules.
     function proposalReader(proposalId, ownerId) {
       let proposal = attachmentRecord('proposals', proposalId);
       return proposal != null && proposal.data.researcherId == ownerId
-        && proposal.data.status != 'draft'
-        && proposal.data.postingOwnerId == request.auth.uid;
+        && proposal.data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
+        && !(proposal.data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
+        && (
+          proposal.data.get('postingOwnerId', '') == request.auth.uid
+          || proposal.data.get('problemBrowsable', false) == true
+        );
     }
 
     // Drafts (and the pre-save path where no document exists yet) may gain and

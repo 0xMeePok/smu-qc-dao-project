@@ -2,9 +2,15 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../../src/config/proposal.js";
-const mocks = vi.hoisted(() => ({ user: { id: "member" }, report: vi.fn(), queue: vi.fn(), context: vi.fn(), moderate: vi.fn(), notifications: vi.fn(), markRead: vi.fn(), comments: vi.fn() }));
+const mocks = vi.hoisted(() => ({ user: { id: "member" }, report: vi.fn(), queue: vi.fn(), context: vi.fn(), moderate: vi.fn(), notifications: vi.fn(), markRead: vi.fn(), comments: vi.fn(), create: vi.fn(), edit: vi.fn(), remove: vi.fn() }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/lib/firebase.js", () => ({ functions: {} }));
+vi.mock("../../src/lib/comments.js", async (importOriginal) => ({
+  ...await importOriginal(),
+  createComment: (...args) => mocks.create(...args),
+  editComment: (...args) => mocks.edit(...args),
+  deleteComment: (...args) => mocks.remove(...args),
+}));
 vi.mock("../../src/lib/moderation.js", async (importOriginal) => ({
   ...await importOriginal(),
   submitContentReport: (...args) => mocks.report(...args), listModerationQueue: (...args) => mocks.queue(...args),
@@ -28,6 +34,9 @@ beforeEach(() => {
   mocks.notifications.mockReset().mockResolvedValue({ items: [notice] });
   mocks.markRead.mockReset().mockResolvedValue({ ok: true });
   mocks.comments.mockReset().mockResolvedValue({ items: [] });
+  mocks.create.mockReset().mockResolvedValue({ id: "new-comment" });
+  mocks.edit.mockReset().mockResolvedValue({ id: "comment1" });
+  mocks.remove.mockReset().mockResolvedValue({ id: "comment1" });
 });
 afterEach(cleanup);
 
@@ -173,6 +182,111 @@ describe("author notices and reportable comments", () => {
     expect(mocks.report).toHaveBeenCalledWith({ contentType: "comment", contentId: "comment1", reason: "abusive", details: "" });
     expect(screen.queryByText(/\d+ reports/)).toBeNull();
   });
+
+  it("keeps replies collapsed until expanded and posts a reply without a recommendation", async () => {
+    mocks.user = { id: "evaluator", roles: ["evaluator"] };
+    mocks.comments.mockResolvedValue({ items: [{
+      id: "comment1", body: "The claimed latency needs a cited benchmark.", authorName: "Researcher",
+      createdAt: row.createdAt, proposalId: "proposal1", parentId: null, replyCount: 1,
+      replies: [{ id: "reply1", body: "Agree on the benchmark.", authorName: "Alice", parentId: "comment1",
+        createdAt: row.createdAt, proposalId: "proposal1" }],
+    }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    await screen.findByText("The claimed latency needs a cited benchmark.");
+    expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
+    expect(screen.queryByLabelText("Write a reply")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 reply" }));
+    expect(screen.getByText("Agree on the benchmark.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reply", hidden: false })).toBeTruthy();
+    expect(within(screen.getByText("Agree on the benchmark.").closest("article")).queryByRole("button", { name: "Reply" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Write a reply"), { target: { value: "Need the cited figure as well." } });
+    fireEvent.click(screen.getByRole("button", { name: "Post reply" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
+      proposalId: "proposal1", body: "Need the cited figure as well.", parentId: "comment1",
+    }));
+    expect(mocks.create.mock.calls[0][0].recommendation).toBeUndefined();
+    fireEvent.click(screen.getByRole("button", { name: "Hide replies" }));
+    expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
+  });
+
+  it("keeps a removed parent placeholder so replies stay reachable", async () => {
+    mocks.comments.mockResolvedValue({ items: [{
+      id: "comment1", body: "", deleted: true, authorName: "", parentId: null, replyCount: 1, proposalId: "proposal1",
+      replies: [{ id: "reply1", body: "Agree on the benchmark.", authorName: "Alice", parentId: "comment1",
+        createdAt: row.createdAt, proposalId: "proposal1" }],
+    }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    expect(await screen.findByText("This comment was removed")).toBeTruthy();
+    expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit comment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete comment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Report this comment" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 reply" }));
+    expect(screen.getByText("Agree on the benchmark.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reply" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Write a reply"), { target: { value: "Still on this thread." } });
+    fireEvent.click(screen.getByRole("button", { name: "Post reply" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
+      proposalId: "proposal1", body: "Still on this thread.", parentId: "comment1",
+    }));
+  });
+
+  it("lets a member post on a proposal and requires a recommendation from assigned evaluators", async () => {
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    fireEvent.change(await screen.findByLabelText("Write a comment"), { target: { value: "The claimed latency needs a cited benchmark." } });
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({ proposalId: "proposal1", body: "The claimed latency needs a cited benchmark." }));
+  });
+
+  it("requires assigned evaluators to pick a recommendation before posting", async () => {
+    mocks.user = { id: "evaluator", roles: ["evaluator"] };
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    fireEvent.change(await screen.findByLabelText("Write a comment"), { target: { value: "The approach is sound with one revision." } });
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Choose Recommend");
+    expect(mocks.create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Recommend with revisions"));
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
+      proposalId: "proposal1", body: "The approach is sound with one revision.", recommendation: "recommend_with_revisions",
+    }));
+  });
+
+  it("requests newest comments when the sort control is changed", async () => {
+    mocks.comments.mockResolvedValue({ items: [{ id: "comment1", body: "Review this technical claim.", authorName: "Researcher", createdAt: row.createdAt }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    await screen.findByText("Review this technical claim.");
+    fireEvent.change(screen.getByLabelText("Sort comments"), { target: { value: "newest" } });
+    await waitFor(() => expect(mocks.comments).toHaveBeenLastCalledWith({ problemId: "problem1", proposalId: "proposal1", sort: "newest" }));
+  });
+
+  it("lets the author edit inside the window and delete, and shows evaluator outcome badges", async () => {
+    mocks.user = { id: "evaluator", roles: ["evaluator"] };
+    mocks.comments.mockResolvedValue({ items: [{
+      id: "comment1", body: "Initial review.", authorId: "evaluator", authorName: "Assigned evaluator",
+      authorRole: "evaluator", badge: "evaluator", recommendation: "recommend", qualifying: true,
+      createdAt: new Date().toISOString(), proposalId: "proposal1",
+    }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    expect(await screen.findByText("Recommend")).toBeTruthy();
+    expect(screen.getAllByText("Evaluator").length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByRole("button", { name: "Edit comment" }));
+    fireEvent.change(screen.getByLabelText("Edit comment"), { target: { value: "Updated review." } });
+    fireEvent.click(screen.getByLabelText("Recommend"));
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await waitFor(() => expect(mocks.edit).toHaveBeenCalledWith({ commentId: "comment1", body: "Updated review.", recommendation: "recommend" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete comment" }));
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith("comment1"));
+  });
+});
+
+it("does not offer a composer on posting-level discussion", async () => {
+  mocks.comments.mockResolvedValue({ items: [{ id: "comment1", body: "A later public comment", createdAt: row.createdAt }] });
+  render(<ReportableComments problemId="problem1" />);
+  await screen.findByText("A later public comment");
+  expect(screen.queryByLabelText("Write a comment")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Post comment" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
 });
 
 it("reaches public comments after a filtered empty page and retries pagination", async () => {

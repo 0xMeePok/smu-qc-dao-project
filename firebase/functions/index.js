@@ -33,6 +33,9 @@ import { getMockMatching as readMockMatching, fundMockProposal as contributeMock
   selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
   getMockFundingPortfolio as readMockFundingPortfolio, sweepExpiredMockMatches,
   declineMockProposal as rejectMockProposal, completeMockEvaluation as finishMockEvaluation, forceExpireMockMatch as forceExpireMockWindow } from "./matching.js";
+import { createComment as writeComment, editComment as amendComment,
+  deleteComment as removeComment } from "./comments.js";
+import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -175,6 +178,26 @@ export const { submitContentReport, listModerationQueue, getModerationContext, m
   listModerationNotifications, markModerationNotificationRead, listReportableComments,
   screenProblemContent, screenProposalContent, screenCommentContent } = registerModerationCallables({
   db, requireMember, requireAdmin, options: MEMBER_CALL_OPTIONS, region: REGION,
+});
+
+export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return listPostedProposalsForProblem({ db, uid, problemId: request.data?.problemId });
+});
+
+export const createComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return writeComment({ db, uid, now: Timestamp.now(), proposalId: request.data?.proposalId,
+    body: request.data?.body, recommendation: request.data?.recommendation, parentId: request.data?.parentId });
+});
+export const editComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return amendComment({ db, uid, now: Timestamp.now(), commentId: request.data?.commentId,
+    body: request.data?.body, recommendation: request.data?.recommendation });
+});
+export const deleteComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return removeComment({ db, uid, now: Timestamp.now(), commentId: request.data?.commentId });
 });
 
 // Mock escrow is a server-only ledger. No real tokens move and these records
@@ -940,7 +963,7 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
   } = request.data ?? {};
 
   let usersQuery = db.collection("users");
-  if (typeof roleFilter === "number" && (roleFilter === 0 || roleFilter === 1)) {
+  if (typeof roleFilter === "number" && (roleFilter === 0 || roleFilter === 1 || roleFilter === 2)) {
     usersQuery = usersQuery.where("role", "==", roleFilter);
   }
 
@@ -997,8 +1020,8 @@ export const adminChangeRole = onCall({ region: REGION }, async (request) => {
   const newRole = request.data?.newRole;
   const reason = request.data?.reason;
 
-  if (typeof newRole !== "number" || (newRole !== 0 && newRole !== 1)) {
-    throw new HttpsError("invalid-argument", "Valid role (0 for User, 1 for Admin) is required.");
+  if (typeof newRole !== "number" || (newRole !== 0 && newRole !== 1 && newRole !== 2)) {
+    throw new HttpsError("invalid-argument", "Valid role (0 for User, 1 for Admin, 2 for Evaluator) is required.");
   }
   if (typeof reason !== "string" || reason.trim().length < 5 || reason.length > 500) {
     throw new HttpsError("invalid-argument", "A reason between 5 and 500 characters is required.");

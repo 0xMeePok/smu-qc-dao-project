@@ -56,13 +56,12 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
     listProposalsForPosting({
       problemId: posting.id,
       viewerId,
-      postingOwnerId: posting.ownerId,
     })
       .then((found) => { if (!cancelled) setItems(found); })
       .catch((err) => { if (!cancelled) { setItems([]); setError(messageForProposalError(err)); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [posting?.id, posting?.ownerId, viewerId]);
+  }, [posting?.id, viewerId]);
 
   const countLabel = `${proposalCount} ${proposalCount === 1 ? "proposal" : "proposals"} received`;
 
@@ -82,7 +81,7 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
         <p className="table-empty">
           {isPoster
             ? "No proposals received yet."
-            : "Proposals are visible to the poster and to each author."}
+            : "No submitted proposals on this opportunity yet."}
         </p>
       )}
     </div>

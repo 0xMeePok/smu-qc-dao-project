@@ -138,8 +138,10 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   if (!proposal) return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p><button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
   const isOpenFunding = proposal.opportunityType === OPEN_FUNDING_TYPE;
   const sponsors = Boolean(user?.id && proposal.postingOwnerId === user.id.toLowerCase());
+  const backRoute = owns ? "proposals" : sponsors ? "funding" : `posting/${proposal.problemId}`;
+  const backLabel = owns ? "Back to my proposals" : sponsors ? "Back to funding portfolio" : "Back to opportunity";
   return <section className="page detail-page">
-    <button className="back" onClick={() => onNavigate(owns ? "proposals" : "funding")}>{owns ? "Back to my proposals" : "Back to funding portfolio"}</button>
+    <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
     {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. Check the on-chain verification below for its current integrity status.</p>}
     {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
     <div className="detail-layout"><article className="detail-main"><span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span><h1>{proposal.title}</h1><p className="lead">{proposal.summary}</p>

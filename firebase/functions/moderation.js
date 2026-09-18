@@ -8,6 +8,9 @@ const TYPES = { problem: "problems", proposal: "proposals", comment: "comments" 
 const ACTION_STATUS = { hide: "hidden", remove: "removed", restore: "restored" };
 const BLOCKED = new Set(["hidden", "removed"]);
 const PAGE_SIZE = 50;
+const MEMBER_VISIBLE_PROPOSAL = ["submitted", "under_review", "accepted", "rejected", "withdrawn"];
+const POSTED_PROPOSAL_CAP = 200;
+const BROWSABLE_PROBLEM_STATUS = new Set(["submitted", "open", "cancelled", "expired"]);
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const owner = (type, data) => type === "problem" ? data.ownerId : type === "proposal" ? data.researcherId : data.authorId || data.userId || data.ownerId;
@@ -58,11 +61,50 @@ async function activeProfile(tx, db, uid, admin = false) {
   }
   return profile.data();
 }
-async function canReadContent(tx, db, type, data, uid, profile) {
+
+export function problemIsMemberBrowsable(data) {
+  return Boolean(data && BROWSABLE_PROBLEM_STATUS.has(data.status) && !BLOCKED.has(data.moderationStatus));
+}
+
+function stampProposalBrowsable(tx, doc, problemBrowsable, now) {
+  const data = doc.data();
+  if (!data || data.status === "draft" || data.problemBrowsable === problemBrowsable) return;
+  tx.update(doc.ref, { problemBrowsable, updatedAt: now });
+}
+
+export async function syncProposalParentVisibility({ db, proposalId, now = Timestamp.now() }) {
+  return db.runTransaction(async (tx) => {
+    const proposal = await tx.get(db.collection("proposals").doc(proposalId));
+    if (!proposal.exists || proposal.data().status === "draft") return { ok: true };
+    const problemId = proposal.data().problemId;
+    const parent = problemId ? await tx.get(db.collection("problems").doc(problemId)) : null;
+    stampProposalBrowsable(tx, proposal, problemIsMemberBrowsable(parent?.exists ? parent.data() : null), now);
+    return { ok: true };
+  });
+}
+
+export async function syncProblemProposalsBrowsable({ db, problemId, now = Timestamp.now() }) {
+  return db.runTransaction(async (tx) => {
+    const parent = await tx.get(db.collection("problems").doc(problemId));
+    if (!parent.exists) return { ok: true };
+    const problemBrowsable = problemIsMemberBrowsable(parent.data());
+    const rows = await tx.get(db.collection("proposals").where("problemId", "==", problemId)
+      .where("status", "in", MEMBER_VISIBLE_PROPOSAL).limit(POSTED_PROPOSAL_CAP + 1));
+    for (const doc of rows.docs.slice(0, POSTED_PROPOSAL_CAP)) stampProposalBrowsable(tx, doc, problemBrowsable, now);
+    return { ok: true };
+  });
+}
+
+export async function canReadContent(tx, db, type, data, uid, profile) {
   if (profile.role === 1 || owner(type, data) === uid) return true;
   if (BLOCKED.has(data.moderationStatus) || !isPublished(type, data)) return false;
   if (type === "problem") return ["submitted", "open", "cancelled", "expired"].includes(data.status);
-  if (type === "proposal") return data.postingOwnerId === uid;
+  if (type === "proposal") {
+    if (data.postingOwnerId === uid) return true;
+    if (!data.problemId) return false;
+    const parent = await tx.get(db.collection("problems").doc(data.problemId));
+    return parent.exists && canReadContent(tx, db, "problem", parent.data(), uid, profile);
+  }
   const parentType = data.proposalId ? "proposal" : "problem";
   const parentId = data.proposalId || data.problemId;
   if (!parentId) return false;
@@ -202,7 +244,7 @@ export async function getModerationContext({ db, uid, queueId }) {
   });
 }
 
-export async function moderateContent({ db, uid, queueId, action, reason, details, prepareMatching, now = Timestamp.now() }) {
+export async function moderateContent({ db, uid, queueId, action, reason, details, prepareMatching, prepareCommentGate, now = Timestamp.now() }) {
   const { contentType, contentId } = parseQueueId(queueId);
   if (!Object.hasOwn(ACTION_STATUS, action) || !MODERATION_REASONS.includes(reason)) fail("invalid-argument", "Choose a moderation action and reason.");
   const note = validDetails(details);
@@ -222,15 +264,19 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
     // write closure, so settlement and visibility commit in one transaction.
     const settlement = prepareMatching && contentType !== "comment"
       ? await prepareMatching({ db, tx, contentType, contentId, action, actorId: uid, now }) : null;
+    const commentGate = prepareCommentGate && contentType === "comment"
+      ? await prepareCommentGate({ db, tx, contentId, data, action, now }) : null;
     const hidden = BLOCKED.has(data.moderationStatus);
     const previousStatus = hidden ? data.moderation.previousStatus : data.status || "submitted";
     const originalPostingOwnerId = hidden ? data.moderation?.originalPostingOwnerId : data.postingOwnerId;
     const moderation = { ...data.moderation, previousStatus, lastAction: action, reason, details: note, moderatorId: uid, moderatedAt: now, sequence };
     if (contentType === "proposal") moderation.originalPostingOwnerId = originalPostingOwnerId || "";
     settlement?.apply?.();
+    commentGate?.apply?.();
     tx.update(ref, { status: action === "restore" ? previousStatus : `moderated_${ACTION_STATUS[action]}`,
       moderationStatus: action === "restore" ? "visible" : ACTION_STATUS[action], moderation,
-      ...(contentType === "proposal" ? { postingOwnerId: action === "restore" ? originalPostingOwnerId || "" : "" } : {}), updatedAt: now });
+      ...(contentType === "proposal" ? { postingOwnerId: action === "restore" ? originalPostingOwnerId || "" : "" } : {}),
+      ...(commentGate ? { qualifying: commentGate.qualifying } : {}), updatedAt: now });
     tx.update(queueRef, { status: ACTION_STATUS[action], lastAction: action, lastReason: reason, updatedAt: now });
     writeStats(tx, statsRef, stats, pendingDelta(previous, ACTION_STATUS[action]), now);
     tx.set(db.collection("moderationEvents").doc(eventId), {
@@ -268,9 +314,43 @@ export async function markModerationNotificationRead({ db, uid, notificationId, 
   });
 }
 
-export async function listReportableComments({ db, uid, problemId, proposalId, cursor }) {
+function commentVisible(data, { uid, profile, proposalScoped }) {
+  if (!(proposalScoped || !data.proposalId) || !isPublished("comment", data)) return false;
+  if (BLOCKED.has(data.moderationStatus) && owner("comment", data) !== uid && profile.role !== 1) return false;
+  if (!data.deletedAt) return true;
+  return proposalScoped && (data.parentId ?? null) == null && (data.replyCount || 0) > 0;
+}
+
+function commentListItem(doc, names) {
+  const data = doc.data();
+  const removed = Boolean(data.deletedAt);
+  const authorId = owner("comment", data) || "";
+  return { id: doc.id, authorId: removed ? "" : authorId, authorName: removed ? "" : names.get(authorId) || "",
+    authorRole: removed ? null : data.authorRole || null, badge: removed ? null : data.badge || null,
+    recommendation: removed ? null : data.recommendation || null, qualifying: !removed && data.qualifying === true,
+    problemId: data.problemId || null, proposalId: data.proposalId || null,
+    parentId: data.parentId ?? null, replyCount: data.replyCount ?? 0, deleted: removed,
+    body: removed ? "" : String(data.body || data.text || data.content || ""),
+    createdAt: serialise(data.createdAt || null), editedAt: removed ? null : serialise(data.editedAt || null),
+    moderationStatus: data.moderationStatus || "visible", moderation: serialise(data.moderation || null) };
+}
+
+async function loadCommentReplies(tx, db, parentIds) {
+  if (!parentIds.length) return [];
+  const pages = await Promise.all(Array.from({ length: Math.ceil(parentIds.length / 10) }, (_, index) =>
+    tx.get(db.collection("comments").where("parentId", "in", parentIds.slice(index * 10, index * 10 + 10)))));
+  return pages.flatMap((page) => page.docs).sort((a, b) => {
+    const at = a.data().createdAt?.toMillis?.() ?? 0, bt = b.data().createdAt?.toMillis?.() ?? 0;
+    if (at !== bt) return at - bt;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+
+export async function listReportableComments({ db, uid, problemId, proposalId, cursor, sort }) {
   const parentType = proposalId ? "proposal" : "problem", parentId = proposalId || problemId;
   validateContent(parentType, parentId);
+  if (sort != null && sort !== "" && sort !== "oldest" && sort !== "newest") fail("invalid-argument", "Choose oldest or newest first.");
+  const newest = sort === "newest";
   if (cursor) {
     validateContent("comment", cursor.id);
     cursorTimestamp(cursor);
@@ -280,21 +360,60 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
     const parent = await tx.get(db.collection(TYPES[parentType]).doc(parentId));
     if (!parent.exists || !await canReadContent(tx, db, parentType, parent.data(), uid, profile)) fail("permission-denied", "This discussion is not available.");
     if (proposalId && problemId && parent.data().problemId !== problemId) fail("permission-denied", "This proposal does not belong to that problem.");
-    let query = db.collection("comments").where(proposalId ? "proposalId" : "problemId", "==", parentId).orderBy("createdAt").orderBy("__name__");
+    const direction = newest ? "desc" : "asc";
+    let query = db.collection("comments").where(proposalId ? "proposalId" : "problemId", "==", parentId);
+    if (proposalId) query = query.where("parentId", "==", null);
+    query = query.orderBy("createdAt", direction).orderBy("__name__", direction);
     if (cursor) query = query.startAfter(cursorTimestamp(cursor), cursor.id);
     const rows = await tx.get(query.limit(101));
     const page = rows.docs.slice(0, 100);
-    const items = page.filter((doc) => (proposalId || !doc.data().proposalId) && isPublished("comment", doc.data())
-      && (!BLOCKED.has(doc.data().moderationStatus) || owner("comment", doc.data()) === uid || profile.role === 1))
-      .map((doc) => {
-        const data = doc.data();
-        return { id: doc.id, authorId: owner("comment", data) || "", problemId: data.problemId || null,
-          proposalId: data.proposalId || null, body: String(data.body || data.text || data.content || ""),
-          createdAt: serialise(data.createdAt || null), moderationStatus: data.moderationStatus || "visible",
-          moderation: serialise(data.moderation || null) };
-      });
+    const visible = page.filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: Boolean(proposalId) }));
+    const replyDocs = proposalId ? await loadCommentReplies(tx, db, visible.map((doc) => doc.id)) : [];
+    const visibleReplies = replyDocs.filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: true }));
+    const authorIds = [...new Set([...visible, ...visibleReplies].map((doc) => owner("comment", doc.data()) || "").filter(Boolean))];
+    const names = new Map();
+    await Promise.all(authorIds.map(async (id) => {
+      const publicProfile = await tx.get(db.collection("publicProfiles").doc(id));
+      names.set(id, publicProfile.data()?.fullName || "");
+    }));
+    const repliesByParent = new Map();
+    for (const doc of visibleReplies) {
+      const replyParentId = doc.data().parentId;
+      if (!repliesByParent.has(replyParentId)) repliesByParent.set(replyParentId, []);
+      repliesByParent.get(replyParentId).push(commentListItem(doc, names));
+    }
+    const items = visible.map((doc) => {
+      const item = commentListItem(doc, names);
+      return proposalId ? { ...item, replies: repliesByParent.get(doc.id) || [] } : item;
+    });
     const last = page.at(-1);
+    if (parentType === "proposal") {
+      const problem = parent.data().problemId
+        ? await tx.get(db.collection("problems").doc(parent.data().problemId)) : null;
+      stampProposalBrowsable(tx, parent, problemIsMemberBrowsable(problem?.exists ? problem.data() : null), Timestamp.now());
+    }
     return { items, truncated: rows.size > 100,
       nextCursor: rows.size > 100 ? timestampCursor(last.id, last.data().createdAt) : null };
+  });
+}
+
+export async function listPostedProposals({ db, uid, problemId }) {
+  validateContent("problem", problemId);
+  return db.runTransaction(async (tx) => {
+    const profile = await activeProfile(tx, db, uid);
+    const parent = await tx.get(db.collection("problems").doc(problemId));
+    if (!parent.exists || !await canReadContent(tx, db, "problem", parent.data(), uid, profile)) {
+      fail("permission-denied", "This opportunity is not available.");
+    }
+    const rows = await tx.get(db.collection("proposals").where("problemId", "==", problemId)
+      .where("status", "in", MEMBER_VISIBLE_PROPOSAL).limit(POSTED_PROPOSAL_CAP + 1));
+    const problemBrowsable = problemIsMemberBrowsable(parent.data());
+    const visible = rows.docs.filter((doc) => !BLOCKED.has(doc.data().moderationStatus)
+      || owner("proposal", doc.data()) === uid || profile.role === 1);
+    for (const doc of rows.docs.slice(0, POSTED_PROPOSAL_CAP)) stampProposalBrowsable(tx, doc, problemBrowsable, Timestamp.now());
+    return {
+      items: visible.slice(0, POSTED_PROPOSAL_CAP).map((doc) => ({ id: doc.id, ...serialise(doc.data()), problemBrowsable })),
+      truncated: rows.size > POSTED_PROPOSAL_CAP,
+    };
   });
 }

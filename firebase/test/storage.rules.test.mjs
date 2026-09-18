@@ -27,6 +27,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 // only showed up on some runs. Keep these distinct from every address there.
 const OWNER = `0x${"4".repeat(40)}`;
 const OTHER = `0x${"5".repeat(40)}`;
+const MEMBER = `0x${"6".repeat(40)}`;
 const SUSPENDED = `0x${"1".repeat(40)}`;
 const POSTING = "posting123";
 
@@ -101,6 +102,7 @@ before(async () => {
     const db = context.firestore();
     await setDoc(doc(db, "users", OWNER), { address: OWNER, role: 0, suspended: false });
     await setDoc(doc(db, "users", OTHER), { address: OTHER, role: 0, suspended: false });
+    await setDoc(doc(db, "users", MEMBER), { address: MEMBER, role: 0, suspended: false });
     await setDoc(doc(db, "users", SUSPENDED), { address: SUSPENDED, role: 0, suspended: true });
   });
 });
@@ -435,12 +437,15 @@ describe("proposal supporting PDFs", () => {
   const proposalId = "storage-proposal-59";
   const path = `proposals/${OWNER}/${proposalId}/support01.pdf`;
   const metadata = pdfMetadata({ customMetadata: { problemId: proposalId } });
-  it("uploads before submission, then permits only the author and sponsor to read", async () => {
+  it("uploads before submission, then permits author and onboarded members to read once submitted", async () => {
     const author = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(uploadBytes(ref(author, path), PDF_BYTES, metadata));
     await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
-    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), { researcherId: OWNER, postingOwnerId: OTHER, status: "submitted" }));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), {
+      researcherId: OWNER, postingOwnerId: OTHER, status: "submitted", problemBrowsable: true,
+    }));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(MEMBER).storage(), path)));
     await assertSucceeds(getBytes(ref(author, path)));
     // Submitted freezes the prefix: no delete, no extra upload, no overwrite.
     await assertFails(deleteObject(ref(author, path)));
@@ -548,6 +553,34 @@ describe("proposal supporting PDFs", () => {
       metadata,
     ));
     await assertSucceeds(uploadBytes(ref(owner, `problems/${OWNER}/${swapId}/support09.pdf`), PDF_BYTES, metadata));
+  });
+
+  it("withholds member downloads when the parent problem is no longer browsable", async () => {
+    const hiddenId = "storage-hidden-parent-59";
+    const hiddenPath = `proposals/${OWNER}/${hiddenId}/support01.pdf`;
+    const hiddenMetadata = pdfMetadata({ customMetadata: { problemId: hiddenId } });
+    await assertSucceeds(uploadBytes(ref(env.authenticatedContext(OWNER).storage(), hiddenPath), PDF_BYTES, hiddenMetadata));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", hiddenId), {
+      researcherId: OWNER, postingOwnerId: OTHER, status: "submitted", problemBrowsable: false,
+    }));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), hiddenPath)));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), hiddenPath)));
+    await assertFails(getBytes(ref(env.authenticatedContext(MEMBER).storage(), hiddenPath)));
+    await assertFails(getBytes(ref(env.authenticatedContext(SUSPENDED).storage(), hiddenPath)));
+    await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), hiddenPath)));
+  });
+
+  it("withholds member downloads when problemBrowsable has not been stamped", async () => {
+    const unstampedId = "storage-unstamped-parent-59";
+    const unstampedPath = `proposals/${OWNER}/${unstampedId}/support01.pdf`;
+    const unstampedMetadata = pdfMetadata({ customMetadata: { problemId: unstampedId } });
+    await assertSucceeds(uploadBytes(ref(env.authenticatedContext(OWNER).storage(), unstampedPath), PDF_BYTES, unstampedMetadata));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", unstampedId), {
+      researcherId: OWNER, postingOwnerId: OTHER, status: "submitted",
+    }));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), unstampedPath)));
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), unstampedPath)));
+    await assertFails(getBytes(ref(env.authenticatedContext(MEMBER).storage(), unstampedPath)));
   });
 
   it("refuses sponsor downloads against a draft that forges postingOwnerId", async () => {
