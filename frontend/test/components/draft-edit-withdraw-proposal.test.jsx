@@ -190,6 +190,7 @@ describe("correcting a proposal before it is evaluated", () => {
 describe("withdrawing a proposal", () => {
   it.each([
     { label: "funding arrives", fundedAmount: 10, status: "funding" },
+    { label: "the problem is invalidated", fundedAmount: 0, status: "invalidated" },
     { label: "a sibling is selected", fundedAmount: 0, status: "awaiting_confirmation" },
   ])("prevents wallet signing when $label after the withdrawal dialog opens", async ({ fundedAmount, status }) => {
     render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);

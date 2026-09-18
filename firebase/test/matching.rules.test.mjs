@@ -90,7 +90,7 @@ describe("QCDAO-81..89 server-owned mock matching", () => {
     await assertSucceeds(edit(env.authenticatedContext(AUTHOR).firestore(), "proposals", id, { methodology: "Improved baseline comparison" }));
     for (const matching of [
       { mode: "mock", status: "open", totalFundedMinor: 100 },
-      ...["awaiting_confirmation", "confirmed"].map((status) => ({ mode: "mock", status, totalFundedMinor: 0 })),
+      ...["awaiting_confirmation", "confirmed", "invalidated"].map((status) => ({ mode: "mock", status, totalFundedMinor: 0 })),
     ]) {
       const funded = await fixture({ problemMatching: matching });
       const owner = env.authenticatedContext(OWNER).firestore();
@@ -103,7 +103,7 @@ describe("QCDAO-81..89 server-owned mock matching", () => {
 
   it("refuses new submissions during selection, even after the deadline until the server settles it", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
-    for (const status of ["awaiting_confirmation", "confirmed", "open"]) {
+    for (const status of ["awaiting_confirmation", "confirmed", "invalidated", "open"]) {
       const id = await fixture({ problemMatching: { mode: "mock", status, deadlineAt: new Date(0) } });
       const data = proposal(id);
       const ref = doc(db, "proposals", `${id}-new`);
@@ -118,7 +118,7 @@ describe("QCDAO-81..89 server-owned mock matching", () => {
 
   it("freezes unfunded sibling proposals during selection and after confirmation", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
-    for (const status of ["awaiting_confirmation", "confirmed"]) {
+    for (const status of ["awaiting_confirmation", "confirmed", "invalidated"]) {
       const id = await fixture({ problemMatching: { mode: "mock", status, proposalId: "another-proposal" } });
       await assertFails(edit(db, "proposals", id, { methodology: "Different sibling terms" }));
       await assertFails(edit(db, "proposals", id, { status: "withdrawn", withdrawalReason: "Changed plans" }));

@@ -60,7 +60,8 @@ function titleStatus(status) {
  * work is not relabelled after the original window closes.
  */
 export function opportunityStatusLabel(status, { expiresAt, now, matching } = {}) {
-  if (matching?.status === "awaiting_confirmation") return "Awaiting creator confirmation";
+  if (matching?.status === "awaiting_confirmation") return "Awaiting creator acceptance";
+  if (matching?.status === "invalidated") return "Invalidated";
   if (matching?.status === "confirmed") return "Match confirmed";
   const key = String(status ?? "").trim().toLowerCase();
   if (RESPONSE_OPEN_STATUSES.has(key) && deadlinePassed(expiresAt, now)) return "Expired";

@@ -1,6 +1,24 @@
 {
   "indexes": [
     {
+      "collectionGroup": "problems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "matching.mode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "matching.status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expiresAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "proposalAuditJobs",
       "queryScope": "COLLECTION",
       "fields": [

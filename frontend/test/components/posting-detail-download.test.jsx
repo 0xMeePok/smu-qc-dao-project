@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   saved: [],
   downloadShouldFail: null,
   posting: null,
+  user: null,
 }));
 
 vi.mock("wagmi", () => ({
@@ -56,7 +57,10 @@ vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
   ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({
-  useAuth: () => ({ isAuthenticated: true, user: { id: VIEWER } }),
+  useAuth: () => ({ isAuthenticated: true, user: mocks.user }),
+}));
+vi.mock("../../src/components/MatchingPanel.jsx", () => ({
+  MatchingPanel: ({ onNavigate }) => <section id="proposal-funding"><button onClick={() => onNavigate("proposal/proposal1")}>View funded proposal</button></section>,
 }));
 
 const { default: PostingDetailPage } = await import("../../src/pages/PostingDetailPage.jsx");
@@ -88,6 +92,7 @@ beforeEach(() => {
   mocks.saved = [];
   mocks.downloadShouldFail = null;
   mocks.posting = publishedPosting();
+  mocks.user = { id: VIEWER };
 });
 afterEach(cleanup);
 
@@ -137,5 +142,30 @@ describe("downloading an attachment from someone else's posting", () => {
     await waitFor(() => expect(
       screen.getAllByRole("alert").some((node) => /permission/i.test(node.textContent)),
     ).toBe(true));
+  });
+});
+
+describe("proposal funding on a problem detail page", () => {
+  it("shows an indicative proposal budget instead of claiming the problem has been funded", async () => {
+    mocks.posting = publishedPosting({ fundedAmount: 40000, fundingProgressPercent: 50 });
+    mocks.user = { id: VIEWER, roles: ["funder"] };
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("Indicative proposal budget");
+    expect(screen.getByText("SGD 80,000")).toBeTruthy();
+    expect(screen.queryByText(/50% funded|committed of|Funded business problem/)).toBeNull();
+    expect(screen.getByRole("button", { name: "View proposals to fund" })).toBeTruthy();
+  });
+
+  it("takes the owner straight to proposal review without evaluation prerequisites", async () => {
+    mocks.user = { id: OWNER, roles: ["owner"] };
+    const onNavigate = vi.fn();
+    render(<PostingDetailPage postingId="posting777" onNavigate={onNavigate} />);
+    const review = await screen.findByRole("button", { name: "Review proposals" });
+    const panel = document.getElementById("proposal-funding");
+    panel.scrollIntoView = vi.fn();
+    fireEvent.click(review);
+    expect(panel.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    fireEvent.click(screen.getByRole("button", { name: "View funded proposal" }));
+    expect(onNavigate).toHaveBeenCalledWith("proposal/proposal1");
   });
 });

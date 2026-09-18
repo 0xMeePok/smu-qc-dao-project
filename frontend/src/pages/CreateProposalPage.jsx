@@ -240,7 +240,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
         const current = await getMockMatching(posting.id, { proposalId });
         const candidate = current.proposals.find((item) => item.id === proposalId);
         if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
-          || ["awaiting_confirmation", "confirmed"].includes(current.matching.status)) {
+          || ["awaiting_confirmation", "confirmed", "invalidated"].includes(current.matching.status)) {
           throw new Error("Funding or matching has started. This proposal can no longer be edited.");
         }
       }

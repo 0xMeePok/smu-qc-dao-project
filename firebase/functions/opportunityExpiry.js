@@ -113,8 +113,8 @@ export function expiryReasonFromFacts({
   now = new Date(),
 } = {}) {
   if (!isExpiredOpenOpportunity(opportunity, now)) return null;
-  // expiresAt closes new submissions; existing mock proposals may still be funded
-  // and selected, including after an unconfirmed selection is voided.
+  // Mock expiry uses matching.js to atomically invalidate and refund its ledger;
+  // the legacy opportunity sweep must not bypass that settlement.
   if (hasMockMatchingLifecycle(opportunity)) return null;
   if (nonNegativeAmount(fundedAmount) < nonNegativeAmount(opportunity?.amount)) {
     return EXPIRY_REASONS.FUNDING_REQUIREMENT_NOT_MET;

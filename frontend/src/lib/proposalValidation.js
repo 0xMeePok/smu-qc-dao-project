@@ -5,7 +5,8 @@ import { isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE } from "./errors.js";
 
 export function proposalBlockReason(posting, now = new Date()) {
   if (!posting) return "This opportunity is not available.";
-  if (posting.matching?.status === "awaiting_confirmation") return "A selected proposal is awaiting creator confirmation. New proposals are paused during the seven-day window.";
+  if (posting.matching?.status === "awaiting_confirmation") return "A selected proposal is awaiting creator acceptance. New proposals are paused during the acceptance window.";
+  if (posting.matching?.status === "invalidated") return "This opportunity was invalidated and is closed to new proposals.";
   if (posting.matching?.status === "confirmed") return "This opportunity already has a confirmed match.";
   if (posting.acceptedProposalId || posting.acceptedSolutionId || posting.hasAcceptedSolution) {
     return "This opportunity already has an accepted solution.";

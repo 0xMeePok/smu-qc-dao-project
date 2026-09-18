@@ -5,7 +5,6 @@ import { evaluateRouteAccess } from "../../src/config/routes.js";
 import { opportunityStatusLabel } from "../../src/config/workflowStatus.js";
 import { shortenAddress } from "../../src/lib/chain.js";
 import { postingActions } from "../../src/lib/postingActions.js";
-import { normaliseOpportunityMetrics } from "../../src/lib/postings.js";
 import { ROLE_ADMIN, ROLE_EVALUATOR, ROLE_USER, capabilitiesForAccessLevel } from "../../src/lib/roles.js";
 
 /** QCDAO-54 - view a posting detail page with full metadata and countdown. */
@@ -67,7 +66,6 @@ function proposalReadsForPosting({ problemId, viewerId }) {
 
 function viewPosting(posting, session, { publicProfile, now = NOW } = {}) {
   const auth = deriveAuthState(session);
-  const metrics = normaliseOpportunityMetrics(posting);
   return {
     route: evaluateRouteAccess("posting", auth.user),
     statusLabel: opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, now }),
@@ -77,10 +75,9 @@ function viewPosting(posting, session, { publicProfile, now = NOW } = {}) {
       organisation: posting.organisation,
       poster: publicProfile,
     }),
-    funding: {
-      requested: `${posting.currency} ${Number(posting.amount).toLocaleString()}`,
-      committed: `${posting.currency} ${metrics.fundedAmount.toLocaleString()}`,
-      percent: metrics.fundingProgressPercent,
+    budget: {
+      amount: `${posting.currency} ${Number(posting.amount).toLocaleString()}`,
+      label: posting.opportunityType === OPEN_FUNDING_TYPE ? "Funding available" : "Indicative proposal budget",
     },
     proposalReads: proposalReadsForPosting({
       problemId: posting.id,
@@ -112,13 +109,13 @@ function actionIds(view) {
 }
 
 describe("[QCDAO-54] view posting detail page", () => {
-  it("[FIT-OPD-030] should let a member open a live posting, see funding progress, and submit or fund", () => {
+  it("[FIT-OPD-030] should let a member open a live posting, see its indicative budget, and browse proposals to fund", () => {
     const view = viewPosting(OPEN_POSTING, participant);
     assert.equal(view.route.action, "RENDER");
     assert.equal(view.statusLabel, "Submitted");
-    assert.equal(view.funding.requested, `USDC ${Number(80000).toLocaleString()}`);
-    assert.equal(view.funding.committed, `USDC ${Number(12000).toLocaleString()}`);
-    assert.equal(view.funding.percent, 15);
+    assert.equal(view.budget.amount, `USDC ${Number(80000).toLocaleString()}`);
+    assert.equal(view.budget.label, "Indicative proposal budget");
+    assert.equal(view.actions.find((action) => action.id === "fund").label, "View proposals to fund");
     assert.deepEqual(actionIds(view), ["submit", "fund"]);
   });
 

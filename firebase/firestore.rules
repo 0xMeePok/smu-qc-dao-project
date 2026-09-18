@@ -992,7 +992,7 @@ service cloud.firestore {
     function preservesMockProblemCommitment(before, after) {
       let matching = before.get('matching', {});
       return (matching.get('totalFundedMinor', 0) == 0
-          && !(matching.get('status', '') in ['awaiting_confirmation', 'confirmed']))
+          && !(matching.get('status', '') in ['awaiting_confirmation', 'confirmed', 'invalidated']))
         || after.diff(before).affectedKeys().hasOnly(['audit', 'updatedAt']);
     }
 
