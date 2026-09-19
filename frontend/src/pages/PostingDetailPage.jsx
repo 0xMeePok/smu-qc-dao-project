@@ -413,6 +413,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               : "Problem statement submitted"}
             actorRole={isOpenFunding ? "Funder" : "Problem owner"}
             firebaseReference={`problems/${posting.id}`}
+            recordTimestamp={posting.updatedAt ?? posting.createdAt}
             onVerify={verifyAudit}
             onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
           />

@@ -468,6 +468,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             eventLabel={editing ? "Open funding opportunity updated" : "Open funding opportunity submitted"}
             actorRole="Funder"
             firebaseReference={`problems/${published.id}`}
+            recordTimestamp={published.updatedAt ?? published.createdAt}
             onVerify={() => readFundingOpportunityAudit(published)}
           />
           <div className="form-actions">

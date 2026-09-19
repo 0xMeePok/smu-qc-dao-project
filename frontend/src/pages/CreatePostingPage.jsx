@@ -566,6 +566,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             eventLabel={editing ? "Funded problem statement updated" : "Funded problem statement submitted"}
             actorRole="Problem owner"
             firebaseReference={`problems/${published.id}`}
+            recordTimestamp={published.updatedAt ?? published.createdAt}
             onVerify={() => readPostingAudit(published)}
           />
           <div className="form-actions">
