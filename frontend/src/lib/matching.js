@@ -21,15 +21,34 @@ export const forceExpireMockMatch = (payload) => call("forceExpireMockMatch", pa
 
 export const MATCHING_LABELS = {
   funding: "Open for funding",
-  awaiting_confirmation: "Awaiting creator confirmation",
+  awaiting_confirmation: "Awaiting creator acceptance",
   confirmed: "Match confirmed · funding locked",
   voided: "Voided · funders refunded",
+  invalidated: "Invalidated · funders refunded",
   cancelled: "Cancelled · funders refunded",
-  declined: "Declined · funders refunded",
+  declined: "Rejected · funders refunded",
   pledged: "Pledged",
   locked: "Locked",
   refunded: "Refunded",
 };
+
+export function proposalFundingLabel(proposal, problemMatching = proposal.problemMatching) {
+  const status = proposal.matching?.status;
+  if (status && status !== "funding") return MATCHING_LABELS[status] || status;
+  if (proposal.status && !["submitted", "under_review"].includes(proposal.status)) return proposal.status;
+  if (problemMatching?.status === "invalidated") return MATCHING_LABELS.invalidated;
+  if (problemMatching?.status === "confirmed") return "Not selected · funders refunded";
+  if (problemMatching?.status === "awaiting_confirmation") {
+    return proposal.id === problemMatching.proposalId
+      ? MATCHING_LABELS.awaiting_confirmation
+      : "Funding paused · another proposal selected";
+  }
+  const target = Number(proposal.amount);
+  const funded = Number(proposal.fundedAmount ?? proposal.matching?.fundedAmount ?? 0);
+  return target > 0 && funded >= target
+    ? "Fully funded · awaiting owner selection"
+    : "Open for funding";
+}
 
 export function matchingError(error) {
   const code = String(error?.code ?? "").split("/").pop();
@@ -41,12 +60,13 @@ export function matchingError(error) {
 }
 
 export function proposalMatchingLocked(proposal) {
-  return proposal?.matching?.evaluationComplete === true
+  return ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status)
+    || proposal?.matching?.evaluationComplete === true
     || Number(proposal?.matching?.fundedAmount ?? 0) > 0
-    || ["awaiting_confirmation", "confirmed", "voided", "cancelled", "declined"].includes(proposal?.matching?.status);
+    || ["awaiting_confirmation", "confirmed", "voided", "cancelled", "declined", "invalidated"].includes(proposal?.matching?.status);
 }
 
 export function problemMatchingLocked(posting) {
   return Number(posting?.matching?.totalFundedMinor ?? 0) > 0
-    || ["awaiting_confirmation", "confirmed"].includes(posting?.matching?.status);
+    || ["awaiting_confirmation", "confirmed", "invalidated"].includes(posting?.matching?.status);
 }

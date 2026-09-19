@@ -5,20 +5,32 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 
 const PAGE_SIZE = 100;
 const JOBS = "matchingNotificationJobs";
-const DECISIONS = new Set(["owner_selected", "creator_confirmed", "creator_declined", "confirmation_expired", "admin_force_expired"]);
-const GATES = new Set(["mock_evaluation_completed", "funding_target_reached"]);
+const DECISIONS = new Set(["owner_selected", "owner_confirmed", "creator_confirmed", "match_confirmed", "owner_declined", "creator_declined", "confirmation_expired", "admin_force_expired", "posting_expired"]);
+const GATES = new Set(["funding_target_reached"]);
 const idFor = (eventId, recipientId) => createHash("sha256").update(`${eventId}:${recipientId}`).digest("hex");
 
+function acceptanceDeadline(event) {
+  const date = event.deadlineAt?.toDate?.();
+  const deadline = date ? `by ${date.toISOString().replace("T", " ").replace(".000Z", " UTC")}`
+    : "within the acceptance window shown on the posting";
+  return `${deadline}${event.deadlineLimitedByPosting ? " (shortened to the original posting deadline)" : ""}`;
+}
+
 function messageFor(job, recipientId) {
+  const deadline = acceptanceDeadline(job.event);
   switch (job.event.type) {
     case "owner_selected": return recipientId === job.selectedCreatorId
-      ? "Your proposal was selected. Confirm your commitment within seven days of selection; otherwise its mock funding will be refunded."
-      : "The problem owner selected a proposal. Mock funding for all proposals is paused while its creator confirms within seven days.";
-    case "creator_confirmed": return "The selected creator confirmed the match. Its mock funding is locked; other proposals are cancelled and their mock contributions refunded.";
-    case "creator_declined": return "The selected creator declined. That proposal's mock contributions were refunded, and the other proposals reopened with their funding and evaluations retained.";
+      ? `Your proposal was selected and accepted by the problem owner. Accept ${deadline} to confirm the match. Either party may reject during this window; rejection refunds this proposal's mock funding. Expiry invalidates the posting and refunds all outstanding mock contributions.`
+      : `The problem owner selected and accepted a proposal. Its creator must accept ${deadline}, and either party can reject during the window. Mock funding for all proposals is paused until the match is resolved.`;
+    case "owner_confirmed": return "The problem owner accepted the selected match. Funds lock only when both parties accept before the recorded deadline.";
+    case "creator_confirmed": return "The selected creator accepted the match. Funds lock only when both parties accept before the recorded deadline.";
+    case "match_confirmed": return "Both parties accepted the match. Its mock funding is locked; other proposals are cancelled and their mock contributions refunded.";
+    case "owner_declined": return "The problem owner rejected the selection. That proposal's mock contributions were refunded. Other proposals reopened until the original posting deadline with their funding and evaluations retained.";
+    case "creator_declined": return "The selected creator declined. That proposal's mock contributions were refunded. Other proposals reopened until the original posting deadline with their funding and evaluations retained.";
     case "confirmation_expired":
-    case "admin_force_expired": return "The selected proposal's confirmation window expired. Its mock contributions were refunded, and the other proposals reopened with their funding and evaluations retained.";
-    default: return "A proposal has completed its mock evaluation and reached its funding target. You can select it with a rationale to start its creator's seven-day confirmation window.";
+    case "admin_force_expired": return "The selected proposal's confirmation window expired. The posting is invalidated and closed to funding and selection. All outstanding mock contributions for its proposals were refunded.";
+    case "posting_expired": return "The original posting deadline expired. The posting is invalidated and closed to funding and selection. All outstanding mock contributions for its proposals were refunded.";
+    default: return "A proposal has reached its funding target. Selecting it with a rationale records your acceptance and starts its creator's acceptance window: up to seven days, capped by the original posting deadline. Either party can reject during the window.";
   }
 }
 
@@ -35,8 +47,9 @@ export async function enqueueMatchingNotifications({ db, eventId, now = Timestam
       tx.get(db.collection("problems").doc(event.problemId)),
       event.proposalId ? tx.get(db.collection("proposals").doc(event.proposalId)) : Promise.resolve(null),
     ]);
-    // Gate events notify only the owner, and only after both trusted gates hold.
+    // Funding readiness notifies only the owner; expert evaluation is optional.
     const gatesReady = ["submitted", "open"].includes(problem.data()?.status)
+      && (!problem.data()?.expiresAt?.toMillis?.() || problem.data().expiresAt.toMillis() > now.toMillis())
       && !problem.data()?.moderated && !selected?.data()?.moderated
       && ["submitted", "under_review"].includes(selected?.data()?.status)
       && !problem.data()?.acceptedProposalId && !problem.data()?.acceptedSolutionId && !problem.data()?.hasAcceptedSolution
@@ -44,13 +57,13 @@ export async function enqueueMatchingNotifications({ db, eventId, now = Timestam
       && !["hidden", "removed"].includes(problem.data()?.moderationStatus)
       && !["hidden", "removed"].includes(selected?.data()?.moderationStatus)
       && (selected?.data()?.matching?.status || "funding") === "funding"
-      && selected?.data()?.matching?.evaluationComplete === true
-      && (selected.data().matching.fundedMinor || 0) >= Math.round(Number(selected.data().amount) * 100)
+      && (selected.data().matching?.fundedMinor || 0) >= Math.round(Number(selected.data().amount) * 100)
       && Number(selected.data().amount) > 0;
     const gateOnly = GATES.has(event.type);
     const noticeKey = gateOnly ? `ready:${event.problemId}:${event.proposalId}:${selected?.data()?.matching?.updatedAt?.toMillis?.() || 0}` : eventId;
     tx.set(jobRef, { eventId, noticeKey, event: { type: event.type, problemId: event.problemId, proposalId: event.proposalId || null,
-      createdAt: event.createdAt || now }, ownerId: problem.data()?.ownerId || null,
+      createdAt: event.createdAt || now, deadlineAt: event.deadlineAt || null,
+      deadlineLimitedByPosting: event.deadlineLimitedByPosting === true }, ownerId: problem.data()?.ownerId || null,
       selectedCreatorId: selected?.data()?.researcherId || null, gateOnly,
       phase: "owners", cursor: null, status: gateOnly && !gatesReady ? "complete" : "pending",
       deliveredCount: 0, scannedCount: 0, createdAt: now, updatedAt: now });

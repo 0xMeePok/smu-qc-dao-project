@@ -23,7 +23,7 @@ export function memoryDb(initial = {}) {
       get: async () => {
         const paths = [...records.keys()].filter((path) => path.startsWith(`${name}/`) && path.split("/").length === 2
           && filters.every(([field, op, value]) => op === "==" ? fieldValue(path, field) === comparable(value)
-            : op === "in" ? value.includes(fieldValue(path, field)) : fieldValue(path, field) < comparable(value)))
+            : op === "in" ? value.includes(fieldValue(path, field)) : op === "<=" ? fieldValue(path, field) != null && fieldValue(path, field) <= comparable(value) : fieldValue(path, field) < comparable(value)))
           .sort((a, b) => { for (const { field, direction } of orders) { const x = fieldValue(a, field), y = fieldValue(b, field); if (x !== y) return (x < y ? -1 : 1) * (direction === "desc" ? -1 : 1); } return 0; })
           .filter((path) => { if (!cursor.length) return true; for (let i = 0; i < orders.length; i++) { const value = fieldValue(path, orders[i].field); if (value !== cursor[i]) return orders[i].direction === "desc" ? value < cursor[i] : value > cursor[i]; } return false; }).slice(0, cap);
         return { docs: paths.map(snapshot), size: paths.length, empty: !paths.length };
@@ -35,6 +35,7 @@ export function memoryDb(initial = {}) {
       const task = queue.then(() => {
         const writes = [];
         return Promise.resolve(fn({ get: (ref) => ref.get(),
+          create: (ref, data) => { if (records.has(ref.path)) throw new Error("Document already exists"); writes.push(() => records.set(ref.path, data)); },
           set: (ref, data) => writes.push(() => records.set(ref.path, data)),
           update: (ref, data) => writes.push(() => records.set(ref.path, { ...records.get(ref.path), ...data })),
           delete: (ref) => writes.push(() => records.delete(ref.path)),

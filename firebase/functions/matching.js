@@ -6,7 +6,7 @@ export const CONFIRMATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_PROPOSALS = 200;
 const MAX_CONTRIBUTIONS = 200;
 const ELIGIBLE = new Set(["submitted", "under_review"]);
-const TERMINAL = new Set(["confirmed", "voided", "declined", "cancelled"]);
+const TERMINAL = new Set(["confirmed", "voided", "declined", "cancelled", "invalidated"]);
 const FUNDING_EVENTS = new Set(["funding_contributed", "funding_target_reached"]);
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const millis = (value) => value?.toMillis?.() ?? 0;
@@ -23,8 +23,11 @@ function explanation(value, field) {
 }
 function event(tx, ctx, { type, proposalId, actorId = "system", reason = null, now, key, details = {} }) {
   const id = createHash("sha256").update(`${ctx.ref.id}:${type}:${key}`).digest("hex");
-  tx.set(ctx.events.doc(id), { problemId: ctx.ref.id, proposalId: proposalId || null, type, actorId, reason,
-    createdAt: now, mode: "mock", chainStatus: "pending", id, ...details });
+  tx.create(ctx.events.doc(id), { problemId: ctx.ref.id, proposalId: proposalId || null, type, actorId, reason,
+    createdAt: now, mode: "mock", chainStatus: "not_applicable", id,
+    actorRole: actorId === "system" ? "system" : ctx.problem.ownerId === actorId ? "problem_owner"
+      : ctx.isAdmin ? "admin" : ctx.proposals.some(doc => doc.data().researcherId === actorId) ? "proposal_creator" : "member",
+    actorWallet: /^0x[0-9a-f]{40}$/i.test(actorId) ? actorId : null, ...details });
 }
 function minorUnits(value) {
   if (typeof value !== "number" || !Number.isFinite(value) || Math.round(value * 100) < 1 || value > 1_000_000_000
@@ -34,11 +37,19 @@ function minorUnits(value) {
   return Math.round(value * 100);
 }
 const proposalState = (proposal) => proposal.matching?.status || "funding";
-const publicMatch = (matching = {}) => ({ status: matching.status || "open", proposalId: matching.proposalId || null,
-  deadlineAt: iso(matching.deadlineAt), totalFundedMinor: matching.totalFundedMinor || 0,
+const publicMatch = (matching = {}, problem = {}) => {
+  const capped = matching.status === "awaiting_confirmation" && millis(problem.expiresAt) > 0
+    && millis(problem.expiresAt) < millis(matching.deadlineAt);
+  return { status: matching.status || "open", proposalId: matching.proposalId || null,
+  deadlineAt: iso(capped ? problem.expiresAt : matching.deadlineAt), totalFundedMinor: matching.totalFundedMinor || 0,
+  selectedBy: matching.selectedBy || null, selectedAt: iso(matching.selectedAt),
   ownerApprovedBy: matching.ownerApprovedBy || null, ownerApprovedAt: iso(matching.ownerApprovedAt),
   creatorApprovedBy: matching.creatorApprovedBy || null, creatorApprovedAt: iso(matching.creatorApprovedAt),
-  rationale: matching.rationale || null });
+  rationale: matching.rationale || null, postingExpiresAt: iso(problem.expiresAt),
+  deadlineLimitedByPosting: capped || matching.deadlineLimitedByPosting === true,
+  invalidatedAt: iso(matching.invalidatedAt), invalidationReason: matching.invalidationReason || null,
+  reopenedAt: iso(matching.reopenedAt), reopenReason: matching.reopenReason || null };
+};
 function contributionView(doc) {
   const data = doc.data();
   return { id: doc.id, problemId: data.problemId, proposalId: data.proposalId, title: data.title,
@@ -54,7 +65,8 @@ function historyView(doc, isAdmin) {
     ? { problemId: data.problemId, proposalId: data.proposalId, type: data.type,
       actorId: null, reason: null, mode: data.mode, chainStatus: data.chainStatus }
     : data;
-  return { ...visible, id: doc.id, createdAt: iso(data.createdAt), deadlineAt: iso(data.deadlineAt) };
+  return { ...visible, id: doc.id, createdAt: iso(data.createdAt), deadlineAt: iso(data.deadlineAt), postingExpiresAt: iso(data.postingExpiresAt),
+    ...(data.ownerApprovedAt ? { ownerApprovedAt: iso(data.ownerApprovedAt) } : {}) };
 }
 
 // Every mutation reads and writes the parent. Concurrent selection, funding and
@@ -126,15 +138,43 @@ function closeSelected(tx, ctx, now, { status = "voided", reason = "confirmation
     .reduce((total, doc) => total + doc.data().amountMinor, 0);
   settleFunding(tx, ctx.funding.filter((doc) => doc.data().proposalId === current.proposalId), null, now, reason);
   tx.update(ctx.ref, { matching: { ...current, status: "open", proposalId: null, deadlineAt: null,
+    selectedBy: null, selectedAt: null,
     ownerApprovedBy: null, ownerApprovedAt: null, creatorApprovedBy: null, creatorApprovedAt: null, rationale: null,
+    deadlineLimitedByPosting: false, reopenedAt: now, reopenReason: details || reason,
     totalFundedMinor: Math.max(0, (current.totalFundedMinor || 0) - refundedMinor), updatedAt: now } });
   event(tx, ctx, { type, proposalId: current.proposalId, actorId, reason: details || reason, now,
     key: current.selectionId || current.proposalId, details: { refundedAmount: refundedMinor / 100, deadlineAt: current.deadlineAt || null } });
+  event(tx, ctx, { type: "posting_reopened", proposalId: current.proposalId, actorId, reason: details || reason, now,
+    key: current.selectionId || current.proposalId, details: { postingExpiresAt: ctx.problem.expiresAt || null } });
+}
+// This is the future escrow/refund adapter boundary: the mock ledger settles
+// atomically here, with immutable off-chain receipts for every invalidation.
+function invalidateContext(tx, ctx, now, { actorId = "system", type = "confirmation_expired", reason = type } = {}) {
+  const current = ctx.problem.matching || {};
+  for (const doc of ctx.proposals) {
+    if (!TERMINAL.has(proposalState(doc.data())) && (doc.id === current.proposalId || (doc.data().matching?.fundedMinor || 0) > 0)) updateProposal(tx, doc,
+      doc.id === current.proposalId ? "voided" : "cancelled", now, { closedAt: now, closedBy: actorId, closeReason: reason });
+  }
+  const refundedMinor = ctx.funding.filter(doc => doc.data().status === "pledged")
+    .reduce((total, doc) => total + doc.data().amountMinor, 0);
+  settleFunding(tx, ctx.funding, null, now, reason);
+  tx.update(ctx.ref, { matching: { ...current, mode: "mock", status: "invalidated", deadlineAt: null,
+    totalFundedMinor: 0, invalidatedAt: now, invalidationReason: reason, updatedAt: now } });
+  const receipt = { proposalId: current.proposalId, actorId, reason, now,
+    key: current.selectionId || "posting_expiry", details: { refundedAmount: refundedMinor / 100,
+      deadlineAt: current.deadlineAt || null, postingExpiresAt: ctx.problem.expiresAt || null } };
+  event(tx, ctx, { ...receipt, type });
+  event(tx, ctx, { ...receipt, type: "posting_invalidated" });
 }
 function expireContext(tx, ctx, now) {
   const current = ctx.problem.matching;
-  if (current?.status !== "awaiting_confirmation" || millis(current.deadlineAt) > now.toMillis()) return false;
-  closeSelected(tx, ctx, now);
+  if (current?.status === "confirmed" || current?.status === "invalidated") return false;
+  const postingExpired = millis(ctx.problem.expiresAt) > 0 && millis(ctx.problem.expiresAt) <= now.toMillis();
+  const confirmationExpired = current?.status === "awaiting_confirmation" && millis(current.deadlineAt) <= now.toMillis();
+  // Legacy posting expiry is handled by its existing lifecycle. A callable may
+  // refuse it without manufacturing mock records for an untouched posting.
+  if (!confirmationExpired && !(postingExpired && current?.mode === "mock")) return false;
+  invalidateContext(tx, ctx, now, { type: confirmationExpired ? "confirmation_expired" : "posting_expired" });
   return true;
 }
 
@@ -144,10 +184,15 @@ export async function settleExpiredMockMatch({ db, problemId, now }) {
 }
 
 export async function sweepExpiredMockMatches({ db, now }) {
-  const expired = await db.collection("problems").where("matching.deadlineAt", "<", now || Timestamp.now()).limit(100).get();
+  const at = now || Timestamp.now();
+  const [windows, postings] = await Promise.all([
+    db.collection("problems").where("matching.deadlineAt", "<=", at).limit(100).get(),
+    db.collection("problems").where("matching.mode", "==", "mock").where("matching.status", "in", ["open", "awaiting_confirmation"])
+      .where("expiresAt", "<=", at).limit(100).get(),
+  ]);
   let settled = 0;
-  for (const problem of expired.docs) {
-    if (await settleExpiredMockMatch({ db, problemId: problem.id, now })) settled += 1;
+  for (const problemId of new Set([...windows.docs, ...postings.docs].map(doc => doc.id))) {
+    if (await settleExpiredMockMatch({ db, problemId: problemId, now: at })) settled += 1;
   }
   return { settled };
 }
@@ -168,15 +213,15 @@ export async function getMockMatching({ db, uid, problemId, proposalId, cursor, 
     const ctx = await readContext({ db, tx, problemId, uid, proposalId, cursor });
     const history = await tx.get(db.collection("matchingEvents").where("problemId", "==", problemId).orderBy("createdAt", "desc").limit(101));
     const at = now || Timestamp.now();
-    const matching = publicMatch(ctx.problem.matching);
-    const open = isOpen(ctx.problem);
+    const matching = publicMatch(ctx.problem.matching, ctx.problem);
+    const open = isOpen(ctx.problem, at);
     return { problemId, mode: "mock", matching,
       canForceExpire: ctx.isAdmin && matching.status === "awaiting_confirmation",
       history: history.docs.slice(0, 100).map(doc => historyView(doc, ctx.isAdmin)),
       historyTruncated: history.size > 100, truncated: ctx.truncated, nextCursor: ctx.nextCursor,
       proposals: ctx.proposals.filter((doc) => !moderated(doc.data()) && (ELIGIBLE.has(doc.data().status) || doc.data().matching)).map((doc) => {
         const proposal = doc.data();
-        const state = matching.status === "confirmed" && matching.proposalId !== doc.id && !TERMINAL.has(proposalState(proposal))
+        const state = ["confirmed", "invalidated"].includes(matching.status) && matching.proposalId !== doc.id && !TERMINAL.has(proposalState(proposal))
           ? "cancelled" : proposalState(proposal);
         const target = Math.round(Number(proposal.amount) * 100);
         const funded = proposal.matching?.fundedMinor || 0;
@@ -186,11 +231,15 @@ export async function getMockMatching({ db, uid, problemId, proposalId, cursor, 
             evaluationCompletedAt: iso(proposal.matching?.evaluationCompletedAt) },
           canCompleteEvaluation: ctx.isAdmin && open && eligible && !proposal.matching?.evaluationComplete,
           canDecline: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
-            && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && proposal.researcherId === uid,
+            && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && (proposal.researcherId === uid || ctx.problem.ownerId === uid),
           canFund: open && eligible && funded < target && proposal.researcherId !== uid && ctx.funding.length < MAX_CONTRIBUTIONS,
-          canSelect: open && eligible && proposal.matching?.evaluationComplete === true && funded >= target && target > 0 && ctx.problem.ownerId === uid && proposal.researcherId !== uid,
+          canSelect: open && eligible && funded >= target && target > 0 && ctx.problem.ownerId === uid && proposal.researcherId !== uid,
+          canApproveOwner: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
+            && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && ctx.problem.ownerId === uid
+            && proposal.researcherId !== uid && !matching.ownerApprovedBy,
           canConfirm: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
-            && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && proposal.researcherId === uid };
+            && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && proposal.researcherId === uid
+            && ctx.problem.ownerId !== uid && !matching.creatorApprovedBy };
       }), contributions: ctx.funding.filter((doc) => doc.data().funderId === uid).map(contributionView) };
   });
 }
@@ -218,7 +267,7 @@ export async function fundMockProposal({ db, uid, problemId, proposalId, amount,
     const data = proposal.data();
     if (moderated(data)) fail("failed-precondition", "This proposal is under moderation.");
     if (data.researcherId === uid) fail("permission-denied", "You cannot fund your own proposal.");
-    assertOpen(ctx.problem);
+    assertOpen(ctx.problem, at);
     if (!ELIGIBLE.has(data.status) || proposalState(data) !== "funding") fail("failed-precondition", "This proposal is not accepting funding.");
     if (data.currency !== ctx.problem.currency) fail("failed-precondition", "Proposal and problem currencies must match.");
     const target = minorUnits(data.amount), fundedMinor = data.matching?.fundedMinor || 0;
@@ -237,14 +286,15 @@ export async function fundMockProposal({ db, uid, problemId, proposalId, amount,
   if (result.expired) fail("failed-precondition", "The confirmation window expired. Its funding has been refunded; refresh and retry.");
   return result;
 }
-function isOpen(problem) {
+function isOpen(problem, at) {
   return (problem.matching?.status || "open") === "open" && ["submitted", "open"].includes(problem.status)
+    && (!millis(problem.expiresAt) || millis(problem.expiresAt) > at.toMillis())
     && !problem.acceptedProposalId && !problem.acceptedSolutionId
     && !problem.hasAcceptedSolution && !problem.moderated && !["hidden", "removed"].includes(problem.moderationStatus);
 }
-function assertOpen(problem) {
-  if ((problem.matching?.status || "open") !== "open") fail("failed-precondition", "Funding and selection are paused while a match is awaiting confirmation or confirmed.");
-  if (!isOpen(problem)) {
+function assertOpen(problem, at) {
+  if ((problem.matching?.status || "open") !== "open") fail("failed-precondition", "This problem is no longer open for funding or selection.");
+  if (!isOpen(problem, at)) {
     fail("failed-precondition", "This problem is no longer open for funding or selection.");
   }
 }
@@ -259,25 +309,29 @@ export async function selectMockProposal({ db, uid, problemId, proposalId, ratio
     if (ctx.problem.ownerId !== uid) fail("permission-denied", "Only the problem owner can select a proposal.");
     if (expireContext(tx, ctx, at)) return { expired: true };
     if (["awaiting_confirmation", "confirmed"].includes(ctx.problem.matching?.status) && ctx.problem.matching.proposalId === proposalId) return { ok: true };
-    assertOpen(ctx.problem);
+    assertOpen(ctx.problem, at);
     const chosen = ctx.proposals.find((doc) => doc.id === proposalId);
     if (!chosen) fail("not-found", "Proposal not found on this problem.");
     const data = chosen.data();
     if (moderated(data)) fail("failed-precondition", "This proposal is under moderation.");
-    if (data.matching?.evaluationComplete !== true) fail("failed-precondition", "Complete expert evaluation before selecting a proposal.");
     if (data.researcherId === uid) fail("permission-denied", "A match requires two different parties.");
     if (!ELIGIBLE.has(data.status) || proposalState(data) !== "funding" || (data.matching?.fundedMinor || 0) < minorUnits(data.amount)) {
       fail("failed-precondition", "Select a fully funded, active proposal.");
     }
     const selectionSequence = (ctx.problem.matching?.selectionSequence || 0) + 1;
     const selectionId = `${problemId}_${selectionSequence}`;
-    updateProposal(tx, chosen, "awaiting_confirmation", at, { ownerApprovedBy: uid, ownerApprovedAt: at, rationale, selectionId });
+    const deadlineMs = Math.min(at.toMillis() + CONFIRMATION_WINDOW_MS, millis(ctx.problem.expiresAt) || Infinity);
+    const deadlineAt = Timestamp.fromMillis(deadlineMs);
+    const deadlineLimitedByPosting = deadlineMs < at.toMillis() + CONFIRMATION_WINDOW_MS;
+    updateProposal(tx, chosen, "awaiting_confirmation", at, { deadlineAt, deadlineLimitedByPosting, selectedBy: uid, selectedAt: at,
+      ownerApprovedBy: uid, ownerApprovedAt: at, creatorApprovedBy: null, creatorApprovedAt: null, rationale, selectionId });
     event(tx, ctx, { type: "owner_selected", proposalId, actorId: uid, reason: rationale, now: at, key: selectionId,
-      details: { evaluationComplete: true, fundedAmount: data.matching.fundedMinor / 100, targetAmount: data.amount,
-        deadlineAt: Timestamp.fromMillis(at.toMillis() + CONFIRMATION_WINDOW_MS) } });
+      details: { evaluationComplete: data.matching?.evaluationComplete === true, fundedAmount: data.matching.fundedMinor / 100, targetAmount: data.amount,
+        ownerApprovedBy: uid, ownerApprovedAt: at,
+        deadlineAt, deadlineLimitedByPosting } });
     tx.update(ctx.ref, { matching: { ...ctx.problem.matching, mode: "mock", status: "awaiting_confirmation", proposalId, selectionId, selectionSequence,
       ownerApprovedBy: uid, ownerApprovedAt: at, creatorApprovedBy: null, creatorApprovedAt: null, rationale,
-      deadlineAt: Timestamp.fromMillis(at.toMillis() + CONFIRMATION_WINDOW_MS), selectedAt: at, updatedAt: at } });
+      deadlineAt, deadlineLimitedByPosting, selectedBy: uid, selectedAt: at, updatedAt: at } });
     return { ok: true };
   });
   if (result.expired) fail("failed-precondition", "The confirmation window expired. Its funding has been refunded; refresh and retry.");
@@ -291,7 +345,9 @@ export async function confirmMockProposal({ db, uid, problemId, proposalId, now 
     const ctx = await readContext({ db, tx, problemId, uid, proposalId });
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find((doc) => doc.id === proposalId);
-    if (!chosen || chosen.data().researcherId !== uid || ctx.problem.ownerId === uid) fail("permission-denied", "Only the selected proposal's creator can confirm.");
+    const owner = ctx.problem.ownerId === uid;
+    const creator = chosen?.data().researcherId === uid;
+    if (!chosen || (!owner && !creator) || (owner && creator)) fail("permission-denied", "Only the problem owner and selected proposal's creator can accept this match.");
     if (expireContext(tx, ctx, at)) return { expired: true };
     if (moderated(chosen.data())) fail("failed-precondition", "This proposal is under moderation.");
     const matching = ctx.problem.matching;
@@ -299,14 +355,26 @@ export async function confirmMockProposal({ db, uid, problemId, proposalId, now 
     if (matching?.status !== "awaiting_confirmation" || matching.proposalId !== proposalId || millis(matching.deadlineAt) <= at.toMillis()) {
       fail("failed-precondition", "This proposal has no active confirmation window.");
     }
+    const approvalField = owner ? "ownerApprovedBy" : "creatorApprovedBy";
+    if (matching[approvalField]) return { ok: true };
+    const approvals = owner ? { ownerApprovedBy: uid, ownerApprovedAt: at } : { creatorApprovedBy: uid, creatorApprovedAt: at };
+    const accepted = { ...matching, ...approvals };
+    event(tx, ctx, { type: owner ? "owner_confirmed" : "creator_confirmed", proposalId, actorId: uid, now: at,
+      key: matching.selectionId || proposalId, details: { deadlineAt: matching.deadlineAt } });
+    if (!accepted.ownerApprovedBy || !accepted.creatorApprovedBy) {
+      updateProposal(tx, chosen, "awaiting_confirmation", at, approvals);
+      tx.update(ctx.ref, { matching: { ...accepted, updatedAt: at } });
+      return { ok: true };
+    }
     for (const doc of ctx.proposals) {
-      if (doc.id === proposalId) updateProposal(tx, doc, "confirmed", at, { creatorApprovedBy: uid, creatorApprovedAt: at });
+      if (doc.id === proposalId) updateProposal(tx, doc, "confirmed", at, { ownerApprovedBy: accepted.ownerApprovedBy,
+        ownerApprovedAt: accepted.ownerApprovedAt, creatorApprovedBy: accepted.creatorApprovedBy, creatorApprovedAt: accepted.creatorApprovedAt });
       else if ((doc.data().matching?.fundedMinor || 0) > 0 && !TERMINAL.has(proposalState(doc.data()))) updateProposal(tx, doc, "cancelled", at);
     }
     settleFunding(tx, ctx.funding, proposalId, at, "another_proposal_confirmed");
-    tx.update(ctx.ref, { matching: { ...matching, status: "confirmed", deadlineAt: null, creatorApprovedBy: uid, creatorApprovedAt: at,
+    tx.update(ctx.ref, { matching: { ...accepted, status: "confirmed", deadlineAt: null,
       totalFundedMinor: chosen.data().matching.fundedMinor, confirmedAt: at, updatedAt: at } });
-    event(tx, ctx, { type: "creator_confirmed", proposalId, actorId: uid, now: at, key: matching.selectionId || proposalId, details: { lockedAmount: chosen.data().matching.fundedMinor / 100,
+    event(tx, ctx, { type: "match_confirmed", proposalId, actorId: uid, now: at, key: matching.selectionId || proposalId, details: { lockedAmount: chosen.data().matching.fundedMinor / 100,
       refundedAmount: ctx.funding.filter(doc => doc.data().proposalId !== proposalId && doc.data().status === "pledged")
         .reduce((total, doc) => total + doc.data().amountMinor, 0) / 100 } });
     return { ok: true };
@@ -334,13 +402,15 @@ export async function declineMockProposal({ db, uid, problemId, proposalId, reas
     const ctx = await readContext({ db, tx, problemId, uid, proposalId });
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
-    if (!chosen || chosen.data().researcherId !== uid) fail("permission-denied", "Only the selected proposal's creator can decline.");
+    const owner = ctx.problem.ownerId === uid;
+    if (!chosen || (!owner && chosen.data().researcherId !== uid)) fail("permission-denied", "Only the problem owner or selected proposal's creator can reject this selection.");
     if (chosen.data().matching?.status === "declined") return { ok: true };
     if (expireContext(tx, ctx, at)) return { expired: true };
     if (ctx.problem.matching?.status !== "awaiting_confirmation" || ctx.problem.matching.proposalId !== proposalId) {
       fail("failed-precondition", "This proposal has no active confirmation window.");
     }
-    closeSelected(tx, ctx, at, { status: "declined", reason: "creator_declined", type: "creator_declined", actorId: uid, details: reason });
+    const type = owner ? "owner_declined" : "creator_declined";
+    closeSelected(tx, ctx, at, { status: "declined", reason: type, type, actorId: uid, details: reason });
     return { ok: true };
   });
   if (result.expired) fail("failed-precondition", "The confirmation window expired and its funding was refunded.");
@@ -353,12 +423,12 @@ export async function completeMockEvaluation({ db, uid, problemId, proposalId, n
   return runContendedTransaction(db, async tx => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId });
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can complete a mock evaluation.");
+    const at = now || Timestamp.now();
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
     if (!chosen || !ELIGIBLE.has(chosen.data().status) || moderated(chosen.data())) fail("failed-precondition", "This proposal is not available for evaluation.");
     if (chosen.data().matching?.evaluationMockComplete === true) return { ok: true };
-    assertOpen(ctx.problem);
+    assertOpen(ctx.problem, at);
     if (TERMINAL.has(proposalState(chosen.data()))) fail("failed-precondition", "This proposal is no longer active.");
-    const at = now || Timestamp.now();
     updateProposal(tx, chosen, proposalState(chosen.data()), at, {
       evaluationComplete: true, evaluationCompletedAt: chosen.data().matching?.evaluationCompletedAt || at,
       evaluationCompletedBy: uid, evaluationMockComplete: true,
@@ -378,7 +448,7 @@ export async function forceExpireMockMatch({ db, uid, problemId, now }) {
     const ctx = await readContext({ db, tx, problemId, uid });
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can force-expire a mock window.");
     if (ctx.problem.matching?.status !== "awaiting_confirmation") return { ok: true, expired: false };
-    closeSelected(tx, ctx, now || Timestamp.now(), { actorId: uid, type: "admin_force_expired" });
+    invalidateContext(tx, ctx, now || Timestamp.now(), { actorId: uid, type: "admin_force_expired" });
     return { ok: true, expired: true };
   });
 }
@@ -429,7 +499,7 @@ export async function prepareModerationMatching({ tx, db, contentType, contentId
       }
       if (refunds.length || selectedAffected) {
         tx.update(ctx.ref, { matching: { ...matching,
-          ...(selectedAffected ? { status: "open", proposalId: null, deadlineAt: null, ownerApprovedBy: null,
+          ...(selectedAffected ? { status: "open", proposalId: null, deadlineAt: null, selectedBy: null, selectedAt: null, ownerApprovedBy: null,
             ownerApprovedAt: null, creatorApprovedBy: null, creatorApprovedAt: null, rationale: null } : {}),
           totalFundedMinor: Math.max(0, (matching.totalFundedMinor || 0) - refundedMinor), updatedAt: at } });
         event(tx, ctx, { type: "moderation_refunded", proposalId: proposalScope ? contentId : null, actorId,

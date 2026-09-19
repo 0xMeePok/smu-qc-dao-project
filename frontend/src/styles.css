@@ -3296,6 +3296,8 @@ footer > p { margin: 0 auto 0 0; }
 /* Server-backed mock funding and two-party matching. */
 .matching-heading, .matching-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .matching-heading h2 { margin: 0; }
+.matching-receipts { margin-block: 12px; }
+.matching-approval dt { color: var(--muted); font-size: 13px; font-weight: 600; }
 .matching-steps { padding-left: 24px; line-height: 1.8; }
 .matching-notice { padding: 18px; border: 1px solid var(--border, #d7dfe8); border-radius: 12px; background: var(--surface, #f5f8fb); }
 .matching-candidates { display: grid; gap: 16px; margin-block: 20px; }

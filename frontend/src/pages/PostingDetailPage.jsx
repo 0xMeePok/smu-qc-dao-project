@@ -83,7 +83,7 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate }) {
               key={action.id}
               className={action.kind === "primary" ? "primary" : "secondary"}
               type="button"
-              onClick={() => action.id === "fund"
+              onClick={() => ["fund", "review-proposals"].includes(action.id)
                 ? document.getElementById("proposal-funding")?.scrollIntoView({ behavior: "smooth", block: "start" })
                 : onNavigate(action.route)}
             >
@@ -325,12 +325,9 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     : postingAuditReceipt(posting);
   const proposalCount = Number(posting.proposalCount ?? 0);
   const requestedAmount = Number(posting.amount);
-  const fundedAmount = Number(posting.fundedAmount ?? 0);
-  const fundingProgressPercent = Number(posting.fundingProgressPercent ?? 0);
   const requestedLabel = Number.isFinite(requestedAmount)
     ? `${posting.currency} ${requestedAmount.toLocaleString()}`
     : "—";
-  const committedLabel = `${posting.currency} ${fundedAmount.toLocaleString()}`;
 
   return (
     <section className="page detail-page">
@@ -346,7 +343,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         <article className="detail-main">
           <div className="card-top">
             <span className="eyebrow">
-              {isOpenFunding ? "Open funding opportunity" : "Funded business problem"}
+              {isOpenFunding ? "Open funding opportunity" : "Problem statement"}
             </span>
             <div className="trust-status-row">
               <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
@@ -407,13 +404,13 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             onNavigate={onNavigate}
           />
 
-          {posting.status !== "draft" && !isModerated(posting) && <><MatchingPanel problemId={posting.id} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} /><ReportContentButton contentType="problem" contentId={posting.id} /><ReportableComments problemId={posting.id} /></>}
+          {posting.status !== "draft" && !isModerated(posting) && <><MatchingPanel problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} /><ReportContentButton contentType="problem" contentId={posting.id} /><ReportableComments problemId={posting.id} /></>}
 
           <AuditReceipt
             audit={audit}
             eventLabel={isOpenFunding
               ? "Open funding opportunity submitted"
-              : "Funded problem statement submitted"}
+              : "Problem statement submitted"}
             actorRole={isOpenFunding ? "Funder" : "Problem owner"}
             firebaseReference={`problems/${posting.id}`}
             onVerify={verifyAudit}
@@ -426,16 +423,9 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
         </article>
 
         <aside className="context-panel">
-          <span className="eyebrow">{isOpenFunding ? "Indicative funding" : "Funding requirement"}</span>
+          <span className="eyebrow">{isOpenFunding ? "Funding available" : "Indicative proposal budget"}</span>
           <strong>{requestedLabel}</strong>
-          <div className="detail-funding-progress">
-            <span className="funding-progress" aria-label={`${fundingProgressPercent}% funded`}>
-              <span style={{ width: `${fundingProgressPercent}%` }} />
-            </span>
-            <small>
-              {committedLabel} committed of {requestedLabel} · {fundingProgressPercent}% funded
-            </small>
-          </div>
+          <p className="field-hint">Contributions fund individual proposals. Review each proposal below for its funding target and progress.</p>
           <dl>
             <PosterIdentity
               ownerId={posting.ownerId}

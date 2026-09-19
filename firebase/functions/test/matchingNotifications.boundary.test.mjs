@@ -63,7 +63,7 @@ test('[boundary] resumer processes at most twenty jobs and rotates the twenty-fi
   assert.equal(db.records.get('matchingNotificationJobs/event20').phase, 'authors');
 });
 
-for (const type of ['funding_contributed', 'unknown_event']) {
+for (const type of ['funding_contributed', 'mock_evaluation_completed', 'unknown_event']) {
   test(`[negative] ${type} events do not queue decision or readiness notices`, async () => {
     const db = fixture(type);
     assert.deepEqual(await enqueueMatchingNotifications({ db, eventId: 'event', now }), { queued: false });
@@ -88,10 +88,21 @@ for (const [scope, flag] of [['problem', { moderated: true }], ['proposal', { mo
   });
 }
 
-test('[positive] readiness notification deduplicates simultaneous gate events after both gates hold', async () => {
+test('[positive] readiness notification deduplicates simultaneous funding events without an evaluation', async () => {
   const db = fixture('funding_target_reached');
-  db.records.set('matchingEvents/evaluation', { ...db.records.get('matchingEvents/event'), type: 'mock_evaluation_completed' });
-  await Promise.all(['event', 'evaluation'].map(eventId => enqueueMatchingNotifications({ db, eventId, now })));
-  await Promise.all(['event', 'evaluation'].map(eventId => processMatchingNotificationPage({ db, eventId, now })));
+  delete db.records.get('proposals/p000').matching.evaluationComplete;
+  db.records.set('matchingEvents/duplicate', { ...db.records.get('matchingEvents/event') });
+  await Promise.all(['event', 'duplicate'].map(eventId => enqueueMatchingNotifications({ db, eventId, now })));
+  await Promise.all(['event', 'duplicate'].map(eventId => processMatchingNotificationPage({ db, eventId, now })));
   assert.deepEqual(notices(db).map(row => row.recipientId), ['owner']);
 });
+
+for (const offset of [-1, 0, 1]) {
+  test(`[boundary] readiness notice respects original posting deadline at ${offset} ms`, async () => {
+    const db = fixture('funding_target_reached');
+    db.records.get('problems/problem').expiresAt = Timestamp.fromMillis(now.toMillis() + offset);
+    assert.equal((await enqueueMatchingNotifications({ db, eventId: 'event', now })).queued, offset > 0);
+    await finish(db);
+    assert.equal(notices(db).length, offset > 0 ? 1 : 0);
+  });
+}
