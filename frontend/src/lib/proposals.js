@@ -47,7 +47,7 @@ async function withMatchingState(rows, { fromServer = false } = {}) {
   return rows.map((row) => {
     const problemMatching = parents.get(row.problemId);
     if (!problemMatching) return row;
-    const cancelled = problemMatching.status === "confirmed" && problemMatching.proposalId !== row.id
+    const cancelled = ["confirmed", "invalidated"].includes(problemMatching.status) && problemMatching.proposalId !== row.id
       && ["submitted", "under_review"].includes(row.status)
       && !["voided", "cancelled", "declined"].includes(row.matching?.status);
     return { ...row, problemMatching, ...(cancelled ? { matching: { ...row.matching, status: "cancelled" } } : {}) };

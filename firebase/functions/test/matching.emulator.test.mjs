@@ -28,20 +28,66 @@ test('Firestore contention: duplicate funding, overfunding, competing selections
     await assert.rejects(() => confirmMockProposal({ db, uid: selected === a ? 'alice' : 'bob', problemId, proposalId: selected,
       now: Timestamp.fromMillis(now.toMillis() + CONFIRMATION_WINDOW_MS) }), { code: 'failed-precondition' });
     const final = await getMockMatching({ db, uid: 'funder', problemId, now: Timestamp.fromMillis(now.toMillis() + CONFIRMATION_WINDOW_MS) });
-    assert.equal(final.matching.status, 'open');
-    assert.equal(final.contributions.filter(c => c.status === 'refunded').reduce((sum, c) => sum + c.amount, 0), 100);
-    assert.equal(final.contributions.filter(c => c.status === 'pledged').reduce((sum, c) => sum + c.amount, 0), 100);
-    const remaining = selected === a ? b : a, creator = remaining === a ? 'alice' : 'bob';
+    assert.equal(final.matching.status, 'invalidated');
+    assert.equal(final.contributions.filter(c => c.status === 'refunded').reduce((sum, c) => sum + c.amount, 0), 200);
+    assert.equal(final.contributions.filter(c => c.status === 'pledged').length, 0);
+    assert.equal(final.history.filter(event => event.type === 'posting_invalidated').length, 1);
     const next = Timestamp.fromMillis(now.toMillis() + CONFIRMATION_WINDOW_MS + 1);
-    await selectMockProposal({ db, uid: 'owner', problemId, proposalId: remaining, rationale: 'Select the remaining evaluated proposal.', now: next });
-    const decisions = await Promise.allSettled([
-      confirmMockProposal({ db, uid: creator, problemId, proposalId: remaining, now: next }),
-      declineMockProposal({ db, uid: creator, problemId, proposalId: remaining, reason: 'We cannot deliver within the proposed budget.', now: next }),
+    await assert.rejects(() => selectMockProposal({ db, uid: 'owner', problemId, proposalId: selected === a ? b : a,
+      rationale: 'Select the remaining proposal.', now: next }), { code: 'failed-precondition' });
+  } finally {
+    await db.terminate();
+    await deleteApp(app);
+  }
+});
+
+test('Firestore contention: creator acceptance settles once under concurrent retries after owner selection', { skip: !enabled }, async () => {
+  const app = initializeApp({ projectId: 'qc-dao-matching-transactions' }, `matching-approvals-${Date.now()}`);
+  const db = getFirestore(app);
+  const suffix = `${Date.now()}`, problemId = `approval-${suffix}`, proposalId = `proposal-${suffix}`;
+  const now = Timestamp.now();
+  try {
+    await Promise.all(['owner', 'creator', 'funder'].map(uid => db.collection('users').doc(uid).set({ suspended: false })));
+    await db.collection('problems').doc(problemId).set({ ownerId: 'owner', status: 'open', currency: 'SGD' });
+    await db.collection('proposals').doc(proposalId).set({ problemId, researcherId: 'creator', status: 'submitted', currency: 'SGD', amount: 100 });
+    await fundMockProposal({ db, uid: 'funder', problemId, proposalId, amount: 100, requestId: `approvals-${suffix}`, now });
+    await selectMockProposal({ db, uid: 'owner', problemId, proposalId, rationale: 'A suitable proposal to start the project.', now });
+    const selected = await getMockMatching({ db, uid: 'owner', problemId, now });
+    assert.equal(selected.matching.ownerApprovedBy, 'owner');
+    assert.equal(selected.matching.creatorApprovedBy, null);
+    await Promise.all(['owner', 'creator', 'owner', 'creator'].map(uid => confirmMockProposal({ db, uid, problemId, proposalId, now })));
+    const result = await getMockMatching({ db, uid: 'funder', problemId, now });
+    assert.equal(result.matching.status, 'confirmed');
+    assert.equal(result.contributions.length, 1);
+    assert.equal(result.contributions[0].status, 'locked');
+    for (const type of ['creator_confirmed', 'match_confirmed']) {
+      assert.equal(result.history.filter(event => event.type === type).length, 1);
+    }
+  } finally {
+    await db.terminate();
+    await deleteApp(app);
+  }
+});
+
+test('Firestore contention: owner rejection races creator acceptance with exactly one settlement', { skip: !enabled }, async () => {
+  const app = initializeApp({ projectId: 'qc-dao-matching-transactions' }, `matching-rejection-${Date.now()}`);
+  const db = getFirestore(app);
+  const suffix = `${Date.now()}`, problemId = `rejection-${suffix}`, proposalId = `rejection-proposal-${suffix}`;
+  const now = Timestamp.now();
+  try {
+    await Promise.all(['owner', 'creator', 'funder'].map(uid => db.collection('users').doc(uid).set({ suspended: false })));
+    await db.collection('problems').doc(problemId).set({ ownerId: 'owner', status: 'open', currency: 'SGD' });
+    await db.collection('proposals').doc(proposalId).set({ problemId, researcherId: 'creator', status: 'submitted', currency: 'SGD', amount: 100 });
+    await fundMockProposal({ db, uid: 'funder', problemId, proposalId, amount: 100, requestId: `rejection-${suffix}`, now });
+    await selectMockProposal({ db, uid: 'owner', problemId, proposalId, rationale: 'A suitable proposal to start the project.', now });
+    const outcomes = await Promise.allSettled([
+      confirmMockProposal({ db, uid: 'creator', problemId, proposalId, now }),
+      declineMockProposal({ db, uid: 'owner', problemId, proposalId, reason: 'We cannot commit to this project.', now }),
     ]);
-    assert.equal(decisions.filter(value => value.status === 'fulfilled').length, 1);
-    const resolved = await getMockMatching({ db, uid: 'funder', problemId, now: next });
-    assert.equal(resolved.history.filter(event => ['creator_confirmed', 'creator_declined'].includes(event.type)).length, 1);
-    assert.equal(resolved.contributions.filter(c => c.status === 'pledged').length, 0);
+    assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length, 1);
+    const result = await getMockMatching({ db, uid: 'funder', problemId, now });
+    assert.equal(result.history.filter(event => ['match_confirmed', 'owner_declined'].includes(event.type)).length, 1);
+    assert.equal(result.contributions[0].status, result.matching.status === 'confirmed' ? 'locked' : 'refunded');
   } finally {
     await db.terminate();
     await deleteApp(app);

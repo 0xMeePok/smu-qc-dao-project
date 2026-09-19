@@ -514,6 +514,8 @@ contract AuditRegistry {
     }
 
     function _requireEntity(bytes32 entityId) private view {
+        // Entity must exist as opportunity or proposal; && is clearer than nested ifs here.
+        // nosemgrep: solidity.performance.use-nested-if.use-nested-if
         if (!_opportunities[entityId].exists && !_proposals[entityId].exists) {
             revert InvalidInput();
         }

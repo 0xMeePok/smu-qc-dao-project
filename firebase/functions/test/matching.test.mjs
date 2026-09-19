@@ -24,7 +24,7 @@ const confirm = (db, proposalId = 'a', uid = 'alice', at = now) =>
 const get = (db, uid = 'owner', at = now) => getMockMatching({ db, uid, problemId: 'problem', now: at });
 const rejects = (fn, code) => assert.rejects(fn, { code });
 
- test('funding alone cannot confirm; owner selects then creator locks winner and refunds all sibling funders', async () => {
+ test('funding alone cannot confirm; owner selection records acceptance and creator accepts to lock winner and refund sibling funders', async () => {
   const db = fixture();
   await fund(db, 'a', 40);
   await fund(db, 'a', 60, 'request_second_1234', 'funder2');
@@ -53,32 +53,31 @@ const rejects = (fn, code) => assert.rejects(fn, { code });
   await select(db); // duplicate selection cannot reset the deadline or outcome
 });
 
-test('exact seven-day boundary voids selected proposal and refunds only its funders; sibling funding reopens', async () => {
+test('exact seven-day boundary invalidates posting and refunds every remaining pledge', async () => {
   const db = fixture();
   await fund(db);
   await fund(db, 'b', 60, 'request_second_1234');
   await select(db);
   await rejects(() => confirm(db, 'a', 'alice', later(CONFIRMATION_WINDOW_MS)), 'failed-precondition');
   const state = await get(db, 'funder', later(CONFIRMATION_WINDOW_MS));
-  assert.equal(state.matching.status, 'open');
+  assert.equal(state.matching.status, 'invalidated');
   assert.equal(state.proposals.find(p => p.id === 'a').matching.status, 'voided');
   assert.equal(state.proposals.find(p => p.id === 'a').canFund, false);
-  assert.equal(state.proposals.find(p => p.id === 'b').canFund, true);
-  assert.deepEqual(state.contributions.map(c => c.status).sort(), ['pledged', 'refunded']);
+  assert.equal(state.proposals.find(p => p.id === 'b').canFund, false);
+  assert.deepEqual(state.contributions.map(c => c.status).sort(), ['refunded', 'refunded']);
   assert.equal(await settleExpiredMockMatch({ db, problemId: 'problem', now: later(CONFIRMATION_WINDOW_MS) }), false);
-  await fundMockProposal({ db, uid: 'funder', problemId: 'problem', proposalId: 'b', amount: 40,
-    requestId: 'request_complete_b', now: later(CONFIRMATION_WINDOW_MS) });
-  await selectMockProposal({ db, rationale: 'This approach meets our requirements.', uid: 'owner', problemId: 'problem', proposalId: 'b', now: later(CONFIRMATION_WINDOW_MS) });
-  await confirm(db, 'b', 'bob', later(CONFIRMATION_WINDOW_MS + 1));
-  assert.equal((await get(db, 'funder', later(CONFIRMATION_WINDOW_MS + 1))).matching.proposalId, 'b');
+  await rejects(() => fundMockProposal({ db, uid: 'funder', problemId: 'problem', proposalId: 'b', amount: 40,
+    requestId: 'request_complete_b', now: later(CONFIRMATION_WINDOW_MS) }), 'failed-precondition');
+  assert.equal(state.history.filter(event => event.type === 'posting_invalidated').length, 1);
+  assert.equal(state.matching.invalidationReason, 'confirmation_expired');
 });
 
-test('confirmation one millisecond before deadline succeeds even if listing expires during the window', async () => {
+test('confirmation one millisecond before the shorter posting deadline succeeds', async () => {
   const db = fixture();
   db.records.get('problems/problem').expiresAt = later(1000);
   await fund(db);
   await select(db);
-  await confirm(db, 'a', 'alice', later(CONFIRMATION_WINDOW_MS - 1));
+  await confirm(db, 'a', 'alice', later(999));
   assert.equal((await get(db, 'owner', later(CONFIRMATION_WINDOW_MS))).matching.status, 'confirmed');
 });
 
@@ -118,7 +117,7 @@ test('actors and invalid funding are rejected; summaries omit proposal body and 
   await fund(db);
   await rejects(() => select(db, 'a', 'bob'), 'permission-denied');
   await select(db);
-  await rejects(() => confirm(db, 'a', 'owner'), 'permission-denied');
+  await rejects(() => confirm(db, 'a', 'funder'), 'permission-denied');
   await rejects(() => confirm(db, 'b', 'bob'), 'failed-precondition');
   const state = await get(db, 'funder2');
   assert.equal(state.contributions.length, 0);
@@ -161,17 +160,18 @@ test('moderation and preexisting accepted solutions prevent new funding; expiry 
   assert.equal(state.matching.totalFundedMinor, 0);
 });
 
-test('listing submission expiry never strands existing proposals or prevents funding after a timed-out selection', async () => {
+test('original posting expiry invalidates a pending selection and refunds all proposal pledges', async () => {
   const db = fixture();
   db.records.get('problems/problem').expiresAt = later(1000);
   await fund(db); await fund(db, 'b', 40, 'request_second_1234'); await select(db);
-  const at = later(CONFIRMATION_WINDOW_MS);
-  const state = await get(db, 'funder', at);
-  assert.equal(state.proposals.find(p => p.id === 'b').canFund, true);
-  await fundMockProposal({ db, uid: 'funder', problemId: 'problem', proposalId: 'b', amount: 60, requestId: 'request_finish_b12', now: at });
-  await selectMockProposal({ db, rationale: 'This approach meets our requirements.', uid: 'owner', problemId: 'problem', proposalId: 'b', now: at });
-  await confirm(db, 'b', 'bob', at);
-  assert.equal((await get(db, 'owner', at)).matching.status, 'confirmed');
+  const pending = await get(db);
+  assert.equal(pending.matching.deadlineAt, later(1000).toDate().toISOString());
+  assert.equal(pending.matching.deadlineLimitedByPosting, true);
+  const state = await get(db, 'funder', later(1000));
+  assert.equal(state.matching.status, 'invalidated');
+  assert.ok(state.proposals.every(proposal => !proposal.canFund && !proposal.canSelect));
+  assert.ok(state.contributions.every(row => row.status === 'refunded'));
+  await rejects(() => selectMockProposal({ db, rationale: 'Choose the remaining proposal.', uid: 'owner', problemId: 'problem', proposalId: 'b', now: later(1000) }), 'failed-precondition');
 });
 
 test('trusted time refresh after transaction reads rejects a newly expired confirmation and still commits refunds', async () => {
@@ -182,7 +182,7 @@ test('trusted time refresh after transaction reads rejects a newly expired confi
   try {
     await rejects(() => confirmMockProposal({ db, uid: 'alice', problemId: 'problem', proposalId: 'a' }), 'failed-precondition');
   } finally { Timestamp.now = original; }
-  assert.equal(db.records.get('problems/problem').matching.status, 'open');
+  assert.equal(db.records.get('problems/problem').matching.status, 'invalidated');
   assert.equal((await get(db, 'funder', later(CONFIRMATION_WINDOW_MS))).contributions[0].status, 'refunded');
 });
 
@@ -193,7 +193,30 @@ test('scheduled expiry refunds without any member opening the problem', async ()
   assert.equal((await sweepExpiredMockMatches({ db, now: later(CONFIRMATION_WINDOW_MS + 1) })).settled, 0);
 });
 
-test('selection requires trusted expert evaluation and rationale; admin mock completion is idempotent and survives funding', async () => {
+test('owner selects a fully funded proposal without evaluation; funding, rationale and creator handshake remain required', async () => {
+  const db = fixture(); db.records.get('proposals/a').matching = {};
+  await fund(db, 'a', 40);
+  assert.equal((await get(db)).proposals.find(p => p.id === 'a').canSelect, false);
+  await rejects(() => select(db), 'failed-precondition');
+  await fund(db, 'a', 60, 'request_second_1234');
+  const ready = (await get(db)).proposals.find(p => p.id === 'a');
+  assert.equal(ready.matching.evaluationComplete, false);
+  assert.equal(ready.canSelect, true);
+  assert.equal((await get(db, 'funder')).proposals.find(p => p.id === 'a').canSelect, false);
+  await rejects(() => select(db, 'a', 'funder'), 'permission-denied');
+  await rejects(() => selectMockProposal({ db, uid: 'owner', problemId: 'problem', proposalId: 'a', now }), 'invalid-argument');
+  await select(db);
+  const pending = await get(db, 'alice');
+  assert.equal(pending.matching.status, 'awaiting_confirmation');
+  assert.equal(pending.proposals.find(p => p.id === 'a').canConfirm, true);
+  assert.equal(pending.history.find(event => event.type === 'owner_selected').evaluationComplete, false);
+  await confirm(db);
+  const confirmed = await get(db, 'funder');
+  assert.equal(confirmed.matching.status, 'confirmed');
+  assert.equal(confirmed.contributions.every(row => row.proposalId === 'a' && row.status === 'locked'), true);
+});
+
+test('optional admin mock evaluation is idempotent and survives funding and selection', async () => {
   const db = fixture(); db.records.get('proposals/a').matching = {};
   db.records.set('evaluations/fake', { proposalId: 'a', status: 'completed' });
   await fund(db, 'a', 40);
@@ -212,16 +235,16 @@ test('selection requires trusted expert evaluation and rationale; admin mock com
   assert.equal(state.matching.ownerApprovedBy, 'owner');
   assert.equal(state.matching.creatorApprovedBy, 'alice');
   assert.equal(state.matching.rationale, 'This approach meets our requirements.');
-  for (const type of ['mock_evaluation_completed', 'owner_selected', 'creator_confirmed']) {
+  for (const type of ['mock_evaluation_completed', 'owner_selected', 'creator_confirmed', 'match_confirmed']) {
     assert.equal(state.history.filter(event => event.type === type).length, 1);
   }
-  assert.ok(state.history.every(event => event.mode === 'mock' && event.chainStatus === 'pending'));
+  assert.ok(state.history.every(event => event.mode === 'mock' && event.chainStatus === 'not_applicable'));
 });
 
 test('creator decline requires a reason, refunds only selected funds, preserves siblings evaluation and creates a fresh selection window', async () => {
   const db = fixture(); await fund(db); await fund(db, 'b', 100, 'request_second_1234'); await select(db);
   await rejects(() => declineMockProposal({ db, uid: 'alice', problemId: 'problem', proposalId: 'a', reason: '', now }), 'invalid-argument');
-  await rejects(() => declineMockProposal({ db, uid: 'owner', problemId: 'problem', proposalId: 'a', reason: 'We cannot deliver this project.', now }), 'permission-denied');
+  await rejects(() => declineMockProposal({ db, uid: 'funder', problemId: 'problem', proposalId: 'a', reason: 'We cannot deliver this project.', now }), 'permission-denied');
   const input = { db, uid: 'alice', problemId: 'problem', proposalId: 'a', reason: 'We cannot deliver this project.', now: later(1000) };
   await declineMockProposal(input); await declineMockProposal(input);
   const state = await get(db, 'funder', later(1000));
@@ -235,15 +258,15 @@ test('creator decline requires a reason, refunds only selected funds, preserves 
   assert.equal((await get(db, 'owner', later(2000))).matching.deadlineAt, later(CONFIRMATION_WINDOW_MS + 2000).toDate().toISOString());
 });
 
-test('force-expiry is admin-only and records actor/time while preserving sibling funds', async () => {
+test('force-expiry is admin-only and records actor/time and refunds all sibling funds', async () => {
   const db = fixture(); await fund(db); await fund(db, 'b', 40, 'request_second_1234'); await select(db);
   await rejects(() => forceExpireMockMatch({ db, uid: 'owner', problemId: 'problem', now }), 'permission-denied');
   assert.equal((await get(db, 'admin')).canForceExpire, true);
   assert.equal((await forceExpireMockMatch({ db, uid: 'admin', problemId: 'problem', now })).expired, true);
   assert.equal((await forceExpireMockMatch({ db, uid: 'admin', problemId: 'problem', now })).expired, false);
   const state = await get(db, 'funder');
-  assert.equal(state.matching.status, 'open');
-  assert.equal(state.contributions.find(c => c.proposalId === 'b').status, 'pledged');
+  assert.equal(state.matching.status, 'invalidated');
+  assert.equal(state.contributions.find(c => c.proposalId === 'b').status, 'refunded');
   assert.equal(state.history.find(e => e.type === 'admin_force_expired').actorId, 'admin');
 });
 
@@ -278,4 +301,78 @@ test('a concurrent moderation refund and creator confirmation conserve every con
   assert.equal(rows.reduce((sum, row) => sum + row.amount, 0), 200);
   assert.equal(rows.filter(row => row.status === 'pledged').length, 0);
   assert.equal(rows.filter(row => row.status === 'locked').reduce((sum, row) => sum + row.amountMinor, 0), db.records.get('problems/problem').matching.totalFundedMinor);
+});
+
+test('rejection reopens only the original remaining posting window and reselection uses its shorter deadline', async () => {
+  const db = fixture();
+  const expiry = later(3 * 86400000);
+  db.records.get('problems/problem').expiresAt = expiry;
+  await fund(db); await fund(db, 'b', 100, 'request_other_target'); await select(db);
+  await declineMockProposal({ db, uid: 'owner', problemId: 'problem', proposalId: 'a', reason: 'Choose a more suitable proposal.', now: later(86400000) });
+  let state = await get(db, 'owner', later(86400000));
+  assert.equal(state.matching.postingExpiresAt, expiry.toDate().toISOString());
+  assert.equal(state.matching.reopenedAt, later(86400000).toDate().toISOString());
+  assert.equal(state.history.filter(event => event.type === 'posting_reopened').length, 1);
+  await selectMockProposal({ db, uid: 'owner', problemId: 'problem', proposalId: 'b', rationale: 'This proposal fits the remaining time.', now: later(2 * 86400000) });
+  state = await get(db, 'owner', later(2 * 86400000));
+  assert.equal(state.matching.deadlineAt, expiry.toDate().toISOString());
+  assert.equal(state.matching.deadlineLimitedByPosting, true);
+  await rejects(() => confirm(db, 'b', 'bob', expiry), 'failed-precondition');
+  assert.equal((await get(db, 'funder', expiry)).matching.status, 'invalidated');
+});
+
+test('scheduled open posting expiry includes its exact deadline, refunds all pledged funds, and runs once', async () => {
+  const db = fixture();
+  db.records.get('problems/problem').expiresAt = later(1000);
+  await fund(db, 'a', 40); await fund(db, 'b', 50, 'request_sibling_fund');
+  assert.equal((await sweepExpiredMockMatches({ db, now: later(999) })).settled, 0);
+  assert.equal((await sweepExpiredMockMatches({ db, now: later(1000) })).settled, 1);
+  assert.equal((await sweepExpiredMockMatches({ db, now: later(1001) })).settled, 0);
+  const state = await get(db, 'funder', later(1001));
+  assert.equal(state.matching.status, 'invalidated');
+  assert.equal(state.matching.invalidationReason, 'posting_expired');
+  assert.equal(state.matching.totalFundedMinor, 0);
+  assert.ok(state.contributions.every(row => row.status === 'refunded'));
+  assert.equal(state.history.filter(event => event.type === 'posting_invalidated').length, 1);
+  await rejects(() => fundMockProposal({ db, uid: 'funder', problemId: 'problem', proposalId: 'a', amount: 20, requestId: 'request_after_expiry', now: later(1001) }), 'failed-precondition');
+});
+
+test('an expired untouched legacy posting cannot start mock funding or selection', async () => {
+  const db = fixture();
+  db.records.get('problems/problem').expiresAt = now;
+  await rejects(() => fund(db), 'failed-precondition');
+  await rejects(() => select(db), 'failed-precondition');
+  assert.equal((await get(db)).proposals.some(proposal => proposal.canFund || proposal.canSelect), false);
+  assert.equal(db.records.get('problems/problem').matching, undefined);
+});
+
+test('off-chain acceptance receipts capture authenticated wallet, role and time without a chain transaction', async () => {
+  const db = fixture();
+  const wallet = `0x${'ab'.repeat(20)}`;
+  db.records.set(`users/${wallet}`, {});
+  db.records.get('problems/problem').ownerId = wallet;
+  await fund(db); await select(db, 'a', wallet);
+  const receipt = (await get(db, wallet)).history.find(event => event.type === 'owner_selected');
+  assert.equal(receipt.actorRole, 'problem_owner');
+  assert.equal(receipt.actorWallet, wallet);
+  assert.equal(receipt.chainStatus, 'not_applicable');
+  assert.equal(receipt.createdAt, now.toDate().toISOString());
+  assert.equal(receipt.transactionHash, undefined);
+  await select(db, 'a', wallet);
+  assert.equal((await get(db, wallet)).history.filter(event => event.type === 'owner_selected').length, 1);
+});
+
+test('scheduled expiry settles legacy pending selections whose saved deadline exceeded the posting expiry', async () => {
+  const db = fixture();
+  db.records.get('problems/problem').expiresAt = later(1000);
+  await fund(db); await select(db);
+  // Existing records created before the posting-deadline cap may contain seven days.
+  db.records.get('problems/problem').matching.deadlineAt = later(CONFIRMATION_WINDOW_MS);
+  const pending = await get(db);
+  assert.equal(pending.matching.deadlineAt, later(1000).toDate().toISOString());
+  assert.equal(pending.matching.deadlineLimitedByPosting, true);
+  assert.equal((await sweepExpiredMockMatches({ db, now: later(1000) })).settled, 1);
+  const state = await get(db, 'funder', later(1000));
+  assert.equal(state.matching.status, 'invalidated');
+  assert.equal(state.contributions[0].status, 'refunded');
 });

@@ -121,6 +121,19 @@ describe("[QCDAO-54] view posting detail page", () => {
     }
   });
 
+  it("directs funders to proposals and owners to review them without requiring evaluations", () => {
+    const fund = postingActions(OPEN_POSTING, PARTICIPANT).find((action) => action.id === "fund");
+    assert.equal(fund.label, "View proposals to fund");
+    const owner = { ...PARTICIPANT, id: OWNER };
+    for (const status of ["submitted", "in_review", "matched"]) {
+      assert.ok(actionIds({ ...OPEN_POSTING, status }, owner).includes("review-proposals"));
+    }
+    assert.ok(actionIds({ ...OPEN_POSTING, expiresAt: PAST }, owner).includes("review-proposals"));
+    assert.ok(!actionIds(OPEN_POSTING, PARTICIPANT).includes("review-proposals"));
+    assert.ok(!actionIds({ ...OPEN_POSTING, status: "draft" }, owner).includes("review-proposals"));
+    assert.ok(!actionIds({ ...OPEN_POSTING, moderationStatus: "hidden" }, owner).includes("review-proposals"));
+  });
+
   it("[FUT-OPD-127] scopes proposal reads to the author and a posting-scoped callable", () => {
     const listing = source("../../src/lib/proposals.js")
       .split("export async function listProposalsForPosting")[1]
@@ -148,10 +161,10 @@ describe("[QCDAO-54] view posting detail page", () => {
   });
 });
 
-it('preserves mock proposal funding after the submission cutoff but pauses it during mutual approval', () => {
+it('closes funding at the original deadline and during pending or terminal matching', () => {
   const posting = { ...OPEN_POSTING, expiresAt: PAST, matching: { mode: 'mock', status: 'open' } };
-  assert.ok(actionIds(posting, PARTICIPANT).includes('fund'));
-  for (const status of ['awaiting_confirmation', 'confirmed']) {
+  assert.ok(!actionIds(posting, PARTICIPANT).includes('fund'));
+  for (const status of ['awaiting_confirmation', 'confirmed', 'invalidated']) {
     assert.ok(!actionIds({ ...posting, matching: { mode: 'mock', status } }, PARTICIPANT).includes('fund'));
   }
 });
