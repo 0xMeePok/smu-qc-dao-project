@@ -16,6 +16,10 @@ vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
   getMockMatching: (...args) => mocks.matching(...args),
 }));
 vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, address: account }) }));
+vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
+  RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
+  RelatedAuditReceiptPane: () => null,
+}));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: account } }) }));
 vi.mock("../../src/lib/postings.js", () => ({ findPosting: async () => mocks.posting }));
 vi.mock("../../src/lib/proposals.js", () => ({
