@@ -1,9 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { MODERATION_REASONS, getModerationContext, listModerationQueue, moderateContent, moderationError } from "../lib/moderation.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
+import { findPosting } from "../lib/postings.js";
+import { findProposal } from "../lib/proposals.js";
 import { formatInstant } from "../lib/datetime.js";
 import { Modal } from "./Modal.jsx";
 import { downloadAttachment, saveBlobAs } from "../lib/attachments.js";
+import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
+
+function relatedAuditTarget(selected, context) {
+  if (!selected || !context) return null;
+  if (selected.contentType === "comment") {
+    const parent = context.parent;
+    if (parent?.contentType === "proposal" && parent.id) return { kind: RELATED_AUDIT_KIND.PROPOSAL, id: parent.id };
+    if (parent?.contentType === "problem" && parent.id) return { kind: RELATED_AUDIT_KIND.LISTING, id: parent.id };
+    return null;
+  }
+  if (selected.contentType === "proposal" && context.content?.id) {
+    return { kind: RELATED_AUDIT_KIND.PROPOSAL, id: context.content.id };
+  }
+  if (selected.contentType === "problem" && context.content?.id) {
+    return { kind: RELATED_AUDIT_KIND.LISTING, id: context.content.id };
+  }
+  return null;
+}
 
 const reasonLabel = (value) => MODERATION_REASONS.find(([key]) => key === value)?.[1] || value;
 const CONTENT_FIELDS = [...new Set(["title", "summary", "body", "text", "content", "businessContext", "currentApproach", "currentLimitations", "expectedOutcome", "successCriteria", "dataAvailability", "fundingThesis", "eligibilityNotes", "methodology", "approach", "deliverables", "timeline", "team", "problemStatement", "proposedSolution", ...PROPOSAL_FIELDS.map(([key]) => key), ...PROBLEM_FRAMING_FIELDS.map(([key]) => key)])];
@@ -30,7 +50,9 @@ export function ModerationQueue({ onCountChange }) {
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
   const [busy, setBusy] = useState(false);
+  const [relatedAudit, setRelatedAudit] = useState(null);
   const inFlight = useRef(false);
+  const relatedAuditRequest = useRef(0);
   const countRef = useRef(onCountChange);
   countRef.current = onCountChange;
 
@@ -45,6 +67,8 @@ export function ModerationQueue({ onCountChange }) {
   }, [filter, page, revision]);
 
   useEffect(() => {
+    relatedAuditRequest.current += 1;
+    setRelatedAudit(null);
     setContext(null); setContextError(""); setAction(""); setReason(""); setDetails("");
     if (!selected) return undefined;
     let active = true;
@@ -71,6 +95,32 @@ export function ModerationQueue({ onCountChange }) {
     } catch (err) { setContextError(moderationError(err)); }
     finally { inFlight.current = false; setBusy(false); }
   };
+  const auditTarget = relatedAuditTarget(selected, context);
+  const openRelatedAudit = async () => {
+    if (!auditTarget) return;
+    const request = ++relatedAuditRequest.current;
+    setRelatedAudit({ kind: auditTarget.kind, loading: true, record: null, error: "" });
+    try {
+      const record = auditTarget.kind === RELATED_AUDIT_KIND.PROPOSAL
+        ? await findProposal(auditTarget.id)
+        : await findPosting(auditTarget.id);
+      if (request !== relatedAuditRequest.current) return;
+      setRelatedAudit({
+        kind: auditTarget.kind,
+        loading: false,
+        record,
+        error: record ? "" : "This record is no longer available, so its verification receipt cannot be opened.",
+      });
+    } catch (err) {
+      if (request !== relatedAuditRequest.current) return;
+      setRelatedAudit({
+        kind: auditTarget.kind,
+        loading: false,
+        record: null,
+        error: err?.message || "The audit receipt could not be loaded. Try again.",
+      });
+    }
+  };
 
   return <section className="moderation-queue">
     <div className="table-header"><div><h2>Content moderation {data && <span className="count-pill">{data.pendingCount ?? 0} pending</span>}</h2><p>Reported content and submissions flagged for review. Every decision records a reason and can be reversed.</p></div><button className="secondary" type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>Refresh queue</button></div>
@@ -81,6 +131,8 @@ export function ModerationQueue({ onCountChange }) {
     {selected && <Modal labelledBy="moderation-review-title" onDismiss={() => { if (!busy) setSelected(null); }}><form onSubmit={submit}>
       <div className="modal-head"><h2 id="moderation-review-title">Review {selected.contentType}</h2></div><div className="modal-body moderation-review-body">
         {context ? <><ContextBody title="Content" content={context.content} contentType={selected.contentType} onDownload={download} /><ContextBody title="Parent context" content={context.parent} contentType={context.parent?.contentType} onDownload={download} />
+          {selected.contentType === "comment" && <p className="field-hint">Comments are recorded off-chain and do not have an on-chain audit receipt.</p>}
+          {auditTarget && <p><button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={openRelatedAudit}>{relatedAudit?.loading ? "Loading audit receipt…" : selected.contentType === "comment" ? "View parent audit receipt" : "View audit receipt"}</button></p>}
           <h3>Reports</h3>{context.reports?.length ? context.reports.map((report, index) => <p key={report.id || index}><strong>{reasonLabel(report.reason)}</strong> · {report.reporterId} · {formatInstant(report.createdAt)}{report.details ? ` — ${report.details}` : ""}</p>) : <p>No member reports. This item was flagged for review.</p>}
           {context.reportsTruncated && <p className="field-hint">Showing the first 100 reports.</p>}
           <h3>Moderation history</h3>{context.history?.length ? context.history.map((entry, index) => <p key={entry.id || index}>{entry.action} · {reasonLabel(entry.reason)} · {formatInstant(entry.createdAt)}{entry.details ? ` — ${entry.details}` : ""}<small className="table-row-meta">By {entry.actorId} · Record {entry.id} · On-chain recording pending</small></p>) : <p>No prior decisions.</p>}
@@ -92,6 +144,7 @@ export function ModerationQueue({ onCountChange }) {
         </> : !contextError && <p role="status">Loading full context…</p>}
         {contextError && <p role="alert" className="error-banner">{contextError}</p>}
       </div><div className="modal-actions"><button type="button" className="secondary" disabled={busy} onClick={() => setSelected(null)}>Close</button><button type="submit" className="primary" disabled={busy || !context}>{busy ? "Recording…" : "Record moderation decision"}</button></div>
-    </form></Modal>}
+      </form></Modal>}
+    {relatedAudit && <RelatedAuditReceiptPane kind={relatedAudit.kind} record={relatedAudit.record} loading={relatedAudit.loading} error={relatedAudit.error} onClose={() => { relatedAuditRequest.current += 1; setRelatedAudit(null); }} />}
   </section>;
 }

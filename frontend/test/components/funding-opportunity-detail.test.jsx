@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("wagmi", () => ({
   useAccount: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true }),
 }));
+vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
+  RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
+  RelatedAuditReceiptPane: () => null,
+}));
 
 vi.mock("../../src/context/AuthContext.jsx", () => ({
   useAuth: () => ({

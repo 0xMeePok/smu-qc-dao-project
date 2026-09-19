@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { formatInstant } from "../lib/datetime.js";
+import { formatInstant, toDate } from "../lib/datetime.js";
 
 const STATUS_COPY = {
   queued: "Queued for wallet submission",
@@ -100,12 +100,25 @@ function unavailableState(error, audit) {
   return { kind: "unavailable", message };
 }
 
+function chainInstant(value) {
+  if (value == null || value === "") return null;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return new Date(seconds * 1000);
+}
+
+/** Prefer the registry timestamp; otherwise the record's stored time. */
+function receiptInstant(chainTimestamp, recordTimestamp) {
+  return chainInstant(chainTimestamp) ?? toDate(recordTimestamp);
+}
+
 /** Human-readable view of the verification overlay required by QCDAO-77/78. */
 export function AuditReceipt({
   audit,
   eventLabel,
   actorRole,
   firebaseReference,
+  recordTimestamp,
   onVerify,
   onRetry,
   entityLabel = "Posting",
@@ -187,6 +200,7 @@ export function AuditReceipt({
   const chainAnchor = verification?.result?.anchor?.anchor;
   const chainTimestamp = chainAnchor?.timestamp ?? chainAnchor?.[5];
   const chainActor = chainAnchor?.actor ?? chainAnchor?.[4];
+  const timestamp = receiptInstant(chainTimestamp, recordTimestamp);
   const verified = verification?.kind === "match";
   // Check the chain before offering another signature. A known in-flight
   // transaction can still be resumed when its verification service is offline.
@@ -224,9 +238,7 @@ export function AuditReceipt({
 
       <dl className="audit-receipt-grid">
         <div><dt>Event</dt><dd>{eventLabel}</dd></div>
-        <div><dt>On-chain timestamp</dt><dd>{chainTimestamp
-          ? formatInstant(new Date(Number(chainTimestamp) * 1000))
-          : "Not available"}</dd></div>
+        <div><dt>Timestamp</dt><dd>{timestamp ? formatInstant(timestamp) : "Not available"}</dd></div>
         <div><dt>Actor role</dt><dd>{actorRole}</dd></div>
         <div><dt>On-chain actor</dt><dd>{chainActor ? <code>{chainActor}</code> : "Not available"}</dd></div>
         <div><dt>Firebase reference</dt><dd><code>{firebaseReference}</code></dd></div>

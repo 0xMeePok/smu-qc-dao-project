@@ -91,6 +91,8 @@ function serializeOpportunityForAdmin(id, data) {
     amount: data.amount ?? null,
     currency: data.currency || "",
     expiresAt: isoTimestamp(data.expiresAt),
+    createdAt: isoTimestamp(data.createdAt),
+    updatedAt: isoTimestamp(data.updatedAt),
     attachments: attachmentMetadata(data.attachments),
     audit: data.audit || null,
   };

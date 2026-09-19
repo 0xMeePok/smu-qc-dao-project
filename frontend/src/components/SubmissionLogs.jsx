@@ -326,6 +326,7 @@ function SubmissionLogs({ kind }) {
             eventLabel={variant.eventLabel}
             actorRole={variant.actorRole}
             firebaseReference={`problems/${selected.id}`}
+            recordTimestamp={selected.updatedAt ?? selected.createdAt}
             onVerify={() => variant.readAudit(selected)}
           />
         </AuditDetailPane>

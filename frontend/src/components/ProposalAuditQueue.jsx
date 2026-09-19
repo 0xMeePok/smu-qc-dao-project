@@ -47,6 +47,7 @@ function ListingReceipt({ opportunity }) {
         : "Funded problem statement submitted"}
       actorRole={isOpenFunding ? "Funder" : "Problem owner"}
       firebaseReference={`problems/${record.id}`}
+      recordTimestamp={record.updatedAt ?? record.createdAt}
       onVerify={() => (isOpenFunding ? readFundingOpportunityAudit(record) : readPostingAudit(record))}
     />
   );
@@ -246,6 +247,7 @@ export function ProposalAuditQueue() {
                   eventLabel="Proposal submitted"
                   actorRole="Researcher / solution developer"
                   firebaseReference={`proposals/${selected.id}`}
+                  recordTimestamp={selected.updatedAt ?? selected.createdAt}
                   onVerify={async () => (await httpsCallable(functions, "adminVerifyProposalAudit")({ proposalId: selected.id })).data}
                 />
               </>

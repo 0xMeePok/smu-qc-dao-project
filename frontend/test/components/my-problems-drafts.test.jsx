@@ -27,6 +27,10 @@ vi.mock("../../src/lib/postings.js", () => ({
 vi.mock("../../src/context/AuthContext.jsx", () => ({
   useAuth: () => ({ user: { id: `0x${"a".repeat(40)}`, org: "SMU" } }),
 }));
+vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
+  RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
+  RelatedAuditReceiptPane: () => null,
+}));
 
 const { MyProblems } = await import("../../src/components/RoleViews.jsx");
 

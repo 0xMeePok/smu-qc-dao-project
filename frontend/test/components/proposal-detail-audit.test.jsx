@@ -4,6 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ connected: false, anchor: vi.fn(), find: vi.fn(), verify: vi.fn() }));
 const account = `0x${"a".repeat(40)}`;
 vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
+vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
+  RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
+  RelatedAuditReceiptPane: () => null,
+}));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}` } }) }));
 vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.find(...args), withdrawProposal: vi.fn(), listProposalRevisions: async () => [] }));
 vi.mock("../../src/lib/proposalAudit.js", () => ({
