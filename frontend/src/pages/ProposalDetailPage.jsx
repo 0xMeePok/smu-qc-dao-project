@@ -15,7 +15,7 @@ import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
-import { getMockMatching, proposalFundingLabel, proposalMatchingLocked } from "../lib/matching.js";
+import { getMockMatching, mergeMatchingState, proposalFundingLabel, proposalMatchingLocked } from "../lib/matching.js";
 import { isModerated } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
 import { ReportableComments } from "../components/ReportableComments.jsx";
@@ -81,7 +81,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     const timer = setInterval(() => {
       findProposal(proposalId, { fromServer: true }).then((current) => {
         if (active && current) setProposal((previous) => ({ ...current,
-          matching: current.matching || previous?.matching,
+          matching: mergeMatchingState(previous?.matching, current.matching),
           problemMatching: current.problemMatching || previous?.problemMatching,
         }));
       }).catch(() => { /* Keep the saved record visible while offline. */ });

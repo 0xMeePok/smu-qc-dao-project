@@ -32,6 +32,12 @@ export const MATCHING_LABELS = {
   refunded: "Refunded",
 };
 
+export function mergeMatchingState(previous, current) {
+  if (!current) return previous;
+  if (!previous) return current;
+  return { ...previous, ...current };
+}
+
 export function proposalFundingLabel(proposal, problemMatching = proposal.problemMatching) {
   const status = proposal.matching?.status;
   if (status && status !== "funding") return MATCHING_LABELS[status] || status;

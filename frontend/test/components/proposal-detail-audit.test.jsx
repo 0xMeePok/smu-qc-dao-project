@@ -17,7 +17,7 @@ const record = { id: "proposal1", researcherId: account, title: "Saved routing s
   audit: { schemaVersion: 1, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, attemptCount: 0, status: "queued", transactionHash: "" } };
 beforeEach(() => { mocks.connected = false; mocks.anchor.mockReset(); mocks.find.mockReset().mockResolvedValue(record);
   mocks.verify.mockReset().mockRejectedValue(new Error("execution reverted: InvalidInput")); });
-afterEach(cleanup);
+afterEach(() => { vi.useRealTimers(); cleanup(); });
 it("shows a concise rejection banner and clears it on retry without losing the proposal", async () => {
   mocks.connected = true;
   mocks.anchor.mockRejectedValueOnce(new Error(`User rejected the request. Request Arguments: data: 0x${"a".repeat(2000)} Details: MetaMask Tx Signature: User denied transaction signature.`))
@@ -70,6 +70,25 @@ it("does not put a previous proposal's receipt onto a newly navigated proposal",
   callback({ ...record.audit, status: "failed" });
   await waitFor(() => expect(screen.getByText(next.audit.contentHash)).toBeTruthy());
   expect(screen.queryByText("Proposal saved; verification needs attention")).toBeNull();
+});
+
+it("shows Open for funding instead of the raw submitted status", async () => {
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+  expect(await screen.findByText("Open for funding")).toBeTruthy();
+  expect(screen.queryByText("submitted")).toBeNull();
+});
+
+it("keeps Open for funding when a later snapshot omits matching.status", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mocks.find.mockResolvedValue({ ...record, matching: { status: "funding", evaluationComplete: true } });
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+  expect(await screen.findByText("Open for funding")).toBeTruthy();
+  mocks.find.mockResolvedValue({ ...record, matching: { evaluationComplete: true } });
+  await vi.advanceTimersByTimeAsync(10_000);
+  await waitFor(() => expect(mocks.find).toHaveBeenCalledWith("proposal1", { fromServer: true }));
+  expect(screen.getByText("Open for funding")).toBeTruthy();
+  expect(screen.queryByText("submitted")).toBeNull();
+  vi.useRealTimers();
 });
 
 it("reads the chain for a missing receipt and never auto-signs already verified content", async () => {

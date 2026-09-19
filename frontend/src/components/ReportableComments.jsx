@@ -140,9 +140,10 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
       value={body} disabled={busy} onChange={(event) => setBody(event.target.value)} />
     {recommend && <fieldset className="comment-recommendations" disabled={busy}>
       <legend>Recommendation</legend>
-      {RECOMMENDATIONS.map(([value, label]) => <label key={value}>
+      {RECOMMENDATIONS.map(([value, label]) => <label key={value} className="comment-recommendation-option">
         <input type="radio" name={initial ? `edit-recommendation-${initial.id}` : "comment-recommendation"}
-          value={value} checked={recommendation === value} onChange={() => setRecommendation(value)} />{label}
+          value={value} checked={recommendation === value} onChange={() => setRecommendation(value)} />
+        <span>{label}</span>
       </label>)}
     </fieldset>}
     {error && <p role="alert" className="field-hint">{error}</p>}
@@ -169,17 +170,17 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
     catch (err) { setError(commentError(err)); setBusy(false); }
   };
   const role = roleText(item.authorRole);
+  const outcome = !removed && item.qualifying && recommendationLabel(item.recommendation);
   return <article className={nested ? "matching-candidate comment-reply" : "matching-candidate"}>
     {editing && !removed ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
       onPosted={onChanged} onCancel={onCancel} /> : <>
+      {outcome && <p className="comment-recommendation">{outcome}</p>}
       <p className={removed ? "proposal-text comment-removed" : "proposal-text"}>
         {removed ? "This comment was removed" : (item.body || item.text || item.content)}
       </p>
       {!removed && <div className="comment-meta">
         <small>{item.authorName || item.authorId} · {formatInstant(item.createdAt)}{item.editedAt ? " · Edited" : ""}</small>
         {role && <span className={`role-chip ${roleChip(item.authorRole)}`}>{role}</span>}
-        {item.qualifying && item.badge === "evaluator" && <span className="user-role-badge evaluator-badge">Evaluator</span>}
-        {item.qualifying && recommendationLabel(item.recommendation) && <span className="comment-recommendation">{recommendationLabel(item.recommendation)}</span>}
       </div>}
       {error && <p role="alert" className="field-hint">{error}</p>}
       <div className="comment-actions">
