@@ -22,7 +22,12 @@ vi.mock("../../src/components/ProposalList.jsx", () => ({ ProposalList: () => nu
 vi.mock("../../src/lib/postings.js", () => ({
   POSTING_STATUS_DRAFT: "draft",
   deletePosting: vi.fn(),
+  findPosting: vi.fn(),
   listOwnPostings: vi.fn(),
+}));
+vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
+  RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
+  RelatedAuditReceiptPane: () => null,
 }));
 
 import { AdminAudit } from "../../src/components/RoleViews.jsx";

@@ -5,7 +5,8 @@ import { collection, getDocs, limit, orderBy, query, startAfter, where } from "f
 import { db } from "../lib/firebase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Modal } from "./Modal.jsx";
-import { POSTING_STATUS_DRAFT, deletePosting, listOwnPostings } from "../lib/postings.js";
+import { POSTING_STATUS_DRAFT, deletePosting, findPosting, listOwnPostings } from "../lib/postings.js";
+import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
@@ -377,7 +378,9 @@ export function AdminAudit() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [filterType, setFilterType] = useState("all");
+  const [relatedAudit, setRelatedAudit] = useState(null);
   const cursorRef = useRef(null);
+  const relatedAuditRequest = useRef(0);
   const PAGE_SIZE = AUDIT_PAGE_SIZE;
 
   const fetchAudits = async ({ append = false } = {}) => {
@@ -414,8 +417,34 @@ export function AdminAudit() {
   };
 
   useEffect(() => {
+    relatedAuditRequest.current += 1;
+    setRelatedAudit(null);
     fetchAudits();
   }, [user?.id, filterType]);
+
+  const openListingAudit = async (id) => {
+    if (!id) return;
+    const request = ++relatedAuditRequest.current;
+    setRelatedAudit({ kind: RELATED_AUDIT_KIND.LISTING, loading: true, record: null, error: "" });
+    try {
+      const record = await findPosting(id);
+      if (request !== relatedAuditRequest.current) return;
+      setRelatedAudit({
+        kind: RELATED_AUDIT_KIND.LISTING,
+        loading: false,
+        record,
+        error: record ? "" : "This listing is no longer available, so its verification receipt cannot be opened.",
+      });
+    } catch (err) {
+      if (request !== relatedAuditRequest.current) return;
+      setRelatedAudit({
+        kind: RELATED_AUDIT_KIND.LISTING,
+        loading: false,
+        record: null,
+        error: err?.message || "The audit receipt could not be loaded. Try again.",
+      });
+    }
+  };
 
   return (
     <div className="card-table">
@@ -490,6 +519,16 @@ export function AdminAudit() {
                           <>
                             {item.reason && <div className="table-row-meta">Lapse reason: {expiryReasonLabel(item.reason)}.</div>}
                             {item.targetId && <div className="table-row-meta">Reference: <code>problems/{item.targetId}</code></div>}
+                            {(item.targetId || item.target) && (
+                              <button
+                                type="button"
+                                className="text-button"
+                                disabled={relatedAudit?.loading}
+                                onClick={() => openListingAudit(item.targetId || item.target)}
+                              >
+                                {relatedAudit?.loading ? "Loading receipt…" : "View receipt"}
+                              </button>
+                            )}
                           </>
                         ) : (
                           item.reason && <div className="table-row-meta">{item.reason}</div>
@@ -510,6 +549,15 @@ export function AdminAudit() {
           </div>
         )}
         </>
+      )}
+      {relatedAudit && (
+        <RelatedAuditReceiptPane
+          kind={relatedAudit.kind}
+          record={relatedAudit.record}
+          loading={relatedAudit.loading}
+          error={relatedAudit.error}
+          onClose={() => { relatedAuditRequest.current += 1; setRelatedAudit(null); }}
+        />
       )}
     </div>
   );
