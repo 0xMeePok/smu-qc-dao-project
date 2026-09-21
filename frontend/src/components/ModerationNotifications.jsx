@@ -39,19 +39,35 @@ function MarkAllReadButton({ unread, busy, onMarkAllRead }) {
   return <button type="button" className="secondary" disabled={Boolean(busy)} onClick={onMarkAllRead}>Mark all read</button>;
 }
 
+const RECORD_TARGET = /^(posting|proposal)\/[A-Za-z0-9_-]{1,128}$/;
+function recordTarget(item) {
+  return RECORD_TARGET.test(item?.navigationTarget || "") ? item.navigationTarget : null;
+}
+function recordLabel(item, target) {
+  if (item.kind === "matching") return "View matching status";
+  return target.startsWith("proposal/") ? "View proposal" : "View posting";
+}
+
 function NotificationFeed({ items, error, busy, onMarkRead, onNavigate }) {
+  const openRecord = (target) => { onNavigate?.(); go(target); };
   return <>
     {error && <p role="alert" className="error-banner">{error}</p>}
-    {items.length ? items.map((item) => <div className={`table-row${item.read ? "" : " is-unread"}`} key={item.id}>
-      <div>
+    {items.length ? items.map((item) => {
+      const target = recordTarget(item);
+      const body = <>
         <strong>{item.message || "A moderation decision was recorded on your content."}</strong>
         <p>{item.reason?.replaceAll("_", " ")}</p>
         {item.details && <p>{item.details}</p>}
         <small>{item.contentType} · {item.contentId} · {formatInstant(item.createdAt)}</small>
-        {item.navigationTarget && /^posting\/[A-Za-z0-9_-]+$/.test(item.navigationTarget) && <button type="button" className="text-button" onClick={() => { onNavigate?.(); go(item.navigationTarget); }}>View matching status</button>}
-      </div>
-      {!item.read && <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => onMarkRead(item.id)}>Mark read</button>}
-    </div>) : <p className="table-empty">No content notices.</p>}
+        {target && <span className="notification-record-action">{recordLabel(item, target)}</span>}
+      </>;
+      return <div className={`table-row${item.read ? "" : " is-unread"}`} key={item.id}>
+        {target
+          ? <button type="button" className="notification-record" onClick={() => openRecord(target)}>{body}</button>
+          : <div>{body}</div>}
+        {!item.read && <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => onMarkRead(item.id)}>Mark read</button>}
+      </div>;
+    }) : <p className="table-empty">No content notices.</p>}
   </>;
 }
 

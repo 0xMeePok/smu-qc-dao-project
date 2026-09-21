@@ -22,6 +22,16 @@ const serialise = (value) => {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, serialise(item)]));
   return value;
 };
+const RECORD_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const RECORD_TARGET = /^(posting|proposal)\/[A-Za-z0-9_-]{1,128}$/;
+export function notificationNavigationTarget(data = {}) {
+  if (RECORD_TARGET.test(data.navigationTarget || "")) return data.navigationTarget;
+  const proposalId = data.proposalId || (data.contentType === "proposal" ? data.contentId : "");
+  const problemId = data.problemId || (data.contentType === "problem" ? data.contentId : "");
+  if ((data.contentType === "proposal" || data.contentType === "comment") && RECORD_ID.test(proposalId)) return `proposal/${proposalId}`;
+  if (RECORD_ID.test(problemId)) return `posting/${problemId}`;
+  return null;
+}
 function validateContent(contentType, contentId) {
   if (!Object.hasOwn(TYPES, contentType) || typeof contentId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(contentId)) fail("invalid-argument", "Choose a valid content item.");
   return `${contentType}_${contentId}`;
@@ -284,10 +294,17 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
       previousVisibility: data.moderationStatus || "visible", visibility: action === "restore" ? "visible" : ACTION_STATUS[action],
       createdAt: now, sequence, chainStatus: "pending", eventVersion: 1, settlement: settlement?.summary || null,
     });
-    if (authorId) tx.set(db.collection("moderationNotifications").doc(`${eventId}_${authorId}`), {
-      recipientId: authorId, queueId, contentType, contentId, title: String(data.title || "Your comment").slice(0, 160),
-      action, reason, details: note, createdAt: now, readAt: null,
-    });
+    if (authorId) {
+      const proposalId = contentType === "proposal" ? contentId : data.proposalId || null;
+      const problemId = contentType === "problem" ? contentId : data.problemId || null;
+      const navigationTarget = notificationNavigationTarget({ contentType, contentId, proposalId, problemId });
+      tx.set(db.collection("moderationNotifications").doc(`${eventId}_${authorId}`), {
+        recipientId: authorId, queueId, contentType, contentId, title: String(data.title || "Your comment").slice(0, 160),
+        action, reason, details: note, createdAt: now, readAt: null,
+        ...(problemId ? { problemId } : {}), ...(proposalId ? { proposalId } : {}),
+        ...(navigationTarget ? { navigationTarget, link: `#/${navigationTarget}` } : {}),
+      });
+    }
     return { ok: true, eventId, status: ACTION_STATUS[action] };
   });
 }
@@ -299,6 +316,7 @@ export async function listModerationNotifications({ db, uid }) {
     return { items: rows.docs.map((doc) => {
       const data = doc.data();
       return { id: doc.id, ...serialise(data), read: Boolean(data.readAt),
+        navigationTarget: notificationNavigationTarget(data),
         message: data.message || `Your ${data.contentType} “${data.title}” was ${data.action === "hide" ? "hidden" : data.action === "remove" ? "removed" : "restored"} by a moderator.` };
     }), truncated: rows.size === 50 };
   });
