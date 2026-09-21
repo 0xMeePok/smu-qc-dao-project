@@ -4,8 +4,8 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { prepareModerationMatching } from "./matching.js";
 import { prepareCommentEvaluationGate } from "./comments.js";
 import { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
-  listModerationNotifications, markModerationNotificationRead, flagSubmittedContent, listReportableComments,
-  syncProposalParentVisibility, syncProblemProposalsBrowsable } from "./moderation.js";
+  listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, flagSubmittedContent, listReportableComments,
+  notifyProposalReceived, syncProposalParentVisibility, syncProblemProposalsBrowsable } from "./moderation.js";
 
 /** Keep moderation transport separate while reusing the application's session checks. */
 export function registerModerationCallables({ db, requireMember, requireAdmin, options, region }) {
@@ -23,7 +23,14 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
       if (!event.data?.after?.exists) return null;
       const contentId = event.params.contentId;
       const flagged = await flagSubmittedContent({ db, contentType, contentId });
-      if (contentType === "proposal") await syncProposalParentVisibility({ db, proposalId: contentId });
+      if (contentType === "proposal") {
+        await notifyProposalReceived({
+          db, proposalId: contentId,
+          before: event.data.before?.exists ? event.data.before.data() : null,
+          after: event.data.after.data(),
+        });
+        await syncProposalParentVisibility({ db, proposalId: contentId });
+      }
       if (contentType === "problem") await syncProblemProposalsBrowsable({ db, problemId: contentId });
       return flagged;
     },
@@ -37,6 +44,7 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
     })),
     listModerationNotifications: member(listModerationNotifications),
     markModerationNotificationRead: member(markModerationNotificationRead),
+    markAllModerationNotificationsRead: member(markAllModerationNotificationsRead),
     listReportableComments: member(listReportableComments),
     screenProblemContent: screening("problem", "problems"),
     screenProposalContent: screening("proposal", "proposals"),

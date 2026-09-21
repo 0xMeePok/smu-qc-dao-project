@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { writeMemberNotice } from "./moderation.js";
 
 const PAGE_SIZE = 100;
 const JOBS = "matchingNotificationJobs";
@@ -124,6 +125,38 @@ export async function resumeMatchingNotifications({ db, now = Timestamp.now() })
   return { processed: jobs.size, delivered };
 }
 
+const NEARING_MS = 24 * 60 * 60 * 1000;
+
+export async function remindNearingApprovalWindows({ db, now = Timestamp.now() }) {
+  const horizon = Timestamp.fromMillis(now.toMillis() + NEARING_MS);
+  const rows = await db.collection("problems").where("matching.deadlineAt", "<=", horizon).limit(100).get();
+  let notified = 0;
+  for (const doc of rows.docs) {
+    const problem = doc.data();
+    const matching = problem.matching || {};
+    const deadlineMs = matching.deadlineAt?.toMillis?.() ?? 0;
+    if (matching.status !== "awaiting_confirmation" || deadlineMs <= now.toMillis()) continue;
+    const proposalId = matching.proposalId || null;
+    const selectionId = matching.selectionId || proposalId;
+    if (!selectionId) continue;
+    const selected = proposalId ? await db.collection("proposals").doc(proposalId).get() : null;
+    const recipients = [...new Set([problem.ownerId, selected?.data()?.researcherId].filter(Boolean))];
+    const title = String(problem.title || "Posting").slice(0, 160);
+    const date = matching.deadlineAt?.toDate?.();
+    const when = date ? date.toISOString().replace("T", " ").replace(".000Z", " UTC") : "soon";
+    for (const uid of recipients) {
+      const written = await writeMemberNotice({
+        db, now, createdAt: now, id: idFor(`nearing:${selectionId}`, uid), recipientId: uid,
+        kind: "approval_nearing_expiry", contentType: "problem", contentId: doc.id,
+        problemId: doc.id, proposalId, title,
+        message: `The acceptance window for “${title}” closes at ${when}. Confirm or reject before it expires.`,
+      });
+      if (written.written) notified += 1;
+    }
+  }
+  return { notified };
+}
+
 export function registerMatchingNotificationFunctions({ db, region }) {
   return {
     notifyMatchingEvent: onDocumentCreated({ document: "matchingEvents/{eventId}", region, maxInstances: 3, retry: true }, async event => {
@@ -132,5 +165,7 @@ export function registerMatchingNotificationFunctions({ db, region }) {
     }),
     resumeMatchingNotificationDelivery: onSchedule({ schedule: "every 1 minutes", region, maxInstances: 1, retryCount: 3 },
       () => resumeMatchingNotifications({ db })),
+    remindNearingApprovalWindows: onSchedule({ schedule: "every 5 minutes", region, maxInstances: 1, retryCount: 3 },
+      () => remindNearingApprovalWindows({ db })),
   };
 }

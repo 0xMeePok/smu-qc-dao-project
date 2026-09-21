@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
-import { canReadContent } from "./moderation.js";
+import { canReadContent, memberNoticeFields } from "./moderation.js";
 
 export const ROLE_EVALUATOR = 2;
 export const ROLE_ADMIN = 1;
@@ -123,15 +123,104 @@ async function evaluationGateReads(tx, db, { proposalId, commentId, qualifying }
     complete: rows.docs.some((doc) => doc.id !== commentId) };
 }
 
-function applyEvaluationComplete(tx, proposal, { complete, now }) {
-  if (!proposal?.exists) return;
-  const matching = { ...(proposal.data().matching || {}) };
+function nextEvaluationComplete(proposal, complete) {
+  if (!proposal?.exists) return null;
+  const matching = proposal.data().matching || {};
   const evaluationComplete = complete || isMockEvaluation(matching);
-  if (evaluationComplete === (matching.evaluationComplete === true)) return;
+  if (evaluationComplete === (matching.evaluationComplete === true)) return null;
+  return evaluationComplete;
+}
+
+function applyEvaluationComplete(tx, proposal, { complete, now }) {
+  const evaluationComplete = nextEvaluationComplete(proposal, complete);
+  if (evaluationComplete == null) return;
+  const matching = { ...(proposal.data().matching || {}) };
   matching.evaluationComplete = evaluationComplete;
   matching.evaluationCompletedAt = evaluationComplete ? (matching.evaluationCompletedAt || now) : null;
   matching.updatedAt = now;
   tx.update(proposal.ref, { matching });
+}
+
+const RECOMMENDATION_LABEL = {
+  recommend: "Recommend",
+  recommend_with_revisions: "Recommend with revisions",
+  do_not_recommend: "Do not recommend",
+};
+
+async function workflowNoticeRecipients(tx, db, proposal, { exclude } = {}) {
+  if (!proposal?.exists) return [];
+  const data = proposal.data();
+  let ownerId = data.postingOwnerId || "";
+  if (data.problemId) {
+    const problem = await tx.get(db.collection("problems").doc(data.problemId));
+    if (problem.exists) ownerId = problem.data().ownerId || ownerId;
+  }
+  const skip = exclude ? String(exclude).toLowerCase() : "";
+  return [...new Set([ownerId, data.researcherId].filter(Boolean).map((id) => String(id).toLowerCase()).filter((id) => id !== skip))];
+}
+
+async function queueCommentNotices(tx, db, { id, recipients, record, proposal, now, kind, message }) {
+  if (!recipients.length || !proposal?.exists) return [];
+  const data = proposal.data();
+  const existing = await Promise.all(recipients.map((uid) => tx.get(db.collection("moderationNotifications").doc(`${id}_${uid}`))));
+  const title = String(data.title || "Proposal").slice(0, 160);
+  return existing.map((snap, i) => ({
+    snap,
+    payload: memberNoticeFields({
+      recipientId: recipients[i], now, createdAt: record?.createdAt || now, kind,
+      contentType: "comment", contentId: record?.id || record?.commentId, proposalId: data.problemId ? proposal.id : record?.proposalId,
+      problemId: record?.problemId || data.problemId, title, message: message(title),
+    }),
+  }));
+}
+
+async function queueQualifyingNotices(tx, db, { commentId, record, proposal, now }) {
+  if (!record.qualifying) return [];
+  const recipients = await workflowNoticeRecipients(tx, db, proposal, { exclude: record.authorId });
+  const outcome = RECOMMENDATION_LABEL[record.recommendation] || "a recommendation";
+  return queueCommentNotices(tx, db, {
+    id: `qualifying_${commentId}`, recipients, record: { ...record, commentId }, proposal, now,
+    kind: "qualifying_recommendation",
+    message: (title) => `An evaluator submitted a qualifying recommendation on “${title}”: ${outcome}.`,
+  });
+}
+
+async function queueQualifyingRemovedNotices(tx, db, { commentId, record, proposal, now }) {
+  if (!record.qualifying) return [];
+  const recipients = await workflowNoticeRecipients(tx, db, proposal, { exclude: record.authorId });
+  return queueCommentNotices(tx, db, {
+    id: `qualifying_removed_${commentId}`, recipients, record: { ...record, commentId }, proposal, now,
+    kind: "qualifying_recommendation_removed",
+    message: (title) => `An evaluator removed a qualifying recommendation from “${title}”.`,
+  });
+}
+
+async function queueEvaluationGateNotices(tx, db, { proposal, complete, now }) {
+  const evaluationComplete = nextEvaluationComplete(proposal, complete);
+  if (evaluationComplete == null) return [];
+  const recipients = await workflowNoticeRecipients(tx, db, proposal);
+  const data = proposal.data();
+  const state = evaluationComplete ? "closed" : "opened";
+  const existing = await Promise.all(recipients.map((uid) =>
+    tx.get(db.collection("moderationNotifications").doc(`gate_${proposal.id}_${state}_${now.toMillis()}_${uid}`))));
+  const title = String(data.title || "Proposal").slice(0, 160);
+  return existing.map((snap, i) => ({
+    snap,
+    payload: memberNoticeFields({
+      recipientId: recipients[i], now, createdAt: now,
+      kind: "evaluation_gate", contentType: "proposal", contentId: proposal.id,
+      proposalId: proposal.id, problemId: data.problemId, title,
+      message: evaluationComplete
+        ? `The evaluator recommendation-comment gate closed on “${title}”.`
+        : `The evaluator recommendation-comment gate opened on “${title}”.`,
+    }),
+  }));
+}
+
+function applyQueuedNotices(tx, queued) {
+  for (const { snap, payload } of queued) {
+    if (!snap.exists) tx.set(snap.ref, payload);
+  }
 }
 
 function authoredComment(tx, db, uid, commentId) {
@@ -191,9 +280,13 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     };
     record.qualifying = commentIsQualifying(record, role);
     const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying });
+    const notices = await queueQualifyingNotices(tx, db, { commentId: ref.id, record, proposal, now });
+    const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     tx.set(ref, record);
     if (parent) tx.update(parent.ref, { replyCount: (parent.data().replyCount || 0) + 1 });
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyQueuedNotices(tx, notices);
+    applyQueuedNotices(tx, gateNotices);
     return view(ref.id, record);
   });
 }
@@ -224,8 +317,14 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
     };
     next.qualifying = commentIsQualifying(next, role);
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: next.qualifying });
+    const notices = next.qualifying && !data.qualifying
+      ? await queueQualifyingNotices(tx, db, { commentId: ref.id, record: next, proposal: gate.proposal, now })
+      : [];
+    const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     tx.set(ref, next);
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyQueuedNotices(tx, notices);
+    applyQueuedNotices(tx, gateNotices);
     return view(ref.id, next);
   });
 }
@@ -238,7 +337,14 @@ export async function prepareCommentEvaluationGate({ tx, db, contentId, data, ac
   const author = data.authorId ? await tx.get(db.collection("users").doc(data.authorId)) : null;
   const qualifying = commentIsQualifying({ ...data, moderationStatus }, accessLevel(author?.data()));
   const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId, qualifying });
-  return { qualifying, apply() { applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now }); } };
+  const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
+  return {
+    qualifying,
+    apply() {
+      applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+      applyQueuedNotices(tx, gateNotices);
+    },
+  };
 }
 
 export async function deleteComment({ db, uid, commentId, now = Timestamp.now() }) {
@@ -256,11 +362,17 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
       revisions: [...(data.revisions || []), revision("delete", data, now)],
     };
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: false });
+    const removedNotices = await queueQualifyingRemovedNotices(tx, db, {
+      commentId: ref.id, record: data, proposal: gate.proposal, now,
+    });
+    const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     tx.set(ref, next);
     if (parent?.exists) {
       tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
     }
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyQueuedNotices(tx, removedNotices);
+    applyQueuedNotices(tx, gateNotices);
     return view(ref.id, next);
   });
 }

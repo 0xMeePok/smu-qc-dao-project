@@ -116,7 +116,7 @@ const NONCE_MAX_INSTANCES = 10;
 // database location. Otherwise every sign-in crosses regions.
 const REGION = "asia-southeast1";
 
-export const { notifyMatchingEvent, resumeMatchingNotificationDelivery } = registerMatchingNotificationFunctions({ db, region: REGION });
+export const { notifyMatchingEvent, resumeMatchingNotificationDelivery, remindNearingApprovalWindows } = registerMatchingNotificationFunctions({ db, region: REGION });
 
 async function syncOpportunityMetrics(event, collectionName, recordId) {
   if (!affectsMetrics(collectionName, event)) return;
@@ -177,7 +177,7 @@ const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
 
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
-  listModerationNotifications, markModerationNotificationRead, listReportableComments,
+  listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, listReportableComments,
   screenProblemContent, screenProposalContent, screenCommentContent } = registerModerationCallables({
   db, requireMember, requireAdmin, options: MEMBER_CALL_OPTIONS, region: REGION,
 });

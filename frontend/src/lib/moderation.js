@@ -19,6 +19,7 @@ export const getModerationContext = (queueId) => call("getModerationContext", { 
 export const moderateContent = (payload) => call("moderateContent", payload);
 export const listModerationNotifications = () => call("listModerationNotifications");
 export const markModerationNotificationRead = (notificationId) => call("markModerationNotificationRead", { notificationId });
+export const markAllModerationNotificationsRead = () => call("markAllModerationNotificationsRead");
 export const listReportableComments = (payload) => call("listReportableComments", payload);
 
 export function moderationError(error) {

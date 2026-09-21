@@ -10,6 +10,7 @@ import { useSession } from "./context/SessionContext.jsx";
 import { shortenAddress } from "./lib/chain.js";
 import { isAdmin, isAssignedEvaluator } from "./lib/roles.js";
 import { ResponsiveHeader } from "./components/ResponsiveHeader.jsx";
+import { NotificationCentre } from "./components/ModerationNotifications.jsx";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
 import { AccessDenied } from "./components/AccessDenied.jsx";
@@ -189,6 +190,7 @@ function AccountControls() {
     const isDaoAdmin = isAdmin(profile?.role) || hasRole(ROLES.ADMIN);
     return (
       <div className="account-controls">
+        <NotificationCentre userId={address} />
         <div className="user-session-pill">
           <div className="user-session-info">
             <button className="user-name account-profile-link" type="button" onClick={() => go("profile")}>
