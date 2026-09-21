@@ -177,7 +177,7 @@ describe("[QCDAO-68] receive in-platform notifications for workflow events", () 
       status: "awaiting_confirmation",
       proposalId: "a",
       selectionId: "sel1",
-      deadlineAt: later(12 * HOUR),
+      deadlineAt: later(6 * HOUR),
     };
     const first = await remindNearingApprovalWindows({ db, now });
     assert.equal(first.notified, 2);

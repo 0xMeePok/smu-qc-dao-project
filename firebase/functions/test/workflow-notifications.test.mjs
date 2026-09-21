@@ -1,23 +1,22 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { memoryDb } from "../functions/test/memoryDb.mjs";
-import { createComment, deleteComment } from "../functions/comments.js";
+import { Timestamp } from "firebase-admin/firestore";
+import { memoryDb } from "./memoryDb.mjs";
+import { createComment, deleteComment } from "../comments.js";
 import {
   listModerationNotifications,
   markAllModerationNotificationsRead,
   notificationNavigationTarget,
   notifyProposalReceived,
-} from "../functions/moderation.js";
-import { remindNearingApprovalWindows } from "../functions/matchingNotifications.js";
+} from "../moderation.js";
+import { remindNearingApprovalWindows } from "../matchingNotifications.js";
 
 /** QCDAO-68 - receive in-platform notifications for workflow events. */
 
-const require = createRequire(new URL("../functions/package.json", import.meta.url));
-const { Timestamp } = require("firebase-admin/firestore");
 const now = Timestamp.fromMillis(1_800_000_000_000);
 const later = (ms) => Timestamp.fromMillis(now.toMillis() + ms);
 const HOUR = 60 * 60 * 1000;
+const WITHIN_NEARING_WINDOW = 6 * HOUR;
 
 function fixture(extra = {}) {
   return memoryDb({
@@ -93,7 +92,7 @@ describe("[QCDAO-68] receive in-platform notifications for workflow events", () 
       status: "awaiting_confirmation",
       proposalId: "a",
       selectionId: "sel1",
-      deadlineAt: later(12 * HOUR),
+      deadlineAt: later(WITHIN_NEARING_WINDOW),
     };
     await notifyProposalReceived({
       db, proposalId: "a", now, before: { status: "draft" }, after: db.records.get("proposals/a"),
@@ -180,7 +179,7 @@ describe("[QCDAO-68] receive in-platform notifications for workflow events", () 
       status: "awaiting_confirmation",
       proposalId: "a",
       selectionId: "sel1",
-      deadlineAt: later(12 * HOUR),
+      deadlineAt: later(WITHIN_NEARING_WINDOW),
     };
     const first = await remindNearingApprovalWindows({ db, now });
     assert.equal(first.notified, 2);

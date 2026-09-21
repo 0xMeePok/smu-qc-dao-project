@@ -136,7 +136,7 @@ describe("[QCDAO-68] receive in-platform notifications for workflow events", () 
       status: "awaiting_confirmation",
       proposalId: "a",
       selectionId: "sel1",
-      deadlineAt: later(12 * HOUR),
+      deadlineAt: later(6 * HOUR),
     };
     await notifyProposalReceived({
       db, proposalId: "a", now, before: { status: "draft" }, after: db.records.get("proposals/a"),
@@ -222,7 +222,7 @@ describe("[QCDAO-68] receive in-platform notifications for workflow events", () 
       status: "awaiting_confirmation",
       proposalId: "a",
       selectionId: "sel1",
-      deadlineAt: later(12 * HOUR),
+      deadlineAt: later(6 * HOUR),
     };
     assert.equal((await remindNearingApprovalWindows({ db, now })).notified, 2);
     const owner = noticeFeedView(await listFor(db, "owner"));
