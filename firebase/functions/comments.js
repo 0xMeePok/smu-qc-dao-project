@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
-import { canReadContent } from "./moderation.js";
+import { canReadContent, memberNoticeFields } from "./moderation.js";
 
 export const ROLE_EVALUATOR = 2;
 export const ROLE_ADMIN = 1;
@@ -134,6 +134,36 @@ function applyEvaluationComplete(tx, proposal, { complete, now }) {
   tx.update(proposal.ref, { matching });
 }
 
+const RECOMMENDATION_LABEL = {
+  recommend: "Recommend",
+  recommend_with_revisions: "Recommend with revisions",
+  do_not_recommend: "Do not recommend",
+};
+
+async function queueQualifyingNotices(tx, db, { commentId, record, proposal, now }) {
+  if (!record.qualifying || !proposal?.exists) return [];
+  const data = proposal.data();
+  const recipients = [...new Set([data.postingOwnerId, data.researcherId].filter((uid) => uid && uid !== record.authorId))];
+  const existing = await Promise.all(recipients.map((uid) => tx.get(db.collection("moderationNotifications").doc(`qualifying_${commentId}_${uid}`))));
+  const title = String(data.title || "Proposal").slice(0, 160);
+  const outcome = RECOMMENDATION_LABEL[record.recommendation] || "a recommendation";
+  return existing.map((snap, i) => ({
+    snap,
+    payload: memberNoticeFields({
+      recipientId: recipients[i], now, createdAt: record.createdAt || now,
+      kind: "qualifying_recommendation", contentType: "comment", contentId: commentId,
+      proposalId: record.proposalId, problemId: record.problemId, title,
+      message: `An evaluator submitted a qualifying recommendation on “${title}”: ${outcome}.`,
+    }),
+  }));
+}
+
+function applyQualifyingNotices(tx, queued) {
+  for (const { snap, payload } of queued) {
+    if (!snap.exists) tx.set(snap.ref, payload);
+  }
+}
+
 function authoredComment(tx, db, uid, commentId) {
   validId(commentId, "comment");
   const ref = db.collection("comments").doc(commentId);
@@ -191,9 +221,11 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     };
     record.qualifying = commentIsQualifying(record, role);
     const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying });
+    const notices = await queueQualifyingNotices(tx, db, { commentId: ref.id, record, proposal, now });
     tx.set(ref, record);
     if (parent) tx.update(parent.ref, { replyCount: (parent.data().replyCount || 0) + 1 });
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyQualifyingNotices(tx, notices);
     return view(ref.id, record);
   });
 }
@@ -224,8 +256,12 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
     };
     next.qualifying = commentIsQualifying(next, role);
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: next.qualifying });
+    const notices = next.qualifying && !data.qualifying
+      ? await queueQualifyingNotices(tx, db, { commentId: ref.id, record: next, proposal: gate.proposal, now })
+      : [];
     tx.set(ref, next);
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyQualifyingNotices(tx, notices);
     return view(ref.id, next);
   });
 }

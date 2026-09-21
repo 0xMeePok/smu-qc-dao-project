@@ -32,6 +32,38 @@ export function notificationNavigationTarget(data = {}) {
   if (RECORD_ID.test(problemId)) return `posting/${problemId}`;
   return null;
 }
+export function memberNoticeFields({ recipientId, now, createdAt, ...fields }) {
+  const navigationTarget = notificationNavigationTarget(fields);
+  return {
+    recipientId, kind: fields.kind || null, contentType: fields.contentType || null, contentId: fields.contentId || null,
+    title: String(fields.title || "").slice(0, 160), message: fields.message,
+    problemId: fields.problemId || null, proposalId: fields.proposalId || null,
+    navigationTarget, link: navigationTarget ? `#/${navigationTarget}` : null,
+    createdAt: createdAt || now, deliveredAt: now, readAt: null,
+  };
+}
+export async function writeMemberNotice({ db, id, recipientId, now = Timestamp.now(), createdAt, ...fields }) {
+  if (!recipientId || typeof id !== "string") return { written: false };
+  const ref = db.collection("moderationNotifications").doc(id);
+  return db.runTransaction(async (tx) => {
+    if ((await tx.get(ref)).exists) return { written: false };
+    tx.set(ref, memberNoticeFields({ recipientId, now, createdAt, ...fields }));
+    return { written: true };
+  });
+}
+export async function notifyProposalReceived({ db, proposalId, before, after, now = Timestamp.now() }) {
+  if (!after || after.status !== "submitted") return { written: false };
+  if (before?.status && before.status !== "draft") return { written: false };
+  const recipientId = after.postingOwnerId;
+  if (!recipientId) return { written: false };
+  const title = String(after.title || "Proposal").slice(0, 160);
+  return writeMemberNotice({
+    db, now, createdAt: after.createdAt || now, id: `received_${proposalId}`, recipientId,
+    kind: "proposal_received", contentType: "proposal", contentId: proposalId, proposalId,
+    problemId: after.problemId || null, title,
+    message: `A new proposal “${title}” was submitted on your posting.`,
+  });
+}
 function validateContent(contentType, contentId) {
   if (!Object.hasOwn(TYPES, contentType) || typeof contentId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(contentId)) fail("invalid-argument", "Choose a valid content item.");
   return `${contentType}_${contentId}`;
