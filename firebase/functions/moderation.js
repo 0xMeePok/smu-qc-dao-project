@@ -313,6 +313,19 @@ export async function markModerationNotificationRead({ db, uid, notificationId, 
     return { ok: true };
   });
 }
+export async function markAllModerationNotificationsRead({ db, uid, now = Timestamp.now() }) {
+  return db.runTransaction(async (tx) => {
+    await activeProfile(tx, db, uid);
+    const rows = await tx.get(db.collection("moderationNotifications").where("recipientId", "==", uid).orderBy("createdAt", "desc").limit(PAGE_SIZE));
+    let updated = 0;
+    for (const doc of rows.docs) {
+      if (doc.data().readAt) continue;
+      tx.update(doc.ref, { readAt: now });
+      updated += 1;
+    }
+    return { ok: true, updated };
+  });
+}
 
 function commentVisible(data, { uid, profile, proposalScoped }) {
   if (!(proposalScoped || !data.proposalId) || !isPublished("comment", data)) return false;

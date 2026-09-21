@@ -3423,6 +3423,18 @@ footer > p { margin: 0 auto 0 0; }
   overflow: hidden;
   padding: 0;
 }
+.notification-centre-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 8px;
+}
+.notification-centre-heading .secondary {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
 .notification-centre-feed {
   max-height: min(60vh, 440px);
   overflow-y: auto;

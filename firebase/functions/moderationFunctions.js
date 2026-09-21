@@ -4,7 +4,7 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { prepareModerationMatching } from "./matching.js";
 import { prepareCommentEvaluationGate } from "./comments.js";
 import { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
-  listModerationNotifications, markModerationNotificationRead, flagSubmittedContent, listReportableComments,
+  listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, flagSubmittedContent, listReportableComments,
   syncProposalParentVisibility, syncProblemProposalsBrowsable } from "./moderation.js";
 
 /** Keep moderation transport separate while reusing the application's session checks. */
@@ -37,6 +37,7 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
     })),
     listModerationNotifications: member(listModerationNotifications),
     markModerationNotificationRead: member(markModerationNotificationRead),
+    markAllModerationNotificationsRead: member(markAllModerationNotificationsRead),
     listReportableComments: member(listReportableComments),
     screenProblemContent: screening("problem", "problems"),
     screenProposalContent: screening("proposal", "proposals"),

@@ -177,7 +177,7 @@ const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
 
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
-  listModerationNotifications, markModerationNotificationRead, listReportableComments,
+  listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, listReportableComments,
   screenProblemContent, screenProposalContent, screenCommentContent } = registerModerationCallables({
   db, requireMember, requireAdmin, options: MEMBER_CALL_OPTIONS, region: REGION,
 });
