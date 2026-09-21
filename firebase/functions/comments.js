@@ -123,11 +123,18 @@ async function evaluationGateReads(tx, db, { proposalId, commentId, qualifying }
     complete: rows.docs.some((doc) => doc.id !== commentId) };
 }
 
-function applyEvaluationComplete(tx, proposal, { complete, now }) {
-  if (!proposal?.exists) return;
-  const matching = { ...(proposal.data().matching || {}) };
+function nextEvaluationComplete(proposal, complete) {
+  if (!proposal?.exists) return null;
+  const matching = proposal.data().matching || {};
   const evaluationComplete = complete || isMockEvaluation(matching);
-  if (evaluationComplete === (matching.evaluationComplete === true)) return;
+  if (evaluationComplete === (matching.evaluationComplete === true)) return null;
+  return evaluationComplete;
+}
+
+function applyEvaluationComplete(tx, proposal, { complete, now }) {
+  const evaluationComplete = nextEvaluationComplete(proposal, complete);
+  if (evaluationComplete == null) return;
+  const matching = { ...(proposal.data().matching || {}) };
   matching.evaluationComplete = evaluationComplete;
   matching.evaluationCompletedAt = evaluationComplete ? (matching.evaluationCompletedAt || now) : null;
   matching.updatedAt = now;
@@ -158,7 +165,29 @@ async function queueQualifyingNotices(tx, db, { commentId, record, proposal, now
   }));
 }
 
-function applyQualifyingNotices(tx, queued) {
+async function queueEvaluationGateNotices(tx, db, { proposal, complete, now }) {
+  const evaluationComplete = nextEvaluationComplete(proposal, complete);
+  if (evaluationComplete == null) return [];
+  const data = proposal.data();
+  const recipients = [...new Set([data.postingOwnerId, data.researcherId].filter(Boolean))];
+  const state = evaluationComplete ? "closed" : "opened";
+  const existing = await Promise.all(recipients.map((uid) =>
+    tx.get(db.collection("moderationNotifications").doc(`gate_${proposal.id}_${state}_${now.toMillis()}_${uid}`))));
+  const title = String(data.title || "Proposal").slice(0, 160);
+  return existing.map((snap, i) => ({
+    snap,
+    payload: memberNoticeFields({
+      recipientId: recipients[i], now, createdAt: now,
+      kind: "evaluation_gate", contentType: "proposal", contentId: proposal.id,
+      proposalId: proposal.id, problemId: data.problemId, title,
+      message: evaluationComplete
+        ? `The evaluator recommendation-comment gate closed on “${title}”.`
+        : `The evaluator recommendation-comment gate opened on “${title}”.`,
+    }),
+  }));
+}
+
+function applyQueuedNotices(tx, queued) {
   for (const { snap, payload } of queued) {
     if (!snap.exists) tx.set(snap.ref, payload);
   }
@@ -222,10 +251,12 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     record.qualifying = commentIsQualifying(record, role);
     const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying });
     const notices = await queueQualifyingNotices(tx, db, { commentId: ref.id, record, proposal, now });
+    const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     tx.set(ref, record);
     if (parent) tx.update(parent.ref, { replyCount: (parent.data().replyCount || 0) + 1 });
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
-    applyQualifyingNotices(tx, notices);
+    applyQueuedNotices(tx, notices);
+    applyQueuedNotices(tx, gateNotices);
     return view(ref.id, record);
   });
 }
@@ -259,9 +290,11 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
     const notices = next.qualifying && !data.qualifying
       ? await queueQualifyingNotices(tx, db, { commentId: ref.id, record: next, proposal: gate.proposal, now })
       : [];
+    const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     tx.set(ref, next);
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
-    applyQualifyingNotices(tx, notices);
+    applyQueuedNotices(tx, notices);
+    applyQueuedNotices(tx, gateNotices);
     return view(ref.id, next);
   });
 }
@@ -274,7 +307,14 @@ export async function prepareCommentEvaluationGate({ tx, db, contentId, data, ac
   const author = data.authorId ? await tx.get(db.collection("users").doc(data.authorId)) : null;
   const qualifying = commentIsQualifying({ ...data, moderationStatus }, accessLevel(author?.data()));
   const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId, qualifying });
-  return { qualifying, apply() { applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now }); } };
+  const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
+  return {
+    qualifying,
+    apply() {
+      applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+      applyQueuedNotices(tx, gateNotices);
+    },
+  };
 }
 
 export async function deleteComment({ db, uid, commentId, now = Timestamp.now() }) {
@@ -292,11 +332,13 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
       revisions: [...(data.revisions || []), revision("delete", data, now)],
     };
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: false });
+    const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     tx.set(ref, next);
     if (parent?.exists) {
       tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
     }
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyQueuedNotices(tx, gateNotices);
     return view(ref.id, next);
   });
 }

@@ -44,7 +44,7 @@ function recordTarget(item) {
   return RECORD_TARGET.test(item?.navigationTarget || "") ? item.navigationTarget : null;
 }
 function recordLabel(item, target) {
-  if (item.kind === "matching") return "View matching status";
+  if (item.kind === "matching" || item.kind === "approval_nearing_expiry") return "View matching status";
   return target.startsWith("proposal/") ? "View proposal" : "View posting";
 }
 
