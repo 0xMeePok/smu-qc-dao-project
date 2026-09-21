@@ -35,7 +35,7 @@ export function notificationNavigationTarget(data = {}) {
 export function memberNoticeFields({ recipientId, now, createdAt, ...fields }) {
   const navigationTarget = notificationNavigationTarget(fields);
   return {
-    recipientId, kind: fields.kind || null, contentType: fields.contentType || null, contentId: fields.contentId || null,
+    recipientId: String(recipientId).toLowerCase(), kind: fields.kind || null, contentType: fields.contentType || null, contentId: fields.contentId || null,
     title: String(fields.title || "").slice(0, 160), message: fields.message,
     problemId: fields.problemId || null, proposalId: fields.proposalId || null,
     navigationTarget, link: navigationTarget ? `#/${navigationTarget}` : null,

@@ -147,29 +147,59 @@ const RECOMMENDATION_LABEL = {
   do_not_recommend: "Do not recommend",
 };
 
-async function queueQualifyingNotices(tx, db, { commentId, record, proposal, now }) {
-  if (!record.qualifying || !proposal?.exists) return [];
+async function workflowNoticeRecipients(tx, db, proposal, { exclude } = {}) {
+  if (!proposal?.exists) return [];
   const data = proposal.data();
-  const recipients = [...new Set([data.postingOwnerId, data.researcherId].filter((uid) => uid && uid !== record.authorId))];
-  const existing = await Promise.all(recipients.map((uid) => tx.get(db.collection("moderationNotifications").doc(`qualifying_${commentId}_${uid}`))));
+  let ownerId = data.postingOwnerId || "";
+  if (data.problemId) {
+    const problem = await tx.get(db.collection("problems").doc(data.problemId));
+    if (problem.exists) ownerId = problem.data().ownerId || ownerId;
+  }
+  const skip = exclude ? String(exclude).toLowerCase() : "";
+  return [...new Set([ownerId, data.researcherId].filter(Boolean).map((id) => String(id).toLowerCase()).filter((id) => id !== skip))];
+}
+
+async function queueCommentNotices(tx, db, { id, recipients, record, proposal, now, kind, message }) {
+  if (!recipients.length || !proposal?.exists) return [];
+  const data = proposal.data();
+  const existing = await Promise.all(recipients.map((uid) => tx.get(db.collection("moderationNotifications").doc(`${id}_${uid}`))));
   const title = String(data.title || "Proposal").slice(0, 160);
-  const outcome = RECOMMENDATION_LABEL[record.recommendation] || "a recommendation";
   return existing.map((snap, i) => ({
     snap,
     payload: memberNoticeFields({
-      recipientId: recipients[i], now, createdAt: record.createdAt || now,
-      kind: "qualifying_recommendation", contentType: "comment", contentId: commentId,
-      proposalId: record.proposalId, problemId: record.problemId, title,
-      message: `An evaluator submitted a qualifying recommendation on “${title}”: ${outcome}.`,
+      recipientId: recipients[i], now, createdAt: record?.createdAt || now, kind,
+      contentType: "comment", contentId: record?.id || record?.commentId, proposalId: data.problemId ? proposal.id : record?.proposalId,
+      problemId: record?.problemId || data.problemId, title, message: message(title),
     }),
   }));
+}
+
+async function queueQualifyingNotices(tx, db, { commentId, record, proposal, now }) {
+  if (!record.qualifying) return [];
+  const recipients = await workflowNoticeRecipients(tx, db, proposal, { exclude: record.authorId });
+  const outcome = RECOMMENDATION_LABEL[record.recommendation] || "a recommendation";
+  return queueCommentNotices(tx, db, {
+    id: `qualifying_${commentId}`, recipients, record: { ...record, commentId }, proposal, now,
+    kind: "qualifying_recommendation",
+    message: (title) => `An evaluator submitted a qualifying recommendation on “${title}”: ${outcome}.`,
+  });
+}
+
+async function queueQualifyingRemovedNotices(tx, db, { commentId, record, proposal, now }) {
+  if (!record.qualifying) return [];
+  const recipients = await workflowNoticeRecipients(tx, db, proposal, { exclude: record.authorId });
+  return queueCommentNotices(tx, db, {
+    id: `qualifying_removed_${commentId}`, recipients, record: { ...record, commentId }, proposal, now,
+    kind: "qualifying_recommendation_removed",
+    message: (title) => `An evaluator removed a qualifying recommendation from “${title}”.`,
+  });
 }
 
 async function queueEvaluationGateNotices(tx, db, { proposal, complete, now }) {
   const evaluationComplete = nextEvaluationComplete(proposal, complete);
   if (evaluationComplete == null) return [];
+  const recipients = await workflowNoticeRecipients(tx, db, proposal);
   const data = proposal.data();
-  const recipients = [...new Set([data.postingOwnerId, data.researcherId].filter(Boolean))];
   const state = evaluationComplete ? "closed" : "opened";
   const existing = await Promise.all(recipients.map((uid) =>
     tx.get(db.collection("moderationNotifications").doc(`gate_${proposal.id}_${state}_${now.toMillis()}_${uid}`))));
@@ -332,12 +362,16 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
       revisions: [...(data.revisions || []), revision("delete", data, now)],
     };
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: false });
+    const removedNotices = await queueQualifyingRemovedNotices(tx, db, {
+      commentId: ref.id, record: data, proposal: gate.proposal, now,
+    });
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     tx.set(ref, next);
     if (parent?.exists) {
       tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
     }
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyQueuedNotices(tx, removedNotices);
     applyQueuedNotices(tx, gateNotices);
     return view(ref.id, next);
   });
