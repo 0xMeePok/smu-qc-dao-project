@@ -205,6 +205,24 @@ async function prepare({ db, problemId, uid, now }) {
   await runContendedTransaction(db, async (tx) => expireContext(tx, await readContext({ db, tx, problemId, uid }), now || Timestamp.now()));
 }
 
+export function mockSelectionState({ problem, proposal, uid, at = Timestamp.now() }) {
+  const parentStatus = problem.matching?.status || "open";
+  const ownStatus = proposal.matching?.status || "funding";
+  const state = ["confirmed", "invalidated"].includes(parentStatus) && problem.matching?.proposalId !== proposal.id && !TERMINAL.has(ownStatus)
+    ? "cancelled" : ownStatus;
+  const target = Math.round(Number(proposal.amount) * 100);
+  const funded = proposal.matching?.fundedMinor || 0;
+  const eligible = ELIGIBLE.has(proposal.status) && !TERMINAL.has(state);
+  const fundingMet = target > 0 && funded >= target;
+  const feedbackOpen = proposal.matching?.evaluationComplete === true;
+  const open = isOpen(problem, at);
+  return {
+    state, fundedAmount: funded / 100, open, eligible, fundingMet, feedbackOpen,
+    canSelect: open && eligible && fundingMet && feedbackOpen && problem.ownerId === uid
+      && proposal.researcherId !== uid && !moderated(proposal),
+  };
+}
+
 export async function getMockMatching({ db, uid, problemId, proposalId, cursor, now }) {
   if (proposalId) validId(proposalId, "proposal");
   if (cursor) validId(cursor, "cursor");
@@ -221,11 +239,11 @@ export async function getMockMatching({ db, uid, problemId, proposalId, cursor, 
       historyTruncated: history.size > 100, truncated: ctx.truncated, nextCursor: ctx.nextCursor,
       proposals: ctx.proposals.filter((doc) => !moderated(doc.data()) && (ELIGIBLE.has(doc.data().status) || doc.data().matching)).map((doc) => {
         const proposal = doc.data();
-        const state = ["confirmed", "invalidated"].includes(matching.status) && matching.proposalId !== doc.id && !TERMINAL.has(proposalState(proposal))
-          ? "cancelled" : proposalState(proposal);
+        const selection = mockSelectionState({ problem: ctx.problem, proposal: { id: doc.id, ...proposal }, uid, at });
+        const state = selection.state;
         const target = Math.round(Number(proposal.amount) * 100);
         const funded = proposal.matching?.fundedMinor || 0;
-        const eligible = ELIGIBLE.has(proposal.status) && !TERMINAL.has(state);
+        const eligible = selection.eligible;
         return { id: doc.id, title: proposal.title || "Untitled proposal", currency: proposal.currency,
           amount: proposal.amount, fundedAmount: funded / 100, matching: { status: state, evaluationComplete: proposal.matching?.evaluationComplete === true,
             evaluationCompletedAt: iso(proposal.matching?.evaluationCompletedAt) },
@@ -233,7 +251,7 @@ export async function getMockMatching({ db, uid, problemId, proposalId, cursor, 
           canDecline: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
             && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && (proposal.researcherId === uid || ctx.problem.ownerId === uid),
           canFund: open && eligible && funded < target && proposal.researcherId !== uid && ctx.funding.length < MAX_CONTRIBUTIONS,
-          canSelect: open && eligible && funded >= target && target > 0 && ctx.problem.ownerId === uid && proposal.researcherId !== uid,
+          canSelect: selection.canSelect,
           canApproveOwner: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
             && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && ctx.problem.ownerId === uid
             && proposal.researcherId !== uid && !matching.ownerApprovedBy,
@@ -317,6 +335,9 @@ export async function selectMockProposal({ db, uid, problemId, proposalId, ratio
     if (data.researcherId === uid) fail("permission-denied", "A match requires two different parties.");
     if (!ELIGIBLE.has(data.status) || proposalState(data) !== "funding" || (data.matching?.fundedMinor || 0) < minorUnits(data.amount)) {
       fail("failed-precondition", "Select a fully funded, active proposal.");
+    }
+    if (data.matching?.evaluationComplete !== true) {
+      fail("failed-precondition", "Selection opens after the evaluator feedback gate and full funding.");
     }
     const selectionSequence = (ctx.problem.matching?.selectionSequence || 0) + 1;
     const selectionId = `${problemId}_${selectionSequence}`;

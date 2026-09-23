@@ -63,6 +63,48 @@ export function commentIsQualifying(data, role) {
     && RECOMMENDATIONS.has(data.recommendation);
 }
 
+const SUMMARY_CAP = 200;
+const COUNT_KEYS = ["recommend", "recommend_with_revisions", "do_not_recommend", "qualifyingCount", "commentCount"];
+
+function emptyCounts() {
+  return Object.fromEntries(COUNT_KEYS.map((key) => [key, 0]));
+}
+
+function commentCounts(data) {
+  const counts = emptyCounts();
+  if (!data || data.deletedAt || BLOCKED.has(data.moderationStatus)) return counts;
+  counts.commentCount = 1;
+  if (data.qualifying === true && (data.parentId ?? null) == null && RECOMMENDATIONS.has(data.recommendation)) {
+    counts.qualifyingCount = 1;
+    counts[data.recommendation] = 1;
+  }
+  return counts;
+}
+
+function addCounts(target, extra) {
+  for (const key of COUNT_KEYS) target[key] += extra[key] || 0;
+  return target;
+}
+
+async function feedbackSummaryReads(tx, db, proposalId) {
+  if (!proposalId) return [];
+  const rows = await tx.get(db.collection("comments").where("proposalId", "==", proposalId).limit(SUMMARY_CAP));
+  return rows.docs;
+}
+
+function applyFeedbackSummary(tx, db, docs, { commentId, next, proposalId, problemId, now }) {
+  if (!proposalId) return;
+  const counts = emptyCounts();
+  for (const doc of docs) {
+    if (doc.id === commentId) continue;
+    addCounts(counts, commentCounts(doc.data()));
+  }
+  if (next) addCounts(counts, commentCounts(next));
+  tx.set(db.collection("proposalFeedbackSummaries").doc(proposalId), {
+    proposalId, problemId: problemId || "", ...counts, updatedAt: now,
+  });
+}
+
 function view(id, data) {
   return {
     id,
@@ -282,11 +324,15 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying });
     const notices = await queueQualifyingNotices(tx, db, { commentId: ref.id, record, proposal, now });
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
+    const summaryDocs = await feedbackSummaryReads(tx, db, proposalId);
     tx.set(ref, record);
     if (parent) tx.update(parent.ref, { replyCount: (parent.data().replyCount || 0) + 1 });
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     applyQueuedNotices(tx, notices);
     applyQueuedNotices(tx, gateNotices);
+    applyFeedbackSummary(tx, db, summaryDocs, {
+      commentId: ref.id, next: record, proposalId, problemId: proposal.data().problemId, now,
+    });
     return view(ref.id, record);
   });
 }
@@ -321,10 +367,14 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
       ? await queueQualifyingNotices(tx, db, { commentId: ref.id, record: next, proposal: gate.proposal, now })
       : [];
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
+    const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
     tx.set(ref, next);
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     applyQueuedNotices(tx, notices);
     applyQueuedNotices(tx, gateNotices);
+    applyFeedbackSummary(tx, db, summaryDocs, {
+      commentId: ref.id, next, proposalId: data.proposalId, problemId: data.problemId, now,
+    });
     return view(ref.id, next);
   });
 }
@@ -338,11 +388,16 @@ export async function prepareCommentEvaluationGate({ tx, db, contentId, data, ac
   const qualifying = commentIsQualifying({ ...data, moderationStatus }, accessLevel(author?.data()));
   const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId, qualifying });
   const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
+  const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
+  const next = { ...data, moderationStatus, qualifying };
   return {
     qualifying,
     apply() {
       applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
       applyQueuedNotices(tx, gateNotices);
+      applyFeedbackSummary(tx, db, summaryDocs, {
+        commentId: contentId, next, proposalId: data.proposalId, problemId: data.problemId, now,
+      });
     },
   };
 }
@@ -366,6 +421,7 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
       commentId: ref.id, record: data, proposal: gate.proposal, now,
     });
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
+    const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
     tx.set(ref, next);
     if (parent?.exists) {
       tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
@@ -373,6 +429,9 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
     applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
     applyQueuedNotices(tx, removedNotices);
     applyQueuedNotices(tx, gateNotices);
+    applyFeedbackSummary(tx, db, summaryDocs, {
+      commentId: ref.id, next, proposalId: data.proposalId, problemId: data.problemId, now,
+    });
     return view(ref.id, next);
   });
 }

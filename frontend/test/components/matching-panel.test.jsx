@@ -51,31 +51,15 @@ describe("server-backed mock funding and mutual matching", () => {
     expect(mocks.read).not.toHaveBeenCalled();
   });
 
-  it("records owner acceptance through selection and starts the creator response window", async () => {
-    mocks.read.mockResolvedValueOnce(snapshot()).mockResolvedValue(waiting());
-    const changed = vi.fn();
-    render(<MatchingPanel problemId="problem-1" onChange={changed} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Select proposal" }));
-    const dialog = screen.getByRole("dialog", { name: "Select this proposal?" });
-    expect(within(dialog).getByText(/records your acceptance as the problem owner/)).toBeTruthy();
-    expect(mocks.select).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("Selection rationale"), { target: { value: "Best technical fit for the problem." } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Select and accept" }));
-    await screen.findByText("Seven-day acceptance window");
-    expect(mocks.select).toHaveBeenCalledWith({ problemId: "problem-1", proposalId: "proposal-1", rationale: "Best technical fit for the problem." });
-    expect(mocks.confirm).not.toHaveBeenCalled();
-    expect(changed).toHaveBeenLastCalledWith(waiting());
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("shows a fully funded unevaluated proposal as ready for owner selection on its detail page", async () => {
-    mocks.read.mockResolvedValue(snapshot({ proposals: [candidate({ matching: { status: "funding", evaluationComplete: false } })] }));
+  it("keeps selection out of the funding panel and describes both gates", async () => {
+    mocks.read.mockResolvedValue(snapshot({ proposals: [candidate({ matching: { status: "funding", evaluationComplete: false }, canSelect: true })] }));
     render(<MatchingPanel problemId="problem-1" proposalId="proposal-1" />);
-    expect(await screen.findByRole("button", { name: "Select proposal" })).toBeTruthy();
+    await screen.findByRole("heading", { name: "Quantum routing" });
+    expect(screen.queryByRole("button", { name: "Select proposal" })).toBeNull();
     expect(screen.getByText("Fully funded · awaiting owner selection")).toBeTruthy();
-    expect(screen.getByText(/You can select this proposal now/)).toBeTruthy();
-    expect(screen.queryByText(/Expert evaluation: Pending/)).toBeNull();
-    expect(screen.getByText(/No evaluation is required for selection/)).toBeTruthy();
+    expect(screen.getByText(/selects from the comparison once this proposal is fully funded and has a qualifying evaluator recommendation/)).toBeTruthy();
+    expect(screen.queryByText(/Fund individual proposals for this problem/)).toBeNull();
+    expect(screen.queryByText(/selects one after it is fully funded and has a qualifying evaluator recommendation/)).toBeNull();
   });
 
   it("links each comparison candidate to the proposal being funded", async () => {
@@ -94,15 +78,6 @@ describe("server-backed mock funding and mutual matching", () => {
     expect(screen.queryByRole("button", { name: "Fund proposal" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Complete mock evaluation" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Expire window for demonstration" })).toBeNull();
-  });
-
-  it("requires at least ten non-whitespace rationale characters before owner selection", async () => {
-    render(<MatchingPanel problemId="problem-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Select proposal" }));
-    fireEvent.change(screen.getByLabelText("Selection rationale"), { target: { value: "  short  " } });
-    submit();
-    expect(screen.getByRole("alert").textContent).toContain("at least 10 characters");
-    expect(mocks.select).not.toHaveBeenCalled();
   });
 
   it("requires a creator's decline reason and shows the refund result", async () => {
@@ -327,21 +302,21 @@ describe("server-backed mock funding and mutual matching", () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let a delayed background poll overwrite a completed selection", async () => {
+  it("does not let a delayed background poll overwrite a completed contribution", async () => {
     vi.useFakeTimers();
     let resolvePoll;
-    mocks.read.mockResolvedValueOnce(snapshot())
+    mocks.read.mockResolvedValueOnce(snapshot({ proposals: [candidate({ fundedAmount: 20, canFund: true, canSelect: false })] }))
       .mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }))
-      .mockResolvedValue(waiting());
+      .mockResolvedValue(snapshot({ proposals: [candidate({ fundedAmount: 45, canFund: true, canSelect: false })] }));
     await act(async () => { render(<MatchingPanel problemId="problem-1" />); });
     await act(async () => { vi.advanceTimersByTime(30_000); });
-    fireEvent.click(screen.getByRole("button", { name: "Select proposal" }));
-    fireEvent.change(screen.getByLabelText("Selection rationale"), { target: { value: "Best technical fit for the problem." } });
+    fireEvent.click(screen.getByRole("button", { name: "Fund proposal" }));
     await act(async () => { submit(); });
-    expect(screen.getByText("Seven-day acceptance window")).toBeTruthy();
-    await act(async () => { resolvePoll(snapshot()); });
-    expect(screen.getByText("Seven-day acceptance window")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Select proposal" })).toBeNull();
+    expect(screen.getByText("Mock contribution recorded.")).toBeTruthy();
+    expect(screen.getByText(/USD 45/)).toBeTruthy();
+    await act(async () => { resolvePoll(snapshot({ proposals: [candidate({ fundedAmount: 20, canFund: true, canSelect: false })] })); });
+    expect(screen.getByText("Mock contribution recorded.")).toBeTruthy();
+    expect(screen.getByText(/USD 45/)).toBeTruthy();
   });
 
   it("loads the next proposal page and can return to the first page", async () => {

@@ -3298,7 +3298,6 @@ footer > p { margin: 0 auto 0 0; }
 .matching-heading h2 { margin: 0; }
 .matching-receipts { margin-block: 12px; }
 .matching-approval dt { color: var(--muted); font-size: 13px; font-weight: 600; }
-.matching-steps { padding-left: 24px; line-height: 1.8; }
 .matching-notice { padding: 18px; border: 1px solid var(--border, #d7dfe8); border-radius: 12px; background: var(--surface, #f5f8fb); }
 .matching-candidates { display: grid; gap: 16px; margin-block: 20px; }
 .matching-candidate { min-width: 0; padding: 20px; border: 1px solid var(--border, #d7dfe8); border-radius: 12px; }
@@ -3485,4 +3484,12 @@ footer > p { margin: 0 auto 0 0; }
   .topbar .notification-centre-feed { max-height: min(50vh, 360px); }
 }
 .mock-portfolio { margin-block: 24px; }
+.comparison-controls { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 20px; }
+.comparison-controls label { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
+.comparison-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.comparison-table { width: 100%; border-collapse: collapse; min-width: 960px; }
+.comparison-table th, .comparison-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.comparison-table th { background: var(--surface-muted); font-size: 13px; }
+.comparison-detail td { background: var(--surface-muted); }
+.comparison-proposal h3, .comparison-proposal h4 { margin: 16px 0 8px; }
 @media (max-width: 600px) { .matching-actions > button { width: 100%; } .matching-candidate { padding: 16px; } }

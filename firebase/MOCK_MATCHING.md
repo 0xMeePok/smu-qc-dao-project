@@ -5,7 +5,7 @@ QCDAO-81–86 use an entirely off-chain, server-side mock workflow. The accepted
 ## Workflow
 
 1. Active members contribute mock amounts to a submitted proposal, up to that proposal's requested amount. Problems are not funded. Creators cannot fund their own proposal. Multiple proposals may reach their targets.
-2. The problem owner selects any active, fully funded proposal without an evaluation prerequisite. A 10–2000 character rationale is mandatory. Selection records owner acceptance and starts a creator response window ending at the earlier of seven days later and the original posting expiry. The actual deadline and any shortened window are visible to both parties.
+2. The problem owner selects any active proposal that is fully funded and has the evaluator-feedback gate open (`matching.evaluationComplete`, from a qualifying evaluator recommendation or the administrator demo marker). A 10–2000 character rationale is mandatory. Selection records owner acceptance and starts a creator response window ending at the earlier of seven days later and the original posting expiry. The actual deadline and any shortened window are visible to both parties. Recommendations stay advisory: any of the three outcomes can open the gate, and none of them ranks or blocks a funded proposal.
 3. While confirmation is pending, funding and selection of every sibling proposal are paused. New submitted proposals, corrections and withdrawals are also blocked by Firestore rules. Nonselected authors are notified of the temporary pause.
 4. Creator acceptance before the deadline locks all mock contributions to the selected proposal, refunds every pledged sibling contribution and cancels the siblings. The parent confirmed state is authoritative for cancellation, including unfunded proposals without their own matching map. A confirmed match cannot be rejected through the pending-selection action.
 5. Either the owner or selected creator may reject a pending selection with a mandatory 10–2000 character reason. This refunds only that proposal's contributors, marks it declined, and reopens the problem until its original posting deadline. Siblings retain their existing funding, evaluation results and comments. A new selection starts a new response window, again capped by the original posting expiry; the declined proposal remains excluded.
@@ -66,7 +66,7 @@ cd firebase/functions
 ./node_modules/.bin/firebase emulators:exec --config ../firebase.json --only firestore --project qc-dao-matching-transactions 'node --test test/matching.emulator.test.mjs'
 ```
 
-The unit suite covers funding eligibility without evaluation, rationale validation, owner and creator rejection, admin-only demo operations, audit idempotency, moderation settlement, mutual approvals, exact deadline boundaries, refunds/locking, idempotency, roles, overfunding, moderation, privacy, candidate pagination and settlement with hundreds of new drafts/proposals. The real Firestore emulator test runs duplicate contributions, overfunding attempts and competing owner selections concurrently, and checks deadline refunds.
+The unit suite covers funding eligibility without evaluation, selection that waits for both full funding and the evaluator-feedback gate, rationale validation, owner and creator rejection, admin-only demo operations, audit idempotency, moderation settlement, mutual approvals, exact deadline boundaries, refunds/locking, idempotency, roles, overfunding, moderation, privacy, candidate pagination and settlement with hundreds of new drafts/proposals. The real Firestore emulator test runs duplicate contributions, overfunding attempts and competing owner selections concurrently, and checks deadline refunds.
 
 ## In-app matching notifications
 
@@ -94,9 +94,9 @@ Sprint 6 can add real escrow settlement through a separate idempotent adapter fo
 
 ## Demo walkthrough
 
-1. Publish a problem with a future expiry and two proposals, using different accounts for the owner and creators. No evaluation action is required.
+1. Publish a problem with a future expiry and two proposals, using different accounts for the owner and creators. Funding can start immediately. Selection stays closed until the chosen proposal also has the evaluator-feedback gate open.
 2. As a member other than the relevant creator, use **Fund proposal** to bring a proposal to its target; optionally fund its sibling partially or fully.
-3. As the problem owner, select the fully funded proposal and enter a rationale. Verify owner acceptance, the creator deadline and paused funding for every proposal. For a posting with fewer than seven days left, verify the shorter deadline is shown.
+3. As the problem owner, open Compare proposals. Select the fully funded proposal only after it has a qualifying evaluator recommendation, or after an administrator records the demo evaluation marker, and enter a rationale. Verify owner acceptance, the creator deadline and paused funding for every proposal. For a posting with fewer than seven days left, verify the shorter deadline is shown. Funders and evaluators can read the comparison and have no selection action.
 4. As the selected creator, accept before the deadline to lock selected funding and refund/cancel sibling proposals. Review both acceptance records and the funder's portfolio.
 5. On another selection, test rejection separately as the owner and creator. Verify selected contributors are refunded and siblings retain their existing funding/comments and reopen only until the original posting deadline. Select another funded proposal and verify its new deadline cannot exceed that original expiry.
 6. On a pending selection, use the administrator's **Expire window for demonstration**, or wait for the deadline. Verify the posting is invalidated, every outstanding pledge is refunded, and further funding/selection are blocked. Also verify an open posting's original expiry closes and refunds its mock workflow.

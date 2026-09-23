@@ -36,6 +36,7 @@ import { getMockMatching as readMockMatching, fundMockProposal as contributeMock
 import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
+import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -185,6 +186,11 @@ export const { submitContentReport, listModerationQueue, getModerationContext, m
 export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return listPostedProposalsForProblem({ db, uid, problemId: request.data?.problemId });
+});
+
+export const getProposalComparison = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return readProposalComparison({ db, uid, problemId: request.data?.problemId });
 });
 
 export const createComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {

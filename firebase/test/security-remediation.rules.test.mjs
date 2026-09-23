@@ -117,7 +117,7 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
   });
   it("cannot fabricate the attestation, reservation, funding evidence or metrics", async () => {
     const db = env.authenticatedContext(OWNER).firestore();
-    for (const name of ["publicationProofs", "recordReservations", "uploadReservations", "creationQuotas", "uploadQuotas", "metricContributions", "opportunityMetrics", "registryArchives", "maintenanceState"]) {
+    for (const name of ["publicationProofs", "recordReservations", "uploadReservations", "creationQuotas", "uploadQuotas", "metricContributions", "opportunityMetrics", "registryArchives", "maintenanceState", "proposalFeedbackSummaries"]) {
       await assertFails(setDoc(doc(db, name, "security-forged"), { uid: OWNER, amount: 99999 }));
     }
     for (const status of ["pledged", "approved", "disbursing", "completed"]) await assertFails(setDoc(doc(db, "funding", `security-${status}`), {
