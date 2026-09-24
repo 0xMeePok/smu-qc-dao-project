@@ -412,6 +412,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <ProposalComparison
               problemId={posting.id}
               refreshKey={`${posting.matching?.status || ""}:${posting.matching?.totalFundedMinor || 0}`}
+              onNavigate={onNavigate}
               onSelected={() => setMatchingRefresh((current) => current + 1)}
             />
             <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />

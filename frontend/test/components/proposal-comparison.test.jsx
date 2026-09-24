@@ -103,7 +103,9 @@ describe("proposal comparison", () => {
     expect(screen.getByRole("columnheader", { name: "Decision" })).toBeTruthy();
     expect(screen.queryByText(/do not rank these proposals or choose a winner/)).toBeNull();
     expect(screen.queryByRole("columnheader", { name: /score|grade|reward/i })).toBeNull();
-    expect(screen.getByText("0 Recommend · 1 Recommend with revisions · 0 Do not recommend")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Go to proposal" })).toHaveLength(2);
+    expect(screen.getByText("1 Recommend with revisions")).toBeTruthy();
+    expect(screen.queryByText(/0 Recommend/)).toBeNull();
   });
 
   it("[FUT-SPE-161] lets the owner select an eligible proposal and records the rationale", async () => {
@@ -134,7 +136,7 @@ describe("proposal comparison", () => {
       rows: [row({ canSelect: false, selectionHint: null }), row({ id: "bravo", title: "Bravo routes", canSelect: false, selectionHint: null })],
     }));
     render(<ProposalComparison problemId="problem" />);
-    await screen.findByRole("button", { name: "Open Alpha annealing" });
+    await screen.findByRole("button", { name: "Show details for Alpha annealing" });
     expect(screen.queryByRole("columnheader", { name: "Decision" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Select / })).toBeNull();
     expect(screen.queryByText(/Needs full funding/)).toBeNull();
@@ -146,17 +148,17 @@ describe("proposal comparison", () => {
     expect(screen.queryByRole("button", { name: "Select Bravo routes" })).toBeNull();
     expect(screen.getByText("Needs full funding.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Filter by evaluator recommendation/), { target: { value: "recommend" } });
-    expect(screen.queryByRole("button", { name: "Open Alpha annealing" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Open Bravo routes" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show details for Alpha annealing" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Show details for Bravo routes" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Filter by evaluator recommendation/), { target: { value: "" } });
     fireEvent.change(screen.getByLabelText(/^Sort/), { target: { value: "amount:asc" } });
-    const titles = screen.getAllByRole("button", { name: /^Open / }).map((button) => button.textContent);
-    expect(titles).toEqual(["Open Bravo routes", "Open Alpha annealing"]);
+    const titles = screen.getAllByRole("button", { name: /^Show details for / }).map((button) => button.getAttribute("aria-label"));
+    expect(titles).toEqual(["Show details for Bravo routes", "Show details for Alpha annealing"]);
   });
 
   it("[FUT-SPE-164] expands a row to the proposal text and evaluator-badged comments", async () => {
     render(<ProposalComparison problemId="problem" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Open Alpha annealing" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show details for Alpha annealing" }));
     const detail = (await screen.findByText("Compare with a classical baseline.")).closest("td");
     expect(within(detail).getByText("Tighten the benchmark.")).toBeTruthy();
     expect(within(detail).getByText("Recommend with revisions")).toBeTruthy();
