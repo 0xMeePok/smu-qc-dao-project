@@ -22,7 +22,8 @@ export function memoryDb(initial = {}) {
       orderBy: (field, direction = "asc") => collection(name, filters, cap, [...orders, { field, direction }], cursor),
       startAfter: (...values) => collection(name, filters, cap, orders, values.map(comparable)),
       get: async () => {
-        const paths = [...records.keys()].filter((path) => path.startsWith(`${name}/`) && path.split("/").length === 2
+        const depth = name.split("/").length + 1;
+        const paths = [...records.keys()].filter((path) => path.startsWith(`${name}/`) && path.split("/").length === depth
           && filters.every(([field, op, value]) => op === "==" ? fieldValue(path, field) === comparable(value)
             : op === "in" ? value.includes(fieldValue(path, field)) : op === "<=" ? fieldValue(path, field) != null && fieldValue(path, field) <= comparable(value) : fieldValue(path, field) < comparable(value)))
           .sort((a, b) => { for (const { field, direction } of orders) { const x = fieldValue(a, field), y = fieldValue(b, field); if (x !== y) return (x < y ? -1 : 1) * (direction === "desc" ? -1 : 1); } return 0; })

@@ -7,6 +7,7 @@ import { attachmentPath } from "../../src/lib/attachments.js";
 import {
   commentCountLabel,
   feedbackLabel,
+  ownerReviewTrackerLabel,
   filterProposalRows,
   queueError,
   sortProposalRows,
@@ -115,6 +116,10 @@ describe("QCDAO-62/63 proposal queues", () => {
     assert.equal(feedbackLabel(rows[1]), "Awaiting evaluator recommendation");
     assert.equal(commentCountLabel(rows[2]), "1 comment");
     assert.equal(commentCountLabel(rows[1]), "0 comments");
+    assert.equal(ownerReviewTrackerLabel({ outcome: "feedback" }), "Owner recorded feedback");
+    assert.equal(ownerReviewTrackerLabel({ outcome: "not_progressing" }), "Owner recorded: not progressing");
+    assert.equal(ownerReviewTrackerLabel({ outcome: "revision_requested", correctionPathOpen: true }), "Owner requested revisions · you can edit and resubmit");
+    assert.equal(ownerReviewTrackerLabel(null), "");
   });
 
   it("keeps the queue's own refusal and hides unexpected failures", () => {

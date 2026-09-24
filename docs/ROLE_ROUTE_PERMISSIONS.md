@@ -107,3 +107,11 @@ non-deleted, unmoderated, top-level comment whose author holds the evaluator acc
 carrying exactly one of `recommend`, `recommend_with_revisions` or `do_not_recommend`. Replies never qualify. The
 server maintains `proposals/{id}.matching.evaluationComplete` from that same rule, so no separate evaluation record
 is stored.
+
+An evaluator recommendation comment, a funder comment, and any other stakeholder comment stay advisory. None of them creates an owner review outcome.
+
+## 8. Owner interim review
+
+Only the designated problem owner (`problems.ownerId`) can record an interim review on a proposal that is still under consideration. The owner chooses one outcome — record feedback, request revisions, or record that the proposal is not progressing — and must write a rationale. The developer sees the latest outcome on `#/proposals` and the full record on the proposal page.
+
+A revision request uses the existing author correction path when that path is already open. It does not select a winner, reject a winner, or set a proposal to selected or awaiting creator acceptance. That terminal decision remains QCDAO-81, made only by the designated problem owner after the evaluator recommendation-comment gate and the funding gate are open.

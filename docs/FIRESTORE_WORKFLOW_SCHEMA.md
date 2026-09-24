@@ -163,3 +163,17 @@ so a retried Firestore event cannot double-count one edit.
 Draft saves are deliberately absent from the trail. A draft is private,
 unevaluated and rewritten freely by design, so recording every save would bury
 the entries a dispute actually turns on.
+
+## Owner interim review
+
+The designated problem owner (`problems.ownerId`, including the funder who owns an open-funding posting) may record an interim review on a proposal that is still under consideration (`submitted` or `under_review`, parent matching still `open`, and the proposal not already in a winner-selection state).
+
+Outcomes are `feedback`, `revision_requested`, and `not_progressing`. Each requires a rationale of 10–2000 characters. The record stores `actorId`, `actorRole` (`problem_owner`, server-derived), `outcome`, `rationale`, and `createdAt`.
+
+`revision_requested` is accepted only while the author can already correct the proposal: status `submitted`, no mock funding, evaluation not complete, and matching still open. It leaves the proposal `submitted` so the author uses the existing edit path. It does not unlock a funded, evaluated, or `under_review` proposal.
+
+These records do not set `selected`, `awaiting_confirmation`, `accepted`, or `rejected`, and they do not call winner selection or rejection. Evaluator recommendation comments stay advisory and cannot create a review.
+
+### `proposals/{proposalId}/ownerReviews/{reviewId}`
+
+Append-only and server-owned. Clients cannot read or write the subcollection or `ownerReviewLatest/current`. The author, the designated owner, and administrators read the trail through `listOwnerReviews`. The author's queue reads the latest summary through `listMyProposalQueue`. A retried submit with the same `requestId` returns the original record.

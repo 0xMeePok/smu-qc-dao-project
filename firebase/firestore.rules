@@ -1416,6 +1416,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Owner interim reviews are server-written. Clients cannot forge a review
+    // or read another member's rationale through the proposal document.
+    match /proposals/{proposalId}/ownerReviews/{reviewId} {
+      allow read, write: if false;
+    }
+    match /proposals/{proposalId}/ownerReviewLatest/{docId} {
+      allow read, write: if false;
+    }
+
     match /evaluations/{evaluationId} {
       function proposalAvailableForEvaluation() {
         return exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))

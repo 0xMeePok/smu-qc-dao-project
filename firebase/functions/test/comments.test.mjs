@@ -592,6 +592,10 @@ test("[BUT-SPER-26] evaluator comments stay off-chain and never write audit or m
     [...db.records.keys()].some((path) => path.startsWith("matchingEvents/")),
     false,
   );
+  assert.equal(
+    [...db.records.keys()].some((path) => path.includes("/ownerReviews/") || path.includes("/ownerReviewLatest/")),
+    false,
+  );
 });
 
 /** QCDAO-62/63 - the tracking list and the evaluator queue, built from these same records. */

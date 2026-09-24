@@ -31,6 +31,8 @@ export function feedbackLabel(row) {
   return `${count} evaluator recommendation${count === 1 ? "" : "s"}${named.length ? `: ${named.join(", ")}` : ""}`;
 }
 
+export { ownerReviewTrackerLabel } from "./ownerReviews.js";
+
 export function commentCountLabel(row) {
   const count = row?.comments ?? 0;
   return count === 1 ? "1 comment" : `${count} comments`;

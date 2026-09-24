@@ -10,6 +10,14 @@ vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
 }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}` } }) }));
 vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.find(...args), withdrawProposal: vi.fn(), listProposalRevisions: async () => [] }));
+vi.mock("../../src/lib/ownerReviews.js", () => ({
+  listOwnerReviews: async () => ({ items: [] }),
+  recordOwnerReview: vi.fn(),
+  OWNER_REVIEW_OUTCOMES: [["feedback", "Record feedback"]],
+  ownerReviewLabel: (value) => value,
+  ownerReviewTrackerLabel: () => "",
+  ownerReviewError: (error) => error?.message || "Could not record the review.",
+}));
 vi.mock("../../src/lib/proposalAudit.js", () => ({
   anchorProposalAudit: (...args) => mocks.anchor(...args), proposalAuditReceipt: (record) => record.audit,
   readProposalAudit: (...args) => mocks.verify(...args),

@@ -469,4 +469,19 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     await assertFails(deleteDoc(doc(trail(db), "rev1")));
     await assertFails(setDoc(doc(trail(sponsor), "forged-by-sponsor"), entry));
   });
+
+  it("keeps owner reviews server-only", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const id = await parent();
+    await assertSucceeds(submit(db, "reviewed", record(id)));
+    const review = { actorId: SPONSOR, actorRole: "problem_owner", outcome: "feedback", rationale: "Recorded only by the server.", createdAt: new Date(), proposalId: "reviewed" };
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", "reviewed", "ownerReviews", "rev1"), review));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", "reviewed", "ownerReviewLatest", "current"), review));
+    const author = env.authenticatedContext(AUTHOR).firestore();
+    const sponsor = env.authenticatedContext(SPONSOR).firestore();
+    await assertFails(getDoc(doc(author, "proposals", "reviewed", "ownerReviews", "rev1")));
+    await assertFails(getDoc(doc(sponsor, "proposals", "reviewed", "ownerReviewLatest", "current")));
+    await assertFails(setDoc(doc(sponsor, "proposals", "reviewed", "ownerReviews", "forged"), review));
+    await assertFails(updateDoc(doc(author, "proposals", "reviewed", "ownerReviews", "rev1"), { rationale: "Rewritten by the author." }));
+  });
 });

@@ -8,6 +8,7 @@ import {
   commentCountLabel,
   feedbackLabel,
   filterProposalRows,
+  ownerReviewTrackerLabel,
   listMyProposalQueue,
   queueError,
   sortProposalRows,
@@ -68,6 +69,7 @@ export function ProposalTracker({ onNavigate }) {
           <small className="table-row-meta">
             {feedbackLabel(item)} · {commentCountLabel(item)}
           </small>
+          {ownerReviewTrackerLabel(item.ownerReview) && <small className="table-row-meta">{ownerReviewTrackerLabel(item.ownerReview)}</small>}
         </div>
         <div className="table-row-actions">
           <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} showInstant={false} />
