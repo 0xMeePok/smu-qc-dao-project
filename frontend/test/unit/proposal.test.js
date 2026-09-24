@@ -116,6 +116,9 @@ describe("QCDAO-62/63 proposal queues", () => {
     assert.equal(feedbackLabel(rows[1]), "Awaiting evaluator recommendation");
     assert.equal(commentCountLabel(rows[2]), "1 comment");
     assert.equal(commentCountLabel(rows[1]), "0 comments");
+  });
+
+  it("[FUT-SPE-169] labels the latest owner review on the developer tracker", () => {
     assert.equal(ownerReviewTrackerLabel({ outcome: "feedback" }), "Owner recorded feedback");
     assert.equal(ownerReviewTrackerLabel({ outcome: "not_progressing" }), "Owner recorded: not progressing");
     assert.equal(ownerReviewTrackerLabel({ outcome: "revision_requested", correctionPathOpen: true }), "Owner requested revisions · you can edit and resubmit");

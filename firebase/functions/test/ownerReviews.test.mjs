@@ -29,7 +29,7 @@ const record = (db, patch = {}) => recordOwnerReview({
   db, uid: "owner", proposalId: "a", outcome: "feedback", rationale, requestId: "review-1", now, ...patch,
 });
 
-test("the designated owner records feedback without changing status or matching", async () => {
+test("[BUT-SPE-35] the designated owner records feedback without changing status or matching", async () => {
   const db = fixture();
   const saved = await record(db);
   assert.equal(saved.actorId, "owner");
@@ -51,7 +51,7 @@ test("the designated owner records feedback without changing status or matching"
   assert.equal([...db.records.keys()].filter((path) => path.includes("/ownerReviews/")).length, 1);
 });
 
-test("a revision request leaves the proposal submitted for the existing edit path", async () => {
+test("[BUT-SPE-36] a revision request leaves the proposal submitted for the existing edit path", async () => {
   const db = fixture();
   const saved = await record(db, { outcome: "revision_requested", requestId: "revise-1" });
   assert.equal(saved.outcome, "revision_requested");
@@ -62,7 +62,7 @@ test("a revision request leaves the proposal submitted for the existing edit pat
   assert.equal(queue.items[0].ownerReview.correctionPathOpen, true);
 });
 
-test("revision requests are refused once editing is closed", async () => {
+test("[BUT-SPE-37] revision requests are refused once editing is closed", async () => {
   const locked = [
     { status: "under_review" },
     { matching: { evaluationComplete: true } },
@@ -76,7 +76,7 @@ test("revision requests are refused once editing is closed", async () => {
   }
 });
 
-test("not progressing stays a record and the proposal can still be selected later", async () => {
+test("[BUT-SPE-38] not progressing stays a record and the proposal can still be selected later", async () => {
   const db = fixture({ matching: { evaluationComplete: true } });
   await fundMockProposal({ db, uid: "funder", problemId: "problem", proposalId: "a", amount: 100, requestId: "fund-a-request-01", now });
   const saved = await record(db, { outcome: "not_progressing", requestId: "stop-1", rationale: "This approach is not progressing for this round." });
@@ -91,7 +91,7 @@ test("not progressing stays a record and the proposal can still be selected late
   assert.equal(db.records.get("proposals/a").matching.status, "awaiting_confirmation");
 });
 
-test("only the designated problem owner can record a review", async () => {
+test("[BUT-SPE-39] only the designated problem owner can record a review", async () => {
   const db = fixture();
   await assert.rejects(() => record(db, { uid: "alice", requestId: "author" }), { code: "permission-denied" });
   await assert.rejects(() => record(db, { uid: "evaluator", requestId: "evaluator" }), { code: "permission-denied" });
@@ -100,13 +100,13 @@ test("only the designated problem owner can record a review", async () => {
   await assert.rejects(() => record(db, { rationale: "short", requestId: "short" }), { code: "invalid-argument" });
 });
 
-test("owner review closes once winner selection has started", async () => {
+test("[BUT-SPE-40] owner review closes once winner selection has started", async () => {
   const db = fixture({ matching: { status: "awaiting_confirmation", evaluationComplete: true, fundedMinor: 10000 } });
   db.records.get("problems/problem").matching = { status: "awaiting_confirmation", proposalId: "a" };
   await assert.rejects(() => record(db, { outcome: "feedback", requestId: "late" }), { code: "failed-precondition" });
 });
 
-test("the author and owner can read the trail; an evaluator cannot", async () => {
+test("[BUT-SPE-41] the author and owner can read the trail; an evaluator cannot", async () => {
   const db = fixture();
   await record(db);
   const author = await listOwnerReviews({ db, uid: "alice", proposalId: "a" });
@@ -116,7 +116,7 @@ test("the author and owner can read the trail; an evaluator cannot", async () =>
   await assert.rejects(() => listOwnerReviews({ db, uid: "evaluator", proposalId: "a" }), { code: "permission-denied" });
 });
 
-test("an evaluator recommendation does not create an owner review", async () => {
+test("[BUT-SPE-42] an evaluator recommendation does not create an owner review", async () => {
   const db = fixture();
   await createComment({ db, uid: "evaluator", proposalId: "a", body: "Recommend this approach.", recommendation: "recommend", now });
   assert.equal([...db.records.keys()].some((path) => path.includes("/ownerReviews/")), false);

@@ -491,7 +491,7 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     await assertFails(setDoc(doc(trail(sponsor), "forged-by-sponsor"), entry));
   });
 
-  it("keeps owner reviews server-only", async () => {
+  it("[BIT-SPE-178] keeps owner reviews server-only", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     const id = await parent();
     await assertSucceeds(submit(db, "reviewed", record(id)));

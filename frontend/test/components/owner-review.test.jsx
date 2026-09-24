@@ -61,14 +61,14 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it("shows the owner rationale to the author and keeps the review form off their page", async () => {
+it("[FUT-SPE-166] shows the owner rationale to the author and keeps the review form off their page", async () => {
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
   expect(await screen.findByText(review.rationale)).toBeTruthy();
   expect(screen.getByText(/Edit the proposal and resubmit/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Record review" })).toBeNull();
 });
 
-it("hides the owner review form and trail from an evaluator", async () => {
+it("[FUT-SPE-167] hides the owner review form and trail from an evaluator", async () => {
   mocks.userId = evaluator;
   mocks.roles = ["evaluator"];
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
@@ -77,7 +77,7 @@ it("hides the owner review form and trail from an evaluator", async () => {
   expect(screen.queryByRole("button", { name: "Record review" })).toBeNull();
 });
 
-it("requires a written rationale before the owner records an outcome", async () => {
+it("[FUT-SPE-168] requires a written rationale before the owner records an outcome", async () => {
   mocks.list.mockResolvedValue({ items: [] });
   render(<OwnerReviewPanel proposalId="proposal1" canRecord revisionPathOpen />);
   expect(await screen.findByRole("button", { name: "Record review" })).toBeTruthy();
