@@ -11,6 +11,7 @@ import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
+import { OwnerReviewPanel } from "../components/OwnerReviewPanel.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
@@ -155,6 +156,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
       }} />}
       {proposal.status !== "draft" && !isModerated(proposal) && <><ReportContentButton contentType="proposal" contentId={proposal.id} /><ReportableComments problemId={proposal.problemId} proposalId={proposal.id} /></>}
+      {(owns || sponsors) && <OwnerReviewPanel proposalId={proposal.id} canRecord={sponsors && !owns} revisionPathOpen={proposal.status === "submitted" && !proposalMatchingLocked(proposal) && !["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status)} />}
       {(owns || sponsors) && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
       {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}

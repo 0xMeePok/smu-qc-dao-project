@@ -427,6 +427,27 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     }));
   });
 
+  it("corrects a proposal that already carries the server-stamped browsable flag", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const id = await parent({ opportunityType: "open-funding" });
+    const framing = { opportunityType: "open-funding", proposedProblem: "Improve emergency routing", relevance: "Faster response", thesisFit: "Resilient public systems" };
+    const attachments = ["file0009", "file0010"].map((fileId) => ({ id: fileId, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST }));
+    await assertSucceeds(submit(db, "stamped-browsable", record(id, { ...framing, attachments })));
+    const anchored = receipt({ status: "pending", transactionHash: `0x${"7".repeat(64)}`, blockNumber: 92, attemptCount: 1 });
+    const payload = correction(id, { ...framing, attachments, thesisFit: "Resilient public systems, restated" });
+    const { updatedAt, ...canonical } = payload;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const admin = ctx.firestore();
+      await rawUpdateDoc(doc(admin, "proposals", "stamped-browsable"), {
+        problemBrowsable: true, matching: { fundedMinor: 0, evaluationComplete: false, status: "open" },
+      });
+      await rawSetDoc(doc(admin, "publicationProofs", "proposals_stamped-browsable"), {
+        uid: AUTHOR, record: canonical, transactionHash: anchored.transactionHash,
+      });
+    });
+    await assertSucceeds(rawUpdateDoc(doc(db, "proposals", "stamped-browsable"), { ...payload, audit: anchored }));
+  });
+
   it("requires a reason to withdraw, and freezes it once given", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     const id = await parent();
@@ -468,5 +489,20 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     await assertFails(updateDoc(doc(trail(db), "rev1"), { changedFields: [] }));
     await assertFails(deleteDoc(doc(trail(db), "rev1")));
     await assertFails(setDoc(doc(trail(sponsor), "forged-by-sponsor"), entry));
+  });
+
+  it("[BIT-SPE-178] keeps owner reviews server-only", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const id = await parent();
+    await assertSucceeds(submit(db, "reviewed", record(id)));
+    const review = { actorId: SPONSOR, actorRole: "problem_owner", outcome: "feedback", rationale: "Recorded only by the server.", createdAt: new Date(), proposalId: "reviewed" };
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", "reviewed", "ownerReviews", "rev1"), review));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", "reviewed", "ownerReviewLatest", "current"), review));
+    const author = env.authenticatedContext(AUTHOR).firestore();
+    const sponsor = env.authenticatedContext(SPONSOR).firestore();
+    await assertFails(getDoc(doc(author, "proposals", "reviewed", "ownerReviews", "rev1")));
+    await assertFails(getDoc(doc(sponsor, "proposals", "reviewed", "ownerReviewLatest", "current")));
+    await assertFails(setDoc(doc(sponsor, "proposals", "reviewed", "ownerReviews", "forged"), review));
+    await assertFails(updateDoc(doc(author, "proposals", "reviewed", "ownerReviews", "rev1"), { rationale: "Rewritten by the author." }));
   });
 });

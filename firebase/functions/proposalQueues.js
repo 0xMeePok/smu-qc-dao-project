@@ -1,6 +1,7 @@
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { ROLE_EVALUATOR } from "./comments.js";
+import { ownerReviewSummary } from "./ownerReviews.js";
 import { problemIsMemberBrowsable } from "./moderation.js";
 
 // QCDAO-62/63 read the queues out of the records that already exist: proposals,
@@ -70,10 +71,14 @@ export async function listMyProposals({ db, uid }) {
   await activeProfile(db, uid);
   const rows = await db.collection("proposals").where("researcherId", "==", uid).limit(MINE_CAP + 1).get();
   const docs = rows.docs.slice(0, MINE_CAP);
-  const [problems, feedback] = await Promise.all([
+  const [problems, feedback, latestReviews] = await Promise.all([
     problemsById(db, [...new Set(docs.map((doc) => doc.data().problemId).filter(Boolean))]),
     feedbackByProposal(db, docs.map((doc) => doc.id)),
+    docs.length
+      ? db.getAll(...docs.map((doc) => db.collection(`proposals/${doc.id}/ownerReviewLatest`).doc("current")))
+      : [],
   ]);
+  const latestByProposal = new Map(latestReviews.filter((snap) => snap.exists).map((snap) => [snap.ref.path.split("/")[1], snap.data()]));
   const items = docs.map((doc) => {
     const data = doc.data();
     const counts = feedback.get(doc.id) ?? { comments: 0, qualifying: 0, recommendations: [] };
@@ -89,6 +94,7 @@ export async function listMyProposals({ db, uid }) {
       posting: postingView(data.problemId, problems.get(data.problemId)),
       evaluationComplete: data.matching?.evaluationComplete === true,
       matchingStatus: data.matching?.status ?? null,
+      ownerReview: ownerReviewSummary(latestByProposal.get(doc.id)),
       ...counts,
     };
   });

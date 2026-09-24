@@ -32,7 +32,11 @@ export function categoryLabel(value) {
 
 export function recommendationSummary(row) {
   if (!row?.qualifyingCount) return "No qualifying recommendation";
-  return RECOMMENDATIONS.map(([id, label]) => `${row.recommendations?.[id] || 0} ${label}`).join(" · ");
+  const named = RECOMMENDATIONS
+    .map(([id, label]) => [row.recommendations?.[id] || 0, label])
+    .filter(([count]) => count > 0)
+    .map(([count, label]) => `${count} ${label}`);
+  return named.join(" · ") || "No qualifying recommendation";
 }
 
 export function filterComparisonRows(rows, outcome) {

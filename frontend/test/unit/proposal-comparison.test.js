@@ -17,10 +17,11 @@ describe("proposal comparison presentation", () => {
     assert.deepEqual(sortComparisonRows(rows, "qualifyingCount:desc", problemMatching).map((row) => row.id), ["bravo", "alpha"]);
   });
 
-  it("[FUT-SPE-159] filters by outcome and summarises every recommendation, including zeroes", () => {
+  it("[FUT-SPE-159] filters by outcome and summarises only recommendations that were given", () => {
     assert.deepEqual(filterComparisonRows(rows, "do_not_recommend").map((row) => row.id), ["alpha"]);
     assert.deepEqual(filterComparisonRows(rows, "").map((row) => row.id), ["bravo", "alpha"]);
-    assert.equal(recommendationSummary(rows[1]), "0 Recommend · 0 Recommend with revisions · 1 Do not recommend");
+    assert.equal(recommendationSummary(rows[1]), "1 Do not recommend");
+    assert.equal(recommendationSummary(rows[0]), "2 Recommend");
     assert.equal(recommendationSummary({ qualifyingCount: 0, recommendations: {} }), "No qualifying recommendation");
     assert.equal(recommendationSummary(rows[0]).includes("grade"), false);
   });

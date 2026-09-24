@@ -22,6 +22,14 @@ vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
 }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: account } }) }));
 vi.mock("../../src/lib/postings.js", () => ({ findPosting: async () => mocks.posting }));
+vi.mock("../../src/lib/ownerReviews.js", () => ({
+  listOwnerReviews: async () => ({ items: [] }),
+  recordOwnerReview: vi.fn(),
+  OWNER_REVIEW_OUTCOMES: [["feedback", "Record feedback"]],
+  ownerReviewLabel: (value) => value,
+  ownerReviewTrackerLabel: () => "",
+  ownerReviewError: (error) => error?.message || "Could not record the review.",
+}));
 vi.mock("../../src/lib/proposals.js", () => ({
   PROPOSAL_STATUS_DRAFT: "draft",
   buildProposalDocument: ({ form }) => ({ ...form, status: "submitted" }),

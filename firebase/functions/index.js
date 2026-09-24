@@ -38,6 +38,7 @@ import { createComment as writeComment, editComment as amendComment,
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
 import { listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
+import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -203,6 +204,16 @@ export const listMyProposalQueue = onCall(MEMBER_CALL_OPTIONS, async (request) =
 export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return evaluatorQueue({ db, uid, cursor: request.data?.cursor ?? null, filter: request.data?.filter ?? "pending" });
+});
+
+export const recordOwnerReview = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return writeOwnerReview({ db, uid, now: Timestamp.now(), proposalId: request.data?.proposalId,
+    outcome: request.data?.outcome, rationale: request.data?.rationale, requestId: request.data?.requestId });
+});
+export const listOwnerReviews = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return readOwnerReviews({ db, uid, proposalId: request.data?.proposalId });
 });
 
 export const createComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {

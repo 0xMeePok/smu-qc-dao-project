@@ -21,7 +21,7 @@ function developerLabel(row) {
   return row.developerName || "Unnamed developer";
 }
 
-export function ProposalComparison({ problemId, refreshKey = "", onSelected }) {
+export function ProposalComparison({ problemId, refreshKey = "", onSelected, onNavigate }) {
   const { user } = useAuth();
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
@@ -101,6 +101,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected }) {
       <tbody>
         {rows.map((row) => <ComparisonRow key={row.id} row={row} problemMatching={state.problemMatching} showDecision={showDecision} open={openId === row.id}
           onToggle={() => setOpenId((current) => current === row.id ? "" : row.id)}
+          onOpen={() => onNavigate?.(`proposal/${row.id}`)}
           onSelect={() => { setError(""); setRationale(""); setPending(row); }} />)}
       </tbody>
     </table></div>}
@@ -125,10 +126,22 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected }) {
   </section>;
 }
 
-function ComparisonRow({ row, problemMatching, showDecision, open, onToggle, onSelect }) {
+function ComparisonRow({ row, problemMatching, showDecision, open, onToggle, onOpen, onSelect }) {
   return <>
     <tr>
-      <td><button type="button" className="text-button" aria-expanded={open} onClick={onToggle}>{open ? "Hide" : "Open"} {row.title}</button></td>
+      <td>
+        <div className="comparison-proposal-name">
+          <button type="button" className="text-button comparison-expand" aria-expanded={open} aria-label={open ? `Hide details for ${row.title}` : `Show details for ${row.title}`} onClick={onToggle}>
+            <svg className={`dropdown-chevron${open ? " open" : ""}`} viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+              <polyline points="6 9 10 13 14 9" />
+            </svg>
+          </button>
+          <div>
+            <strong>{row.title}</strong>
+            <button type="button" className="text-button" onClick={onOpen}>Go to proposal</button>
+          </div>
+        </div>
+      </td>
       <td>{developerLabel(row)}<small className="table-row-meta">{row.organisation || "Organisation unavailable"}</small></td>
       <td>{categoryLabel(row.category)}</td>
       <td>{money(row.currency, row.amount)}</td>
