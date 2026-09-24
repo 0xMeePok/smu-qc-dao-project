@@ -221,3 +221,46 @@ test("parent visibility stamps fail closed for hidden problems and unstamped pro
   assert.equal(db.records.get("proposals/a").problemBrowsable, false);
   assert.equal(db.records.get("proposals/b").problemBrowsable, false);
 });
+
+test("hiding a posting stamps every child proposal, not just the first page", async () => {
+  const db = fixture();
+  // 201 children: the acceptance case for the storage-visibility finding.
+  for (let index = 0; index < 201; index += 1) {
+    db.records.set(`proposals/bulk_${String(index).padStart(3, "0")}`, {
+      researcherId: "alice", postingOwnerId: "owner", problemId: "problem",
+      title: `Bulk proposal ${index}`, status: "submitted", amount: 10, currency: "USDC",
+      problemBrowsable: true, createdAt: now,
+    });
+  }
+  db.records.set("problems/problem", { ...db.records.get("problems/problem"), moderationStatus: "hidden" });
+  const result = await syncProblemProposalsBrowsable({ db, problemId: "problem", now, pageSize: 50 });
+  assert.equal(result.complete, true);
+  const stale = [...db.records.entries()]
+    .filter(([path, data]) => path.startsWith("proposals/") && data.problemId === "problem" && data.problemBrowsable !== false);
+  assert.deepEqual(stale.map(([path]) => path), [], "every child must lose member download access");
+  assert.equal(db.records.get("proposals/bulk_200").problemBrowsable, false);
+});
+
+test("an interrupted visibility sync resumes from its checkpoint instead of restarting", async () => {
+  const db = fixture();
+  for (let index = 0; index < 20; index += 1) {
+    db.records.set(`proposals/bulk_${String(index).padStart(3, "0")}`, {
+      researcherId: "alice", postingOwnerId: "owner", problemId: "problem",
+      title: `Bulk proposal ${index}`, status: "submitted", amount: 10, currency: "USDC",
+      problemBrowsable: true, createdAt: now,
+    });
+  }
+  db.records.set("problems/problem", { ...db.records.get("problems/problem"), moderationStatus: "hidden" });
+  let ticks = 0;
+  const clock = () => (ticks++ < 2 ? 0 : 10_000); // start + first check inside budget, then out
+  const first = await syncProblemProposalsBrowsable({ db, problemId: "problem", now, pageSize: 5, budgetMs: 1_000, clock });
+  assert.equal(first.complete, false);
+  assert.ok(first.synced > 0 && first.synced < 22);
+  const checkpoint = db.records.get("jobState/proposalVisibility_problem");
+  assert.equal(checkpoint.problemBrowsable, false);
+  assert.equal(checkpoint.cursorId, first.cursorId);
+  const second = await syncProblemProposalsBrowsable({ db, problemId: "problem", now, pageSize: 50 });
+  assert.equal(second.complete, true);
+  assert.equal(db.records.get("proposals/bulk_019").problemBrowsable, false);
+  assert.equal(db.records.has("jobState/proposalVisibility_problem"), false);
+});

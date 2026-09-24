@@ -43,12 +43,15 @@ proves nothing, since anyone can call Firestore directly and skip it. The uid
 Firebase ends up with **is** the lowercase wallet address, and that uid only exists
 because one of these functions verified a real signature first:
 
-1. **`getSiweNonce`** — issues a single-use nonce and returns the exact message to
-   sign. The client never chooses this text.
-2. **`verifySiweSignature`** — rebuilds that message from its own stored nonce,
-   verifies the signature (`viem.verifyMessage`, which also covers EIP-1271 smart
-   contract wallets), burns the nonce, and mints a Firebase custom token whose uid is
-   the address.
+1. **`getSiweNonce`** — opens a challenge for this attempt and returns the exact
+   message to sign plus its `challengeId`. The client never chooses this text. Each
+   request gets its own challenge, so another caller can neither replace a pending
+   sign-in nor spend its verification attempts.
+2. **`verifySiweSignature`** — takes that `challengeId`, rebuilds the message from
+   the challenge's own stored nonce, verifies the signature (`viem.verifyMessage`,
+   which also covers EIP-1271 smart contract wallets), burns the nonce, and mints a
+   Firebase custom token whose uid is the address. Attempts are counted against the
+   challenge, never against the wallet.
 3. **`revokeOwnSessions`** — records an immediate Firestore session cutoff and
    revokes Firebase refresh tokens before the browser removes its persisted login.
 
@@ -381,7 +384,7 @@ You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
 |---|---|---|
 | `users/{address}` | the owning wallet only (`get`, never `list`) | the full profile, including `role` |
 | `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation`, `biography`, `expertise` — nothing else |
-| `siweNonces/{address}` | nobody; Admin SDK only | pending sign-in nonces |
+| `siweNonces/{challengeId}` | nobody; Admin SDK only | pending sign-in challenges, one per attempt |
 
 Postings live in `problems/{problemId}`. A submitted or open posting is readable by
 any active member; a **draft is private to its owner**. Their PDF attachments live in

@@ -77,8 +77,8 @@ The whole `stats` map is **frozen against client writes** — the rules require 
 byte-identical on update, so nobody can award themselves karma. Only Admin SDK code can
 move those numbers.
 
-**`siweNonces/{address}`** — written and consumed by the Cloud Functions, denied to all
-clients. Manages itself; ignore it.
+**`siweNonces/{challengeId}`** — one pending sign-in challenge per attempt, written and
+consumed by the Cloud Functions, denied to all clients. Manages itself; ignore it.
 
 ## Step 5 — Register the web app **[YOU]**
 
@@ -169,15 +169,16 @@ Sign in with Wallet
 wagmi connector picker   (wallets discovered via EIP-6963)
       |
       v
-getSiweNonce()   ------>  server issues a single-use nonce and returns
-      |                   the exact message to sign
+getSiweNonce()   ------>  server opens a challenge for THIS attempt and returns
+      |                   the exact message to sign, plus its challengeId
       v
 wallet signs that message
       |
       v
-verifySiweSignature() -->  server rebuilds the message from its OWN stored nonce,
-      |                    verifies the signature, burns the nonce, and mints a
-      |                    Firebase custom token whose uid IS the wallet address
+verifySiweSignature() -->  server looks up that challengeId, rebuilds the message
+      |   (+ challengeId)   from its OWN stored nonce, verifies the signature, burns
+      |                    the nonce, and mints a Firebase custom token whose uid IS
+      |                    the wallet address
       v
 signInWithCustomToken()
       |

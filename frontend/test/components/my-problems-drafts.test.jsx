@@ -166,3 +166,104 @@ it("QCDAO-132 can load and resume a draft older than the first 50 postings", asy
   expect(onNavigate).toHaveBeenCalledWith("create/draft1");
   expect(screen.queryByRole("button", { name: "Load older opportunities" })).toBeNull();
 });
+
+/** QCDAO-62/63 - the researcher's tracking list and the evaluator's queue. */
+const queues = vi.hoisted(() => ({ mine: { items: [] }, drafts: [], evaluator: async () => ({ items: [], nextCursor: null }), navigated: [] }));
+
+vi.mock("../../src/lib/proposalQueues.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  listMyProposalQueue: async () => queues.mine,
+  listEvaluatorQueue: async (payload) => queues.evaluator(payload),
+}));
+
+vi.mock("../../src/lib/proposals.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  listProposals: async () => queues.drafts,
+  deleteProposalDraft: async () => {},
+}));
+
+const { EvaluatorQueue, ResearcherProposals } = await import("../../src/components/RoleViews.jsx");
+
+const navigate = (route) => queues.navigated.push(route);
+const SOON = "2026-09-20T00:00:00.000Z";
+const LATER = "2026-10-20T00:00:00.000Z";
+
+describe("QCDAO-62 tracking my own proposals", () => {
+  afterEach(cleanup);
+  beforeEach(() => {
+    queues.navigated = [];
+    queues.drafts = [];
+    queues.mine = { items: [
+      { id: "p1", title: "Quantum routing", status: "submitted", createdAt: "2026-09-01T00:00:00.000Z",
+        problemId: "problem-1", posting: { id: "problem-1", title: "Cold-chain routing", status: "open", expiresAt: LATER },
+        comments: 2, qualifying: 1, recommendations: ["recommend"] },
+      { id: "p2", title: "Annealing study", status: "withdrawn", createdAt: "2026-09-05T00:00:00.000Z",
+        problemId: "problem-2", posting: { id: "problem-2", title: "Scheduling", status: "open", expiresAt: SOON },
+        comments: 0, qualifying: 0, recommendations: [] },
+    ] };
+  });
+
+  it("shows feedback progress, comment count and a deep link into the proposal", async () => {
+    render(<ResearcherProposals onNavigate={navigate} />);
+    await screen.findByText("Quantum routing");
+    expect(screen.getByText(/1 evaluator recommendation: Recommend/)).toBeTruthy();
+    expect(screen.getByText(/2 comments/)).toBeTruthy();
+    expect(screen.getByText(/Awaiting evaluator recommendation/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cold-chain routing" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "View proposal" })[0]);
+    expect(queues.navigated).toContain("posting/problem-1");
+    expect(queues.navigated).toContain("proposal/p2");
+  });
+
+  it("orders by closing soonest and filters by workflow status", async () => {
+    const { container } = render(<ResearcherProposals onNavigate={navigate} />);
+    await screen.findByText("Quantum routing");
+    const titles = () => [...container.querySelectorAll(".table-row")].map((row) => row.querySelector("strong")?.textContent);
+    expect(titles()).toEqual(["Annealing study", "Quantum routing"]);
+    fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "withdrawn" } });
+    await waitFor(() => expect(titles()).toEqual(["Annealing study"]));
+  });
+});
+
+describe("QCDAO-63 the evaluator recommendation queue", () => {
+  afterEach(cleanup);
+  const pending = { id: "s1", title: "Soon solution", status: "submitted", submittedAt: "2026-09-02T00:00:00.000Z",
+    posting: { id: "problem-2", title: "Scheduling", status: "open", expiresAt: SOON }, recommendationStatus: "pending", recommendation: null };
+  const done = { id: "s2", title: "Reviewed solution", status: "submitted", submittedAt: "2026-09-01T00:00:00.000Z",
+    posting: { id: "problem-1", title: "Cold-chain routing", status: "open", expiresAt: LATER },
+    recommendationStatus: "submitted", recommendation: "recommend_with_revisions" };
+
+  beforeEach(() => {
+    queues.navigated = [];
+    queues.evaluator = async ({ filter }) => ({ filter, nextCursor: null,
+      items: filter === "submitted" ? [done] : filter === "all" ? [pending, done] : [pending] });
+  });
+
+  it("lists what still needs my recommendation and opens it for review", async () => {
+    render(<EvaluatorQueue onNavigate={navigate} />);
+    await screen.findByText("Soon solution");
+    expect(screen.getByText(/Scheduling/)).toBeTruthy();
+    expect(screen.getByText(/No recommendation from me yet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open proposal" }));
+    expect(queues.navigated).toContain("proposal/s1");
+  });
+
+  it("separates the solutions I have already recommended on", async () => {
+    render(<EvaluatorQueue onNavigate={navigate} />);
+    await screen.findByText("Soon solution");
+    fireEvent.click(screen.getByRole("tab", { name: "Recommendation submitted" }));
+    await screen.findByText(/My recommendation: Recommend with revisions/);
+    expect(screen.queryByText("Soon solution")).toBeNull();
+  });
+
+  it("explains a refusal when the account is not an assigned evaluator", async () => {
+    queues.evaluator = async () => {
+      const error = new Error("Only an assigned evaluator can open this queue.");
+      error.code = "functions/permission-denied";
+      throw error;
+    };
+    render(<EvaluatorQueue onNavigate={navigate} />);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByText(/assigned evaluator/)).toBeTruthy();
+  });
+});
