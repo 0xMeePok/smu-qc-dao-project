@@ -7,6 +7,9 @@ export const ROLE_EVALUATOR = 2;
 export const ROLE_ADMIN = 1;
 export const COMMENT_EDIT_WINDOW_MS = 15 * 60 * 1000;
 export const COMMENT_BODY_MAX = 5000;
+// A thread is bounded so one discussion cannot grow into an unbounded read.
+export const REPLIES_PER_THREAD = 200;
+export const REPLIES_PER_MEMBER_PER_THREAD = 20;
 export const EVALUATOR_BADGE = "evaluator";
 export const RECOMMENDATIONS = new Set(["recommend", "recommend_with_revisions", "do_not_recommend"]);
 const BLOCKED = new Set(["hidden", "removed"]);
@@ -293,6 +296,18 @@ async function loadReplyParent(tx, db, proposalId, parentId) {
   return parent;
 }
 
+async function assertReplyAllowance(tx, db, parent, uid) {
+  if (!parent) return;
+  if ((parent.data().replyCount || 0) >= REPLIES_PER_THREAD) {
+    fail("resource-exhausted", "This thread has reached its reply limit.");
+  }
+  const mine = await tx.get(db.collection("comments").where("parentId", "==", parent.id)
+    .where("authorId", "==", uid).limit(REPLIES_PER_MEMBER_PER_THREAD));
+  if (mine.size >= REPLIES_PER_MEMBER_PER_THREAD) {
+    fail("resource-exhausted", "You have reached your reply limit for this thread.");
+  }
+}
+
 export async function createComment({ db, uid, proposalId, body, recommendation, parentId, now = Timestamp.now() }) {
   validId(proposalId, "proposal");
   const text = commentBody(body);
@@ -302,6 +317,7 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     const profile = await loadMember(tx, db, uid);
     const proposal = await loadReadableProposal(tx, db, uid, profile, proposalId);
     const parent = await loadReplyParent(tx, db, proposalId, replyTo);
+    await assertReplyAllowance(tx, db, parent, uid);
     const role = accessLevel(profile);
     const shown = presentation(role);
     const record = {

@@ -13,6 +13,8 @@ import {
 } from "../comments.js";
 import { listReportableComments, moderateContent } from "../moderation.js";
 import { fundMockProposal, getMockMatching, selectMockProposal } from "../matching.js";
+import { listEvaluatorQueue, listMyProposals } from "../proposalQueues.js";
+import { REPLIES_PER_MEMBER_PER_THREAD, REPLIES_PER_THREAD } from "../comments.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
 const later = (ms) => Timestamp.fromMillis(now.toMillis() + ms);
@@ -589,5 +591,144 @@ test("[BUT-SPER-26] evaluator comments stay off-chain and never write audit or m
   assert.equal(
     [...db.records.keys()].some((path) => path.startsWith("matchingEvents/")),
     false,
+  );
+});
+
+/** QCDAO-62/63 - the tracking list and the evaluator queue, built from these same records. */
+const DAY = 24 * 60 * 60 * 1000;
+
+function queueFixture() {
+  return memoryDb({
+    "users/owner": { role: 0, fullName: "Problem owner" },
+    "users/alice": { role: 0, fullName: "Alice" },
+    "users/evaluator": { role: 2, fullName: "Assigned evaluator" },
+    "problems/soon": { ownerId: "owner", title: "Closing soon", status: "open", expiresAt: later(2 * DAY), createdAt: now },
+    "problems/later": { ownerId: "owner", title: "Closing later", status: "submitted", expiresAt: later(9 * DAY), createdAt: now },
+    "problems/unpublished": { ownerId: "owner", title: "Draft posting", status: "draft", expiresAt: later(DAY), createdAt: now },
+    "proposals/soon-a": { researcherId: "alice", postingOwnerId: "owner", problemId: "soon", title: "Soon solution",
+      status: "submitted", amount: 100, currency: "SGD", createdAt: now },
+    "proposals/later-a": { researcherId: "alice", postingOwnerId: "owner", problemId: "later", title: "Later solution",
+      status: "submitted", amount: 200, currency: "SGD", createdAt: later(60_000) },
+    "proposals/evaluator-own": { researcherId: "evaluator", postingOwnerId: "owner", problemId: "later",
+      title: "The evaluator's own solution", status: "submitted", createdAt: now },
+    "proposals/unpublished-a": { researcherId: "alice", postingOwnerId: "owner", problemId: "unpublished",
+      title: "On an unpublished posting", status: "submitted", createdAt: now },
+  });
+}
+
+test("[QCDAO-62] tracks my proposals with their posting, comment count and recommendation progress", async () => {
+  const db = queueFixture();
+  await createComment({ db, uid: "owner", proposalId: "soon-a", body: "How does this scale?", now });
+  await createComment({ db, uid: "evaluator", proposalId: "soon-a", body: "Sound approach", recommendation: "recommend", now });
+  const { items } = await listMyProposals({ db, uid: "alice" });
+  assert.ok(!items.some((item) => item.id === "evaluator-own"), "another member's proposal must not appear");
+  const soon = items.find((item) => item.id === "soon-a");
+  assert.equal(soon.posting.title, "Closing soon");
+  assert.equal(soon.posting.expiresAt, later(2 * DAY).toDate().toISOString());
+  assert.equal(soon.comments, 2);
+  assert.equal(soon.qualifying, 1);
+  assert.deepEqual(soon.recommendations, ["recommend"]);
+  assert.equal(soon.evaluationComplete, true);
+  assert.equal(items.find((item) => item.id === "later-a").qualifying, 0);
+});
+
+test("[QCDAO-62] counts only the comments a reader can still see", async () => {
+  const db = queueFixture();
+  const removed = await createComment({ db, uid: "owner", proposalId: "soon-a", body: "Withdrawn question", now });
+  await createComment({ db, uid: "owner", proposalId: "soon-a", body: "Standing question", now });
+  await deleteComment({ db, uid: "owner", commentId: removed.id, now: later(1000) });
+  const { items } = await listMyProposals({ db, uid: "alice" });
+  assert.equal(items.find((item) => item.id === "soon-a").comments, 1);
+});
+
+test("[QCDAO-63] refuses the queue to an account without the evaluator access level", async () => {
+  const db = queueFixture();
+  await assert.rejects(() => listEvaluatorQueue({ db, uid: "alice" }), /assigned evaluator/);
+});
+
+test("[QCDAO-63] queues eligible solutions closing soonest, skipping the evaluator's own and unpublished postings", async () => {
+  const db = queueFixture();
+  const { items } = await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" });
+  assert.deepEqual(items.map((item) => item.id), ["soon-a", "later-a"]);
+  assert.equal(items[0].posting.title, "Closing soon");
+  assert.equal(items[0].recommendationStatus, "pending");
+});
+
+test("[QCDAO-63] separates pending from submitted once my recommendation is filed", async () => {
+  const db = queueFixture();
+  await createComment({ db, uid: "evaluator", proposalId: "soon-a", body: "Strong fit", recommendation: "recommend_with_revisions", now });
+  const pending = await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" });
+  assert.deepEqual(pending.items.map((item) => item.id), ["later-a"]);
+  const submitted = await listEvaluatorQueue({ db, uid: "evaluator", filter: "submitted" });
+  assert.deepEqual(submitted.items.map((item) => item.id), ["soon-a"]);
+  assert.equal(submitted.items[0].recommendation, "recommend_with_revisions");
+});
+
+test("[QCDAO-63] a reply from me is not a recommendation and leaves the solution pending", async () => {
+  const db = queueFixture();
+  const parent = await createComment({ db, uid: "owner", proposalId: "soon-a", body: "Question for the team", now });
+  await createComment({ db, uid: "evaluator", proposalId: "soon-a", body: "Answering the question", parentId: parent.id, now });
+  const { items } = await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" });
+  assert.ok(items.some((item) => item.id === "soon-a"));
+});
+
+/** Bounded discussions: replies are capped when posted and paged when read. */
+test("a member cannot post unbounded replies under one comment", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  for (let index = 0; index < REPLIES_PER_MEMBER_PER_THREAD; index += 1) {
+    await createComment({ db, uid: "alice", proposalId: "a", parentId: parent.id, body: `Reply ${index}`, now });
+  }
+  await assert.rejects(
+    () => createComment({ db, uid: "alice", proposalId: "a", parentId: parent.id, body: "One too many", now }),
+    { code: "resource-exhausted" },
+  );
+  // A different member still has their own allowance.
+  await assert.doesNotReject(
+    () => createComment({ db, uid: "owner", proposalId: "a", parentId: parent.id, body: "A separate voice", now }),
+  );
+});
+
+test("a thread stops accepting replies at its cap", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  db.records.set(`comments/${parent.id}`, { ...db.records.get(`comments/${parent.id}`), replyCount: REPLIES_PER_THREAD });
+  await assert.rejects(
+    () => createComment({ db, uid: "owner", proposalId: "a", parentId: parent.id, body: "Past the cap", now }),
+    { code: "resource-exhausted" },
+  );
+});
+
+test("a long thread returns a bounded preview and pages the rest through a cursor", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  for (let index = 0; index < 8; index += 1) {
+    await createComment({ db, uid: index % 2 ? "alice" : "owner", proposalId: "a", parentId: parent.id,
+      body: `Reply ${index}`, now: later(index + 1) });
+  }
+  const listed = await listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "a" });
+  const thread = listed.items.find((item) => item.id === parent.id);
+  assert.equal(thread.replyCount, 8);
+  assert.ok(thread.replies.length < 8, "the first response must not carry every reply");
+  assert.equal(thread.hasMoreReplies, true);
+  assert.ok(thread.nextReplyCursor);
+
+  const page = await listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "a",
+    threadId: parent.id, cursor: thread.nextReplyCursor });
+  assert.equal(page.threadId, parent.id);
+  assert.ok(page.items.length > 0);
+  const seen = new Set([...thread.replies, ...page.items].map((item) => item.id));
+  assert.equal(seen.size, thread.replies.length + page.items.length, "pages must not repeat a reply");
+  assert.ok(page.items.every((item) => item.parentId === parent.id));
+});
+
+test("thread paging refuses a comment that belongs to another proposal", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  db.records.set(`proposals/other`, { researcherId: "alice", postingOwnerId: "owner", problemId: "problem",
+    title: "Other", status: "submitted", createdAt: now });
+  await assert.rejects(
+    () => listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "other", threadId: parent.id }),
+    { code: "not-found" },
   );
 });

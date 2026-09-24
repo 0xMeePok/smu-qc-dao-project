@@ -39,9 +39,17 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
     submitContentReport: member(submitContentReport),
     listModerationQueue: admin(listModerationQueue),
     getModerationContext: admin(getModerationContext),
-    moderateContent: admin((args) => moderateContent({
-      ...args, prepareMatching: prepareModerationMatching, prepareCommentGate: prepareCommentEvaluationGate,
-    })),
+    moderateContent: admin(async (args) => {
+      const result = await moderateContent({
+        ...args, prepareMatching: prepareModerationMatching, prepareCommentGate: prepareCommentEvaluationGate,
+      });
+      // The matching transaction only reaches the proposals it loaded. Stamp the
+      // rest before returning, so no child keeps serving PDFs for a hidden parent.
+      if (args.contentType === "problem") {
+        await syncProblemProposalsBrowsable({ db: args.db, problemId: args.contentId, now: args.now });
+      }
+      return result;
+    }),
     listModerationNotifications: member(listModerationNotifications),
     markModerationNotificationRead: member(markModerationNotificationRead),
     markAllModerationNotificationsRead: member(markAllModerationNotificationsRead),

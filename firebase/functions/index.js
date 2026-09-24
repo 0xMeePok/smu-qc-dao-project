@@ -37,6 +37,7 @@ import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
+import { listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -191,6 +192,17 @@ export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) =
 export const getProposalComparison = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return readProposalComparison({ db, uid, problemId: request.data?.problemId });
+});
+
+// QCDAO-62 and QCDAO-63 read existing proposal, problem and comment records.
+export const listMyProposalQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return listMyProposals({ db, uid });
+});
+
+export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return evaluatorQueue({ db, uid, cursor: request.data?.cursor ?? null, filter: request.data?.filter ?? "pending" });
 });
 
 export const createComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
@@ -419,10 +431,9 @@ async function issueNonce({ request, address, ref, domain }) {
   const nowMs = Date.now();
 
   return db.runTransaction(async (tx) => {
-    const [globalSnapshot, sourceSnapshot, nonceSnapshot] = await Promise.all([
+    const [globalSnapshot, sourceSnapshot] = await Promise.all([
       tx.get(globalRef),
       tx.get(sourceRef),
-      tx.get(ref),
     ]);
     const global = quotaCounter(globalSnapshot, nowMs);
     const perSource = quotaCounter(sourceSnapshot, nowMs);
@@ -446,22 +457,6 @@ async function issueNonce({ request, address, ref, domain }) {
       expiresAt,
     });
 
-    if (nonceSnapshot.exists) {
-      const data = nonceSnapshot.data() ?? {};
-      const nonceExpiresAt = typeof data.expiresAt?.toMillis === "function"
-        ? data.expiresAt.toMillis()
-        : null;
-      const stillPending = data.consumed === false
-        && typeof data.nonce === "string"
-        && typeof data.issuedAt === "string"
-        && nonceExpiresAt !== null
-        && nonceExpiresAt > nowMs;
-
-      if (stillPending && data.domain === domain) {
-        return { nonce: data.nonce, issuedAt: data.issuedAt, domain: data.domain };
-      }
-    }
-
     const fresh = {
       nonce: randomBytes(16).toString("hex"),
       issuedAt: new Date(nowMs).toISOString(),
@@ -471,6 +466,7 @@ async function issueNonce({ request, address, ref, domain }) {
     tx.set(ref, {
       ...fresh,
       address,
+      callerHash: sourceHash,
       consumed: false,
       expiresAt: Timestamp.fromMillis(nowMs + NONCE_TTL_MS),
       createdAt: Timestamp.fromMillis(nowMs),
@@ -496,7 +492,10 @@ export const getSiweNonce = onCall(
   },
   async (request) => {
     const address = normaliseAddress(request.data?.address);
-    const ref = db.collection(NONCE_COLLECTION).doc(address);
+    // One opaque challenge per attempt, not one per wallet: another caller can
+    // then neither replace this sign-in nor spend its verification attempts.
+    const challengeId = randomBytes(16).toString("hex");
+    const ref = db.collection(NONCE_COLLECTION).doc(challengeId);
     const domain = resolveDomain(request);
     const issued = await issueNonce({ request, address, ref, domain });
 
@@ -504,6 +503,7 @@ export const getSiweNonce = onCall(
       message: buildMessage({ address, ...issued }),
       nonce: issued.nonce,
       issuedAt: issued.issuedAt,
+      challengeId,
     };
   },
 );
@@ -529,7 +529,14 @@ export const verifySiweSignature = onCall({
     throw new HttpsError("invalid-argument", "A valid wallet signature is required.");
   }
 
-  const ref = db.collection(NONCE_COLLECTION).doc(address);
+  const challengeId = request.data?.challengeId;
+  if (challengeId !== undefined && challengeId !== null
+      && (typeof challengeId !== "string" || !/^[0-9a-f]{32}$/.test(challengeId))) {
+    throw new HttpsError("invalid-argument", "A valid sign-in challenge is required.");
+  }
+  // Attempts are counted on this document, so a challenge belongs to the caller
+  // that opened it. Address-keyed records predate this and drain with their TTL.
+  const ref = db.collection(NONCE_COLLECTION).doc(challengeId || address);
 
   // Bound verification work atomically before cryptography. Failed signatures
   // spend an attempt but never consume the wallet nonce.
@@ -562,6 +569,9 @@ export const verifySiweSignature = onCall({
   }
 
   const record = snapshot.data() ?? {};
+  if (record.address && record.address !== address) {
+    throw new HttpsError("failed-precondition", "That sign-in request belongs to another wallet. Start again.");
+  }
   const expiresAtMs = typeof record.expiresAt?.toMillis === "function"
     ? record.expiresAt.toMillis()
     : null;

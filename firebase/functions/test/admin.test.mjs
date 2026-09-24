@@ -36,7 +36,9 @@ async function getIdTokenForAccount(account) {
   const address = account.address.toLowerCase();
   const { result: nonceRes } = await call("getSiweNonce", { address });
   const signature = await account.signMessage({ message: nonceRes.message });
-  const { result: verifyRes } = await call("verifySiweSignature", { address, signature });
+  const { result: verifyRes } = await call("verifySiweSignature", {
+    address, signature, challengeId: nonceRes.challengeId,
+  });
   const customToken = verifyRes.token;
 
   const authRes = await fetch(
@@ -314,7 +316,9 @@ describe("adminSetSuspended", () => {
     // 2. Attempt SIWE login for user2
     const { result: nonceRes } = await call("getSiweNonce", { address: user2Address });
     const signature = await user2Account.signMessage({ message: nonceRes.message });
-    const verifyRes = await call("verifySiweSignature", { address: user2Address, signature });
+    const verifyRes = await call("verifySiweSignature", {
+      address: user2Address, signature, challengeId: nonceRes.challengeId,
+    });
 
     assert.equal(verifyRes.error?.status, "PERMISSION_DENIED");
     assert.ok(verifyRes.error?.message?.includes("suspended"));

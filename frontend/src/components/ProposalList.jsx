@@ -29,7 +29,7 @@ function Row({ item, onNavigate, onDelete }) {
   </div>;
 }
 
-export function ProposalList({ received = false, onNavigate }) {
+export function ProposalList({ received = false, draftsOnly = false, onNavigate }) {
   const { user } = useAuth();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -71,13 +71,13 @@ export function ProposalList({ received = false, onNavigate }) {
         : drafts.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} onDelete={setPendingDelete} />)}
     </div>}
 
-    <div className="card-table">
+    {!draftsOnly && <div className="card-table">
       <div className="table-header"><h3>{received ? "Proposals received" : "My proposals"}</h3>{!received && <button className="secondary small" onClick={() => onNavigate("discover")}>Browse opportunities</button>}</div>
       {loading ? <p className="table-empty" role="status">Loading proposals…</p>
         : error ? <p className="error-banner" role="alert">{error}</p>
         : !submitted.length ? <p className="table-empty">{received ? "No proposals received yet." : "No proposals yet. Choose an open opportunity to submit your approach."}</p>
         : submitted.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} onDelete={setPendingDelete} />)}
-    </div>
+    </div>}
 
     {pendingDelete && <Modal labelledBy="delete-proposal-draft-title" describedBy="delete-proposal-draft-desc" onDismiss={() => { if (!deleting) setPendingDelete(null); }}>
       <div className="modal-head"><div>

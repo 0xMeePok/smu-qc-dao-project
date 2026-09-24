@@ -4,6 +4,14 @@ import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "..
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../../src/lib/proposalValidation.js";
 import { buildProposalDocument } from "../../src/lib/proposals.js";
 import { attachmentPath } from "../../src/lib/attachments.js";
+import {
+  commentCountLabel,
+  feedbackLabel,
+  filterProposalRows,
+  queueError,
+  sortProposalRows,
+  statusOptions,
+} from "../../src/lib/proposalQueues.js";
 
 const posting = { id: "problem-1", ownerId: "0xowner", status: "submitted", currency: "USDC", expiresAt: new Date("2099-01-01") };
 const form = { ...Object.fromEntries(PROPOSAL_FIELDS.map(([key]) => [key, ` ${key} content `])), amount: "1500", category: "quantum-inspired" };
@@ -75,5 +83,44 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     // a draft has to answer for every field on the way out.
     assert.ok(Object.keys(validateProposal({ title: "Routing, first pass" }, posting)).length > 1);
     assert.deepEqual(validateProposal(form, posting), {});
+  });
+});
+
+describe("QCDAO-62/63 proposal queues", () => {
+  const rows = [
+    { id: "p1", status: "submitted", createdAt: "2026-09-01T00:00:00.000Z",
+      posting: { expiresAt: "2026-10-01T00:00:00.000Z" }, comments: 2, qualifying: 1, recommendations: ["recommend"] },
+    { id: "p2", status: "withdrawn", createdAt: "2026-09-05T00:00:00.000Z",
+      posting: { expiresAt: "2026-09-20T00:00:00.000Z" }, comments: 0, qualifying: 0, recommendations: [] },
+    { id: "p3", status: "submitted", createdAt: "2026-09-03T00:00:00.000Z",
+      posting: { expiresAt: null }, comments: 1, qualifying: 0, recommendations: [] },
+  ];
+
+  it("orders by closing soonest and leaves postings without a deadline last", () => {
+    assert.deepEqual(sortProposalRows(rows, "closing").map((row) => row.id), ["p2", "p1", "p3"]);
+  });
+
+  it("orders by newest submission when the author asks for it", () => {
+    assert.deepEqual(sortProposalRows(rows, "submitted").map((row) => row.id), ["p2", "p3", "p1"]);
+  });
+
+  it("filters by the shared workflow status and offers only the statuses present", () => {
+    assert.deepEqual(filterProposalRows(rows, "submitted").map((row) => row.id), ["p1", "p3"]);
+    assert.equal(filterProposalRows(rows, "all").length, 3);
+    assert.deepEqual(statusOptions(rows), ["submitted", "withdrawn"]);
+  });
+
+  it("reports feedback progress as evaluator recommendations, never scores", () => {
+    assert.match(feedbackLabel(rows[0]), /1 evaluator recommendation: Recommend/);
+    assert.equal(feedbackLabel(rows[1]), "Awaiting evaluator recommendation");
+    assert.equal(commentCountLabel(rows[2]), "1 comment");
+    assert.equal(commentCountLabel(rows[1]), "0 comments");
+  });
+
+  it("keeps the queue's own refusal and hides unexpected failures", () => {
+    const denied = { code: "functions/permission-denied", message: "Only an assigned evaluator can open this queue." };
+    assert.match(queueError(denied), /assigned evaluator/);
+    assert.match(queueError({ code: "functions/internal", message: "boom" }), /Could not load the queue/);
+    assert.doesNotMatch(queueError({ code: "functions/internal", message: "boom" }), /boom/);
   });
 });

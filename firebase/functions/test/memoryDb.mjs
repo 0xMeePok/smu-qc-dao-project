@@ -13,7 +13,8 @@ export function memoryDb(initial = {}) {
   });
   const comparable = (value) => value?.toMillis?.() ?? value;
   const collection = (name, filters = [], cap = Infinity, orders = [], cursor = []) => {
-    const fieldValue = (path, field) => field === "__name__" ? path.split("/").at(-1) : comparable(field.split(".").reduce((value, key) => value?.[key], records.get(path)));
+    const named = (field) => (typeof field === "string" ? field : "__name__");
+    const fieldValue = (path, rawField) => named(rawField) === "__name__" ? path.split("/").at(-1) : comparable(named(rawField).split(".").reduce((value, key) => value?.[key], records.get(path)));
     return {
       doc: (id) => reference(`${name}/${id}`),
       where: (field, op, value) => collection(name, [...filters, [field, op, value]], cap, orders, cursor),
@@ -31,6 +32,7 @@ export function memoryDb(initial = {}) {
     };
   };
   return { records, get reads() { return reads; }, collection,
+    getAll: async (...refs) => Promise.all(refs.map((ref) => ref.get())),
     runTransaction(fn) {
       const task = queue.then(() => {
         const writes = [];

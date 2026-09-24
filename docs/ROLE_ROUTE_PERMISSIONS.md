@@ -90,3 +90,20 @@ Authentication is strictly enforced via Web3 Sign-In with Ethereum (SIWE) throug
    - **Platform Participant**: User profiles (`role == 0` in Firestore) receive the full participant capability set: `[owner, researcher, evaluator, funder]`.
    - **DAO Administrator**: Dedicated admin profiles (`role == 1` in Firestore, assigned out-of-band/admin SDK) receive the isolated `[admin]` capability set.
    - **Unauthenticated Visitor**: Resolves to `[guest]`.
+---
+
+## 7. Evaluator Assignment Model (QCDAO-63)
+
+`role = 2` (assigned evaluator) is granted by a DAO administrator from **Admin Audit → User Directory & Roles**. No
+client path can set it: `firestore.rules` fixes `role` at 0 on create and immutable on every client update.
+
+Once assigned, an evaluator **self-selects from an eligible pool** rather than being allocated individual proposals.
+Every solution on a live posting (`submitted` or `open`) that the evaluator did not author appears in their queue at
+`#/evaluations`, ordered by closing soonest. There is no per-proposal assignment record, and no automated matching by
+expertise (explicitly out of scope).
+
+A **qualifying evaluator recommendation comment** is the unit of progress for both QCDAO-62 and QCDAO-63: an active,
+non-deleted, unmoderated, top-level comment whose author holds the evaluator access level (server-derived badge),
+carrying exactly one of `recommend`, `recommend_with_revisions` or `do_not_recommend`. Replies never qualify. The
+server maintains `proposals/{id}.matching.evaluationComplete` from that same rule, so no separate evaluation record
+is stored.

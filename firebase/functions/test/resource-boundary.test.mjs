@@ -18,7 +18,10 @@ async function call(name, data, auth = token) {
 }
 before(async () => {
   const nonce = await call("getSiweNonce", { address: uid });
-  const signed = await call("verifySiweSignature", { address: uid, signature: await account.signMessage({ message: nonce.result.message }) });
+  const signed = await call("verifySiweSignature", {
+    address: uid, signature: await account.signMessage({ message: nonce.result.message }),
+    challengeId: nonce.result.challengeId,
+  });
   const response = await fetch("http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: signed.result.token, returnSecureToken: true }),
   });
