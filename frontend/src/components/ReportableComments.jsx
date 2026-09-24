@@ -69,6 +69,11 @@ function CommentsPage({ problemId, proposalId }) {
   function refresh() {
     setEditingId(null); setItems([]); setCursor(null); busy.current = false; load(null, sort);
   }
+  // QCDAO-70: replies arrive as a bounded preview; a thread pages on demand.
+  async function loadThread(threadId, cursor) {
+    return listReportableComments({ problemId, ...(proposalId ? { proposalId } : {}), threadId,
+      ...(cursor ? { cursor } : {}) });
+  }
   function toggleThread(id, open) {
     setExpandedIds((current) => {
       const next = new Set(current);
@@ -102,7 +107,8 @@ function CommentsPage({ problemId, proposalId }) {
     {items.map((item) => <CommentItem key={item.id} item={item} user={user} editing={editingId === item.id}
       editingId={editingId} canReply={canCompose} expanded={expandedIds.has(item.id)}
       onToggle={() => toggleThread(item.id)} onReply={() => toggleThread(item.id, true)}
-      onEdit={(id) => setEditingId(id || item.id)} onCancel={() => setEditingId(null)} onChanged={refresh} />)}
+      onEdit={(id) => setEditingId(id || item.id)} onCancel={() => setEditingId(null)} onChanged={refresh}
+      onLoadReplies={loadThread} />)}
     {loading && <p role="status" className="field-hint">Loading comments…</p>}
     {(cursor || error) && <button className="secondary" type="button" disabled={loading} onClick={() => load(cursor, sort)}>{error ? "Retry comments" : "Load more comments"}</button>}
   </section>;
@@ -154,13 +160,33 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
   </form>;
 }
 
-function CommentItem({ item, user, editing, editingId, canReply, expanded, onToggle, onReply, onEdit, onCancel, onChanged, nested }) {
+function CommentItem({ item, user, editing, editingId, canReply, expanded, onToggle, onReply, onEdit, onCancel, onChanged, onLoadReplies, nested }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [extraReplies, setExtraReplies] = useState([]);
+  const [replyCursor, setReplyCursor] = useState(item.nextReplyCursor ?? null);
+  const [loadingReplies, setLoadingReplies] = useState(false);
+  useEffect(() => {
+    setExtraReplies([]);
+    setReplyCursor(item.nextReplyCursor ?? null);
+  }, [item.id, item.replies]);
+  const loadMoreReplies = async () => {
+    if (loadingReplies || !replyCursor || !onLoadReplies) return;
+    setLoadingReplies(true); setError("");
+    try {
+      const data = await onLoadReplies(item.id, replyCursor);
+      setExtraReplies((current) => [...current, ...(data?.items ?? [])]);
+      setReplyCursor(data?.nextCursor ?? null);
+    } catch (err) {
+      setError(moderationError(err));
+    } finally {
+      setLoadingReplies(false);
+    }
+  };
   const removed = Boolean(item.deleted || item.deletedAt);
   const mine = !removed && sameAuthor(user, item);
   const editable = mine && canEditComment(item);
-  const replies = item.replies || [];
+  const replies = [...(item.replies || []), ...extraReplies];
   const count = replyCount(item);
   const parent = !nested && !item.parentId;
   const remove = async () => {
@@ -195,6 +221,9 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
     {parent && expanded && <div className="comment-replies">
       {replies.map((reply) => <CommentItem key={reply.id} item={reply} user={user} nested editing={editingId === reply.id}
         onEdit={() => onEdit(reply.id)} onCancel={onCancel} onChanged={onChanged} />)}
+      {replyCursor && <button type="button" className="text-button" disabled={loadingReplies} onClick={loadMoreReplies}>
+        {loadingReplies ? "Loading…" : "Load more replies"}
+      </button>}
       {canReply && !editingId && <CommentComposer proposalId={item.proposalId} parentId={item.id} evaluator={isEvaluator(user)}
         onPosted={onChanged} />}
     </div>}

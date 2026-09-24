@@ -135,6 +135,22 @@ describe("[QCDAO-70] reply to comments in a threaded discussion", () => {
     assert.doesNotMatch(posting, /proposalId=\{/);
   });
 
+  it("[FUT-SCR-146] pages a long thread instead of loading every reply in one response", () => {
+    const ui = source("../../src/components/ReportableComments.jsx");
+    assert.match(ui, /Load more replies/);
+    assert.match(ui, /onLoadReplies\(item\.id, replyCursor\)/);
+    assert.match(ui, /threadId/);
+    const server = source("../../../firebase/functions/moderation.js");
+    assert.match(server, /const REPLY_PREVIEW = \d+;/);
+    assert.match(server, /const THREAD_REPLY_PAGE = \d+;/);
+    assert.match(server, /const AUTHOR_LOOKUP_CAP = \d+;/);
+    // A reply query must be bounded per parent, never "every reply under these ids".
+    assert.doesNotMatch(server, /where\("parentId", "in"/);
+    const comments = source("../../../firebase/functions/comments.js");
+    assert.match(comments, /REPLIES_PER_THREAD/);
+    assert.match(comments, /REPLIES_PER_MEMBER_PER_THREAD/);
+  });
+
   it("[FUT-SCR-145] keeps a removed parent placeholder while replies remain, then drops the thread", async () => {
     const db = fixture();
     const parent = await create(db);

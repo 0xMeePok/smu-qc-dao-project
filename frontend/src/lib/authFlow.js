@@ -31,7 +31,8 @@ export async function requestSignInMessage(address) {
   if (!data?.message) {
     throw new OnboardingError("The server did not return a message to sign. Try again.");
   }
-  return data.message;
+  // The challenge id ties the signature back to this attempt's own record.
+  return { message: data.message, challengeId: data.challengeId ?? null };
 }
 
 export async function revokeOwnSessions() {
@@ -44,10 +45,10 @@ export async function revokeOwnSessions() {
   return data;
 }
 
-export async function exchangeSignatureForSession({ address, signature }) {
+export async function exchangeSignatureForSession({ address, signature, challengeId }) {
   requireFirebase();
   const verifySiweSignature = httpsCallable(functions, "verifySiweSignature");
-  const { data } = await verifySiweSignature({ address, signature });
+  const { data } = await verifySiweSignature({ address, signature, ...(challengeId ? { challengeId } : {}) });
   if (!data?.token) {
     throw new OnboardingError("The server did not return a session token. Try again.");
   }

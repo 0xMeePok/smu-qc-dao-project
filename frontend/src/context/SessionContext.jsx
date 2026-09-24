@@ -113,18 +113,17 @@ export function SessionProvider({ children }) {
         // RPC/currency needed) when the wallet has never heard of the chain, so this
         // one call still covers both "wrong network" and "network not added yet".
         //
-        // If the user dismisses the switch prompt a nonce may already have been
-        // issued and left pending, but that costs them nothing: getSiweNonce is
-        // idempotent while a nonce is unexpired, so the retry gets the same message
-        // back rather than an error.
+        // If the user dismisses the switch prompt a challenge may already have
+        // been issued and left pending, but that costs them nothing: each attempt
+        // gets its own challenge, and an abandoned one simply expires.
         const needsSwitch = getConnection(wagmiConfig).chainId !== EXPECTED_CHAIN_ID;
-        const [message] = await Promise.all([
+        const [challenge] = await Promise.all([
           requestSignInMessage(target),
           needsSwitch ? switchChain(wagmiConfig, { chainId: EXPECTED_CHAIN_ID }) : null,
         ]);
 
-        const signature = await signMessageAsync({ message, account: target });
-        await exchangeSignatureForSession({ address: target, signature });
+        const signature = await signMessageAsync({ message: challenge.message, account: target });
+        await exchangeSignatureForSession({ address: target, signature, challengeId: challenge.challengeId });
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
         setVerifiedAddress(target);

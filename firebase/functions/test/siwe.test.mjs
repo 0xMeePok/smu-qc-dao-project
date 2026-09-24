@@ -67,6 +67,7 @@ describe("honest sign-in", () => {
     const { result } = await call("verifySiweSignature", {
       address: victim.address,
       signature,
+      challengeId: nonce.challengeId,
     });
 
     assert.ok(result.token, "a valid signature should mint a custom token");
@@ -80,10 +81,10 @@ describe("attacks that must fail", () => {
     const { result: nonce } = await call("getSiweNonce", { address: victim.address });
     const signature = await victim.signMessage({ message: nonce.message });
 
-    const first = await call("verifySiweSignature", { address: victim.address, signature });
+    const first = await call("verifySiweSignature", { address: victim.address, signature, challengeId: nonce.challengeId });
     assert.ok(first.result?.token, "first use should succeed");
 
-    const second = await call("verifySiweSignature", { address: victim.address, signature });
+    const second = await call("verifySiweSignature", { address: victim.address, signature, challengeId: nonce.challengeId });
     assert.equal(second.result?.token, undefined, "the nonce must be single use");
   });
 
@@ -91,25 +92,26 @@ describe("attacks that must fail", () => {
     const victim = privateKeyToAccount(generatePrivateKey());
     const { result: nonce } = await call("getSiweNonce", { address: victim.address });
     const signature = await attacker.signMessage({ message: nonce.message });
-    const res = await call("verifySiweSignature", { address: victim.address, signature });
+    const res = await call("verifySiweSignature", { address: victim.address, signature, challengeId: nonce.challengeId });
     assert.equal(res.result?.token, undefined);
   });
 
   it("rejects a fabricated signature", async () => {
     const victim = privateKeyToAccount(generatePrivateKey());
-    await call("getSiweNonce", { address: victim.address });
+    const { result: nonce } = await call("getSiweNonce", { address: victim.address });
     const res = await call("verifySiweSignature", {
       address: victim.address,
       signature: `0x${"11".repeat(65)}`,
+      challengeId: nonce.challengeId,
     });
     assert.equal(res.result?.token, undefined);
   });
 
   it("rejects a real signature over a message the server never issued", async () => {
     const victim = privateKeyToAccount(generatePrivateKey());
-    await call("getSiweNonce", { address: victim.address });
+    const { result: nonce } = await call("getSiweNonce", { address: victim.address });
     const signature = await victim.signMessage({ message: "I agree to give away everything" });
-    const res = await call("verifySiweSignature", { address: victim.address, signature });
+    const res = await call("verifySiweSignature", { address: victim.address, signature, challengeId: nonce.challengeId });
     assert.equal(res.result?.token, undefined);
   });
 
@@ -139,11 +141,11 @@ describe("recovery after a failed attempt", () => {
     const { result: nonce } = await call("getSiweNonce", { address: victim.address });
 
     const bogus = await attacker.signMessage({ message: nonce.message });
-    const failed = await call("verifySiweSignature", { address: victim.address, signature: bogus });
+    const failed = await call("verifySiweSignature", { address: victim.address, signature: bogus, challengeId: nonce.challengeId });
     assert.equal(failed.result?.token, undefined, "the attacker's signature must not verify");
 
     const real = await victim.signMessage({ message: nonce.message });
-    const recovered = await call("verifySiweSignature", { address: victim.address, signature: real });
+    const recovered = await call("verifySiweSignature", { address: victim.address, signature: real, challengeId: nonce.challengeId });
     assert.ok(recovered.result?.token, "the legitimate holder must still be able to complete sign-in");
     assert.equal(recovered.result.address, victim.address.toLowerCase());
   });
@@ -220,25 +222,29 @@ describe("SIWE domain binding", () => {
     const fresh = privateKeyToAccount(generatePrivateKey());
     const { result: nonce } = await call("getSiweNonce", { address: fresh.address });
     const signature = await fresh.signMessage({ message: nonce.message });
-    const outcome = await call("verifySiweSignature", { address: fresh.address, signature });
+    const outcome = await call("verifySiweSignature", { address: fresh.address, signature, challengeId: nonce.challengeId });
 
     assert.ok(outcome.result?.token, "a legitimate user must still be able to sign in");
   });
 });
 
-describe("nonce issuance is idempotent and cannot be griefed", () => {
-  it("returns the SAME pending nonce instead of overwriting it", async () => {
+describe("sign-in challenges are isolated per attempt", () => {
+  it("issues a separate challenge per request and never replaces a pending one", async () => {
     // The griefing vector: an attacker who knows a wallet address (they are public)
-    // repeatedly requests nonces for it, replacing the message the real owner is
-    // part-way through signing. Returning the pending nonce means nothing is ever
-    // invalidated, so there is nothing to grief.
-    const fresh = privateKeyToAccount(generatePrivateKey());
-    const first = await call("getSiweNonce", { address: fresh.address });
-    const second = await call("getSiweNonce", { address: fresh.address });
+    // repeatedly requests nonces for it. Each request now opens its own challenge,
+    // so the message the real owner is part-way through signing is left untouched.
+    const victim = privateKeyToAccount(generatePrivateKey());
+    const { result: first } = await call("getSiweNonce", { address: victim.address });
+    const { result: second } = await call("getSiweNonce", { address: victim.address });
 
-    assert.ok(first.result?.nonce, "first request should issue a nonce");
-    assert.equal(second.result?.nonce, first.result.nonce, "the pending nonce must be reused");
-    assert.equal(second.result?.message, first.result.message, "and so must the message");
+    assert.notEqual(first.challengeId, second.challengeId, "each attempt owns a challenge");
+    assert.notEqual(first.nonce, second.nonce);
+
+    const signature = await victim.signMessage({ message: first.message });
+    const outcome = await call("verifySiweSignature", {
+      address: victim.address, signature, challengeId: first.challengeId,
+    });
+    assert.ok(outcome.result?.token, "the earlier challenge must still be signable");
   });
 
   it("keeps a victim's in-flight signature valid through repeated attacker requests", async () => {
@@ -251,57 +257,94 @@ describe("nonce issuance is idempotent and cannot be griefed", () => {
     }
 
     const signature = await victim.signMessage({ message: issued.message });
-    const outcome = await call("verifySiweSignature", { address: victim.address, signature });
+    const outcome = await call("verifySiweSignature", {
+      address: victim.address, signature, challengeId: issued.challengeId,
+    });
     assert.ok(outcome.result?.token, "the victim's original signature must still verify");
+  });
+
+  it("does not let another caller's failures exhaust the holder's challenge", async () => {
+    // Attempts used to be counted per wallet, so anyone could spend a target's ten
+    // tries and lock them out of signing in.
+    const victim = privateKeyToAccount(generatePrivateKey());
+    const { result: mine } = await call("getSiweNonce", { address: victim.address });
+    const { result: theirs } = await call("getSiweNonce", { address: victim.address });
+
+    for (let i = 0; i < 12; i += 1) {
+      const bogus = await attacker.signMessage({ message: theirs.message });
+      const failed = await call("verifySiweSignature", {
+        address: victim.address, signature: bogus, challengeId: theirs.challengeId,
+      });
+      assert.equal(failed.result?.token, undefined, "an attacker signature must not verify");
+    }
+
+    const real = await victim.signMessage({ message: mine.message });
+    const outcome = await call("verifySiweSignature", {
+      address: victim.address, signature: real, challengeId: mine.challengeId,
+    });
+    assert.ok(outcome.result?.token, "the holder's own challenge must survive another caller's failures");
+  });
+
+  it("refuses a challenge that belongs to a different wallet", async () => {
+    const victim = privateKeyToAccount(generatePrivateKey());
+    const stranger = privateKeyToAccount(generatePrivateKey());
+    const { result: issued } = await call("getSiweNonce", { address: victim.address });
+    const signature = await stranger.signMessage({ message: issued.message });
+    const outcome = await call("verifySiweSignature", {
+      address: stranger.address, signature, challengeId: issued.challengeId,
+    });
+    assert.equal(outcome.result?.token, undefined);
   });
 
   it("issues a genuinely new nonce once the previous one is consumed", async () => {
     const fresh = privateKeyToAccount(generatePrivateKey());
     const { result: first } = await call("getSiweNonce", { address: fresh.address });
     const signature = await fresh.signMessage({ message: first.message });
-    await call("verifySiweSignature", { address: fresh.address, signature });
+    await call("verifySiweSignature", { address: fresh.address, signature, challengeId: first.challengeId });
 
     const { result: second } = await call("getSiweNonce", { address: fresh.address });
     assert.ok(second?.nonce, "a fresh nonce should be issued after consumption");
     assert.notEqual(second.nonce, first.nonce, "a consumed nonce must never be reissued");
   });
 
-  it("does not burn the nonce when a bogus signature is submitted", async () => {
-    // Verification now reads the nonce and only consumes it AFTER the signature
-    // checks out. Previously it was marked consumed first and reset on failure,
-    // leaving a window where the real owner's signature was rejected as used.
+  it("does not burn the challenge when a bogus signature is submitted", async () => {
+    // Verification reads the challenge and only consumes it AFTER the signature
+    // checks out, so a wrong signature never strands the real owner.
     const victim = privateKeyToAccount(generatePrivateKey());
     const { result: issued } = await call("getSiweNonce", { address: victim.address });
 
     for (let i = 0; i < 3; i += 1) {
       const bogus = await attacker.signMessage({ message: issued.message });
-      const failed = await call("verifySiweSignature", { address: victim.address, signature: bogus });
+      const failed = await call("verifySiweSignature", {
+        address: victim.address, signature: bogus, challengeId: issued.challengeId,
+      });
       assert.equal(failed.result?.token, undefined, "an attacker signature must not verify");
     }
 
     const real = await victim.signMessage({ message: issued.message });
-    const outcome = await call("verifySiweSignature", { address: victim.address, signature: real });
+    const outcome = await call("verifySiweSignature", {
+      address: victim.address, signature: real, challengeId: issued.challengeId,
+    });
     assert.ok(outcome.result?.token, "the legitimate signature must still work afterwards");
   });
 
-  it("survives concurrent nonce requests for one address without splitting the nonce", async () => {
-    // Issuance is transactional, so parallel calls cannot each decide the record is
-    // absent and write different nonces - which would leave whichever user signed
-    // the losing message unable to verify.
+  it("gives every concurrent caller a challenge that verifies on its own", async () => {
+    // Issuance is transactional per challenge, so parallel calls cannot collide or
+    // leave a caller holding a message the server never stored.
     const fresh = privateKeyToAccount(generatePrivateKey());
     const results = await Promise.all(
       Array.from({ length: 5 }, () => call("getSiweNonce", { address: fresh.address })),
     );
 
-    const nonces = new Set(results.map((r) => r.result?.nonce).filter(Boolean));
-    assert.equal(nonces.size, 1, `all concurrent callers must get one nonce, got ${nonces.size}`);
+    const challenges = new Set(results.map((r) => r.result?.challengeId).filter(Boolean));
+    assert.equal(challenges.size, 5, "each caller gets its own challenge");
 
-    const [only] = [...nonces];
-    const signature = await fresh.signMessage({
-      message: results.find((r) => r.result?.nonce === only).result.message,
+    const chosen = results[2].result;
+    const signature = await fresh.signMessage({ message: chosen.message });
+    const outcome = await call("verifySiweSignature", {
+      address: fresh.address, signature, challengeId: chosen.challengeId,
     });
-    const outcome = await call("verifySiweSignature", { address: fresh.address, signature });
-    assert.ok(outcome.result?.token, "that nonce must be the one stored and therefore verifiable");
+    assert.ok(outcome.result?.token, "that challenge must be the one stored and therefore verifiable");
   });
 
   it("still rejects a replayed signature exactly once", async () => {
@@ -309,10 +352,10 @@ describe("nonce issuance is idempotent and cannot be griefed", () => {
     const { result: issued } = await call("getSiweNonce", { address: fresh.address });
     const signature = await fresh.signMessage({ message: issued.message });
 
-    const first = await call("verifySiweSignature", { address: fresh.address, signature });
+    const first = await call("verifySiweSignature", { address: fresh.address, signature, challengeId: issued.challengeId });
     assert.ok(first.result?.token, "first use succeeds");
 
-    const second = await call("verifySiweSignature", { address: fresh.address, signature });
+    const second = await call("verifySiweSignature", { address: fresh.address, signature, challengeId: issued.challengeId });
     assert.equal(second.result?.token, undefined, "the nonce must remain single use");
   });
 });
@@ -442,12 +485,12 @@ describe("hosting origins, including CD preview channels", () => {
 describe("QCDAO-138 bounded verification work", () => {
   it("caps concurrent invalid signatures per nonce without consuming it", async () => {
     const wallet = privateKeyToAccount(generatePrivateKey());
-    await call("getSiweNonce", { address: wallet.address });
+    const { result: issued } = await call("getSiweNonce", { address: wallet.address });
     const results = await Promise.all(Array.from({ length: 15 }, () => call("verifySiweSignature", {
-      address: wallet.address, signature: `0x${"11".repeat(65)}`,
+      address: wallet.address, signature: `0x${"11".repeat(65)}`, challengeId: issued.challengeId,
     })));
     assert.equal(results.filter((result) => result.error?.status === "RESOURCE_EXHAUSTED").length, 5);
-    const saved = (await db.collection("siweNonces").doc(wallet.address.toLowerCase()).get()).data();
+    const saved = (await db.collection("siweNonces").doc(issued.challengeId).get()).data();
     assert.equal(saved.verificationAttempts, 10);
     assert.equal(saved.consumed, false);
   });
@@ -463,12 +506,14 @@ describe("QCDAO-138 bounded verification work", () => {
   });
   it("rejects malformed and oversized signatures before charging verification", async () => {
     const wallet = privateKeyToAccount(generatePrivateKey());
-    await call("getSiweNonce", { address: wallet.address });
+    const { result: issued } = await call("getSiweNonce", { address: wallet.address });
     for (const signature of ["0xz1", `0x${"11".repeat(2049)}`]) {
-      const result = await call("verifySiweSignature", { address: wallet.address, signature });
+      const result = await call("verifySiweSignature", {
+        address: wallet.address, signature, challengeId: issued.challengeId,
+      });
       assert.equal(result.error?.status, "INVALID_ARGUMENT");
     }
-    const saved = (await db.collection("siweNonces").doc(wallet.address.toLowerCase()).get()).data();
+    const saved = (await db.collection("siweNonces").doc(issued.challengeId).get()).data();
     assert.equal(saved.verificationAttempts, undefined);
   });
 });

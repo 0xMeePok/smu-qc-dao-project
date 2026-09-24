@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Timestamp } from "firebase-admin/firestore";
+import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 
 export const REPORT_REASONS = ["off_topic", "abusive", "misleading", "duplicate", "other"];
@@ -10,6 +10,15 @@ const BLOCKED = new Set(["hidden", "removed"]);
 const PAGE_SIZE = 50;
 const MEMBER_VISIBLE_PROPOSAL = ["submitted", "under_review", "accepted", "rejected", "withdrawn"];
 const POSTED_PROPOSAL_CAP = 200;
+const VISIBILITY_SYNC_PAGE = 300;
+// A discussion response is bounded: a page of parents, a preview of replies under
+// each, and a capped set of author-name lookups. Whole threads page separately.
+const COMMENT_PAGE = 100;
+const PROPOSAL_COMMENT_PAGE = 25;
+const REPLY_PREVIEW = 3;
+const THREAD_REPLY_PAGE = 20;
+const AUTHOR_LOOKUP_CAP = 120;
+const VISIBILITY_SYNC_BUDGET_MS = 45_000;
 const BROWSABLE_PROBLEM_STATUS = new Set(["submitted", "open", "cancelled", "expired"]);
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -125,16 +134,49 @@ export async function syncProposalParentVisibility({ db, proposalId, now = Times
   });
 }
 
-export async function syncProblemProposalsBrowsable({ db, problemId, now = Timestamp.now() }) {
-  return db.runTransaction(async (tx) => {
-    const parent = await tx.get(db.collection("problems").doc(problemId));
-    if (!parent.exists) return { ok: true };
-    const problemBrowsable = problemIsMemberBrowsable(parent.data());
-    const rows = await tx.get(db.collection("proposals").where("problemId", "==", problemId)
-      .where("status", "in", MEMBER_VISIBLE_PROPOSAL).limit(POSTED_PROPOSAL_CAP + 1));
-    for (const doc of rows.docs.slice(0, POSTED_PROPOSAL_CAP)) stampProposalBrowsable(tx, doc, problemBrowsable, now);
-    return { ok: true };
-  });
+export async function syncProblemProposalsBrowsable({
+  db, problemId, now = Timestamp.now(), pageSize = VISIBILITY_SYNC_PAGE,
+  budgetMs = VISIBILITY_SYNC_BUDGET_MS, clock = Date.now,
+} = {}) {
+  const startedAt = clock();
+  const parent = await db.collection("problems").doc(problemId).get();
+  if (!parent.exists) return { ok: true, synced: 0, complete: true };
+  const problemBrowsable = problemIsMemberBrowsable(parent.data());
+  // Storage authorises proposal PDFs from each child's own problemBrowsable flag,
+  // so EVERY child has to be stamped - not the first page. A hidden posting with
+  // more children than one page would otherwise keep serving their PDFs.
+  const checkpointRef = db.collection("jobState").doc(`proposalVisibility_${problemId}`);
+  const checkpoint = (await checkpointRef.get()).data() ?? {};
+  let cursor = checkpoint.problemBrowsable === problemBrowsable ? checkpoint.cursorId ?? null : null;
+  let synced = 0;
+  let complete = false;
+  while (clock() - startedAt < budgetMs) {
+    let query = db.collection("proposals").where("problemId", "==", problemId)
+      .where("status", "in", MEMBER_VISIBLE_PROPOSAL)
+      .orderBy(FieldPath.documentId(), "asc").limit(pageSize);
+    if (cursor) query = query.startAfter(cursor);
+    const rows = await query.get();
+    if (rows.empty) { complete = true; break; }
+    const stale = rows.docs.filter((doc) => doc.data()
+      && doc.data().status !== "draft" && doc.data().problemBrowsable !== problemBrowsable);
+    const writes = stale.length;
+    // One transaction per page: the page is bounded well under the 500-write cap.
+    if (writes) {
+      await db.runTransaction(async (tx) => {
+        for (const doc of stale) tx.update(doc.ref, { problemBrowsable, updatedAt: now });
+      });
+    }
+    synced += writes;
+    cursor = rows.docs.at(-1).id;
+    if (rows.size < pageSize) { complete = true; break; }
+  }
+  if (complete) {
+    if (checkpoint.cursorId) await checkpointRef.delete();
+    return { ok: true, synced, complete: true };
+  }
+  // Resumable: the next pass continues from here rather than starting over.
+  await checkpointRef.set({ problemId, problemBrowsable, cursorId: cursor, updatedAt: now });
+  return { ok: true, synced, complete: false, cursorId: cursor };
 }
 
 export async function canReadContent(tx, db, type, data, uid, profile) {
@@ -398,18 +440,32 @@ function commentListItem(doc, names) {
     moderationStatus: data.moderationStatus || "visible", moderation: serialise(data.moderation || null) };
 }
 
-async function loadCommentReplies(tx, db, parentIds) {
-  if (!parentIds.length) return [];
-  const pages = await Promise.all(Array.from({ length: Math.ceil(parentIds.length / 10) }, (_, index) =>
-    tx.get(db.collection("comments").where("parentId", "in", parentIds.slice(index * 10, index * 10 + 10)))));
-  return pages.flatMap((page) => page.docs).sort((a, b) => {
-    const at = a.data().createdAt?.toMillis?.() ?? 0, bt = b.data().createdAt?.toMillis?.() ?? 0;
-    if (at !== bt) return at - bt;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
+async function loadCommentReplies(tx, db, parentIds, perParent = REPLY_PREVIEW) {
+  if (!parentIds.length) return new Map();
+  const pages = await Promise.all(parentIds.map((id) => tx.get(repliesQuery(db, id).limit(perParent + 1))));
+  return new Map(parentIds.map((id, index) => {
+    const docs = pages[index].docs;
+    return [id, { docs: docs.slice(0, perParent), hasMore: docs.length > perParent }];
+  }));
 }
 
-export async function listReportableComments({ db, uid, problemId, proposalId, cursor, sort }) {
+function repliesQuery(db, parentId) {
+  return db.collection("comments").where("parentId", "==", parentId)
+    .orderBy("createdAt", "asc").orderBy("__name__", "asc");
+}
+
+async function authorNames(tx, db, docs) {
+  const ids = [...new Set(docs.map((doc) => owner("comment", doc.data()) || "").filter(Boolean))]
+    .slice(0, AUTHOR_LOOKUP_CAP);
+  const names = new Map();
+  await Promise.all(ids.map(async (id) => {
+    const publicProfile = await tx.get(db.collection("publicProfiles").doc(id));
+    names.set(id, publicProfile.data()?.fullName || "");
+  }));
+  return names;
+}
+
+export async function listReportableComments({ db, uid, problemId, proposalId, cursor, sort, threadId }) {
   const parentType = proposalId ? "proposal" : "problem", parentId = proposalId || problemId;
   validateContent(parentType, parentId);
   if (sort != null && sort !== "" && sort !== "oldest" && sort !== "newest") fail("invalid-argument", "Choose oldest or newest first.");
@@ -423,31 +479,49 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
     const parent = await tx.get(db.collection(TYPES[parentType]).doc(parentId));
     if (!parent.exists || !await canReadContent(tx, db, parentType, parent.data(), uid, profile)) fail("permission-denied", "This discussion is not available.");
     if (proposalId && problemId && parent.data().problemId !== problemId) fail("permission-denied", "This proposal does not belong to that problem.");
+    // One thread's replies, paginated. Parent access was proved above.
+    if (threadId) {
+      validateContent("comment", threadId);
+      const thread = await tx.get(db.collection("comments").doc(threadId));
+      if (!thread.exists || thread.data().proposalId !== parentId || (thread.data().parentId ?? null) != null) {
+        fail("not-found", "This comment is not available.");
+      }
+      let threadQuery = repliesQuery(db, threadId);
+      if (cursor) threadQuery = threadQuery.startAfter(cursorTimestamp(cursor), cursor.id);
+      const replyRows = await tx.get(threadQuery.limit(THREAD_REPLY_PAGE + 1));
+      const replyPage = replyRows.docs.slice(0, THREAD_REPLY_PAGE);
+      const shown = replyPage.filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: true }));
+      const replyNames = await authorNames(tx, db, shown);
+      const lastReply = replyPage.at(-1);
+      return {
+        threadId,
+        items: shown.map((doc) => commentListItem(doc, replyNames)),
+        truncated: replyRows.size > THREAD_REPLY_PAGE,
+        nextCursor: replyRows.size > THREAD_REPLY_PAGE
+          ? timestampCursor(lastReply.id, lastReply.data().createdAt) : null,
+      };
+    }
+    const pageSize = proposalId ? PROPOSAL_COMMENT_PAGE : COMMENT_PAGE;
     const direction = newest ? "desc" : "asc";
     let query = db.collection("comments").where(proposalId ? "proposalId" : "problemId", "==", parentId);
     if (proposalId) query = query.where("parentId", "==", null);
     query = query.orderBy("createdAt", direction).orderBy("__name__", direction);
     if (cursor) query = query.startAfter(cursorTimestamp(cursor), cursor.id);
-    const rows = await tx.get(query.limit(101));
-    const page = rows.docs.slice(0, 100);
+    const rows = await tx.get(query.limit(pageSize + 1));
+    const page = rows.docs.slice(0, pageSize);
     const visible = page.filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: Boolean(proposalId) }));
-    const replyDocs = proposalId ? await loadCommentReplies(tx, db, visible.map((doc) => doc.id)) : [];
-    const visibleReplies = replyDocs.filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: true }));
-    const authorIds = [...new Set([...visible, ...visibleReplies].map((doc) => owner("comment", doc.data()) || "").filter(Boolean))];
-    const names = new Map();
-    await Promise.all(authorIds.map(async (id) => {
-      const publicProfile = await tx.get(db.collection("publicProfiles").doc(id));
-      names.set(id, publicProfile.data()?.fullName || "");
-    }));
-    const repliesByParent = new Map();
-    for (const doc of visibleReplies) {
-      const replyParentId = doc.data().parentId;
-      if (!repliesByParent.has(replyParentId)) repliesByParent.set(replyParentId, []);
-      repliesByParent.get(replyParentId).push(commentListItem(doc, names));
-    }
+    const replies = proposalId ? await loadCommentReplies(tx, db, visible.map((doc) => doc.id)) : new Map();
+    const visibleReplies = [...replies.values()].flatMap((entry) => entry.docs)
+      .filter((doc) => commentVisible(doc.data(), { uid, profile, proposalScoped: true }));
+    const names = await authorNames(tx, db, [...visible, ...visibleReplies]);
     const items = visible.map((doc) => {
       const item = commentListItem(doc, names);
-      return proposalId ? { ...item, replies: repliesByParent.get(doc.id) || [] } : item;
+      if (!proposalId) return item;
+      const entry = replies.get(doc.id) ?? { docs: [], hasMore: false };
+      const shown = entry.docs.filter((reply) => commentVisible(reply.data(), { uid, profile, proposalScoped: true }));
+      const lastPreview = entry.docs.at(-1);
+      return { ...item, replies: shown.map((reply) => commentListItem(reply, names)), hasMoreReplies: entry.hasMore,
+        nextReplyCursor: entry.hasMore ? timestampCursor(lastPreview.id, lastPreview.data().createdAt) : null };
     });
     const last = page.at(-1);
     if (parentType === "proposal") {
@@ -455,8 +529,8 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
         ? await tx.get(db.collection("problems").doc(parent.data().problemId)) : null;
       stampProposalBrowsable(tx, parent, problemIsMemberBrowsable(problem?.exists ? problem.data() : null), Timestamp.now());
     }
-    return { items, truncated: rows.size > 100,
-      nextCursor: rows.size > 100 ? timestampCursor(last.id, last.data().createdAt) : null };
+    return { items, truncated: rows.size > pageSize,
+      nextCursor: rows.size > pageSize ? timestampCursor(last.id, last.data().createdAt) : null };
   });
 }
 

@@ -277,7 +277,7 @@ service cloud.firestore {
     // Sign-in nonces are written and read only by the Admin SDK inside the callable
     // functions. Exposing them to the browser would let an attacker read a pending
     // nonce, or clear the `consumed` flag and replay a signature.
-    match /siweNonces/{address} {
+    match /siweNonces/{challengeId} {
       allow read, write: if false;
     }
 

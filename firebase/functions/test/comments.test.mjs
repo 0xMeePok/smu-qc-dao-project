@@ -14,6 +14,7 @@ import {
 import { listReportableComments, moderateContent } from "../moderation.js";
 import { fundMockProposal, getMockMatching, selectMockProposal } from "../matching.js";
 import { listEvaluatorQueue, listMyProposals } from "../proposalQueues.js";
+import { REPLIES_PER_MEMBER_PER_THREAD, REPLIES_PER_THREAD } from "../comments.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
 const later = (ms) => Timestamp.fromMillis(now.toMillis() + ms);
@@ -669,4 +670,65 @@ test("[QCDAO-63] a reply from me is not a recommendation and leaves the solution
   await createComment({ db, uid: "evaluator", proposalId: "soon-a", body: "Answering the question", parentId: parent.id, now });
   const { items } = await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" });
   assert.ok(items.some((item) => item.id === "soon-a"));
+});
+
+/** Bounded discussions: replies are capped when posted and paged when read. */
+test("a member cannot post unbounded replies under one comment", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  for (let index = 0; index < REPLIES_PER_MEMBER_PER_THREAD; index += 1) {
+    await createComment({ db, uid: "alice", proposalId: "a", parentId: parent.id, body: `Reply ${index}`, now });
+  }
+  await assert.rejects(
+    () => createComment({ db, uid: "alice", proposalId: "a", parentId: parent.id, body: "One too many", now }),
+    { code: "resource-exhausted" },
+  );
+  // A different member still has their own allowance.
+  await assert.doesNotReject(
+    () => createComment({ db, uid: "owner", proposalId: "a", parentId: parent.id, body: "A separate voice", now }),
+  );
+});
+
+test("a thread stops accepting replies at its cap", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  db.records.set(`comments/${parent.id}`, { ...db.records.get(`comments/${parent.id}`), replyCount: REPLIES_PER_THREAD });
+  await assert.rejects(
+    () => createComment({ db, uid: "owner", proposalId: "a", parentId: parent.id, body: "Past the cap", now }),
+    { code: "resource-exhausted" },
+  );
+});
+
+test("a long thread returns a bounded preview and pages the rest through a cursor", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  for (let index = 0; index < 8; index += 1) {
+    await createComment({ db, uid: index % 2 ? "alice" : "owner", proposalId: "a", parentId: parent.id,
+      body: `Reply ${index}`, now: later(index + 1) });
+  }
+  const listed = await listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "a" });
+  const thread = listed.items.find((item) => item.id === parent.id);
+  assert.equal(thread.replyCount, 8);
+  assert.ok(thread.replies.length < 8, "the first response must not carry every reply");
+  assert.equal(thread.hasMoreReplies, true);
+  assert.ok(thread.nextReplyCursor);
+
+  const page = await listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "a",
+    threadId: parent.id, cursor: thread.nextReplyCursor });
+  assert.equal(page.threadId, parent.id);
+  assert.ok(page.items.length > 0);
+  const seen = new Set([...thread.replies, ...page.items].map((item) => item.id));
+  assert.equal(seen.size, thread.replies.length + page.items.length, "pages must not repeat a reply");
+  assert.ok(page.items.every((item) => item.parentId === parent.id));
+});
+
+test("thread paging refuses a comment that belongs to another proposal", async () => {
+  const db = fixture();
+  const parent = await create(db);
+  db.records.set(`proposals/other`, { researcherId: "alice", postingOwnerId: "owner", problemId: "problem",
+    title: "Other", status: "submitted", createdAt: now });
+  await assert.rejects(
+    () => listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "other", threadId: parent.id }),
+    { code: "not-found" },
+  );
 });

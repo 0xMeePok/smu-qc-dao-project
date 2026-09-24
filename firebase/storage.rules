@@ -229,10 +229,12 @@ service firebase.storage {
     // on the proposal detail page, but only while the parent is still member-
     // gettable (submitted, open, cancelled, expired — not hidden or removed).
     // postingOwnerId. Storage allows only two Firestore reads (profile + record),
-    // so this cannot get() the parent posting. prepareModerationMatching stamps
-    // problemBrowsable onto child proposals when a problem is hidden, removed or
-    // restored; write triggers and posting lists backfill the same field from the
-    // live parent. Absent or false denies member downloads (fail closed).
+    // so this cannot get() the parent posting. Moderating a problem stamps
+    // problemBrowsable onto EVERY child proposal - syncProblemProposalsBrowsable
+    // pages through all of them and resumes from a checkpoint if interrupted, so a
+    // posting with more children than one page cannot leave a stale `true` behind.
+    // Write triggers and posting lists backfill the same field from the live
+    // parent. Absent or false denies member downloads (fail closed).
     // activeProfile already enforces the same onboarding/suspension gate as
     // hasCompletedProfile + isActiveUser in firestore.rules.
     function proposalReader(proposalId, ownerId) {
