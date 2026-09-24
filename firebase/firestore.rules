@@ -1472,6 +1472,7 @@ service cloud.firestore {
     match /matchingEvents/{id} { allow read, write: if false; }
     match /matchingNotificationJobs/{id} { allow read, write: if false; }
     match /comments/{id} { allow read, write: if false; }
+    match /proposalFeedbackSummaries/{id} { allow read, write: if false; }
 
     // Public-safe counters derived by Cloud Functions from role-scoped proposal
     // and funding records. Clients can read metrics only when they can browse the

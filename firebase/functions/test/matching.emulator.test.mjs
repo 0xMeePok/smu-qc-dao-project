@@ -49,7 +49,7 @@ test('Firestore contention: creator acceptance settles once under concurrent ret
   try {
     await Promise.all(['owner', 'creator', 'funder'].map(uid => db.collection('users').doc(uid).set({ suspended: false })));
     await db.collection('problems').doc(problemId).set({ ownerId: 'owner', status: 'open', currency: 'SGD' });
-    await db.collection('proposals').doc(proposalId).set({ problemId, researcherId: 'creator', status: 'submitted', currency: 'SGD', amount: 100 });
+    await db.collection('proposals').doc(proposalId).set({ problemId, researcherId: 'creator', status: 'submitted', currency: 'SGD', amount: 100, matching: { evaluationComplete: true } });
     await fundMockProposal({ db, uid: 'funder', problemId, proposalId, amount: 100, requestId: `approvals-${suffix}`, now });
     await selectMockProposal({ db, uid: 'owner', problemId, proposalId, rationale: 'A suitable proposal to start the project.', now });
     const selected = await getMockMatching({ db, uid: 'owner', problemId, now });
@@ -77,7 +77,7 @@ test('Firestore contention: owner rejection races creator acceptance with exactl
   try {
     await Promise.all(['owner', 'creator', 'funder'].map(uid => db.collection('users').doc(uid).set({ suspended: false })));
     await db.collection('problems').doc(problemId).set({ ownerId: 'owner', status: 'open', currency: 'SGD' });
-    await db.collection('proposals').doc(proposalId).set({ problemId, researcherId: 'creator', status: 'submitted', currency: 'SGD', amount: 100 });
+    await db.collection('proposals').doc(proposalId).set({ problemId, researcherId: 'creator', status: 'submitted', currency: 'SGD', amount: 100, matching: { evaluationComplete: true } });
     await fundMockProposal({ db, uid: 'funder', problemId, proposalId, amount: 100, requestId: `rejection-${suffix}`, now });
     await selectMockProposal({ db, uid: 'owner', problemId, proposalId, rationale: 'A suitable proposal to start the project.', now });
     const outcomes = await Promise.allSettled([

@@ -17,8 +17,8 @@ async function fixture() {
   const db = memoryDb({
     'users/owner': {}, 'users/creator': {}, 'users/sibling': {}, 'users/funder': {},
     'problems/p': { ownerId: 'owner', currency: 'SGD', status: 'open' },
-    'proposals/a': { problemId: 'p', researcherId: 'creator', status: 'submitted', title: 'Chosen proposal', amount: 100, currency: 'SGD' },
-    'proposals/b': { problemId: 'p', researcherId: 'sibling', status: 'submitted', title: 'Sibling proposal', amount: 100, currency: 'SGD' },
+    'proposals/a': { problemId: 'p', researcherId: 'creator', status: 'submitted', title: 'Chosen proposal', amount: 100, currency: 'SGD', matching: { evaluationComplete: true } },
+    'proposals/b': { problemId: 'p', researcherId: 'sibling', status: 'submitted', title: 'Sibling proposal', amount: 100, currency: 'SGD', matching: { evaluationComplete: true } },
   });
   await fund(db, 'a', 100, 'approval_funding_0001');
   await fund(db, 'b', 40, 'approval_funding_0002');

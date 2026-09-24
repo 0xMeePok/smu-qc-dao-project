@@ -62,6 +62,9 @@ vi.mock("../../src/context/AuthContext.jsx", () => ({
 vi.mock("../../src/components/MatchingPanel.jsx", () => ({
   MatchingPanel: ({ onNavigate }) => <section id="proposal-funding"><button onClick={() => onNavigate("proposal/proposal1")}>View funded proposal</button></section>,
 }));
+vi.mock("../../src/components/ProposalComparison.jsx", () => ({
+  ProposalComparison: () => <section id="proposal-comparison" />,
+}));
 
 const { default: PostingDetailPage } = await import("../../src/pages/PostingDetailPage.jsx");
 
@@ -156,12 +159,12 @@ describe("proposal funding on a problem detail page", () => {
     expect(screen.getByRole("button", { name: "View proposals to fund" })).toBeTruthy();
   });
 
-  it("takes the owner straight to proposal review without evaluation prerequisites", async () => {
+  it("[FUT-SPE-165] takes the owner to the proposal comparison", async () => {
     mocks.user = { id: OWNER, roles: ["owner"] };
     const onNavigate = vi.fn();
     render(<PostingDetailPage postingId="posting777" onNavigate={onNavigate} />);
     const review = await screen.findByRole("button", { name: "Review proposals" });
-    const panel = document.getElementById("proposal-funding");
+    const panel = document.getElementById("proposal-comparison");
     panel.scrollIntoView = vi.fn();
     fireEvent.click(review);
     expect(panel.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });

@@ -16,6 +16,7 @@ import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { PostingProposals } from "../components/PostingProposals.jsx";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
+import { ProposalComparison } from "../components/ProposalComparison.jsx";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { isModerated } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
@@ -83,9 +84,11 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate }) {
               key={action.id}
               className={action.kind === "primary" ? "primary" : "secondary"}
               type="button"
-              onClick={() => ["fund", "review-proposals"].includes(action.id)
-                ? document.getElementById("proposal-funding")?.scrollIntoView({ behavior: "smooth", block: "start" })
-                : onNavigate(action.route)}
+              onClick={() => {
+                const target = action.id === "review-proposals" ? "proposal-comparison" : action.id === "fund" ? "proposal-funding" : "";
+                if (target) document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                else onNavigate(action.route);
+              }}
             >
               {action.label}
             </button>
@@ -126,6 +129,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const { isAuthenticated, user } = useAuth();
   const { address: connectedAddress, isConnected } = useAccount();
   const [posting, setPosting] = useState(null);
+  const [matchingRefresh, setMatchingRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
@@ -404,7 +408,16 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             onNavigate={onNavigate}
           />
 
-          {posting.status !== "draft" && !isModerated(posting) && <><MatchingPanel problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} /><ReportContentButton contentType="problem" contentId={posting.id} /><ReportableComments problemId={posting.id} /></>}
+          {posting.status !== "draft" && !isModerated(posting) && <>
+            <ProposalComparison
+              problemId={posting.id}
+              refreshKey={`${posting.matching?.status || ""}:${posting.matching?.totalFundedMinor || 0}`}
+              onSelected={() => setMatchingRefresh((current) => current + 1)}
+            />
+            <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
+            <ReportContentButton contentType="problem" contentId={posting.id} />
+            <ReportableComments problemId={posting.id} />
+          </>}
 
           <AuditReceipt
             audit={audit}
