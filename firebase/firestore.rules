@@ -1176,8 +1176,8 @@ service cloud.firestore {
         // valid post-restoration correction differ from its exact proof.
         // Keep the common create/draft-publish check short: the heaviest atomic
         // submission sits close to Firestore's 1,000-expression ceiling.
-        && (data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit'])
-          || data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit', 'matching', 'moderationStatus', 'moderation']));
+        && (data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit', 'problemBrowsable'])
+          || data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit', 'problemBrowsable', 'matching', 'moderationStatus', 'moderation']));
     }
 
     function publicationWriteAllowed(scope, recordId, data) {
