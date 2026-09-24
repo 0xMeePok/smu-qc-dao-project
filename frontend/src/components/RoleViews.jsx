@@ -1,6 +1,9 @@
 import { ProposalList } from "./ProposalList.jsx";
+import { ProposalTracker } from "./ProposalTracker.jsx";
+import { QUEUE_FILTERS, listEvaluatorQueue, queueError, sortProposalRows } from "../lib/proposalQueues.js";
+import { recommendationLabel } from "../lib/comments.js";
 import { MockFundingPortfolio } from "./MockFundingPortfolio.jsx";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -218,67 +221,93 @@ export function MyProblems({ onNavigate }) {
 }
 
 export function ResearcherProposals({ onNavigate }) {
-  return <section className="page dashboard-page"><div className="page-heading"><h1>My Research Proposals</h1><p>View your submissions, verification receipts and withdrawal history.</p></div><ProposalList onNavigate={onNavigate} /></section>;
+  return <section className="page dashboard-page">
+    <div className="page-heading">
+      <h1>My Research Proposals</h1>
+      <p>Track every submission, its evaluator feedback and the time left on each opportunity.</p>
+    </div>
+    <ProposalTracker onNavigate={onNavigate} />
+    <ProposalList draftsOnly onNavigate={onNavigate} />
+  </section>;
 }
 
-export function EvaluatorQueue() {
-  const { user } = useAuth();
-  const [data, setData] = useState([]);
-  const [error, setError] = useState(null);
+/**
+ * QCDAO-63 - solutions still awaiting this evaluator's recommendation comment.
+ * Assignment model: an administrator grants the evaluator access level, and the
+ * evaluator then self-selects from every live posting's eligible solutions.
+ */
+export function EvaluatorQueue({ onNavigate }) {
+  const [filter, setFilter] = useState("pending");
+  const [rows, setRows] = useState([]);
+  const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function fetchData() {
-      if (!user?.id || !db) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const q = query(collection(db, "evaluations"), where("evaluatorId", "==", user.id));
-        const querySnapshot = await getDocs(q);
-        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (err) {
-        setError(err);
-      } finally {
-        setLoading(false);
-      }
+  const load = useCallback(async (nextFilter, nextCursor = null) => {
+    setLoading(true); setError("");
+    try {
+      const data = await listEvaluatorQueue({ filter: nextFilter, ...(nextCursor ? { cursor: nextCursor } : {}) });
+      setRows((current) => (nextCursor ? [...current, ...(data?.items ?? [])] : (data?.items ?? [])));
+      setCursor(data?.nextCursor ?? null);
+    } catch (err) {
+      setError(queueError(err));
+    } finally {
+      setLoading(false);
     }
-    fetchData();
-  }, [user?.id]);
+  }, []);
+
+  useEffect(() => { load(filter); }, [filter, load]);
+
+  // Closing soonest first: the tightest response window needs the recommendation most.
+  const visible = useMemo(() => sortProposalRows(rows, "closing"), [rows]);
 
   return (
     <section className="page dashboard-page">
       <div className="page-heading">
         <div className="eyebrow-row">
           <RoleBadge role="evaluator" />
-          <span>Panel: {user?.org}</span>
+          <span>Assigned by a DAO administrator</span>
         </div>
         <h1>Evaluation queue</h1>
-        <p>Review assigned submissions, assign criterion scores, and record your evaluation.</p>
+        <p>Open a solution with its posting for context, then leave one recommendation comment.</p>
+      </div>
+
+      <div className="admin-tabs-nav" role="tablist" aria-label="Recommendation status">
+        {QUEUE_FILTERS.map(([value, label]) => (
+          <button key={value} type="button" role="tab" aria-selected={filter === value}
+            className={`admin-tab-btn ${filter === value ? "active" : ""}`}
+            onClick={() => { if (value !== filter) { setRows([]); setCursor(null); setFilter(value); } }}>
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="card-table">
-        <div className="table-header">
-          <h3>Assigned submissions</h3>
-        </div>
-        
-        {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
-        ) : error ? (
-          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
-             <strong>Error:</strong> {error.message}
-          </div>
-        ) : data.length === 0 ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No evaluations pending.</div>
-        ) : (
-          data.map(item => (
-            <div className="table-row" key={item.id}>
-              <div>
-                <strong>{item.title}</strong>
-              </div>
+        <div className="table-header"><h3>{filter === "submitted" ? "Recommendation submitted" : "Awaiting my recommendation"}</h3></div>
+        {loading && !visible.length ? <p className="table-empty" role="status">Loading queue…</p>
+          : error ? <p className="error-banner" role="alert">{error}</p>
+          : !visible.length ? <p className="table-empty">
+              {filter === "submitted" ? "You have not recommended on a solution yet." : "Nothing is waiting for your recommendation."}
+            </p>
+          : visible.map((item) => <div className="table-row" key={item.id}>
+            <div>
+              <strong>{item.title || "Untitled proposal"}</strong>
+              <small className="table-row-meta">{item.posting?.title || "Untitled posting"} · Submitted {formatInstant(item.submittedAt)}</small>
+              <small className="table-row-meta">
+                {item.recommendationStatus === "submitted"
+                  ? `My recommendation: ${recommendationLabel(item.recommendation)}`
+                  : "No recommendation from me yet"}
+              </small>
             </div>
-          ))
-        )}
+            <div className="table-row-actions">
+              <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} showInstant={false} />
+              {item.posting?.id && <button className="text-button" type="button" onClick={() => onNavigate(`posting/${item.posting.id}`)}>View posting</button>}
+              <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>Open proposal</button>
+            </div>
+          </div>)}
+        {cursor && <button className="secondary" type="button" disabled={loading} onClick={() => load(filter, cursor)}>
+          {loading ? "Loading…" : "Load more"}
+        </button>}
       </div>
     </section>
   );

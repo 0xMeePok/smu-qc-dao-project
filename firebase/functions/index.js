@@ -36,6 +36,7 @@ import { getMockMatching as readMockMatching, fundMockProposal as contributeMock
 import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
+import { listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -185,6 +186,17 @@ export const { submitContentReport, listModerationQueue, getModerationContext, m
 export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return listPostedProposalsForProblem({ db, uid, problemId: request.data?.problemId });
+});
+
+// QCDAO-62 and QCDAO-63 read existing proposal, problem and comment records.
+export const listMyProposalQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return listMyProposals({ db, uid });
+});
+
+export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return evaluatorQueue({ db, uid, cursor: request.data?.cursor ?? null, filter: request.data?.filter ?? "pending" });
 });
 
 export const createComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
