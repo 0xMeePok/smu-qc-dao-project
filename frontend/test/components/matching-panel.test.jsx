@@ -51,15 +51,15 @@ describe("server-backed mock funding and mutual matching", () => {
     expect(mocks.read).not.toHaveBeenCalled();
   });
 
-  it("keeps selection out of the funding panel and describes both gates", async () => {
+  it("keeps selection out of the funding panel and describes evaluation as optional", async () => {
     mocks.read.mockResolvedValue(snapshot({ proposals: [candidate({ matching: { status: "funding", evaluationComplete: false }, canSelect: true })] }));
     render(<MatchingPanel problemId="problem-1" proposalId="proposal-1" />);
     await screen.findByRole("heading", { name: "Quantum routing" });
     expect(screen.queryByRole("button", { name: "Select proposal" })).toBeNull();
     expect(screen.getByText("Fully funded · awaiting owner selection")).toBeTruthy();
-    expect(screen.getByText(/selects from the comparison once this proposal is fully funded and has a qualifying evaluator recommendation/)).toBeTruthy();
+    expect(screen.getByText(/can select this proposal from the comparison once it is fully funded. Expert evaluation is optional/)).toBeTruthy();
     expect(screen.queryByText(/Fund individual proposals for this problem/)).toBeNull();
-    expect(screen.queryByText(/selects one after it is fully funded and has a qualifying evaluator recommendation/)).toBeNull();
+    expect(screen.queryByText(/qualifying evaluator recommendation/)).toBeNull();
   });
 
   it("links each comparison candidate to the proposal being funded", async () => {

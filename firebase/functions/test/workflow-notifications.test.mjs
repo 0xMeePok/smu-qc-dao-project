@@ -142,6 +142,9 @@ describe("[QCDAO-68] receive in-platform notifications for workflow events", () 
     const ownerKinds = notices(db, "owner").map((row) => row.kind);
     assert.ok(ownerKinds.includes("qualifying_recommendation"));
     assert.ok(ownerKinds.includes("evaluation_gate"));
+    const progressNotice = notices(db, "owner").find((row) => row.kind === "evaluation_gate");
+    assert.match(progressNotice.message, /Evaluation remains optional for owner selection/);
+    assert.doesNotMatch(progressNotice.message, /gate/);
     assert.ok(notices(db, "alice").some((row) => row.kind === "qualifying_recommendation"));
     assert.equal(notices(db, "evaluator").length, 0);
     const notice = notices(db, "owner").find((row) => row.kind === "qualifying_recommendation");

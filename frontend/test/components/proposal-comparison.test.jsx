@@ -129,7 +129,20 @@ describe("proposal comparison", () => {
     expect(selected).toHaveBeenCalled();
   });
 
-  it("[FUT-SPE-162] shows selection only to the owner after both gates are open", async () => {
+  it("lets the owner select a fully funded proposal without evaluator feedback", async () => {
+    mocks.read.mockResolvedValue(comparison({
+      rows: [row({ matching: { status: "funding", evaluationComplete: false },
+        recommendations: { recommend: 0, recommend_with_revisions: 0, do_not_recommend: 0 },
+        qualifyingCount: 0, commentCount: 0 })],
+    }));
+    render(<ProposalComparison problemId="problem" />);
+    expect(await screen.findByRole("button", { name: "Select Alpha annealing" })).toBeTruthy();
+    expect(screen.getByText("No qualifying recommendation")).toBeTruthy();
+    expect(screen.getByText(/recommendations are optional and advisory/)).toBeTruthy();
+    expect(screen.queryByText(/Needs a qualifying evaluator recommendation/)).toBeNull();
+  });
+
+  it("[FUT-SPE-162] shows selection only to the owner after the funding gate is open", async () => {
     mocks.user = { id: "funder" };
     mocks.read.mockResolvedValue(comparison({
       viewerIsOwner: false,

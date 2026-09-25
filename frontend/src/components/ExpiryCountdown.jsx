@@ -6,34 +6,48 @@ import {
   formatCountdown,
   formatInstant,
 } from "../lib/datetime.js";
-import { closedStatusLabel } from "../config/workflowStatus.js";
+import { closedStatusLabel, opportunityStatusLabel } from "../config/workflowStatus.js";
 
 /**
  * QCDAO-55 - time remaining on a posting, beside its exact UTC deadline.
- * A closed status wins over the clock, so a force-expired or withdrawn posting never counts down.
+ * A closed posting or confirmed match wins over the clock. Pending selections
+ * count down to the creator's response deadline; reopening restores the posting deadline.
  */
-export function ExpiryCountdown({ expiresAt, status, showInstant = true }) {
+export function ExpiryCountdown({ expiresAt, status, matching, showInstant = true }) {
   const [now, setNow] = useState(() => new Date());
 
-  const closedLabel = closedStatusLabel(status);
-  const parts = countdownParts(expiresAt, now);
+  const matchingStatus = matching?.status;
+  const pendingMatch = matchingStatus === "awaiting_confirmation" && Boolean(matching.deadlineAt);
+  const deadline = pendingMatch ? matching.deadlineAt : expiresAt;
+  const closedLabel = matchingStatus === "confirmed" || matchingStatus === "invalidated"
+    ? opportunityStatusLabel(status, { matching })
+    : closedStatusLabel(status);
+  const parts = countdownParts(deadline, now);
   const expired = Boolean(closedLabel) || (parts?.expired ?? false);
-  const urgency = closedLabel ? "expired" : expiryUrgency(expiresAt, now);
+  const urgency = closedLabel ? "expired" : expiryUrgency(deadline, now);
+  const urgencyLabel = pendingMatch ? "Awaiting creator acceptance" : expiryUrgencyLabel(urgency);
+  const deadlineVerb = pendingMatch ? "Creator response ends" : "Closes";
+  const confirmedAt = matchingStatus === "confirmed" ? matching.confirmedAt : null;
 
   useEffect(() => {
-    if (!expiresAt || expired) return undefined;
+    if (!deadline || expired) return undefined;
     const timer = setInterval(() => setNow(new Date()), 60 * 1000);
     return () => clearInterval(timer);
-  }, [expiresAt, expired]);
+  }, [deadline, expired]);
 
   if (closedLabel) {
     return (
       <span
-        className="expiry-countdown expiry-expired"
-        aria-label={`${closedLabel}. Deadline ${formatInstant(expiresAt)}.`}
+        className={`expiry-countdown ${matchingStatus === "confirmed" ? "expiry-confirmed" : "expiry-expired"}`}
+        aria-label={matchingStatus === "confirmed"
+          ? `Match confirmed${confirmedAt ? ` at ${formatInstant(confirmedAt)}` : ""}.`
+          : `${closedLabel}. Deadline ${formatInstant(expiresAt)}.`}
       >
-        <strong aria-live="off" title={formatInstant(expiresAt)}>{closedLabel}</strong>
-        {showInstant && <small>{formatInstant(expiresAt)}</small>}
+        <strong aria-live="off" title={matchingStatus === "confirmed"
+          ? (confirmedAt ? formatInstant(confirmedAt) : undefined)
+          : formatInstant(expiresAt)}>{closedLabel}</strong>
+        {showInstant && matchingStatus === "confirmed" && confirmedAt ? <small>{formatInstant(confirmedAt)}</small> : null}
+        {showInstant && matchingStatus !== "confirmed" ? <small>{formatInstant(expiresAt)}</small> : null}
       </span>
     );
   }
@@ -44,17 +58,17 @@ export function ExpiryCountdown({ expiresAt, status, showInstant = true }) {
     <span
       className={`expiry-countdown expiry-${urgency}`}
       aria-label={expired
-        ? `Expired. Closes ${formatInstant(expiresAt)}.`
-        : `${expiryUrgencyLabel(urgency)}. ${formatCountdown(expiresAt, now)}. Closes ${formatInstant(expiresAt)}.`}
+        ? `Expired. ${deadlineVerb} ${formatInstant(deadline)}.`
+        : `${urgencyLabel}. ${formatCountdown(deadline, now)}. ${deadlineVerb} ${formatInstant(deadline)}.`}
     >
       <strong
         aria-live="off"
-        title={formatInstant(expiresAt)}
+        title={formatInstant(deadline)}
       >
-        {expired ? "Expired" : formatCountdown(expiresAt, now)}
+        {expired ? "Expired" : formatCountdown(deadline, now)}
       </strong>
-      {!expired && <span className="expiry-urgency" aria-hidden="true">{expiryUrgencyLabel(urgency)}</span>}
-      {showInstant && <small>{formatInstant(expiresAt)}</small>}
+      {!expired && <span className="expiry-urgency" aria-hidden="true">{urgencyLabel}</span>}
+      {showInstant && <small>{formatInstant(deadline)}</small>}
     </span>
   );
 }

@@ -322,6 +322,8 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   }
 
   const expired = isResponseWindowClosed(posting);
+  const matchingStatus = posting.matching?.status;
+  const matchClosed = matchingStatus === "confirmed" || matchingStatus === "invalidated";
   const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
   const entityLabel = isOpenFunding ? "funding opportunity" : "problem statement";
   const audit = isOpenFunding
@@ -476,8 +478,8 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
           )}
 
           <div className="expiry-panel">
-            <span className="eyebrow">{expired ? "Closed" : "Time remaining"}</span>
-            <ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />
+            <span className="eyebrow">{expired || matchClosed ? "Closed" : matchingStatus === "awaiting_confirmation" ? "Creator response window" : "Time remaining"}</span>
+            <ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} matching={posting.matching} />
             {posting.status === "expired" && (
               <p className="field-hint"><strong>Lapse reason:</strong> {expiryReasonLabel(posting.expiryReason)}.</p>
             )}

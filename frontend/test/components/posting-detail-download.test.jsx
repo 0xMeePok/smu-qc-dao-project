@@ -149,6 +149,30 @@ describe("downloading an attachment from someone else's posting", () => {
 });
 
 describe("proposal funding on a problem detail page", () => {
+  it("shows the creator deadline while pending and a closed label once matched", async () => {
+    const expiresAt = new Date("2026-12-01T00:00:00Z");
+    const deadlineAt = new Date("2026-11-01T00:00:00Z");
+    mocks.posting = publishedPosting({ expiresAt, matching: { status: "awaiting_confirmation", deadlineAt } });
+    const { unmount } = render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("Creator response window");
+    expect(screen.getAllByText("Awaiting creator acceptance").length).toBeGreaterThan(0);
+    expect(screen.getByText("2026-11-01 00:00:00 UTC")).toBeTruthy();
+    unmount();
+
+    mocks.posting = publishedPosting({ expiresAt, matching: { status: "open", reopenedAt: new Date("2026-10-01T00:00:00Z") } });
+    const reopened = render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("Time remaining");
+    expect(screen.getByLabelText(/Closes 2026-12-01 00:00:00 UTC/)).toBeTruthy();
+    expect(screen.queryByText("Creator response window")).toBeNull();
+    reopened.unmount();
+
+    mocks.posting = publishedPosting({ expiresAt, matching: { status: "confirmed", confirmedAt: new Date("2026-11-02T00:00:00Z") } });
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("Closed");
+    expect(screen.getByLabelText("Match confirmed at 2026-11-02 00:00:00 UTC.")).toBeTruthy();
+    expect(screen.queryByText("Time remaining")).toBeNull();
+  });
+
   it("shows an indicative proposal budget instead of claiming the problem has been funded", async () => {
     mocks.posting = publishedPosting({ fundedAmount: 40000, fundingProgressPercent: 50 });
     mocks.user = { id: VIEWER, roles: ["funder"] };

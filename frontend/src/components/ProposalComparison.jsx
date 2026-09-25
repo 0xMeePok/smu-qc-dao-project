@@ -77,6 +77,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
 
   return <section id="proposal-comparison" className="detail-section proposal-comparison" aria-label="Proposal comparison">
     <h2>Compare proposals</h2>
+    <p className="field-hint">Evaluator recommendations are optional and advisory. The problem owner can select any eligible, fully funded proposal without one.</p>
     <div className="comparison-controls">
       <label>Filter by evaluator recommendation
         <select value={outcome} onChange={(event) => setOutcome(event.target.value)}>
@@ -111,7 +112,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
         <div className="modal-head"><h2 id="comparison-select-title">Select this proposal?</h2></div>
         <div className="modal-body">
           <strong>{pending.title}</strong>
-          <p>Selecting records your acceptance as the problem owner and your rationale in the audit record. Recommendations stay advisory: this does not mark the proposal as the highest scored or the preferred submission.</p>
+          <p>Selecting records your acceptance as the problem owner and your rationale in the audit record. Recommendations are optional and advisory: this does not mark the proposal as the highest scored or the preferred submission.</p>
           <label htmlFor="comparison-rationale">Selection rationale</label>
           <textarea id="comparison-rationale" value={rationale} minLength={10} maxLength={2000} required rows={4} disabled={busy} onChange={(event) => setRationale(event.target.value)} />
           <p className="field-hint">Required. 10–2000 characters, recorded with your selection.</p>

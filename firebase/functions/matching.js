@@ -218,7 +218,7 @@ export function mockSelectionState({ problem, proposal, uid, at = Timestamp.now(
   const open = isOpen(problem, at);
   return {
     state, fundedAmount: funded / 100, open, eligible, fundingMet, feedbackOpen,
-    canSelect: open && eligible && fundingMet && feedbackOpen && problem.ownerId === uid
+    canSelect: open && eligible && fundingMet && problem.ownerId === uid
       && proposal.researcherId !== uid && !moderated(proposal),
   };
 }
@@ -335,9 +335,6 @@ export async function selectMockProposal({ db, uid, problemId, proposalId, ratio
     if (data.researcherId === uid) fail("permission-denied", "A match requires two different parties.");
     if (!ELIGIBLE.has(data.status) || proposalState(data) !== "funding" || (data.matching?.fundedMinor || 0) < minorUnits(data.amount)) {
       fail("failed-precondition", "Select a fully funded, active proposal.");
-    }
-    if (data.matching?.evaluationComplete !== true) {
-      fail("failed-precondition", "Selection opens after the evaluator feedback gate and full funding.");
     }
     const selectionSequence = (ctx.problem.matching?.selectionSequence || 0) + 1;
     const selectionId = `${problemId}_${selectionSequence}`;

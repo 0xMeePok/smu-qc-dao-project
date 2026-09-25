@@ -2893,6 +2893,10 @@ footer > p { margin: 0 auto 0 0; }
   color: var(--danger);
 }
 
+.expiry-confirmed strong {
+  color: var(--success);
+}
+
 /* TECHNOLOGY AREA PICKER (QCDAO-48) */
 /*
   Its own grid rather than .radio-group. These are twelve short domain choices
