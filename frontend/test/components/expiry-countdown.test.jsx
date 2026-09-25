@@ -74,4 +74,33 @@ describe("ExpiryCountdown", () => {
     render(<ExpiryCountdown expiresAt={new Date("2026-12-01T00:00:00Z")} status="in_review" />);
     expect(screen.getByText(/left$/)).toBeTruthy();
   });
+
+  it("[QCDAO-82/85] switches from creator response to posting time after rejection", () => {
+    const expiresAt = new Date("2026-10-01T00:00:00Z");
+    const deadlineAt = new Date("2026-09-08T00:00:00Z");
+    const { rerender } = render(
+      <ExpiryCountdown expiresAt={expiresAt} status="submitted" matching={{ status: "awaiting_confirmation", deadlineAt }} />,
+    );
+    expect(screen.getByText("7d 00h 00m left")).toBeTruthy();
+    expect(screen.getByText("Awaiting creator acceptance")).toBeTruthy();
+    expect(screen.getByLabelText(/Creator response ends 2026-09-08 00:00:00 UTC/)).toBeTruthy();
+
+    rerender(<ExpiryCountdown expiresAt={expiresAt} status="submitted" matching={{ status: "open", reopenedAt: NOW }} />);
+    expect(screen.getByText("30d 00h 00m left")).toBeTruthy();
+    expect(screen.getByText("Open")).toBeTruthy();
+    expect(screen.queryByText("Awaiting creator acceptance")).toBeNull();
+  });
+
+  it("[QCDAO-86] labels a confirmed match as closed even before posting expiry", () => {
+    const { container } = render(
+      <ExpiryCountdown expiresAt={new Date("2026-10-01T00:00:00Z")} status="submitted" matching={{ status: "confirmed", confirmedAt: NOW }} />,
+    );
+    expect(screen.getByText("Match confirmed")).toBeTruthy();
+    expect(screen.getByLabelText("Match confirmed at 2026-09-01 00:00:00 UTC.")).toBeTruthy();
+    expect(screen.getByText("2026-09-01 00:00:00 UTC")).toBeTruthy();
+    expect(screen.queryByText("2026-10-01 00:00:00 UTC")).toBeNull();
+    expect(screen.queryByText(/left$/)).toBeNull();
+    expect(container.querySelector(".expiry-confirmed")).toBeTruthy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
