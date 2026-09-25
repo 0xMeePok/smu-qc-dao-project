@@ -170,6 +170,27 @@ describe("author notices and reportable comments", () => {
     expect(screen.queryByText(notice.message)).toBeNull();
   });
 
+  it("tells an evaluator they cannot judge their own solution, and hides the picker", async () => {
+    mocks.user = { id: "evaluator", roles: ["evaluator"] };
+    mocks.comments.mockResolvedValue({ items: [] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" authorId="evaluator" />);
+    await screen.findByText("You cannot evaluate your own solution.");
+    expect(screen.queryByText("Recommendation")).toBeNull();
+    // Discussion is still open to them.
+    expect(screen.getByLabelText("Write a comment")).toBeTruthy();
+  });
+
+  it("tells an evaluator when another evaluator already holds the recommendation", async () => {
+    mocks.user = { id: "evaluator", roles: ["evaluator"] };
+    mocks.comments.mockResolvedValue({ items: [{
+      id: "comment1", body: "A sound approach.", authorName: "First evaluator", createdAt: row.createdAt,
+      proposalId: "proposal1", parentId: null, qualifying: true, badge: "evaluator", recommendation: "recommend",
+    }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" authorId="alice" />);
+    await screen.findByText("Another evaluator has already recommended this solution.");
+    expect(screen.queryByText("Recommendation")).toBeNull();
+  });
+
   it("renders scoped comments with per-comment report actions", async () => {
     mocks.comments.mockResolvedValue({ items: [{ id: "comment1", body: "Review this technical claim.", authorName: "Researcher", createdAt: row.createdAt }] });
     render(<ReportableComments problemId="problem1" proposalId="proposal1" />);

@@ -379,35 +379,29 @@ test("deleting a parent with replies keeps a placeholder; deleting the last repl
   assert.equal((await listReportableComments({ db, uid: "funder", proposalId: "a" })).items.length, 0);
 });
 
-test("evaluationComplete stays true while any qualifying comment remains and clears when the last one is removed", async () => {
+test("the gate follows the one recommendation a solution carries, and frees the slot when it goes", async () => {
   const db = fixture();
-  const first = await create(db, {
-    uid: "evaluator",
-    recommendation: "recommend",
-  });
+  db.records.set("users/evaluator2", { role: 2, fullName: "Second evaluator" });
+  const first = await create(db, { uid: "evaluator", recommendation: "recommend" });
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+  assert.equal(db.records.get("proposals/a").matching.recommendedBy, "evaluator");
+
+  // A solution carries one recommendation: a second evaluator is refused.
+  await assert.rejects(() => create(db, {
+    uid: "evaluator2", recommendation: "do_not_recommend", body: "A competing recommendation.",
+  }), { code: "failed-precondition" });
+
+  await deleteComment({ db, uid: "evaluator", commentId: first.id, now: later(1000) });
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, false);
+  assert.equal(db.records.get("proposals/a").matching.recommendedBy, null);
+
+  // With the slot free another evaluator may take it.
   const second = await create(db, {
-    uid: "evaluator",
-    recommendation: "do_not_recommend",
-    body: "A second independent recommendation.",
+    uid: "evaluator2", recommendation: "do_not_recommend", body: "A later recommendation.", now: later(2000),
   });
-  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
-  await deleteComment({
-    db,
-    uid: "evaluator",
-    commentId: first.id,
-    now: later(1000),
-  });
-  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
-  await deleteComment({
-    db,
-    uid: "evaluator",
-    commentId: second.id,
-    now: later(2000),
-  });
-  assert.equal(
-    db.records.get("proposals/a").matching.evaluationComplete,
-    false,
-  );
+  assert.equal(db.records.get("proposals/a").matching.recommendedBy, "evaluator2");
+  await deleteComment({ db, uid: "evaluator2", commentId: second.id, now: later(3000) });
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, false);
 });
 
 test("admin mock evaluationComplete survives deleting the last qualifying comment", async () => {
@@ -534,42 +528,32 @@ test("[BUT-SPER-24] a qualifying evaluator comment does not unlock selection whi
   assert.equal(db.records.get("proposals/a").matching.status, "funding");
 });
 
-test("[BUT-SPER-25] removing one qualifying comment keeps the gate; removing the last clears it", async () => {
+test("[BUT-SPER-25] removing the recommendation clears the gate; restoring it brings the gate back", async () => {
   const db = fixture();
-  const first = await create(db, { uid: "evaluator", recommendation: "recommend" });
-  const second = await create(db, {
-    uid: "evaluator",
-    recommendation: "do_not_recommend",
-    body: "A second independent recommendation.",
+  const only = await create(db, { uid: "evaluator", recommendation: "recommend" });
+  db.records.set(`moderationQueue/comment_${only.id}`, {
+    contentType: "comment",
+    contentId: only.id,
+    status: "pending",
   });
-  const queue = (id) => {
-    db.records.set(`moderationQueue/comment_${id}`, {
-      contentType: "comment",
-      contentId: id,
-      status: "pending",
-    });
-  };
-  queue(first.id);
-  queue(second.id);
-  const act = (id, action, reason) =>
+  const act = (action, reason) =>
     moderateContent({
       db,
       uid: "admin",
-      queueId: `comment_${id}`,
+      queueId: `comment_${only.id}`,
       action,
       reason,
       now,
       prepareCommentGate: prepareCommentEvaluationGate,
     });
-  await act(first.id, "remove", "off_topic");
-  assert.equal(db.records.get(`comments/${first.id}`).qualifying, false);
-  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
-  await act(second.id, "remove", "off_topic");
-  assert.equal(db.records.get(`comments/${second.id}`).qualifying, false);
+  await act("remove", "off_topic");
+  assert.equal(db.records.get(`comments/${only.id}`).qualifying, false);
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, false);
-  await act(second.id, "restore", "no_violation");
-  assert.equal(db.records.get(`comments/${second.id}`).qualifying, true);
+  assert.equal(db.records.get("proposals/a").matching.recommendedBy, null);
+  await act("restore", "no_violation");
+  assert.equal(db.records.get(`comments/${only.id}`).qualifying, true);
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+  assert.equal(db.records.get("proposals/a").matching.recommendedBy, "evaluator");
 });
 
 test("[BUT-SPER-26] evaluator comments stay off-chain and never write audit or matching history", async () => {
@@ -735,4 +719,54 @@ test("thread paging refuses a comment that belongs to another proposal", async (
     () => listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "other", threadId: parent.id }),
     { code: "not-found" },
   );
+});
+
+/** One recommendation per solution, never from its author. */
+test("an evaluator may discuss their own solution but never recommend it", async () => {
+  const db = fixture();
+  db.records.set("proposals/own", {
+    researcherId: "evaluator", postingOwnerId: "owner", problemId: "problem",
+    title: "The evaluator's own solution", status: "submitted", createdAt: now,
+  });
+  await assert.rejects(() => createComment({
+    db, uid: "evaluator", proposalId: "own", body: "Backing my own work.", recommendation: "recommend", now,
+  }), { code: "permission-denied" });
+
+  // Discussion is still open to them; it simply carries no recommendation.
+  const plain = await createComment({ db, uid: "evaluator", proposalId: "own", body: "Clarifying my approach.", now });
+  assert.equal(plain.recommendation, null);
+  assert.equal(plain.qualifying, false);
+  assert.equal(db.records.get("proposals/own").matching?.evaluationComplete === true, false);
+  assert.equal(db.records.get("proposals/own").matching?.recommendedBy ?? null, null);
+});
+
+test("two evaluators recommending at once leave exactly one recommendation on record", async () => {
+  const db = fixture();
+  db.records.set("users/evaluator2", { role: 2, fullName: "Second evaluator" });
+  const outcomes = await Promise.allSettled([
+    createComment({ db, uid: "evaluator", proposalId: "a", body: "The first view.", recommendation: "recommend", now }),
+    createComment({ db, uid: "evaluator2", proposalId: "a", body: "The second view.", recommendation: "do_not_recommend", now }),
+  ]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  const refused = outcomes.find((outcome) => outcome.status === "rejected");
+  assert.equal(refused.reason.code, "failed-precondition");
+  assert.match(refused.reason.message, /already recommended/i);
+  const qualifying = comments(db).filter(([, data]) => data.qualifying === true);
+  assert.equal(qualifying.length, 1);
+  assert.equal(db.records.get("proposals/a").matching.recommendedBy, qualifying[0][1].authorId);
+});
+
+test("[QCDAO-63] drops a solution from every queue once any evaluator has recommended it", async () => {
+  const db = queueFixture();
+  db.records.set("users/evaluator2", { role: 2, fullName: "Second evaluator" });
+  await createComment({ db, uid: "evaluator2", proposalId: "soon-a", body: "A sound approach.", recommendation: "recommend", now });
+
+  const pending = await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" });
+  assert.deepEqual(pending.items.map((item) => item.id), ["later-a"], "someone else's call is not mine to make");
+  const submitted = await listEvaluatorQueue({ db, uid: "evaluator", filter: "submitted" });
+  assert.deepEqual(submitted.items.map((item) => item.id), []);
+
+  const theirs = await listEvaluatorQueue({ db, uid: "evaluator2", filter: "submitted" });
+  assert.deepEqual(theirs.items.map((item) => item.id), ["soon-a"]);
+  assert.equal(theirs.items[0].recommendation, "recommend");
 });

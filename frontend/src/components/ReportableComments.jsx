@@ -28,16 +28,17 @@ function roleText(authorRole) {
   return "";
 }
 
-export function ReportableComments({ problemId, proposalId }) {
+export function ReportableComments({ problemId, proposalId, authorId }) {
   const { user } = useAuth();
-  return <CommentsPage key={`${user?.id || "guest"}:${problemId}:${proposalId || ""}`} problemId={problemId} proposalId={proposalId} />;
+  return <CommentsPage key={`${user?.id || "guest"}:${problemId}:${proposalId || ""}`}
+    problemId={problemId} proposalId={proposalId} authorId={authorId} />;
 }
 
 function replyCount(item) {
   return item?.replyCount ?? item?.replies?.length ?? 0;
 }
 
-function CommentsPage({ problemId, proposalId }) {
+function CommentsPage({ problemId, proposalId, authorId }) {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
@@ -49,6 +50,9 @@ function CommentsPage({ problemId, proposalId }) {
   const request = useRef(0);
   const busy = useRef(false);
   const canCompose = Boolean(user?.id && proposalId);
+  // A solution carries one recommendation, and never from its own author.
+  const ownSolution = Boolean(authorId && user?.id && authorId.toLowerCase() === user.id.toLowerCase());
+  const recommended = items.some((item) => item.qualifying);
   async function load(nextCursor, direction = sort) {
     if (busy.current || !problemId) return;
     busy.current = true;
@@ -102,7 +106,8 @@ function CommentsPage({ problemId, proposalId }) {
         </select>
       </label>}
     </div>
-    {canCompose && !editingId && <CommentComposer proposalId={proposalId} evaluator={isEvaluator(user)} onPosted={refresh} />}
+    {canCompose && !editingId && <CommentComposer proposalId={proposalId} evaluator={isEvaluator(user)}
+      ownSolution={ownSolution} recommended={recommended} onPosted={refresh} onRefresh={refresh} />}
     {error && <p role="alert" className="field-hint">{error}</p>}
     {items.map((item) => <CommentItem key={item.id} item={item} user={user} editing={editingId === item.id}
       editingId={editingId} canReply={canCompose} expanded={expandedIds.has(item.id)}
@@ -114,9 +119,11 @@ function CommentsPage({ problemId, proposalId }) {
   </section>;
 }
 
-function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, parentId }) {
+function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, parentId, ownSolution = false, recommended = false, onRefresh }) {
   const reply = Boolean(parentId) || Boolean(initial?.parentId);
-  const recommend = evaluator && !reply;
+  // Editing my own recommendation still shows the picker; everyone else is blocked.
+  const blocked = evaluator && !reply && (ownSolution || (recommended && !initial?.qualifying));
+  const recommend = evaluator && !reply && !blocked;
   const [body, setBody] = useState(initial?.body || "");
   const [recommendation, setRecommendation] = useState(initial?.recommendation || "");
   const [error, setError] = useState("");
@@ -136,6 +143,8 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
       onPosted();
     } catch (err) {
       setError(commentError(err));
+      // Lost the race for the recommendation: show what is already on record.
+      if (/already recommended/i.test(String(err?.message ?? ""))) onRefresh?.();
     } finally {
       setBusy(false);
     }
@@ -144,6 +153,11 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
     <label htmlFor={fieldId}>{initial ? "Edit comment" : reply ? "Write a reply" : "Write a comment"}</label>
     <textarea id={fieldId} rows={reply ? 3 : 4} maxLength={COMMENT_BODY_MAX}
       value={body} disabled={busy} onChange={(event) => setBody(event.target.value)} />
+    {blocked && <p className="field-hint">
+      {ownSolution
+        ? "You cannot evaluate your own solution."
+        : "Another evaluator has already recommended this solution."}
+    </p>}
     {recommend && <fieldset className="comment-recommendations" disabled={busy}>
       <legend>Recommendation</legend>
       {RECOMMENDATIONS.map(([value, label]) => <label key={value} className="comment-recommendation-option">

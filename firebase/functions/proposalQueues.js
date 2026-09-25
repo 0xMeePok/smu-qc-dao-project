@@ -102,21 +102,6 @@ export async function listMyProposals({ db, uid }) {
   return { items, truncated: rows.size > MINE_CAP };
 }
 
-/** Qualifying recommendations this evaluator has already filed, by proposal id. */
-async function myRecommendations(db, uid, proposalIds) {
-  const filed = new Map();
-  const pages = await Promise.all(chunks(proposalIds).map((ids) =>
-    db.collection("comments").where("authorId", "==", uid).where("proposalId", "in", ids).get()));
-  for (const page of pages) {
-    for (const doc of page.docs) {
-      const data = doc.data();
-      if (data.qualifying !== true || !visibleComment(data)) continue;
-      filed.set(data.proposalId, { commentId: doc.id, recommendation: data.recommendation, at: iso(data.createdAt) });
-    }
-  }
-  return filed;
-}
-
 /**
  * QCDAO-63. Proposals this evaluator may still file a recommendation comment on.
  * Evaluators self-select from the eligible pool: an administrator assigns the
@@ -133,33 +118,35 @@ export async function listEvaluatorQueue({ db, uid, cursor = null, filter = "pen
   const open = problems.docs.filter((doc) => problemIsMemberBrowsable(doc.data()));
   const pages = await Promise.all(open.map((doc) => db.collection("proposals")
     .where("problemId", "==", doc.id).where("status", "in", OPEN_PROPOSAL).limit(QUEUE_CAP).get()));
+  const wanted = filter === "submitted" ? "submitted" : "pending";
   const candidates = [];
   open.forEach((problem, index) => {
     for (const doc of pages[index].docs) {
       const data = doc.data();
       // An evaluator may also author solutions; they cannot recommend their own.
       if (BLOCKED.has(data.moderationStatus) || data.researcherId === uid) continue;
-      candidates.push({ doc, data, problem });
+      const matching = data.matching || {};
+      const mine = Boolean(matching.recommendedBy) && matching.recommendedBy === uid;
+      // A solution carries one recommendation. Once another evaluator has filed it -
+      // or an administrator closed evaluation - it is not waiting for anyone.
+      if (!mine && (matching.recommendedBy || matching.evaluationComplete === true)) continue;
+      candidates.push({ doc, data, problem, mine, matching });
     }
   });
-  const filed = await myRecommendations(db, uid, candidates.map((row) => row.doc.id));
-  const items = candidates.map(({ doc, data, problem }) => {
-    const mine = filed.get(doc.id) ?? null;
-    return {
-      id: doc.id,
-      title: data.title ?? "",
-      status: data.status ?? "",
-      submittedAt: iso(data.createdAt),
-      posting: postingView(problem.id, problem.data()),
-      recommendationStatus: mine ? "submitted" : "pending",
-      recommendation: mine?.recommendation ?? null,
-      recommendedAt: mine?.at ?? null,
-    };
-  }).filter((item) => filter === "all" || item.recommendationStatus === filter);
+  const items = candidates.map(({ doc, data, problem, mine, matching }) => ({
+    id: doc.id,
+    title: data.title ?? "",
+    status: data.status ?? "",
+    submittedAt: iso(data.createdAt),
+    posting: postingView(problem.id, problem.data()),
+    recommendationStatus: mine ? "submitted" : "pending",
+    recommendation: mine ? matching.recommendation ?? null : null,
+    recommendedAt: mine ? iso(matching.evaluationCompletedAt) : null,
+  })).filter((item) => item.recommendationStatus === wanted);
   const last = problems.docs.at(-1);
   return {
     items,
-    filter,
+    filter: wanted,
     nextCursor: problems.size === PROBLEM_PAGE && last
       ? { expiresAt: millis(last.data().expiresAt), id: last.id }
       : null,

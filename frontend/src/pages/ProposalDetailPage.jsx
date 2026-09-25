@@ -155,7 +155,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         const updated = next.proposals.find((item) => item.id === proposal.id);
         if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
       }} />}
-      {proposal.status !== "draft" && !isModerated(proposal) && <><ReportContentButton contentType="proposal" contentId={proposal.id} /><ReportableComments problemId={proposal.problemId} proposalId={proposal.id} /></>}
+      {proposal.status !== "draft" && !isModerated(proposal) && <><ReportContentButton contentType="proposal" contentId={proposal.id} /><ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId} /></>}
       {(owns || sponsors) && <OwnerReviewPanel proposalId={proposal.id} canRecord={sponsors && !owns} revisionPathOpen={proposal.status === "submitted" && !proposalMatchingLocked(proposal) && !["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status)} />}
       {(owns || sponsors) && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />

@@ -209,10 +209,11 @@ describe("QCDAO-62 tracking my own proposals", () => {
     expect(screen.getByText(/1 evaluator recommendation: Recommend/)).toBeTruthy();
     expect(screen.getByText(/2 comments/)).toBeTruthy();
     expect(screen.getByText(/Awaiting evaluator recommendation/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Cold-chain routing" }));
+    // The opportunity is named, not linked: only the proposal is clickable.
+    expect(screen.getByText(/Proposal for: Cold-chain routing/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cold-chain routing" })).toBeNull();
     fireEvent.click(screen.getAllByRole("button", { name: "View proposal" })[0]);
-    expect(queues.navigated).toContain("posting/problem-1");
-    expect(queues.navigated).toContain("proposal/p2");
+    expect(queues.navigated).toEqual(["proposal/p2"]);
   });
 
   it("orders by closing soonest and filters by workflow status", async () => {
@@ -243,7 +244,7 @@ describe("QCDAO-63 the evaluator recommendation queue", () => {
     render(<EvaluatorQueue onNavigate={navigate} />);
     await screen.findByText("Soon solution");
     expect(screen.getByText(/Scheduling/)).toBeTruthy();
-    expect(screen.getByText(/No recommendation from me yet/)).toBeTruthy();
+    expect(screen.getByText(/No recommendation yet/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open proposal" }));
     expect(queues.navigated).toContain("proposal/s1");
   });
@@ -251,9 +252,16 @@ describe("QCDAO-63 the evaluator recommendation queue", () => {
   it("separates the solutions I have already recommended on", async () => {
     render(<EvaluatorQueue onNavigate={navigate} />);
     await screen.findByText("Soon solution");
-    fireEvent.click(screen.getByRole("tab", { name: "Recommendation submitted" }));
+    fireEvent.click(screen.getByRole("tab", { name: "My recommendations" }));
     await screen.findByText(/My recommendation: Recommend with revisions/);
     expect(screen.queryByText("Soon solution")).toBeNull();
+  });
+
+  it("offers only the two states a solution can be in, with no wider pool", async () => {
+    render(<EvaluatorQueue onNavigate={navigate} />);
+    await screen.findByText("Soon solution");
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs).toEqual(["Awaiting recommendation", "My recommendations"]);
   });
 
   it("explains a refusal when the account is not an assigned evaluator", async () => {
