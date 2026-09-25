@@ -269,7 +269,7 @@ export function EvaluatorQueue({ onNavigate }) {
           <span>Assigned by a DAO administrator</span>
         </div>
         <h1>Evaluation queue</h1>
-        <p>Open a solution with its posting for context, then leave one recommendation comment.</p>
+        <p>Open a solution with its posting for context, then leave the one recommendation it carries.</p>
       </div>
 
       <div className="admin-tabs-nav" role="tablist" aria-label="Recommendation status">
@@ -283,11 +283,11 @@ export function EvaluatorQueue({ onNavigate }) {
       </div>
 
       <div className="card-table">
-        <div className="table-header"><h3>{filter === "submitted" ? "Recommendation submitted" : "Awaiting my recommendation"}</h3></div>
+        <div className="table-header"><h3>{filter === "submitted" ? "My recommendations" : "Awaiting recommendation"}</h3></div>
         {loading && !visible.length ? <p className="table-empty" role="status">Loading queue…</p>
           : error ? <p className="error-banner" role="alert">{error}</p>
           : !visible.length ? <p className="table-empty">
-              {filter === "submitted" ? "You have not recommended on a solution yet." : "Nothing is waiting for your recommendation."}
+              {filter === "submitted" ? "You have not recommended a solution yet." : "No solution is waiting for a recommendation."}
             </p>
           : visible.map((item) => <div className="table-row" key={item.id}>
             <div>
@@ -296,7 +296,7 @@ export function EvaluatorQueue({ onNavigate }) {
               <small className="table-row-meta">
                 {item.recommendationStatus === "submitted"
                   ? `My recommendation: ${recommendationLabel(item.recommendation)}`
-                  : "No recommendation from me yet"}
+                  : "No recommendation yet"}
               </small>
             </div>
             <div className="table-row-actions">

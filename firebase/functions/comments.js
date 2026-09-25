@@ -40,6 +40,28 @@ function presentation(role) {
   return { authorRole: "user", badge: null };
 }
 
+function ownSolution(proposal, uid) {
+  return proposal?.data?.().researcherId === uid;
+}
+
+/** One recommendation per solution, and never from its own author. */
+function canRecommend({ proposal, uid, role, isReply, commentId = null }) {
+  if (role !== ROLE_EVALUATOR || isReply || ownSolution(proposal, uid)) return false;
+  const held = recommendationHolder(proposal?.data?.());
+  return !held || held.commentId === commentId;
+}
+
+function assertRecommendationAllowed({ proposal, uid, recommendation, isReply, commentId = null }) {
+  if (recommendation == null || recommendation === "" || isReply) return;
+  if (ownSolution(proposal, uid)) {
+    fail("permission-denied", "You cannot recommend your own solution.");
+  }
+  const held = recommendationHolder(proposal?.data?.());
+  if (held && held.commentId !== commentId) {
+    fail("failed-precondition", "Another evaluator has already recommended this solution.");
+  }
+}
+
 function recommendationFor(role, value, previous = null, { reply = false } = {}) {
   const provided = value != null && value !== "";
   if (reply) {
@@ -156,16 +178,22 @@ function isMockEvaluation(matching = {}) {
   return matching.evaluationMockComplete === true || Boolean(matching.evaluationCompletedBy);
 }
 
-async function evaluationGateReads(tx, db, { proposalId, commentId, qualifying }) {
-  if (!proposalId) return { proposal: null, complete: qualifying };
+async function evaluationGateReads(tx, db, { proposalId, commentId, qualifying, holder }) {
+  if (!proposalId) return { proposal: null, complete: qualifying, holder: holder ?? null };
   const proposalRef = db.collection("proposals").doc(proposalId);
-  if (qualifying) return { proposal: await tx.get(proposalRef), complete: true };
+  if (qualifying) return { proposal: await tx.get(proposalRef), complete: true, holder: holder ?? null };
   const [proposal, rows] = await Promise.all([
     tx.get(proposalRef),
     tx.get(db.collection("comments").where("proposalId", "==", proposalId).where("qualifying", "==", true).limit(5)),
   ]);
+  // Whichever qualifying comment is left owns the recommendation now.
+  const remaining = rows.docs.filter((doc) => doc.id !== commentId);
+  const survivor = remaining[0];
   return { proposal: proposal.exists ? proposal : null,
-    complete: rows.docs.some((doc) => doc.id !== commentId) };
+    complete: remaining.length > 0,
+    holder: survivor
+      ? { by: survivor.data().authorId, commentId: survivor.id, recommendation: survivor.data().recommendation ?? null }
+      : null };
 }
 
 function nextEvaluationComplete(proposal, complete) {
@@ -176,13 +204,34 @@ function nextEvaluationComplete(proposal, complete) {
   return evaluationComplete;
 }
 
-function applyEvaluationComplete(tx, proposal, { complete, now }) {
-  const evaluationComplete = nextEvaluationComplete(proposal, complete);
-  if (evaluationComplete == null) return;
-  const matching = { ...(proposal.data().matching || {}) };
-  matching.evaluationComplete = evaluationComplete;
-  matching.evaluationCompletedAt = evaluationComplete ? (matching.evaluationCompletedAt || now) : null;
-  matching.updatedAt = now;
+/** The recommendation a solution currently carries, or null. */
+export function recommendationHolder(proposalData) {
+  const matching = proposalData?.matching || {};
+  return matching.recommendedBy
+    ? { by: matching.recommendedBy, commentId: matching.recommendationCommentId ?? null,
+      recommendation: matching.recommendation ?? null }
+    : null;
+}
+
+// Writing the holder onto the solution is also what serialises two evaluators
+// recommending at once: both transactions read this document, so the loser
+// retries, sees the winner, and is refused instead of filing a second opinion.
+function applyEvaluationComplete(tx, proposal, { complete, now, holder }) {
+  if (!proposal?.exists) return;
+  const current = proposal.data().matching || {};
+  const evaluationComplete = complete || isMockEvaluation(current);
+  const keep = holder === undefined;
+  const nextBy = keep ? (current.recommendedBy ?? null) : (holder?.by ?? null);
+  const nextCommentId = keep ? (current.recommendationCommentId ?? null) : (holder?.commentId ?? null);
+  const nextValue = keep ? (current.recommendation ?? null) : (holder?.recommendation ?? null);
+  if (evaluationComplete === (current.evaluationComplete === true)
+    && nextBy === (current.recommendedBy ?? null)
+    && nextCommentId === (current.recommendationCommentId ?? null)
+    && nextValue === (current.recommendation ?? null)) return;
+  const matching = { ...current, evaluationComplete, recommendedBy: nextBy,
+    recommendationCommentId: nextCommentId, recommendation: nextValue,
+    evaluationCompletedAt: evaluationComplete ? (current.evaluationCompletedAt || now) : null,
+    updatedAt: now };
   tx.update(proposal.ref, { matching });
 }
 
@@ -319,6 +368,10 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     const parent = await loadReplyParent(tx, db, proposalId, replyTo);
     await assertReplyAllowance(tx, db, parent, uid);
     const role = accessLevel(profile);
+    assertRecommendationAllowed({ proposal, uid, recommendation, isReply: Boolean(replyTo) });
+    // An evaluator may still discuss their own solution - they just cannot judge it,
+    // and a solution carries one recommendation, so a second evaluator is refused.
+    const recommends = canRecommend({ proposal, uid, role, isReply: Boolean(replyTo) });
     const shown = presentation(role);
     const record = {
       authorId: uid,
@@ -328,7 +381,7 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
       replyCount: 0,
       body: text,
       ...shown,
-      recommendation: recommendationFor(role, recommendation, null, { reply: Boolean(replyTo) }),
+      recommendation: recommendationFor(recommends ? role : 0, recommendation, null, { reply: Boolean(replyTo) }),
       qualifying: false,
       ...GRADING,
       moderationStatus: "visible",
@@ -337,13 +390,14 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
       updatedAt: now,
     };
     record.qualifying = commentIsQualifying(record, role);
-    const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying });
+    const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying,
+      holder: record.qualifying ? { by: uid, commentId: ref.id, recommendation: record.recommendation } : undefined });
     const notices = await queueQualifyingNotices(tx, db, { commentId: ref.id, record, proposal, now });
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     const summaryDocs = await feedbackSummaryReads(tx, db, proposalId);
     tx.set(ref, record);
     if (parent) tx.update(parent.ref, { replyCount: (parent.data().replyCount || 0) + 1 });
-    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
     applyQueuedNotices(tx, notices);
     applyQueuedNotices(tx, gateNotices);
     applyFeedbackSummary(tx, db, summaryDocs, {
@@ -362,14 +416,17 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
     if (now.toMillis() - millis(data.createdAt) > COMMENT_EDIT_WINDOW_MS) {
       fail("failed-precondition", "Comments can only be edited within 15 minutes of posting.");
     }
-    await loadReadableProposal(tx, db, uid, profile, data.proposalId);
+    const proposal = await loadReadableProposal(tx, db, uid, profile, data.proposalId);
     const role = accessLevel(profile);
+    const isReply = (data.parentId ?? null) != null;
+    assertRecommendationAllowed({ proposal, uid, recommendation, isReply, commentId: ref.id });
+    const recommends = canRecommend({ proposal, uid, role, isReply, commentId: ref.id });
     const shown = presentation(role);
     const next = {
       ...data,
       body: text,
       ...shown,
-      recommendation: recommendationFor(role, recommendation, data.recommendation),
+      recommendation: recommendationFor(recommends ? role : 0, recommendation, data.recommendation),
       updatedAt: now,
       editedAt: now,
       qftGrade: data.qftGrade ?? null,
@@ -378,14 +435,15 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
       revisions: [...(data.revisions || []), revision("edit", data, now)],
     };
     next.qualifying = commentIsQualifying(next, role);
-    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: next.qualifying });
+    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: next.qualifying,
+      holder: next.qualifying ? { by: uid, commentId: ref.id, recommendation: next.recommendation } : undefined });
     const notices = next.qualifying && !data.qualifying
       ? await queueQualifyingNotices(tx, db, { commentId: ref.id, record: next, proposal: gate.proposal, now })
       : [];
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
     tx.set(ref, next);
-    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
     applyQueuedNotices(tx, notices);
     applyQueuedNotices(tx, gateNotices);
     applyFeedbackSummary(tx, db, summaryDocs, {
@@ -402,14 +460,17 @@ export async function prepareCommentEvaluationGate({ tx, db, contentId, data, ac
     : data.moderationStatus;
   const author = data.authorId ? await tx.get(db.collection("users").doc(data.authorId)) : null;
   const qualifying = commentIsQualifying({ ...data, moderationStatus }, accessLevel(author?.data()));
-  const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId, qualifying });
+  const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId, qualifying,
+    holder: qualifying
+      ? { by: data.authorId, commentId: contentId, recommendation: data.recommendation ?? null }
+      : undefined });
   const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
   const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
   const next = { ...data, moderationStatus, qualifying };
   return {
     qualifying,
     apply() {
-      applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+      applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
       applyQueuedNotices(tx, gateNotices);
       applyFeedbackSummary(tx, db, summaryDocs, {
         commentId: contentId, next, proposalId: data.proposalId, problemId: data.problemId, now,
@@ -442,7 +503,7 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
     if (parent?.exists) {
       tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
     }
-    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now });
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
     applyQueuedNotices(tx, removedNotices);
     applyQueuedNotices(tx, gateNotices);
     applyFeedbackSummary(tx, db, summaryDocs, {

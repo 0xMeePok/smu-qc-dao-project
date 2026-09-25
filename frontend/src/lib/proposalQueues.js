@@ -4,10 +4,11 @@ import { requireFirebase } from "./authFlow.js";
 import { recommendationLabel } from "./comments.js";
 
 /** QCDAO-62/63 workspace queues. Both read records that already exist. */
+// A solution carries one recommendation, so "pending" already means nobody has
+// recommended it yet - there is no wider pool to show.
 export const QUEUE_FILTERS = [
-  ["pending", "Awaiting my recommendation"],
-  ["submitted", "Recommendation submitted"],
-  ["all", "All eligible"],
+  ["pending", "Awaiting recommendation"],
+  ["submitted", "My recommendations"],
 ];
 
 export const PROPOSAL_SORTS = [

@@ -15,6 +15,11 @@ import {
   statusOptions,
 } from "../lib/proposalQueues.js";
 
+function sentenceCase(value) {
+  const text = String(value ?? "").replaceAll("_", " ");
+  return text ? text[0].toUpperCase() + text.slice(1) : "";
+}
+
 /** QCDAO-62 - every submitted proposal with where it stands, without asking anyone. */
 export function ProposalTracker({ onNavigate }) {
   const [rows, setRows] = useState([]);
@@ -62,9 +67,14 @@ export function ProposalTracker({ onNavigate }) {
       : !visible.length ? <p className="table-empty">No proposals yet. Choose an open opportunity to submit your approach.</p>
       : visible.map((item) => <div className="table-row" key={item.id}>
         <div>
+          {/* The bold line is this member's own proposal; the opportunity it answers
+              is named beneath it, so neither title can be mistaken for the other. */}
           <strong>{item.title || "Untitled proposal"}</strong>
           <small className="table-row-meta">
-            {MATCHING_LABELS[item.matchingStatus] || item.status} · Submitted {formatInstant(item.createdAt)}
+            Proposal for: {item.posting?.title || "Untitled opportunity"}
+          </small>
+          <small className="table-row-meta">
+            Status: {MATCHING_LABELS[item.matchingStatus] || sentenceCase(item.status)} · Submitted {formatInstant(item.createdAt)}
           </small>
           <small className="table-row-meta">
             {feedbackLabel(item)} · {commentCountLabel(item)}
@@ -73,9 +83,6 @@ export function ProposalTracker({ onNavigate }) {
         </div>
         <div className="table-row-actions">
           <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} showInstant={false} />
-          {item.problemId && <button className="text-button" type="button" onClick={() => onNavigate(`posting/${item.problemId}`)}>
-            {item.posting?.title || "View opportunity"}
-          </button>}
           <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
         </div>
       </div>)}

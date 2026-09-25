@@ -50,16 +50,20 @@ test("[BUT-SPE-34] comparison lists advisory recommendation counts and keeps sel
   const db = fixture();
   await createComment({ db, uid: "funder", proposalId: "alpha", body: "Useful context from a funder.", now });
   const endorsed = await comment(db);
-  await comment(db, { body: "I would not proceed.", recommendation: "do_not_recommend" });
+  // A solution carries ONE recommendation: a competing one is refused, not counted.
+  await assert.rejects(
+    () => comment(db, { body: "I would not proceed.", recommendation: "do_not_recommend" }),
+    { code: "failed-precondition" },
+  );
   await createComment({ db, uid: "alice", proposalId: "alpha", body: "Agreed.", parentId: endorsed.id, now: later(1) });
   await comment(db, { proposalId: "bravo", body: "Revise the baseline.", recommendation: "recommend_with_revisions", now: later(2) });
 
   const summary = db.records.get("proposalFeedbackSummaries/alpha");
   assert.equal(summary.recommend, 1);
   assert.equal(summary.recommend_with_revisions, 0);
-  assert.equal(summary.do_not_recommend, 1);
-  assert.equal(summary.qualifyingCount, 2);
-  assert.equal(summary.commentCount, 4);
+  assert.equal(summary.do_not_recommend, 0);
+  assert.equal(summary.qualifyingCount, 1);
+  assert.equal(summary.commentCount, 3);
   assert.equal(summary.qftGrade, undefined);
 
   const beforeFunding = await getProposalComparison({ db, uid: "owner", problemId: "problem", now });

@@ -787,20 +787,6 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "authorId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "proposalId",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "comments",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
           "fieldPath": "parentId",
           "order": "ASCENDING"
         },
