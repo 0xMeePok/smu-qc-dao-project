@@ -305,8 +305,8 @@ async function queueEvaluationGateNotices(tx, db, { proposal, complete, now }) {
       kind: "evaluation_gate", contentType: "proposal", contentId: proposal.id,
       proposalId: proposal.id, problemId: data.problemId, title,
       message: evaluationComplete
-        ? `The evaluator recommendation-comment gate closed on “${title}”.`
-        : `The evaluator recommendation-comment gate opened on “${title}”.`,
+        ? `A qualifying evaluator recommendation is now on “${title}”. Evaluation remains optional for owner selection.`
+        : `“${title}” no longer has a qualifying evaluator recommendation. Owner selection still depends on full funding, not evaluation.`,
     }),
   }));
 }

@@ -193,7 +193,7 @@ test('scheduled expiry refunds without any member opening the problem', async ()
   assert.equal((await sweepExpiredMockMatches({ db, now: later(CONFIRMATION_WINDOW_MS + 1) })).settled, 0);
 });
 
-test('owner selection requires full funding and the evaluator feedback gate; rationale and creator handshake remain required', async () => {
+test('owner selection requires full funding but not evaluation; rationale and creator handshake remain required', async () => {
   const db = fixture(); db.records.get('proposals/a').matching = {};
   await fund(db, 'a', 40);
   assert.equal((await get(db)).proposals.find(p => p.id === 'a').canSelect, false);
@@ -201,11 +201,7 @@ test('owner selection requires full funding and the evaluator feedback gate; rat
   await fund(db, 'a', 60, 'request_second_1234');
   const funded = (await get(db)).proposals.find(p => p.id === 'a');
   assert.equal(funded.matching.evaluationComplete, false);
-  assert.equal(funded.canSelect, false);
-  await assert.rejects(() => select(db), { code: 'failed-precondition', message: 'Selection opens after the evaluator feedback gate and full funding.' });
-  db.records.get('proposals/a').matching.evaluationComplete = true;
-  const ready = (await get(db)).proposals.find(p => p.id === 'a');
-  assert.equal(ready.canSelect, true);
+  assert.equal(funded.canSelect, true);
   assert.equal((await get(db, 'funder')).proposals.find(p => p.id === 'a').canSelect, false);
   await rejects(() => select(db, 'a', 'funder'), 'permission-denied');
   await rejects(() => selectMockProposal({ db, uid: 'owner', problemId: 'problem', proposalId: 'a', now }), 'invalid-argument');
@@ -213,7 +209,7 @@ test('owner selection requires full funding and the evaluator feedback gate; rat
   const pending = await get(db, 'alice');
   assert.equal(pending.matching.status, 'awaiting_confirmation');
   assert.equal(pending.proposals.find(p => p.id === 'a').canConfirm, true);
-  assert.equal(pending.history.find(event => event.type === 'owner_selected').evaluationComplete, true);
+  assert.equal(pending.history.find(event => event.type === 'owner_selected').evaluationComplete, false);
   await confirm(db);
   const confirmed = await get(db, 'funder');
   assert.equal(confirmed.matching.status, 'confirmed');

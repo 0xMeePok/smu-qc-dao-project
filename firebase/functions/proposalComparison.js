@@ -26,8 +26,6 @@ function recommendationCounts(data = {}) {
 
 function selectionHint(viewerIsOwner, selection) {
   if (!viewerIsOwner || selection.canSelect || !selection.open || !selection.eligible) return null;
-  if (!selection.feedbackOpen && !selection.fundingMet) return "Needs full funding and a qualifying evaluator recommendation.";
-  if (!selection.feedbackOpen) return "Needs a qualifying evaluator recommendation.";
   if (!selection.fundingMet) return "Needs full funding.";
   return null;
 }

@@ -46,7 +46,7 @@ const comment = (db, patch) => createComment({
   db, uid: "evaluator", proposalId: "alpha", body: "The benchmark needs a citation.", recommendation: "recommend", now, ...patch,
 });
 
-test("[BUT-SPE-34] comparison lists advisory recommendation counts and keeps selection behind both gates", async () => {
+test("[BUT-SPE-34] comparison lists advisory recommendation counts and requires funding, not evaluation, for selection", async () => {
   const db = fixture();
   await createComment({ db, uid: "funder", proposalId: "alpha", body: "Useful context from a funder.", now });
   const endorsed = await comment(db);
@@ -100,6 +100,21 @@ test("[BUT-SPE-34] comparison lists advisory recommendation counts and keeps sel
   assert.equal(db.records.get("proposals/alpha").matching.evaluationComplete, false);
   const closed = await getProposalComparison({ db, uid: "owner", problemId: "problem", now: later(6) });
   const alpha = closed.rows.find((row) => row.id === "alpha");
-  assert.equal(alpha.canSelect, false);
-  assert.match(alpha.selectionHint, /qualifying evaluator recommendation/);
+  assert.equal(alpha.canSelect, true);
+  assert.equal(alpha.selectionHint, null);
+});
+
+test("a fully funded proposal with no evaluator comment can be selected by its owner", async () => {
+  const db = fixture();
+  const beforeFunding = await getProposalComparison({ db, uid: "owner", problemId: "problem", now });
+  const unfunded = beforeFunding.rows.find((row) => row.id === "alpha");
+  assert.equal(unfunded.canSelect, false);
+  assert.equal(unfunded.selectionHint, "Needs full funding.");
+  await fundMockProposal({ db, uid: "funder", problemId: "problem", proposalId: "alpha", amount: 100, requestId: "request_no_evaluation", now });
+  const owner = await getProposalComparison({ db, uid: "owner", problemId: "problem", now });
+  const alpha = owner.rows.find((row) => row.id === "alpha");
+  assert.equal(alpha.matching.evaluationComplete, false);
+  assert.equal(alpha.qualifyingCount, 0);
+  assert.equal(alpha.canSelect, true);
+  assert.equal(alpha.selectionHint, null);
 });
