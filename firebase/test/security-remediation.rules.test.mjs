@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import { before, after, describe, it } from "node:test";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { collection, doc, getDocs, query, where, limit, setDoc, updateDoc, deleteField, serverTimestamp, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where, limit, setDoc, updateDoc, deleteField, serverTimestamp, writeBatch, Timestamp } from "firebase/firestore";
+import { PUBLISH_VALIDATION, isPublishableProblem } from "../functions/publicationValidation.js";
 import { ref, uploadBytes } from "firebase/storage";
 
 const OWNER = `0x${"d7".repeat(20)}`;
@@ -39,7 +40,17 @@ async function trusted(scope, id, data, proof = true) {
     await setDoc(doc(ctx.firestore(), "recordReservations", `${scope}_${id}`), { uid });
     if (proof) {
       const { createdAt, updatedAt, audit, ...record } = data;
-      await setDoc(doc(ctx.firestore(), "publicationProofs", `${scope}_${id}`), { uid, record, transactionHash: audit?.transactionHash ?? "" });
+      // Stands in for attestPublication, so it marks the proof exactly as that
+      // function does: only when the shared validator accepts the record.
+      const profile = scope === "problems" ? await getDoc(doc(ctx.firestore(), "users", uid)) : null;
+      const publishable = scope === "problems" && isPublishableProblem(
+        { ...record, expiresAt: record.expiresAt instanceof Date ? Timestamp.fromDate(record.expiresAt) : record.expiresAt },
+        { uid, profileOrganisation: profile?.data()?.organisation },
+      );
+      await setDoc(doc(ctx.firestore(), "publicationProofs", `${scope}_${id}`), {
+        uid, record, transactionHash: audit?.transactionHash ?? "",
+        ...(publishable ? { validation: PUBLISH_VALIDATION } : {}),
+      });
     }
   });
 }

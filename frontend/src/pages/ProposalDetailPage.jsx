@@ -1,5 +1,6 @@
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findProposal, withdrawProposal } from "../lib/proposals.js";
@@ -13,7 +14,7 @@ import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
 import { OwnerReviewPanel } from "../components/OwnerReviewPanel.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
-import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../config/proposal.js";
+import { PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
 import { getMockMatching, mergeMatchingState, proposalFundingLabel, proposalMatchingLocked } from "../lib/matching.js";
@@ -21,6 +22,7 @@ import { isModerated } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
 import { ReportableComments } from "../components/ReportableComments.jsx";
 import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
+import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
@@ -42,6 +44,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   // withdrawProposal that would revert — and so the anchored reason cannot be
   // edited into something the receipt no longer describes.
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
+  const [tab, setTab] = useState("overview");
   useEffect(() => {
     if (confirm && !anchoredWithdrawal && !withdrawing && (proposalMatchingLocked(proposal)
       || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status))) {
@@ -55,7 +58,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setProposal(null); setError(""); setConfirm(false);
-    setReason(""); setReasonError(""); setAnchoredWithdrawal(null);
+    setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab("overview");
     setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
@@ -141,31 +144,109 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const sponsors = Boolean(user?.id && proposal.postingOwnerId === user.id.toLowerCase());
   const backRoute = owns ? "proposals" : sponsors ? "my-problems" : `posting/${proposal.problemId}`;
   const backLabel = owns ? "Back to my proposals" : sponsors ? "Back to my problems" : "Back to opportunity";
+  const showCollaboration = proposal.status !== "draft" && !isModerated(proposal);
+  const reviewers = owns || sponsors;
+  const canReview = sponsors && !owns;
+  const tabs = [
+    ["overview", "Overview"],
+    ...(showCollaboration ? [["funding", "Match & funding"]] : []),
+    // Only the sponsor always has something here (the review form); everyone
+    // else sees feedback and comments under the proposal, when there are any.
+    ...(canReview ? [["feedback", "Feedback"]] : []),
+    ["record", "Record"],
+  ];
+  const activeTab = tabs.some(([value]) => value === tab) ? tab : "overview";
+  const panel = (value) => `posting-tab${activeTab === value ? " is-active" : ""}`;
+  const openRecord = () => {
+    flushSync(() => setTab("record"));
+    document.getElementById("proposal-panel-record")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
+  const locked = proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status);
   return <section className="page detail-page">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
-    {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. Check the on-chain verification below for its current integrity status.</p>}
+    {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. <button type="button" className="text-button" onClick={openRecord}>Check its on-chain verification</button> under Record.</p>}
     {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
-    <div className="detail-layout"><article className="detail-main"><span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span><h1>{proposal.title}</h1><p className="lead">{proposal.summary}</p>
-      {isOpenFunding && <p>The funder acts as the problem owner for selection. This proposal follows the same proposal funding, selection and approval process as other solution proposals.</p>}
+    <div className="detail-layout"><article className="detail-main">
+      <div className="card-top">
+        <span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
+        <div className="trust-status-row"><span className="status-dot">{proposalFundingLabel(proposal)}</span><VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending /></div>
+      </div>
+      <h1>{proposal.title}</h1>
+      <p className="lead">{proposal.summary}</p>
       <ContentModerationNotice record={proposal} />
-      {[...PROPOSAL_FIELDS.slice(2), ...(isOpenFunding ? PROBLEM_FRAMING_FIELDS : [])].map(([key, label]) => proposal[key] && <div className="detail-section" key={key}><h2>{label}</h2><p className="proposal-text">{proposal[key]}</p></div>)}
-      {proposal.attachments?.length > 0 && <div className="detail-section"><h2>Supporting attachments</h2>{proposal.attachments.map((item) => <p key={item.id}><button className="text-button" onClick={() => download(item)}>Download {item.name}</button></p>)}</div>}
-      {proposal.status === "withdrawn" && proposal.withdrawalReason && <div className="detail-section"><h2>Withdrawal reason</h2><p className="proposal-text">{proposal.withdrawalReason}</p></div>}
-      {proposal.status !== "draft" && !isModerated(proposal) && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onChange={(next) => {
-        const updated = next.proposals.find((item) => item.id === proposal.id);
-        if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
-      }} />}
-      {proposal.status !== "draft" && !isModerated(proposal) && <><ReportContentButton contentType="proposal" contentId={proposal.id} /><ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId} /></>}
-      {(owns || sponsors) && <OwnerReviewPanel proposalId={proposal.id} canRecord={sponsors && !owns} revisionPathOpen={proposal.status === "submitted" && !proposalMatchingLocked(proposal) && !["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status)} />}
-      {(owns || sponsors) && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
-      <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
-      {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
-    </article><aside className="context-panel"><div className="trust-status-row"><span className="status-dot">{proposalFundingLabel(proposal)}</span><VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending /></div><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><p>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label}</p><dl><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
+
+      {/* One job per tab, as on the posting page. Every panel stays mounted so
+          the match state MatchingPanel reports keeps the sidebar current. */}
+      <div className="posting-tabs">
+        <div className="segmented" role="tablist" aria-label="Proposal sections">
+          {tabs.map(([value, label]) => (
+            <button key={value} type="button" role="tab" id={`proposal-tab-${value}`}
+              aria-selected={activeTab === value} aria-controls={`proposal-panel-${value}`}
+              className={activeTab === value ? "selected" : ""} onClick={() => setTab(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className={panel("overview")} role="tabpanel" id="proposal-panel-overview" aria-labelledby="proposal-tab-overview">
+        {proposal.status === "withdrawn" && <DetailGroup title="Withdrawn">
+          <DetailItem heading="Withdrawal reason">{proposal.withdrawalReason}</DetailItem>
+        </DetailGroup>}
+        {isOpenFunding && <>
+          <p className="field-hint posting-tab-note">The funder acts as the problem owner for selection. This proposal follows the same funding, selection and approval process as other solution proposals.</p>
+          <DetailGroup title="The problem">
+            <DetailItem heading="Proposed problem statement">{proposal.proposedProblem}</DetailItem>
+            <DetailItem heading="Business or scientific relevance">{proposal.relevance}</DetailItem>
+            <DetailItem heading="Why this fits the funder's thesis">{proposal.thesisFit}</DetailItem>
+          </DetailGroup>
+        </>}
+        <DetailGroup title="The approach">
+          <DetailItem heading="Technical methodology">{proposal.methodology}</DetailItem>
+          <DetailItem heading="Why this approach suits the problem">{proposal.suitability}</DetailItem>
+        </DetailGroup>
+        <DetailGroup title="What success looks like">
+          <DetailItem heading="Expected outcomes">{proposal.expectedOutcomes}</DetailItem>
+          <DetailItem heading="Measurable success criteria">{proposal.successCriteria}</DetailItem>
+        </DetailGroup>
+        <DetailGroup title="Delivery">
+          <DetailItem heading="Delivery timeline">{proposal.timeline}</DetailItem>
+          <DetailItem heading="Milestones and deliverables">{proposal.milestones}</DetailItem>
+          <DetailItem heading="Team and relevant experience">{proposal.team}</DetailItem>
+        </DetailGroup>
+        {proposal.attachments?.length > 0 && <section className="detail-section detail-group"><h2>Supporting attachments</h2>{proposal.attachments.map((item) => <p key={item.id}><button className="text-button" onClick={() => download(item)}>Download {item.name}</button></p>)}</section>}
+        {/* The sponsor's feedback (for the author) and comments render nothing
+            when there are none, so they follow the proposal instead of an
+            usually empty tab. */}
+        {owns && <OwnerReviewPanel proposalId={proposal.id} revisionPathOpen={proposal.status === "submitted" && !locked} />}
+        {showCollaboration && <>
+          <ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId} />
+          <div className="detail-report"><ReportContentButton contentType="proposal" contentId={proposal.id} /></div>
+        </>}
+      </div>
+
+      {showCollaboration && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
+        <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onChange={(next) => {
+          const updated = next.proposals.find((item) => item.id === proposal.id);
+          if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
+        }} />
+      </div>}
+
+      {canReview && <div className={panel("feedback")} role="tabpanel" id="proposal-panel-feedback" aria-labelledby="proposal-tab-feedback">
+        <OwnerReviewPanel proposalId={proposal.id} canRecord revisionPathOpen={proposal.status === "submitted" && !locked} />
+      </div>}
+
+      <div className={panel("record")} role="tabpanel" id="proposal-panel-record" aria-labelledby="proposal-tab-record">
+        <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
+        {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
+        {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
+      </div>
+    </article><aside className="context-panel"><span className="eyebrow">Requested</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
           that point on. */}
-      {owns && !proposalMatchingLocked(proposal) && !["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status) && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
-      {owns && !proposalMatchingLocked(proposal) && !["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status) && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
+      {owns && !locked && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
+      {owns && !locked && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
       {owns && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(`submit-proposal/${proposal.problemId}`)}>Submit a replacement</button>}
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}

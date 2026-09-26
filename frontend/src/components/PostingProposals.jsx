@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { formatInstant } from "../lib/datetime.js";
 import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
-import { proposalFundingLabel } from "../lib/matching.js";
+import { FundingMeta } from "./FundingMeta.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 function Row({ item, onNavigate, problemMatching }) {
@@ -14,7 +14,7 @@ function Row({ item, onNavigate, problemMatching }) {
         <small className="table-row-meta">
           {isDraft
             ? `Last saved ${formatInstant(item.updatedAt)}`
-            : `${proposalFundingLabel(item, problemMatching)} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
+            : <FundingMeta item={item} problemMatching={problemMatching} />}
         </small>
       </div>
       <div className="table-row-actions">

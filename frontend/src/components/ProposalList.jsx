@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { PROPOSAL_STATUS_DRAFT, deleteProposalDraft, listProposals } from "../lib/proposals.js";
 import { formatInstant } from "../lib/datetime.js";
 import { Modal } from "./Modal.jsx";
-import { proposalFundingLabel } from "../lib/matching.js";
+import { FundingMeta } from "./FundingMeta.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
 function Row({ item, onNavigate, onDelete }) {
@@ -15,7 +15,7 @@ function Row({ item, onNavigate, onDelete }) {
       <small className="table-row-meta">
         {isDraft
           ? `Last saved ${formatInstant(item.updatedAt)}`
-          : `${proposalFundingLabel(item)} · ${item.currency} ${Number(item.amount).toLocaleString()} · ${formatInstant(item.createdAt)}`}
+          : <FundingMeta item={item} />}
       </small>
     </div>
     <div className="table-row-actions">

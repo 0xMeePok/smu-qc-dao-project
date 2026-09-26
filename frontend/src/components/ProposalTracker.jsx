@@ -82,7 +82,7 @@ export function ProposalTracker({ onNavigate }) {
           {ownerReviewTrackerLabel(item.ownerReview) && <small className="table-row-meta">{ownerReviewTrackerLabel(item.ownerReview)}</small>}
         </div>
         <div className="table-row-actions">
-          <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} showInstant={false} />
+          <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
           <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
         </div>
       </div>)}

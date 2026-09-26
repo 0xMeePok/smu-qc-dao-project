@@ -216,6 +216,17 @@ describe("QCDAO-62 tracking my own proposals", () => {
     expect(queues.navigated).toEqual(["proposal/p2"]);
   });
 
+  it("shows the parent posting's pending match instead of Open", async () => {
+    const deadlineAt = new Date(Date.now() + 2 * 864e5).toISOString();
+    queues.mine.items[0].posting = { ...queues.mine.items[0].posting, expiresAt: new Date(Date.now() + 80 * 864e5).toISOString(),
+      matching: { status: "awaiting_confirmation", deadlineAt, confirmedAt: null } };
+    const { container } = render(<ResearcherProposals onNavigate={navigate} />);
+    await screen.findByText("Quantum routing");
+    const row = screen.getByText("Quantum routing").closest(".table-row");
+    expect(row.querySelector(".expiry-urgency").textContent).toBe("Awaiting creator acceptance");
+    expect(container.textContent).toContain("Awaiting creator acceptance");
+  });
+
   it("orders by closing soonest and filters by workflow status", async () => {
     const { container } = render(<ResearcherProposals onNavigate={navigate} />);
     await screen.findByText("Quantum routing");
@@ -273,5 +284,25 @@ describe("QCDAO-63 the evaluator recommendation queue", () => {
     render(<EvaluatorQueue onNavigate={navigate} />);
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.getByText(/assigned evaluator/)).toBeTruthy();
+  });
+
+  it("shows a pending match instead of Open and withdraws Edit while the posting is locked", async () => {
+    const deadlineAt = new Date(Date.now() + 2 * 864e5).toISOString();
+    mocks.postings = [
+      { ...PUBLISHED, id: "locked1", title: "Awaiting acceptance", expiresAt: new Date(Date.now() + 80 * 864e5),
+        matching: { status: "awaiting_confirmation", deadlineAt, proposalId: "p1" } },
+      { ...PUBLISHED, id: "open1", title: "Still open", expiresAt: new Date(Date.now() + 80 * 864e5) },
+    ];
+    render(<MyProblems onNavigate={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Awaiting acceptance")).toBeTruthy());
+
+    const locked = screen.getByText("Awaiting acceptance").closest(".table-row");
+    expect(locked.querySelector(".status-dot").textContent).toBe("Awaiting creator acceptance");
+    expect(locked.querySelector(".status-dot").className).toContain("is-awaiting");
+    expect(locked.textContent).not.toContain("Edit");
+
+    const open = screen.getByText("Still open").closest(".table-row");
+    expect(open.querySelector(".status-dot").textContent).not.toBe("Awaiting creator acceptance");
+    expect(open.textContent).toContain("Edit");
   });
 });

@@ -1186,6 +1186,27 @@ service cloud.firestore {
           || data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit', 'problemBrowsable', 'matching', 'moderationStatus', 'moderation']));
     }
 
+    // A posting becoming marketplace-visible (create as submitted, or a draft being
+    // published). attestPublication has run the full schema - see
+    // functions/publicationValidation.js - and marked the proof; re-running those
+    // checks here as well crossed Firestore's 1,000-expression cap for any posting
+    // with a PDF and its audit receipt. What stays here is everything the proof
+    // cannot vouch for: the write must reproduce the attested record exactly (the
+    // strict key list, so no unvalidated field rides along), carry a well-formed
+    // receipt for the attested transaction, and fall inside the expiry window
+    // measured from THIS request. A proof without the marker - including every
+    // proof issued before it existed - is never accepted here.
+    function attestedPublish(problemId, data) {
+      let proof = get(/databases/$(database)/documents/publicationProofs/$('problems_' + problemId)).data;
+      return proof.uid == request.auth.uid
+        && proof.get('validation', '') == 'problem-publish-v1'
+        && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
+        && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit'])
+        && hasValidAudit(data)
+        && isMarketplaceVisible(data.status)
+        && expiryInDocumentedRange(data.expiresAt);
+    }
+
     function publicationWriteAllowed(scope, recordId, data) {
       return data.status == 'draft'
         || (resource != null && resource.data.status != 'draft'
@@ -1228,22 +1249,22 @@ service cloud.firestore {
       allow create: if isActiveUser(request.auth.uid)
         && hasCompletedProfile(request.auth.uid)
         && reservedRecord("problems", problemId)
-        && publicationWriteAllowed("problems", problemId, request.resource.data)
         && isWalletAddress(request.auth.uid)
         && request.resource.data.ownerId == request.auth.uid
         // Nothing has been withdrawn yet, so a reason may only be an empty seed.
         && request.resource.data.get('withdrawalReason', '') == ''
-        && validProblem(request.resource.data)
-        && validAttachments(request.resource.data, false)
         // QCDAO-48 posts straight to 'submitted'; 'draft' stays for anything that
         // saves before it is complete. Nothing else may be created directly - a
         // posting cannot start life already open, matched or funded.
         && request.resource.data.status in ['draft', 'submitted']
+        // A draft needs no proof and is validated here in full. A submitted
+        // posting is validated by attestPublication and bound to that proof;
+        // attestedPublish also owns the documented-range expiry check (a posting
+        // that arrives already expired is a mistake, not a state).
         && (request.resource.data.status == 'draft'
-          || (validMarketplaceOpportunity(request.resource.data)
-            // Expiry is the window solution developers respond within, so a
-            // posting that arrives already expired is a mistake, not a state.
-            && expiryInDocumentedRange(request.resource.data.expiresAt)))
+          ? (validProblem(request.resource.data)
+            && validAttachments(request.resource.data, false))
+          : attestedPublish(problemId, request.resource.data))
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
       function problemUpdateIsAllowed() {
@@ -1251,7 +1272,6 @@ service cloud.firestore {
         let after = request.resource.data;
         return isActiveUser(request.auth.uid)
         && preservesMockProblemCommitment(before, after)
-        && publicationWriteAllowed("problems", problemId, after)
         && resource != null
         && before.ownerId == request.auth.uid
         && after.ownerId == before.ownerId
@@ -1262,15 +1282,16 @@ service cloud.firestore {
         // see validOpportunityUpdate. The deadline lock is published-only so a
         // draft carrying attachments does not spend it against the 1000-expression cap.
         && (before.status == 'draft'
-          ? (opportunityWriteIsAllowed(before, after, problemId)
-            && validProblem(after)
-            && validAttachments(after, false)
-            // ONLY a draft may be incomplete. A draft can only move to submitted or open,
-            // so publishing one needs the full contract and a documented-range expiry.
-            && (after.status == 'draft'
-              || (validMarketplaceOpportunity(after)
-                && expiryInDocumentedRange(after.expiresAt))))
+          // ONLY a draft may be incomplete. Saving one needs no proof and is
+          // validated here; publishing one (draft -> submitted/open) must match a
+          // proof attestPublication validated - see attestedPublish.
+          ? (after.status == 'draft'
+            ? (opportunityWriteIsAllowed(before, after, problemId)
+              && validProblem(after)
+              && validAttachments(after, false))
+            : attestedPublish(problemId, after))
           : (before.status != 'expired'
+            && publicationWriteAllowed("problems", problemId, after)
             && ownerDeadlineOpen(before)
             && validOpportunityUpdate(before, after, problemId)))
         && after.createdAt == before.createdAt

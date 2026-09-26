@@ -370,3 +370,19 @@ describe("cancel abandons completed draft attachments", () => {
     expect(mocks.deleted).toEqual([DRAFT_ATTACHMENT]);
   });
 });
+
+describe("wizard navigation while an attachment is uploading", () => {
+  it("holds the owner on the current step until uploads settle", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    await waitFor(() => expect(typeof mocks.uploader.onPendingChange).toBe("function"));
+    await act(async () => { mocks.uploader.onPendingChange(1); });
+
+    expect(screen.getByRole("button", { name: "Continue" }).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Review/ }).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /The problem/ }).disabled).toBe(false);
+
+    await act(async () => { mocks.uploader.onPendingChange(0); });
+    expect(screen.getByRole("button", { name: "Continue" }).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: /Review/ }).disabled).toBe(false);
+  });
+});

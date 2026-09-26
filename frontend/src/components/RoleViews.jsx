@@ -13,7 +13,8 @@ import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditRecei
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
-import { expiryReasonLabel } from "../config/workflowStatus.js";
+import { expiryReasonLabel, opportunityStatusLabel } from "../config/workflowStatus.js";
+import { problemMatchingLocked } from "../lib/matching.js";
 import { ROLE_LABELS } from "../config/roles.js";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 
@@ -90,6 +91,10 @@ export function MyProblems({ onNavigate }) {
   };
 
   function Row({ item, isDraft }) {
+    const live = !isDraft && ["submitted", "open"].includes(item.status);
+    // A selection or committed funding freezes the posting (the dual lock), so
+    // the row says so instead of "Open", and editing is withdrawn.
+    const locked = live && problemMatchingLocked(item);
     return (
       <div className="table-row">
         <div>
@@ -98,8 +103,13 @@ export function MyProblems({ onNavigate }) {
             {isDraft ? "Last saved " : "Submitted "}
             {formatInstant(item.updatedAt)}
           </small>
-          {!isDraft && ["submitted", "open"].includes(item.status) && (
-            <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} />
+          {live && (
+            <span className={`status-dot${item.matching?.status === "awaiting_confirmation" ? " is-awaiting" : ""}`}>
+              {opportunityStatusLabel(item.status, { expiresAt: item.expiresAt, matching: item.matching })}
+            </span>
+          )}
+          {live && (
+            <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} />
           )}
         </div>
         <div className="table-row-actions">
@@ -116,7 +126,7 @@ export function MyProblems({ onNavigate }) {
           >
             {isDraft ? "Resume editing" : "View"}
           </button>
-          {!isDraft && ["submitted", "open"].includes(item.status) && (
+          {live && !locked && (
             <button
               className="text-button"
               type="button"
@@ -300,7 +310,7 @@ export function EvaluatorQueue({ onNavigate }) {
               </small>
             </div>
             <div className="table-row-actions">
-              <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} showInstant={false} />
+              <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
               {item.posting?.id && <button className="text-button" type="button" onClick={() => onNavigate(`posting/${item.posting.id}`)}>View posting</button>}
               <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>Open proposal</button>
             </div>

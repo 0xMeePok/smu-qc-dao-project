@@ -10,6 +10,7 @@ import { useSession } from "./context/SessionContext.jsx";
 import { shortenAddress } from "./lib/chain.js";
 import { isAdmin, isAssignedEvaluator } from "./lib/roles.js";
 import { ResponsiveHeader } from "./components/ResponsiveHeader.jsx";
+import { useTheme } from "./lib/theme.js";
 import { NotificationCentre } from "./components/ModerationNotifications.jsx";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
@@ -27,6 +28,7 @@ import {
   FundingPortfolio,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import HomePage from "./pages/HomePage.jsx";
 import ArchitectureHelpPage from "./pages/ArchitectureHelpPage.jsx";
 import CreatePostingPage from "./pages/CreatePostingPage.jsx";
 import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
@@ -94,169 +96,234 @@ function go(route) {
   window.location.hash = route.startsWith("/") ? route : `/${route}`;
 }
 
-function ArrowIcon() {
+const LAST_WORKSPACE_KEY = "qcdao-last-workspace";
+
+function rememberWorkspace(key) {
+  try { window.localStorage.setItem(LAST_WORKSPACE_KEY, key); } catch { /* private mode */ }
+}
+
+// Where "Workspaces" leads: the last workspace opened, if it is still permitted,
+// otherwise the first one. The tabs on the page switch between them.
+function workspaceHome(workspaceRoutes) {
+  let last = null;
+  try { last = window.localStorage.getItem(LAST_WORKSPACE_KEY); } catch { /* private mode */ }
+  return workspaceRoutes.find((w) => w.key === last)?.key ?? workspaceRoutes[0]?.key;
+}
+
+function WorkspacesLink({ route, workspaceRoutes }) {
+  const active = workspaceRoutes.some((w) => w.key === route);
   return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M4 10h11M11 6l4 4-4 4" />
+    <button
+      type="button"
+      className={`nav-dropdown-trigger${active ? " active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      onClick={() => go(workspaceHome(workspaceRoutes))}
+    >
+      Workspaces
+    </button>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12h14M12 5v14" />
     </svg>
   );
 }
 
-function WorkspacesDropdown({ route, workspaceRoutes }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
-  const isCurrentWorkspace = workspaceRoutes.some((w) => w.key === route);
-  const activeWorkspace = workspaceRoutes.find((w) => w.key === route);
+function ChevronIcon({ direction = "right", size = 16 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={direction === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"} />
+    </svg>
+  );
+}
+
+function ThemeToggle({ theme, onToggle }) {
+  const label = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  return (
+    <button className="icon-button theme-toggle" type="button" onClick={onToggle} aria-label={label} title={label}>
+      {theme === "dark" ? (
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2m-7.07-2.93 1.41-1.41m11.32-11.32 1.41-1.41M2 12h2m16 0h2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+  const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
 
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
+    if (!open) return undefined;
+    const dismiss = (event) => { if (!menuRef.current?.contains(event.target)) setOpen(false); };
+    const escape = (event) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", escape);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [open]);
 
-  const workspaceDescriptions = {
-    "my-problems": "Manage owned challenges & proposals",
-    "proposals": "Track grant proposals & deliverables",
-    "evaluations": "Conduct evaluations & scoring",
-    "funding": "Oversee capital & escrow releases",
-  };
+  const navigate = (route) => { setOpen(false); go(route); };
 
   return (
-    <div className="nav-dropdown-wrapper" ref={dropdownRef}>
+    <div className="account-menu" ref={menuRef}>
       <button
         type="button"
-        className={`nav-dropdown-trigger ${isCurrentWorkspace ? "active" : ""}`}
-        onClick={() => setIsOpen((prev) => !prev)}
-        aria-expanded={isOpen}
+        className="avatar-button"
+        aria-label={`Account menu for ${name}`}
+        aria-expanded={open}
         aria-haspopup="true"
+        onClick={() => setOpen((current) => !current)}
       >
-        <span>{activeWorkspace ? `Workspaces: ${activeWorkspace.label}` : "Workspaces"}</span>
-        <svg
-          className={`dropdown-chevron ${isOpen ? "open" : ""}`}
-          viewBox="0 0 20 20"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <polyline points="6 9 10 13 14 9" />
-        </svg>
+        <span className="avatar" aria-hidden="true">{initial}</span>
+        <span className="account-menu-inline-name">{name}</span>
       </button>
-
-      {isOpen && (
-        <div className="nav-dropdown-menu" role="menu">
-          <div className="nav-dropdown-header">
-            <span className="eyebrow">Member Workspaces</span>
+      {open && (
+        <div className="account-menu-panel" role="menu">
+          <div className="account-menu-identity">
+            <span className="avatar avatar-lg" aria-hidden="true">{initial}</span>
+            <div>
+              <strong>{name}</strong>
+              <small>{roleLabel}</small>
+            </div>
           </div>
-          {workspaceRoutes.map(({ key, label }) => {
-            const isActive = route === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                className={`nav-dropdown-item ${isActive ? "selected" : ""}`}
-                role="menuitem"
-                onClick={() => {
-                  setIsOpen(false);
-                  go(key);
-                }}
-              >
-                <div className="dropdown-item-content">
-                  <div className="dropdown-item-title">
-                    <strong>{label}</strong>
-                    {isActive && <span className="current-dot" />}
-                  </div>
-                  <small>{workspaceDescriptions[key] || ""}</small>
-                </div>
-              </button>
-            );
-          })}
+          <div className="account-menu-divider" />
+          <button type="button" role="menuitem" onClick={() => navigate("profile")}>Profile</button>
+          {workspaceRoutes.length > 0 && (
+            <button type="button" role="menuitem" onClick={() => navigate(workspaceHome(workspaceRoutes))}>Workspaces</button>
+          )}
+          <div className="account-menu-divider" />
+          <button type="button" role="menuitem" className="account-menu-signout" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
         </div>
       )}
     </div>
   );
 }
 
-function AccountControls() {
+function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
   const { isSignedIn, profile, address, signOut } = useSession();
   const { hasRole } = useAuth();
 
+  const newBrief = canCreate && (
+    <button className="primary small new-brief-button" type="button" onClick={() => go("create")}>
+      <PlusIcon />New brief
+    </button>
+  );
+
   if (isSignedIn) {
     const isDaoAdmin = isAdmin(profile?.role) || hasRole(ROLES.ADMIN);
+    const roleLabel = isDaoAdmin ? "DAO Admin" : isAssignedEvaluator(profile?.role) ? "Evaluator" : "Platform member";
+    const name = profile?.fullName || shortenAddress(address);
     return (
       <div className="account-controls">
+        {newBrief}
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <NotificationCentre userId={address} />
-        <div className="user-session-pill">
-          <div className="user-session-info">
-            <button className="user-name account-profile-link" type="button" onClick={() => go("profile")}>
-              {profile?.fullName || shortenAddress(address)}
-            </button>
-            <div className="role-tags-row">
-              {isDaoAdmin ? (
-                <span className="user-role-badge admin-badge">DAO Admin</span>
-              ) : isAssignedEvaluator(profile?.role) ? (
-                <span className="user-role-badge evaluator-badge" title="Owner · Researcher · Evaluator · Funder">
-                  Evaluator
-                </span>
-              ) : (
-                <span className="user-role-badge member-badge" title="Owner · Researcher · Funder">
-                  Platform Member
-                </span>
-              )}
-            </div>
-          </div>
-          <button className="signout-btn" type="button" onClick={() => signOut()} title="Sign Out">
-            Sign Out
-          </button>
-        </div>
+        <AccountMenu
+          name={name}
+          roleLabel={profile?.organisation ? `${roleLabel} · ${profile.organisation}` : roleLabel}
+          workspaceRoutes={workspaceRoutes}
+          onSignOut={() => signOut()}
+        />
       </div>
     );
   }
 
   return (
     <div className="account-controls">
+      <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       <SignInWithWallet />
     </div>
   );
 }
 
-function Shell({ route, children }) {
-  const { roles } = useAuth();
-  const navRoutes = getPermittedNavRoutes(roles);
+const WORKSPACE_ICONS = {
+  "my-problems": "owner",
+  proposals: "researcher",
+  evaluations: "evaluator",
+  funding: "funder",
+};
 
-  // Group primary navigation vs stakeholder workspaces
-  const workspaceKeys = new Set(["my-problems", "proposals", "evaluations", "funding"]);
-  const primaryRoutes = navRoutes.filter((r) => !workspaceKeys.has(r.key));
-  const workspaceRoutes = navRoutes.filter((r) => workspaceKeys.has(r.key));
-
+function WorkspaceTabs({ route, workspaceRoutes }) {
+  if (workspaceRoutes.length < 2) return null;
   return (
-    <>
-      <ResponsiveHeader route={route} primaryRoutes={primaryRoutes} workspaceRoutes={workspaceRoutes}
-        desktopWorkspaces={<WorkspacesDropdown route={route} workspaceRoutes={workspaceRoutes} />}
-        accountControls={<AccountControls />} onNavigate={go} />
-
-      <main className="content">{children}</main>
-
-      <footer className="footer">
-        <div>
-          <strong>QC DAO</strong> — Multi-role quantum funding platform with verifiable on-chain audit trails.
-        </div>
-        <div className="footer-links">
-          <button type="button" onClick={() => go("architecture")}>On-chain vs off-chain</button>
-          <span>·</span>
-          <span>Arbitrum Sepolia (421614)</span>
-          <span>·</span>
-          <span>Proof of Concept</span>
-        </div>
-      </footer>
-    </>
+    <nav className="workspace-tabs" aria-label="Workspaces">
+      {workspaceRoutes.map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          className={route === key ? "selected" : ""}
+          aria-current={route === key ? "page" : undefined}
+          onClick={() => go(key)}
+        >
+          <span className="ws-icon"><StakeholderIcon type={WORKSPACE_ICONS[key]} /></span>
+          <span>{label}</span>
+        </button>
+      ))}
+    </nav>
   );
 }
+
+function Shell({ route, children }) {
+  const { roles } = useAuth();
+  const { theme, toggleTheme } = useTheme();
+  const navRoutes = getPermittedNavRoutes(roles);
+
+  // Primary navigation stays short: Profile lives in the account menu and
+  // Create is the "New brief" button, so neither repeats as a nav link.
+  const workspaceKeys = new Set(["my-problems", "proposals", "evaluations", "funding"]);
+  const accountKeys = new Set(["profile", "create"]);
+  const primaryRoutes = navRoutes.filter((r) => !workspaceKeys.has(r.key) && !accountKeys.has(r.key));
+  const workspaceRoutes = navRoutes.filter((r) => workspaceKeys.has(r.key));
+  const canCreate = navRoutes.some((r) => r.key === "create");
+
+  useEffect(() => {
+    if (workspaceKeys.has(route)) rememberWorkspace(route);
+  }, [route]);
+  const onHome = route === "home";
+
+  return (
+    <div className={`app-shell${onHome ? " is-home" : ""}`}>
+      {/* The Liquid Glass colour field every pane floats over. */}
+      <div className="ambient-backdrop" aria-hidden="true">
+        <span className="ambient-blob b1" />
+        <span className="ambient-blob b2" />
+        <span className="ambient-blob b3" />
+      </div>
+      <ResponsiveHeader route={route} primaryRoutes={primaryRoutes} workspaceRoutes={workspaceRoutes}
+        desktopWorkspaces={<WorkspacesLink route={route} workspaceRoutes={workspaceRoutes} />}
+        accountControls={<AccountControls theme={theme} onToggleTheme={toggleTheme} canCreate={canCreate} workspaceRoutes={workspaceRoutes} />}
+        onNavigate={go} />
+
+      <main className="content">
+        {workspaceKeys.has(route) && <div className="workspace-tabs-wrap"><WorkspaceTabs route={route} workspaceRoutes={workspaceRoutes} /></div>}
+        {children}
+      </main>
+
+      <footer className="footer">
+        <span className="footer-brand">QC DAO</span>
+        <div className="footer-links">
+          <button type="button" onClick={() => go("architecture")}>On-chain vs off-chain</button>
+          <span>Arbitrum Sepolia (421614)</span>
+          <span>Proof of concept</span>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
 
 function OpportunityIcon({ type }) {
   if (type === "Business problem") {
@@ -320,90 +387,121 @@ function StakeholderIcon({ type }) {
   );
 }
 
-function OpportunityCard({ item }) {
-  const proposalLabel = `${item.proposalCount} ${item.proposalCount === 1 ? "proposal" : "proposals"}`;
-  const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt });
+function proposalLabel(count) {
+  return `${count} ${count === 1 ? "proposal" : "proposals"}`;
+}
 
+function categoryLine(labels) {
+  if (labels.length === 0) return "";
+  return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} +${labels.length - 2}` : labels.join(", ");
+}
+
+function openOpportunity(item) {
+  go(`${item.route ?? "opportunity"}/${item.id}`);
+}
+
+function OpportunityTrust({ item }) {
+  const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt, matching: item.matching });
   return (
-    <div className="opportunity-card">
-      <button
-        className="opportunity-card-hit"
-        type="button"
-        onClick={() => go(`${item.route ?? "opportunity"}/${item.id}`)}
-        aria-label={`View ${item.title}`}
-      />
-      <span className="opportunity-mark">
-        <OpportunityIcon type={item.type} />
-      </span>
-      <div className="opportunity-summary">
+    <span className="trust-status-row">
+      <span className={`status-dot${item.matching?.status === "awaiting_confirmation" ? " is-awaiting" : ""}`}>{statusLabel}</span>
+      <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
+    </span>
+  );
+}
+
+// One row per opportunity. The stretched hit button makes the whole row a link
+// while the verification badge above it stays independently focusable.
+function OpportunityRow({ item }) {
+  const categories = categoryLine(item.categoryLabels);
+  return (
+    <div className="opportunity-row">
+      <button className="opportunity-card-hit" type="button" onClick={() => openOpportunity(item)} aria-label={`View ${item.title}`} />
+      <div className="opportunity-row-main">
         <strong>{item.title}</strong>
-        <span className="opportunity-byline">
-          <small>{item.owner}</small>
-          <span className={`opportunity-type-badge ${item.type === "Open funding" ? "funding" : "problem"}`}>
-            {item.type}
-          </span>
-        </span>
-        <span className="opportunity-categories" aria-label="Technology areas">
-          {item.categoryLabels.slice(0, 3).map((category) => (
-            <small className="opportunity-category" key={category}>{category}</small>
-          ))}
-          {item.categoryLabels.length > 3 && (
-            <small className="opportunity-category">+{item.categoryLabels.length - 3}</small>
-          )}
-        </span>
+        <small>{[item.owner, item.type, categories].filter(Boolean).join(" · ")}</small>
+        <OpportunityTrust item={item} />
       </div>
-      <div className="opportunity-activity">
-        <div className="trust-status-row">
-          <span className="status-dot">{statusLabel}</span>
-          <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
-        </div>
-        <small>{proposalLabel}</small>
+      <div className="opportunity-row-side">
+        <strong>{item.amount}</strong>
+        <small>
+          <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} showInstant={false} />
+          <span aria-hidden="true"> · </span>
+          {proposalLabel(item.proposalCount)}
+        </small>
       </div>
-      <div className="opportunity-funding">
-        <span className="opportunity-amount">{item.amount}</span>
-        <small>{item.type === "Open funding" ? "Funding available" : "Indicative proposal budget"}</small>
-      </div>
-      <div className="opportunity-deadline">
-        <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} />
-      </div>
-      <span className="row-arrow">
-        <ArrowIcon />
-      </span>
+      <span className="row-chevron"><ChevronIcon /></span>
     </div>
   );
 }
 
-function OpportunityList({ items }) {
+function OpportunityTile({ item }) {
+  const categories = categoryLine(item.categoryLabels);
   return (
-    <div className="opportunity-list">
-      <div className="opportunity-list-head">
-        <span>Problem or funding call</span>
-        <span>Status &amp; proposals</span>
-        <span>Funding</span>
-        <span>Time remaining</span>
-        <span />
+    <div className="opportunity-tile">
+      <button className="opportunity-card-hit" type="button" onClick={() => openOpportunity(item)} aria-label={`View ${item.title}`} />
+      <small className="opportunity-tile-type">{item.type}</small>
+      <strong className="opportunity-tile-title">{item.title}</strong>
+      <span className="opportunity-tile-org">{item.owner}</span>
+      <span className="opportunity-tile-spacer" />
+      {categories && <small className="opportunity-tile-tags">{categories}</small>}
+      <OpportunityTrust item={item} />
+      <div className="opportunity-tile-foot">
+        <strong>{item.amount}</strong>
+        <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} showInstant={false} />
       </div>
-      {items.map((item) => <OpportunityCard item={item} key={item.id} />)}
     </div>
   );
+}
+
+function OpportunityTable({ items }) {
+  return (
+    <div className="opportunity-table-scroll">
+      <table className="opportunity-table">
+        <thead>
+          <tr>
+            <th scope="col">Title</th>
+            <th scope="col">Organisation</th>
+            <th scope="col">Status</th>
+            <th scope="col" className="numeric">Funding</th>
+            <th scope="col" className="numeric">Proposals</th>
+            <th scope="col" className="numeric">Closes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td>
+                <button className="opportunity-table-link" type="button" onClick={() => openOpportunity(item)}>{item.title}</button>
+                <small>{item.type}</small>
+              </td>
+              <td>{item.owner}</td>
+              <td><OpportunityTrust item={item} /></td>
+              <td className="numeric">{item.amount}</td>
+              <td className="numeric">{item.proposalCount}</td>
+              <td className="numeric">{item.deadline}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function OpportunityList({ items, view = "rows" }) {
+  if (view === "cards") {
+    return <div className="opportunity-grid">{items.map((item) => <OpportunityTile item={item} key={item.id} />)}</div>;
+  }
+  if (view === "table") return <OpportunityTable items={items} />;
+  return <div className="opportunity-list">{items.map((item) => <OpportunityRow item={item} key={item.id} />)}</div>;
 }
 
 function OpportunityListSkeleton() {
   return (
     <div className="opportunity-list opportunity-list-skeleton" aria-label="Loading opportunities" aria-busy="true">
-      <div className="opportunity-list-head">
-        <span>Problem or funding call</span>
-        <span>Status &amp; proposals</span>
-        <span>Funding</span>
-        <span>Time remaining</span>
-        <span />
-      </div>
       {[0, 1, 2, 3].map((row) => (
         <div className="opportunity-skeleton-row" key={row}>
-          <span className="skeleton-block skeleton-icon" />
           <span className="skeleton-lines"><i /><i /></span>
-          <span className="skeleton-block" />
-          <span className="skeleton-block" />
           <span className="skeleton-block" />
         </div>
       ))}
@@ -411,87 +509,20 @@ function OpportunityListSkeleton() {
   );
 }
 
-function ResearchNetwork() {
-  return (
-    <div className="research-network" aria-label="Stakeholder network">
-      <svg className="network-lines" viewBox="0 0 460 320" aria-hidden="true">
-        <path d="M100 80 L230 160" />
-        <path d="M360 70 L230 160" />
-        <path d="M90 240 L230 160" />
-        <path d="M370 250 L230 160" />
-        <path d="M100 80 L90 240" />
-        <path d="M360 70 L370 250" />
-        <circle cx="100" cy="80" r="4" />
-        <circle cx="360" cy="70" r="4" />
-        <circle cx="90" cy="240" r="4" />
-        <circle cx="370" cy="250" r="4" />
-      </svg>
-      <div className="network-core">QC</div>
-      <div className="network-node owner">
-        <div className="network-icon"><StakeholderIcon type="owner" /></div>
-        <strong>Problem owner</strong>
-        <span>Defines problem</span>
-      </div>
-      <div className="network-node evaluator">
-        <div className="network-icon"><StakeholderIcon type="evaluator" /></div>
-        <strong>Evaluator</strong>
-        <span>Scores proposals</span>
-      </div>
-      <div className="network-node researcher">
-        <div className="network-icon"><StakeholderIcon type="researcher" /></div>
-        <strong>Researcher</strong>
-        <span>Delivers work</span>
-      </div>
-      <div className="network-node funder">
-        <div className="network-icon"><StakeholderIcon type="funder" /></div>
-        <strong>Funder</strong>
-        <span>Backs outcomes</span>
-      </div>
-    </div>
-  );
-}
-
 function Home() {
   const { postings, loading, isAuthenticated } = usePublishedPostings();
-
+  const { roles } = useAuth();
+  const workspaceRoutes = getPermittedNavRoutes(roles)
+    .filter((r) => ["my-problems", "proposals", "evaluations", "funding"].includes(r.key));
   return (
-    <>
-      <section className="hero">
-        <div className="hero-copy">
-          <h1>Fund research<br /><span>with clear outcomes.</span></h1>
-          <p>Publish important problems, compare thoughtful proposals and support work through clear delivery stages.</p>
-          <div className="actions">
-            <button className="primary" type="button" onClick={() => go("discover")}>Explore opportunities</button>
-            <button className="secondary" type="button" onClick={() => go("create")}>Publish a brief</button>
-          </div>
-        </div>
-        <ResearchNetwork />
-      </section>
-
-      <section className="marketplace-section">
-        <div className="section-heading">
-          <div>
-            <h2>Open opportunities</h2>
-            <p>Competitive problems and one-to-one research relationships.</p>
-          </div>
-          <button className="text-button" type="button" onClick={() => go("discover")}>Browse all <ArrowIcon /></button>
-        </div>
-        {!isAuthenticated && <SignedOutNotice />}
-        {isAuthenticated && loading && <p className="lead">Loading opportunities…</p>}
-        {isAuthenticated && !loading && postings.length === 0 && (
-          <p className="lead">No open opportunities yet. Publish the first one.</p>
-        )}
-        {postings.length > 0 && <OpportunityList items={postings.slice(0, 5)} />}
-      </section>
-
-      <section className="how">
-        <div className="steps">
-          <article><b aria-hidden="true">01</b><div><h3>Accountable by design</h3><p>Define outcomes and deliverables before work begins.</p></div></article>
-          <article><b aria-hidden="true">02</b><div><h3>Evidence over hype</h3><p>Compare opportunities on methods, feasibility and impact.</p></div></article>
-          <article><b aria-hidden="true">03</b><div><h3>Fund with confidence</h3><p>Keep a transparent record from publication onward.</p></div></article>
-        </div>
-      </section>
-    </>
+    <HomePage
+      postings={postings}
+      loading={loading}
+      isAuthenticated={isAuthenticated}
+      onNavigate={go}
+      // Signed out there is no workspace yet; the guard on my-problems sends them to sign in.
+      onOpenWorkspaces={() => go(workspaceHome(workspaceRoutes) ?? "my-problems")}
+    />
   );
 }
 
@@ -557,10 +588,34 @@ function syncDiscoverUrl(filters) {
   }
 }
 
+const DISCOVER_VIEWS = [
+  { value: "rows", label: "List", icon: <path d="M3 6h18M3 12h18M3 18h18" /> },
+  { value: "cards", label: "Cards", icon: <><rect width="7" height="7" x="3" y="3" rx="1.5" /><rect width="7" height="7" x="14" y="3" rx="1.5" /><rect width="7" height="7" x="14" y="14" rx="1.5" /><rect width="7" height="7" x="3" y="14" rx="1.5" /></> },
+  { value: "table", label: "Table", icon: <><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18M3 15h18M9 3v18" /></> },
+];
+const DISCOVER_VIEW_KEY = "qcdao-discover-view";
+
+function useDiscoverView() {
+  const [view, setView] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(DISCOVER_VIEW_KEY);
+      return DISCOVER_VIEWS.some(({ value }) => value === stored) ? stored : "rows";
+    } catch {
+      return "rows";
+    }
+  });
+  const choose = (next) => {
+    setView(next);
+    try { window.localStorage.setItem(DISCOVER_VIEW_KEY, next); } catch { /* private mode */ }
+  };
+  return [view, choose];
+}
+
 function Discover({ params }) {
   const { postings, loading, loadError, isAuthenticated, hasMore, loadMore } = usePublishedPostings();
   const paramsKey = params.toString();
   const [filters, setFilters] = useState(() => parseDiscoveryParams(params));
+  const [view, setView] = useDiscoverView();
 
   useEffect(() => {
     setFilters(parseDiscoveryParams(params));
@@ -579,6 +634,9 @@ function Discover({ params }) {
     [postings, filters],
   );
   const activeFilters = hasActiveDiscoveryFilters(filters);
+  const panelFilterCount = ["category", "status", "organisation", "timeRemaining", "minimumFunding", "maximumFunding"]
+    .filter((key) => String(filters[key] ?? "") !== "").length;
+  const [filtersOpen, setFiltersOpen] = useState(panelFilterCount > 0);
 
   const updateFilters = (changes) => {
     setFilters((current) => {
@@ -594,29 +652,21 @@ function Discover({ params }) {
     syncDiscoverUrl(next);
   };
 
+  const typeTabs = [{ value: "", label: "All" }, ...opportunityTypes.filter(({ value }) => value !== "funding-request")];
+
   return (
     <section className="page discover-page">
-      <div className="discover-heading-row">
-        <div className="page-heading">
-          <h1>Explore research opportunities</h1>
-          <p>Browse every open problem statement and funding opportunity in one place.</p>
-        </div>
-        <label className="discover-sort">
-          <span>Sort by</span>
-          <select value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}>
-            {DISCOVERY_SORT_OPTIONS.map((option) => (
-              <option value={option.value} key={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
+      <div className="page-heading">
+        <h1>Discover</h1>
+        <p>Every open problem and funding call, in one place.</p>
       </div>
 
       <div className="discover-search-row">
         <label className="discover-search">
           <span className="sr-only">Search opportunities</span>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <circle cx="8.5" cy="8.5" r="5.5" />
-            <path d="M12.5 12.5L17 17" />
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
           </svg>
           <input
             type="search"
@@ -625,98 +675,139 @@ function Discover({ params }) {
             onChange={(event) => updateFilters({ query: event.target.value })}
           />
         </label>
-        {activeFilters && (
-          <button className="secondary discover-clear" type="button" onClick={clearFilters}>
-            Clear filters
-          </button>
-        )}
-      </div>
-
-      <div className="filters" aria-label="Posting type">
-        {[{ value: "", label: "All opportunities" }, ...opportunityTypes.filter(({ value }) => value !== "funding-request")].map((item) => (
-          <button
-            className={filters.type === item.value ? "selected" : ""}
-            key={item.value || "all"}
-            type="button"
-            aria-pressed={filters.type === item.value}
-            onClick={() => updateFilters({ type: item.value })}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="discover-filter-panel" aria-label="Opportunity filters">
-        <label>
-          <span>Technology area</span>
-          <select value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}>
-            <option value="">All areas</option>
-            {POSTING_CATEGORIES.map((category) => (
-              <option value={category.value} key={category.value}>
-                {category.value === "quantum" ? "Quantum — gate-based, annealing & quantum-inspired" : category.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Status</span>
-          <select value={filters.status} onChange={(event) => updateFilters({ status: event.target.value })}>
-            <option value="">All statuses</option>
-            {statuses.map((status) => (
-              <option value={status} key={status}>{opportunityStatusLabel(status)}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Organisation</span>
-          <select value={filters.organisation} onChange={(event) => updateFilters({ organisation: event.target.value })}>
-            <option value="">All organisations</option>
-            {organisations.map((organisation) => (
-              <option value={organisation} key={organisation}>{organisation}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Time remaining</span>
-          <select value={filters.timeRemaining} onChange={(event) => updateFilters({ timeRemaining: event.target.value })}>
-            <option value="">Any closing date</option>
-            {DISCOVERY_TIME_OPTIONS.map((option) => (
+        <button
+          className={`filter-toggle${filtersOpen ? " is-open" : ""}`}
+          type="button"
+          aria-expanded={filtersOpen}
+          aria-controls="discover-filter-panel"
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" />
+          </svg>
+          Filters{panelFilterCount > 0 ? ` · ${panelFilterCount}` : ""}
+        </button>
+        <label className="discover-sort">
+          <span className="sr-only">Sort by</span>
+          <select value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}>
+            {DISCOVERY_SORT_OPTIONS.map((option) => (
               <option value={option.value} key={option.value}>{option.label}</option>
             ))}
           </select>
         </label>
-        <fieldset className="funding-range">
-          <legend>Funding amount</legend>
+      </div>
+
+      {filtersOpen && (
+        <div id="discover-filter-panel" className="discover-filter-panel" aria-label="Opportunity filters">
           <label>
-            <span className="sr-only">Minimum funding</span>
-            <input
-              min="0"
-              inputMode="decimal"
-              type="number"
-              value={filters.minimumFunding}
-              placeholder="Minimum"
-              onChange={(event) => updateFilters({ minimumFunding: event.target.value })}
-            />
+            <span>Technology area</span>
+            <select value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}>
+              <option value="">All areas</option>
+              {POSTING_CATEGORIES.map((category) => (
+                <option value={category.value} key={category.value}>
+                  {category.value === "quantum" ? "Quantum — gate-based, annealing & quantum-inspired" : category.label}
+                </option>
+              ))}
+            </select>
           </label>
-          <span aria-hidden="true">–</span>
           <label>
-            <span className="sr-only">Maximum funding</span>
-            <input
-              min="0"
-              inputMode="decimal"
-              type="number"
-              value={filters.maximumFunding}
-              placeholder="Maximum"
-              onChange={(event) => updateFilters({ maximumFunding: event.target.value })}
-            />
+            <span>Status</span>
+            <select value={filters.status} onChange={(event) => updateFilters({ status: event.target.value })}>
+              <option value="">All statuses</option>
+              {statuses.map((status) => (
+                <option value={status} key={status}>{opportunityStatusLabel(status)}</option>
+              ))}
+            </select>
           </label>
-        </fieldset>
+          <label>
+            <span>Organisation</span>
+            <select value={filters.organisation} onChange={(event) => updateFilters({ organisation: event.target.value })}>
+              <option value="">All organisations</option>
+              {organisations.map((organisation) => (
+                <option value={organisation} key={organisation}>{organisation}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Closes within</span>
+            <select value={filters.timeRemaining} onChange={(event) => updateFilters({ timeRemaining: event.target.value })}>
+              <option value="">Any closing date</option>
+              {DISCOVERY_TIME_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <fieldset className="funding-range">
+            <legend>Funding</legend>
+            <label>
+              <span className="sr-only">Minimum funding</span>
+              <input
+                min="0"
+                inputMode="decimal"
+                type="number"
+                value={filters.minimumFunding}
+                placeholder="Min"
+                onChange={(event) => updateFilters({ minimumFunding: event.target.value })}
+              />
+            </label>
+            <label>
+              <span className="sr-only">Maximum funding</span>
+              <input
+                min="0"
+                inputMode="decimal"
+                type="number"
+                value={filters.maximumFunding}
+                placeholder="Max"
+                onChange={(event) => updateFilters({ maximumFunding: event.target.value })}
+              />
+            </label>
+          </fieldset>
+          {activeFilters && (
+            <button className="text-button discover-clear" type="button" onClick={clearFilters}>Clear filters</button>
+          )}
+        </div>
+      )}
+
+      <div className="discover-toolbar">
+        <div className="segmented" role="group" aria-label="Posting type">
+          {typeTabs.map((item) => (
+            <button
+              className={filters.type === item.value ? "selected" : ""}
+              key={item.value || "all"}
+              type="button"
+              aria-pressed={filters.type === item.value}
+              onClick={() => updateFilters({ type: item.value })}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="discover-toolbar-end">
+          {!loading && !loadError && postings.length > 0 && (
+            <span className="discover-results-summary" aria-live="polite">
+              {results.totalResults} {results.totalResults === 1 ? "opportunity" : "opportunities"}
+              {results.totalPages > 1 && ` · showing ${results.firstResult}–${results.lastResult}`}
+            </span>
+          )}
+          <div className="segmented segmented-icons" role="group" aria-label="Layout">
+            {DISCOVER_VIEWS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={view === option.value ? "selected" : ""}
+                aria-pressed={view === option.value}
+                aria-label={option.label}
+                title={option.label}
+                onClick={() => setView(option.value)}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">{option.icon}</svg>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {hasMore && <p className="notice">Filters and sorting apply to the opportunities loaded so far. Load more to search further.</p>}
-      {hasMore && <button type="button" className="secondary" disabled={loading} onClick={loadMore}>
-        {loading ? "Loading opportunities…" : "Load more opportunities"}
-      </button>}
       {!isAuthenticated && <SignedOutNotice />}
       {isAuthenticated && loading && <OpportunityListSkeleton />}
       {loadError && (
@@ -733,21 +824,14 @@ function Discover({ params }) {
       )}
       {!loading && !loadError && postings.length > 0 && (
         <>
-          <div className="discover-results-summary" aria-live="polite">
-            <strong>{results.totalResults} {results.totalResults === 1 ? "opportunity" : "opportunities"}</strong>
-            {results.totalResults > 0 && (
-              <span>Showing {results.firstResult}–{results.lastResult}</span>
-            )}
-          </div>
           {results.totalResults === 0 ? (
             <div className="discover-empty discover-no-results" role="status">
-              <span className="empty-icon-wrapper" aria-hidden="true"><OpportunityIcon /></span>
-              <h2>No opportunities match these filters</h2>
-              <p>Try a broader keyword, funding range, category or closing window.</p>
+              <h2>No matches</h2>
+              <p>Try a different search or clear your filters.</p>
               <button className="secondary" type="button" onClick={clearFilters}>Clear all filters</button>
             </div>
           ) : (
-            <OpportunityList items={results.items} />
+            <OpportunityList items={results.items} view={view} />
           )}
           {results.totalPages > 1 && (
             <nav className="discover-pagination" aria-label="Opportunity pages">
@@ -772,9 +856,15 @@ function Discover({ params }) {
           )}
         </>
       )}
+      {hasMore && <div className="discover-load-more">
+        <button type="button" className="secondary" disabled={loading} onClick={loadMore}>
+          {loading ? "Loading opportunities…" : "Load more opportunities"}
+        </button>
+      </div>}
     </section>
   );
 }
+
 
 
 function NotFound() {
@@ -817,7 +907,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <ProfilePage />
+        <ProfilePage onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "submit-proposal" || section === "edit-proposal" || section === "proposal") {

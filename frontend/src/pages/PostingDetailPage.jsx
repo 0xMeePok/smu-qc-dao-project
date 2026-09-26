@@ -1,5 +1,6 @@
 import { proposalBlockReason } from "../lib/proposalValidation.js";
 import { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findPosting, withdrawPosting } from "../lib/postings.js";
@@ -44,6 +45,7 @@ import {
 } from "../config/workflowStatus.js";
 import { postingActions } from "../lib/postingActions.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
+import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { shortenAddress } from "../lib/chain.js";
 import { canEditOpportunity } from "../lib/opportunityEdit.js";
@@ -58,18 +60,7 @@ import { OpportunityRevisionTrail } from "../components/OpportunityRevisionTrail
  * A draft stays private to its owner.
  */
 
-function Detail({ heading, children }) {
-  const text = String(children ?? "").trim();
-  if (!text) return null;
-  return (
-    <div className="detail-section">
-      <h2>{heading}</h2>
-      <p>{text}</p>
-    </div>
-  );
-}
-
-function ActionBar({ posting, user, isAuthenticated, onNavigate }) {
+function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
   const actions = postingActions(posting, user, { isAuthenticated });
   const blocked = proposalBlockReason(posting);
   const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
@@ -86,7 +77,7 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate }) {
               type="button"
               onClick={() => {
                 const target = action.id === "review-proposals" ? "proposal-comparison" : action.id === "fund" ? "proposal-funding" : "";
-                if (target) document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                if (target) onReveal(target);
                 else onNavigate(action.route);
               }}
             >
@@ -130,6 +121,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const { address: connectedAddress, isConnected } = useAccount();
   const [posting, setPosting] = useState(null);
   const [matchingRefresh, setMatchingRefresh] = useState(0);
+  const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
@@ -156,6 +148,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     setReason("");
     setReasonError("");
     setAnchoredWithdrawal(null);
+    setTab("overview");
 
     findPosting(postingId)
       .then((found) => { if (!cancelled) setPosting(found); })
@@ -335,6 +328,24 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     ? `${posting.currency} ${requestedAmount.toLocaleString()}`
     : "—";
 
+  const showCollaboration = posting.status !== "draft" && !isModerated(posting);
+  const tabs = [
+    ["overview", "Overview"],
+    ["proposals", `Proposals${proposalCount ? ` (${proposalCount})` : ""}`],
+    ...(showCollaboration ? [["funding", "Match & funding"]] : []),
+    ["record", "Record"],
+  ];
+  const activeTab = tabs.some(([value]) => value === tab) ? tab : "overview";
+  const panel = (value) => `posting-tab${activeTab === value ? " is-active" : ""}`;
+  // In-page actions ("Review proposals", "Fund a proposal") open their tab first.
+  // flushSync makes that tab visible before the scroll: a hidden section has no
+  // position to scroll to.
+  const reveal = (target) => {
+    flushSync(() => setTab(target === "proposal-funding" ? "funding" : "proposals"));
+    document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const timeLabel = expired || matchClosed ? "Closed" : matchingStatus === "awaiting_confirmation" ? "Creator response window" : "Time remaining";
+
   return (
     <section className="page detail-page">
       <button className="back" type="button" onClick={() => onNavigate(ownsPosting ? "my-problems" : "discover")}>
@@ -352,97 +363,161 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               {isOpenFunding ? "Open funding opportunity" : "Problem statement"}
             </span>
             <div className="trust-status-row">
-              <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
+              <span className={`status-dot${matchingStatus === "awaiting_confirmation" ? " is-awaiting" : expired || matchClosed || posting.status === "cancelled" ? " is-closed" : ""}`}>{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
               <VerifiedBadge audit={posting.audit} recordStatus={posting.status} hidePending />
             </div>
           </div>
           <h1>{posting.title}</h1>
           <ContentModerationNotice record={posting} />
+          {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
 
-          {isOpenFunding ? (
-            <>
-              <Detail heading="Funding thesis and areas of interest">{posting.fundingThesis}</Detail>
-              <Detail heading="Eligibility notes">{posting.eligibilityNotes}</Detail>
-            </>
-          ) : (
-            <>
-              <Detail heading="Problem description">{posting.summary}</Detail>
-              <Detail heading="Business context">{posting.businessContext}</Detail>
-              <Detail heading="Current approach">{posting.currentApproach}</Detail>
-              <Detail heading="Limitations of that approach">{posting.currentLimitations}</Detail>
-              <Detail heading="Expected outcome">{posting.expectedOutcome}</Detail>
-              <Detail heading="Success criteria">{posting.successCriteria}</Detail>
-              <Detail heading="Relevant data availability">{posting.dataAvailability}</Detail>
-            </>
-          )}
+          {/* One job per tab. Every panel stays mounted and only the active one is
+              shown, so a selection made under Proposals still refreshes the match
+              state that the sidebar and Match & funding read. */}
+          <div className="posting-tabs">
+            <div className="segmented" role="tablist" aria-label="Posting sections">
+              {tabs.map(([value, label]) => (
+                <button key={value} type="button" role="tab" id={`posting-tab-${value}`}
+                  aria-selected={activeTab === value} aria-controls={`posting-panel-${value}`}
+                  className={activeTab === value ? "selected" : ""} onClick={() => setTab(value)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-          {posting.status === "cancelled" && posting.withdrawalReason && (
-            <Detail heading="Withdrawal reason">{posting.withdrawalReason}</Detail>
-          )}
+          <div className={panel("overview")} role="tabpanel" id="posting-panel-overview" aria-labelledby="posting-tab-overview">
+            {posting.status === "cancelled" && posting.withdrawalReason && (
+              <DetailGroup title="Withdrawn">
+                <DetailItem heading="Withdrawal reason">{posting.withdrawalReason}</DetailItem>
+              </DetailGroup>
+            )}
+            {isOpenFunding ? (
+              <DetailGroup title="What this funds">
+                <DetailItem heading="Funding thesis and areas of interest">{posting.fundingThesis}</DetailItem>
+                <DetailItem heading="Eligibility notes">{posting.eligibilityNotes}</DetailItem>
+              </DetailGroup>
+            ) : (
+              <>
+                <DetailGroup title="The problem">
+                  <DetailItem heading="Problem description">{posting.summary}</DetailItem>
+                  <DetailItem heading="Business context">{posting.businessContext}</DetailItem>
+                </DetailGroup>
+                <DetailGroup title="Current approach">
+                  <DetailItem heading="Current approach">{posting.currentApproach}</DetailItem>
+                  <DetailItem heading="Limitations of that approach">{posting.currentLimitations}</DetailItem>
+                </DetailGroup>
+                <DetailGroup title="What success looks like">
+                  <DetailItem heading="Expected outcome">{posting.expectedOutcome}</DetailItem>
+                  <DetailItem heading="Success criteria">{posting.successCriteria}</DetailItem>
+                  <DetailItem heading="Relevant data availability">{posting.dataAvailability}</DetailItem>
+                </DetailGroup>
+              </>
+            )}
 
-          {posting.attachments.length > 0 && (
-            <div className="detail-section">
-              <h2>Supporting documents</h2>
-              <ul className="attachment-list">
-                {posting.attachments.map((attachment) => (
-                  <li className="attachment-row" key={attachment.id}>
-                    <span className="attachment-mark" aria-hidden="true">PDF</span>
-                    <span className="attachment-meta">
-                      <strong>{attachment.name}</strong>
-                      <small>{formatBytes(attachment.size)}</small>
-                    </span>
-                    <span className="attachment-actions">
-                      <button type="button" className="text-button" onClick={() => download(attachment)}>
-                        Download
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            {(posting.categories.length > 0 || (isOpenFunding && posting.tags.length > 0) || posting.attachments.length > 0) && (
+              <div className="detail-section detail-group">
+                {posting.categories.length > 0 && (
+                  <div className="detail-item">
+                    <h3>Technology areas</h3>
+                    <div className="tag-list">
+                      {posting.categories.map((value) => (
+                        <span className="tag-chip static" key={value}>{categoryLabel(value)}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {isOpenFunding && posting.tags.length > 0 && (
+                  <div className="detail-item">
+                    <h3>Discovery tags</h3>
+                    <div className="tag-list">
+                      {posting.tags.map((tag) => (
+                        <span className="tag-chip static" key={tag}>{tag}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {posting.attachments.length > 0 && (
+                  <div className="detail-item">
+                    <h3>Supporting documents</h3>
+                    <ul className="attachment-list">
+                      {posting.attachments.map((attachment) => (
+                        <li className="attachment-row" key={attachment.id}>
+                          <span className="attachment-mark" aria-hidden="true">PDF</span>
+                          <span className="attachment-meta">
+                            <strong>{attachment.name}</strong>
+                            <small>{formatBytes(attachment.size)}</small>
+                          </span>
+                          <span className="attachment-actions">
+                            <button type="button" className="text-button" onClick={() => download(attachment)}>
+                              Download
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Comments are occasional, so they sit under the brief (and render
+                nothing when there are none) rather than behind a tab that is
+                usually empty. */}
+            {showCollaboration && <>
+              <ReportableComments problemId={posting.id} />
+              <div className="detail-report"><ReportContentButton contentType="problem" contentId={posting.id} /></div>
+            </>}
+          </div>
+
+          <div className={panel("proposals")} role="tabpanel" id="posting-panel-proposals" aria-labelledby="posting-tab-proposals">
+            <PostingProposals
+              posting={posting}
+              viewerId={user?.id}
+              isPoster={ownsPosting}
+              proposalCount={proposalCount}
+              onNavigate={onNavigate}
+            />
+            {showCollaboration && (
+              <ProposalComparison
+                problemId={posting.id}
+                refreshKey={`${posting.matching?.status || ""}:${posting.matching?.totalFundedMinor || 0}`}
+                onNavigate={onNavigate}
+                onSelected={() => setMatchingRefresh((current) => current + 1)}
+              />
+            )}
+          </div>
+
+          {showCollaboration && (
+            <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
+              <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
+              <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
             </div>
           )}
 
-          <PostingProposals
-            posting={posting}
-            viewerId={user?.id}
-            isPoster={ownsPosting}
-            proposalCount={proposalCount}
-            onNavigate={onNavigate}
-          />
-
-          {posting.status !== "draft" && !isModerated(posting) && <>
-            <ProposalComparison
-              problemId={posting.id}
-              refreshKey={`${posting.matching?.status || ""}:${posting.matching?.totalFundedMinor || 0}`}
-              onNavigate={onNavigate}
-              onSelected={() => setMatchingRefresh((current) => current + 1)}
+          <div className={panel("record")} role="tabpanel" id="posting-panel-record" aria-labelledby="posting-tab-record">
+            <dl className="settings-group posting-record-facts">
+              <div className="settings-row"><dt>Submitted</dt><dd>{formatInstant(posting.createdAt)}</dd></div>
+              <div className="settings-row"><dt>Reference</dt><dd><code>{posting.id}</code></dd></div>
+            </dl>
+            <AuditReceipt
+              audit={audit}
+              eventLabel={isOpenFunding
+                ? "Open funding opportunity submitted"
+                : "Problem statement submitted"}
+              actorRole={isOpenFunding ? "Funder" : "Problem owner"}
+              firebaseReference={`problems/${posting.id}`}
+              recordTimestamp={posting.updatedAt ?? posting.createdAt}
+              onVerify={verifyAudit}
+              onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
             />
-            <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
-            <ReportContentButton contentType="problem" contentId={posting.id} />
-            <ReportableComments problemId={posting.id} />
-          </>}
-
-          <AuditReceipt
-            audit={audit}
-            eventLabel={isOpenFunding
-              ? "Open funding opportunity submitted"
-              : "Problem statement submitted"}
-            actorRole={isOpenFunding ? "Funder" : "Problem owner"}
-            firebaseReference={`problems/${posting.id}`}
-            recordTimestamp={posting.updatedAt ?? posting.createdAt}
-            onVerify={verifyAudit}
-            onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
-          />
-
-          <OpportunityRevisionTrail postingId={posting.id} uid={user?.id} isOwner={ownsPosting} />
-
-          {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
+            <OpportunityRevisionTrail postingId={posting.id} uid={user?.id} isOwner={ownsPosting} />
+          </div>
         </article>
 
         <aside className="context-panel">
           <span className="eyebrow">{isOpenFunding ? "Funding available" : "Indicative proposal budget"}</span>
           <strong>{requestedLabel}</strong>
-          <p className="field-hint">Contributions fund individual proposals. Review each proposal below for its funding target and progress.</p>
           <dl>
             <PosterIdentity
               ownerId={posting.ownerId}
@@ -451,11 +526,16 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               onNavigate={onNavigate}
             />
             <div>
-              <dt>Proposals received</dt>
+              <dt>{timeLabel}</dt>
+              <dd><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} matching={posting.matching} /></dd>
+            </div>
+            {posting.status === "expired" && (
+              <div><dt>Lapse reason</dt><dd>{expiryReasonLabel(posting.expiryReason)}</dd></div>
+            )}
+            <div>
+              <dt>Proposals</dt>
               <dd>{proposalCount} {proposalCount === 1 ? "proposal" : "proposals"}</dd>
             </div>
-            <div><dt>Submitted</dt><dd>{formatInstant(posting.createdAt)}</dd></div>
-            <div><dt>Reference</dt><dd><code>{posting.id}</code></dd></div>
           </dl>
 
           <ActionBar
@@ -463,6 +543,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             user={user}
             isAuthenticated={isAuthenticated}
             onNavigate={onNavigate}
+            onReveal={reveal}
           />
           {/* postingActions only offers Edit on a draft, routed to the create form.
               These two are the published-posting owner actions it has no route for. */}
@@ -475,36 +556,6 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             <button className="secondary" type="button" disabled={withdrawing} onClick={() => setConfirm(true)}>
               Withdraw {entityLabel}
             </button>
-          )}
-
-          <div className="expiry-panel">
-            <span className="eyebrow">{expired || matchClosed ? "Closed" : matchingStatus === "awaiting_confirmation" ? "Creator response window" : "Time remaining"}</span>
-            <ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} matching={posting.matching} />
-            {posting.status === "expired" && (
-              <p className="field-hint"><strong>Lapse reason:</strong> {expiryReasonLabel(posting.expiryReason)}.</p>
-            )}
-          </div>
-
-          {posting.categories.length > 0 && (
-            <>
-              <span className="eyebrow">Technology areas</span>
-              <div className="tag-list">
-                {posting.categories.map((value) => (
-                  <span className="tag-chip static" key={value}>{categoryLabel(value)}</span>
-                ))}
-              </div>
-            </>
-          )}
-
-          {isOpenFunding && posting.tags.length > 0 && (
-            <>
-              <span className="eyebrow">Discovery tags</span>
-              <div className="tag-list">
-                {posting.tags.map((tag) => (
-                  <span className="tag-chip static" key={tag}>{tag}</span>
-                ))}
-              </div>
-            </>
           )}
         </aside>
       </div>

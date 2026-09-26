@@ -50,10 +50,22 @@ async function problemsById(db, ids) {
   return new Map(docs.filter((doc) => doc.exists).map((doc) => [doc.id, doc.data()]));
 }
 
+// Only what a researcher or evaluator needs to read the posting's state: whether
+// a match is pending, confirmed or invalidated and when the creator's response
+// window ends. The selected proposal, funded totals and approvals stay private.
+function matchingView(matching) {
+  const status = matching?.status;
+  if (!["awaiting_confirmation", "confirmed", "invalidated"].includes(status)) return null;
+  return { status, deadlineAt: iso(matching.deadlineAt), confirmedAt: iso(matching.confirmedAt) };
+}
+
 function postingView(id, problem) {
   return problem
-    ? { id, title: problem.title ?? "", status: problem.status ?? "", expiresAt: iso(problem.expiresAt) }
-    : { id, title: "", status: "", expiresAt: null };
+    ? {
+      id, title: problem.title ?? "", status: problem.status ?? "", expiresAt: iso(problem.expiresAt),
+      matching: matchingView(problem.matching),
+    }
+    : { id, title: "", status: "", expiresAt: null, matching: null };
 }
 
 async function activeProfile(db, uid) {
