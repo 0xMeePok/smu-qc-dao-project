@@ -3,7 +3,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase.js";
 import { AuditReceipt } from "./AuditReceipt.jsx";
 import { AuditDetailPane } from "./AuditDetailPane.jsx";
-import { VerifiedBadge } from "./VerifiedBadge.jsx";
+import { LiveVerifiedBadge } from "./LiveVerifiedBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { postingAuditReceipt, readPostingAudit } from "../lib/postingAudit.js";
@@ -84,6 +84,7 @@ export function ProposalAuditQueue() {
   const [paneTab, setPaneTab] = useState("proposal");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [verificationRun, setVerificationRun] = useState(0);
   const request = useRef(0);
 
   const load = async (next = null, status = statusFilter) => {
@@ -96,6 +97,7 @@ export function ProposalAuditQueue() {
       if (generation !== request.current) return;
       setItems((old) => next ? [...old, ...data.items.filter((item) => !old.some((existing) => existing.id === item.id))] : data.items);
       setCursor(data.cursor);
+      setVerificationRun(generation);
     } catch (err) { if (generation === request.current) setError(err.message || "The verification queue could not be loaded. Try refreshing."); }
     finally { if (generation === request.current) setLoading(false); }
   };
@@ -133,7 +135,7 @@ export function ProposalAuditQueue() {
       <div className="page-heading">
         <span className="eyebrow">Proposal audit trail</span>
         <h2>Verification queue</h2>
-        <p>Proposal submissions stay saved while verification catches up. Pending transactions retry automatically up to three times with increasing delays.</p>
+        <p>Proposal submissions stay saved while verification catches up. Badges check the chain; filters use the saved receipt status. Pending transactions retry automatically up to three times with increasing delays.</p>
       </div>
       <div className="table-controls-bar audit-toolbar-sticky">
         <div className="search-filter-group">
@@ -150,12 +152,12 @@ export function ProposalAuditQueue() {
             className="audit-filter-select"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            aria-label="Filter by verification status"
+            aria-label="Filter by saved receipt status"
           >
             <option value="all">All statuses</option>
             <option value="attention">Needs attention</option>
-            <option value="pending">Pending</option>
-            <option value="confirmed">Confirmed</option>
+            <option value="pending">Receipt pending</option>
+            <option value="confirmed">Receipt confirmed</option>
           </select>
         </div>
         <button type="button" className="secondary small" onClick={() => load(null, statusFilter)} disabled={loading || Boolean(busy)}>Refresh queue</button>
@@ -190,7 +192,12 @@ export function ProposalAuditQueue() {
                 <tr className="audit-nav-row" key={item.id}>
                   <td>
                     <div className="audit-status-cell">
-                      <VerifiedBadge audit={item.audit} />
+                      <LiveVerifiedBadge
+                        audit={item.audit}
+                        verificationKey={`${verificationRun}:${item.id}`}
+                        requireTransaction
+                        onVerify={async () => (await httpsCallable(functions, "adminVerifyProposalAudit")({ proposalId: item.id })).data}
+                      />
                       {item.status === "waiting-wallet" ? (
                         <span className="table-row-meta">{LABELS[item.status]}</span>
                       ) : null}
@@ -207,7 +214,7 @@ export function ProposalAuditQueue() {
                       <button type="button" className="secondary small" onClick={() => { setSelected(item); setPaneTab("proposal"); }}>View receipts</button>
                       {item.status !== "confirmed" && (
                         <button type="button" className="secondary small" disabled={Boolean(busy)} onClick={() => retry(item)}>
-                          {busy === item.id ? "Checking…" : item.transactionHash ? "Retry confirmation" : "Reset wallet attempts"}
+                          {busy === item.id ? "Checking…" : item.transactionHash ? "Recheck and save receipt" : "Reset wallet attempts"}
                         </button>
                       )}
                     </div>

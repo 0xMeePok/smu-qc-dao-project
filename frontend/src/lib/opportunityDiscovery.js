@@ -6,7 +6,7 @@ export const DISCOVERY_PAGE_SIZE = 6;
 
 export const DISCOVERY_SORT_OPTIONS = Object.freeze([
   { value: "newest", label: "Newest" },
-  { value: "closing", label: "Closing soonest" },
+  { value: "closing", label: "Earliest deadline" },
   { value: "amount-desc", label: "Funding: high to low" },
   { value: "amount-asc", label: "Funding: low to high" },
 ]);

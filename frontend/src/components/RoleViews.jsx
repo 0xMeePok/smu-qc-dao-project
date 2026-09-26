@@ -106,7 +106,7 @@ export function MyProblems({ onNavigate }) {
           {isDraft && <span className="draft-badge">Draft</span>}
           {item.status === "cancelled" && <span className="draft-badge">Withdrawn</span>}
           {item.status === "expired" && <span className="draft-badge">Expired</span>}
-          <VerifiedBadge audit={item.audit} recordStatus={item.status} />
+          <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
           <button
             className="text-button"
             type="button"
@@ -258,7 +258,7 @@ export function EvaluatorQueue({ onNavigate }) {
 
   useEffect(() => { load(filter); }, [filter, load]);
 
-  // Closing soonest first: the tightest response window needs the recommendation most.
+  // Earliest deadline first: the tightest response window needs the recommendation most.
   const visible = useMemo(() => sortProposalRows(rows, "closing"), [rows]);
 
   return (

@@ -74,6 +74,7 @@
 .audit-state-mismatch { background: #fde2df; color: #8b271f; }
 .audit-state-unavailable { background: #ece9df; color: #4f4b42; }
 .audit-state-checking,
+.audit-state-unanchored,
 .audit-state-pending,
 .audit-state-submitted,
 .audit-state-queued { background: #fff0c9; color: #6f4c00; }

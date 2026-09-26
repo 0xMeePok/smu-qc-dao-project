@@ -19,7 +19,7 @@ function Row({ item, onNavigate, problemMatching }) {
       </div>
       <div className="table-row-actions">
         {isDraft ? <span className="draft-badge">Draft</span> : null}
-        <VerifiedBadge audit={item.audit} recordStatus={item.status} />
+        <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
         <button
           className="text-button"
           type="button"

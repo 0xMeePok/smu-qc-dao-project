@@ -54,6 +54,7 @@ describe("AuditReceipt", () => {
       lastError: "This content is already anchored on Arbitrum Sepolia. Change the posting before signing again." }),
       onVerify: verify, onRetry: retry });
     expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
+    expect(screen.queryByText("Waiting for block confirmation")).toBeNull();
     expect(verify).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: /start verification|resume verification|retry anchoring/i })).toBeNull();
     expect(screen.queryByText(/Change the posting|Wallet retry limit/)).toBeNull();
@@ -196,7 +197,15 @@ it.each([
 it("does not claim a pending transaction is confirmed when no audit is found", async () => {
   renderReceipt({ audit: receipt({ status: "pending" }), onVerify: async () => { throw new Error("InvalidInput"); } });
   expect(await screen.findByText(/transaction may still be waiting for confirmation/)).toBeTruthy();
+  expect(screen.getByText("No on-chain match")).toBeTruthy();
+  expect(screen.queryByText("Waiting for block confirmation")).toBeNull();
   expect(screen.queryByText("Verified on Arbitrum Sepolia")).toBeNull();
+});
+
+it("does not repeat a saved pending label when the live check is unavailable", async () => {
+  renderReceipt({ audit: receipt({ status: "pending" }), onVerify: async () => { throw new Error("RPC offline"); } });
+  expect(await screen.findByText("Audit unavailable")).toBeTruthy();
+  expect(screen.queryByText("Waiting for block confirmation")).toBeNull();
 });
 
 it("explains a clipboard failure and allows resuming a known transaction at the attempt cap", async () => {

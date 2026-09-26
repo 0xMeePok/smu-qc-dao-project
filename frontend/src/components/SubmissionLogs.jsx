@@ -20,7 +20,7 @@ import {
 } from "../lib/fundingOpportunityAudit.js";
 import { AuditReceipt } from "./AuditReceipt.jsx";
 import { AuditDetailPane } from "./AuditDetailPane.jsx";
-import { VerifiedBadge } from "./VerifiedBadge.jsx";
+import { LiveVerifiedBadge } from "./LiveVerifiedBadge.jsx";
 
 const PAGE_SIZE = 25;
 const MAX_FILTER_SCANS = 8;
@@ -153,6 +153,7 @@ function SubmissionLogs({ kind }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
+  const [verificationRun, setVerificationRun] = useState(0);
   const cursorRef = useRef(null);
   const request = useRef(0);
 
@@ -186,6 +187,7 @@ function SubmissionLogs({ kind }) {
         }
         return next;
       });
+      setVerificationRun(generation);
     } catch (err) {
       if (generation === request.current) {
         setError(err.message || variant.error);
@@ -270,7 +272,7 @@ function SubmissionLogs({ kind }) {
               <th scope="col">Status</th>
               <th scope="col">Title</th>
               <th scope="col">Organisation</th>
-              <th scope="col">Audit</th>
+              <th scope="col">On-chain check</th>
               <th scope="col">Submitted</th>
               <th scope="col"><span className="visually-hidden">Actions</span></th>
             </tr>
@@ -284,7 +286,12 @@ function SubmissionLogs({ kind }) {
                   <div className="table-row-meta"><code>problems/{item.id}</code></div>
                 </td>
                 <td>{item.organisation || "—"}</td>
-                <td><VerifiedBadge audit={item.audit} recordStatus={item.status} /></td>
+                <td><LiveVerifiedBadge
+                  audit={item.audit}
+                  recordStatus={item.status}
+                  verificationKey={`${verificationRun}:${item.id}`}
+                  onVerify={() => variant.readAudit(item)}
+                /></td>
                 <td>{formatInstant(item.createdAt)}</td>
                 <td>
                   <button type="button" className="secondary small" onClick={() => setSelected(item)}>
