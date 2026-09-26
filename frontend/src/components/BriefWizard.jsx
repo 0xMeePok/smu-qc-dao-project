@@ -49,7 +49,9 @@ export function useWizard(steps) {
   };
 }
 
-export function WizardSteps({ steps, current, onSelect, errorSteps = new Set() }) {
+// `lockForward` holds the owner on the current step or earlier, e.g. while an
+// attachment is still uploading; going back stays open.
+export function WizardSteps({ steps, current, onSelect, errorSteps = new Set(), lockForward = false }) {
   return (
     <ol className="wizard-steps" aria-label="Brief steps">
       {steps.map((step, index) => {
@@ -62,6 +64,7 @@ export function WizardSteps({ steps, current, onSelect, errorSteps = new Set() }
               type="button"
               className={`wizard-step-pill${active ? " is-active" : ""}${done ? " is-done" : ""}${invalid ? " is-invalid" : ""}`}
               aria-current={active ? "step" : undefined}
+              disabled={lockForward && index > current}
               onClick={() => onSelect(index)}
             >
               <span className="wizard-step-number" aria-hidden="true">{invalid ? "!" : done ? "✓" : index + 1}</span>

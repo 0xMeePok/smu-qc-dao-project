@@ -535,7 +535,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
       />
       )}
 
-      <WizardSteps steps={FUNDING_STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)} />
+      <WizardSteps steps={FUNDING_STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)} lockForward={pendingCount > 0} />
 
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>
@@ -714,7 +714,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             </button>
             <div className="wizard-nav-end">
               {!wizard.isLast && (
-                <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next}>Continue</button>
+                <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pendingCount > 0}>Continue</button>
               )}
               {(wizard.isLast || editing || submitting || saveFailed || pendingCount > 0) && (
                 <button className="primary" type="submit" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0}>
