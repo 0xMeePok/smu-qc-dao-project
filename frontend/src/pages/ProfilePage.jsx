@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Field } from "../components/Field.jsx";
 import { useSession } from "../context/SessionContext.jsx";
 import { roleLabel } from "../lib/roles.js";
@@ -8,8 +8,8 @@ import { validateProfile } from "../lib/validation.js";
 import { ModerationNotifications } from "../components/ModerationNotifications.jsx";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { opportunityStatusLabel } from "../config/workflowStatus.js";
-import { listOwnPostings } from "../lib/postings.js";
-import { listProposals } from "../lib/proposals.js";
+import { POSTING_STATUS_DRAFT, listOwnPostings } from "../lib/postings.js";
+import { PROPOSAL_STATUS_DRAFT, listProposals } from "../lib/proposals.js";
 import { opportunityTypeLabel } from "../lib/opportunityPresentation.js";
 
 function formatDate(value) {
@@ -47,20 +47,36 @@ function statusText(value) {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
 }
 
-// The owner's briefs and proposals, fetched only when their tab is first opened.
+// The owner's briefs and proposals, fetched once each, the first time their tab
+// opens. A request finishes even if the tab changes meanwhile, so coming back never
+// finds a placeholder that nothing will fill; only a new wallet discards results.
 function useProfileList(tab, address) {
   const [lists, setLists] = useState({});
+  const requested = useRef(new Set());
+  const owner = useRef(address);
+
   useEffect(() => {
-    if (!address || tab === "about" || lists[tab]) return undefined;
-    let cancelled = false;
-    setLists((current) => ({ ...current, [tab]: { loading: true, items: [] } }));
+    if (owner.current !== address) {
+      owner.current = address;
+      requested.current = new Set();
+      setLists({});
+    }
+  }, [address]);
+
+  useEffect(() => {
+    if (!address || tab === "about" || requested.current.has(tab)) return;
+    requested.current.add(tab);
+    const forAddress = address;
+    const store = (entry) => {
+      if (owner.current === forAddress) setLists((current) => ({ ...current, [tab]: entry }));
+    };
     const load = tab === "briefs"
       ? listOwnPostings(address).then((page) => page.items.map((posting) => ({
         id: posting.id,
         title: posting.title || "Untitled brief",
         sub: [opportunityTypeLabel(posting), `${Number(posting.proposalCount || 0)} ${Number(posting.proposalCount) === 1 ? "proposal" : "proposals"}`].join(" · "),
         status: opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching }),
-        route: posting.status === "draft"
+        route: posting.status === POSTING_STATUS_DRAFT
           ? (posting.opportunityType === OPEN_FUNDING_TYPE ? `create-funding/${posting.id}` : `create/${posting.id}`)
           : `posting/${posting.id}`,
       })))
@@ -69,13 +85,17 @@ function useProfileList(tab, address) {
         title: proposal.title || "Untitled proposal",
         sub: [proposal.currency && proposal.amount ? `${proposal.currency} ${Number(proposal.amount).toLocaleString()}` : "", formatDate(proposal.createdAt)].filter(Boolean).join(" · "),
         status: statusText(proposal.status),
-        route: `proposal/${proposal.id}`,
+        // Drafts open in the editor, as they do from My Proposals.
+        route: proposal.status === PROPOSAL_STATUS_DRAFT ? `edit-proposal/${proposal.id}` : `proposal/${proposal.id}`,
       })));
     load
-      .then((items) => { if (!cancelled) setLists((current) => ({ ...current, [tab]: { loading: false, items } })); })
-      .catch((error) => { if (!cancelled) setLists((current) => ({ ...current, [tab]: { loading: false, items: [], error: messageForFirebaseError(error) } })); });
-    return () => { cancelled = true; };
+      .then((items) => store({ loading: false, items }))
+      .catch((error) => {
+        requested.current.delete(tab);
+        store({ loading: false, items: [], error: messageForFirebaseError(error) });
+      });
   }, [tab, address]);
+
   return lists[tab] ?? { loading: tab !== "about", items: [] };
 }
 

@@ -27,11 +27,21 @@ export function applyTheme(theme) {
 }
 
 // Light/dark preference. An explicit choice is remembered per browser; until
-// then the page follows the operating system.
+// then the page follows the operating system, including when it changes live.
 export function useTheme() {
   const [theme, setTheme] = useState(initialTheme);
 
   useEffect(() => { applyTheme(theme); }, [theme]);
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!media) return undefined;
+    const follow = (event) => {
+      if (!storedTheme()) setTheme(event.matches ? "dark" : "light");
+    };
+    media.addEventListener?.("change", follow);
+    return () => media.removeEventListener?.("change", follow);
+  }, []);
 
   const toggleTheme = () => setTheme((current) => {
     const next = current === "dark" ? "light" : "dark";

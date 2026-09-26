@@ -3607,7 +3607,12 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 .opportunity-row .expiry-countdown,
 .opportunity-tile .expiry-countdown { display: inline; color: inherit; font-size: inherit; }
 .opportunity-row .expiry-countdown strong,
-.opportunity-tile .expiry-countdown strong { color: inherit; font-size: inherit; font-weight: 400; }
+.opportunity-tile .expiry-countdown strong { font-size: inherit; font-weight: 400; }
+/* Urgent deadlines keep their warning colour; the rest read as quiet metadata. */
+.opportunity-row .expiry-countdown:not(.expiry-approaching, .expiry-critical, .expiry-expired) strong,
+.opportunity-tile .expiry-countdown:not(.expiry-approaching, .expiry-critical, .expiry-expired) strong { color: inherit; }
+.opportunity-row .expiry-approaching strong, .opportunity-tile .expiry-approaching strong,
+.opportunity-row .expiry-critical strong, .opportunity-tile .expiry-critical strong { font-weight: 600; }
 .opportunity-row .expiry-urgency,
 .opportunity-tile .expiry-urgency { display: none; }
 
@@ -3951,6 +3956,14 @@ footer.footer { justify-content: space-between; gap: 16px; min-height: 0; margin
 :root[data-theme="dark"] .network-banner { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
 :root[data-theme="dark"] .network-banner .secondary:hover { background: var(--surface-hover); }
 :root[data-theme="dark"] .attachment-error { background: var(--danger-soft); color: var(--danger); }
+:root[data-theme="dark"] .redirect-notice strong,
+:root[data-theme="dark"] .redirect-notice p,
+:root[data-theme="dark"] .notice-badge,
+:root[data-theme="dark"] .expiry-approaching strong,
+:root[data-theme="dark"] .expiry-approaching .expiry-urgency { color: var(--warning); }
+:root[data-theme="dark"] .redirect-notice code { background: rgba(255, 255, 255, 0.1); }
+:root[data-theme="dark"] .signin-error,
+:root[data-theme="dark"] .notice-error strong { color: var(--danger); }
 
 /* ---- Responsive ---- */
 @media (max-width: 960px) {
