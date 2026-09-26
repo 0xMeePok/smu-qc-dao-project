@@ -585,7 +585,7 @@ test("[BUT-SPER-26] evaluator comments stay off-chain and never write audit or m
 /** QCDAO-62/63 - the tracking list and the evaluator queue, built from these same records. */
 const DAY = 24 * 60 * 60 * 1000;
 
-function queueFixture() {
+function queueFixture(overrides = {}) {
   return memoryDb({
     "users/owner": { role: 0, fullName: "Problem owner" },
     "users/alice": { role: 0, fullName: "Alice" },
@@ -601,8 +601,26 @@ function queueFixture() {
       title: "The evaluator's own solution", status: "submitted", createdAt: now },
     "proposals/unpublished-a": { researcherId: "alice", postingOwnerId: "owner", problemId: "unpublished",
       title: "On an unpublished posting", status: "submitted", createdAt: now },
+    ...overrides,
   });
 }
+
+test("shows the parent posting's pending match to researchers and evaluators without its private details", async () => {
+  const deadlineAt = later(2 * DAY);
+  const db = queueFixture({
+    "problems/later": { ownerId: "owner", title: "Closing later", status: "submitted", expiresAt: later(9 * DAY), createdAt: now,
+      matching: { status: "awaiting_confirmation", deadlineAt, proposalId: "later-a", totalFundedMinor: 50_000, approvals: { a: true } } },
+  });
+  const mine = (await listMyProposals({ db, uid: "alice" })).items;
+  assert.deepEqual(mine.find((item) => item.id === "later-a").posting.matching, {
+    status: "awaiting_confirmation", deadlineAt: deadlineAt.toDate().toISOString(), confirmedAt: null,
+  });
+  // A posting with no match, or one still collecting funding, carries none.
+  assert.equal(mine.find((item) => item.id === "soon-a").posting.matching, null);
+  const queue = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" })).items;
+  const onLater = queue.find((item) => item.posting.id === "later");
+  assert.deepEqual(Object.keys(onLater.posting.matching).sort(), ["confirmedAt", "deadlineAt", "status"]);
+});
 
 test("[QCDAO-62] tracks my proposals with their posting, comment count and recommendation progress", async () => {
   const db = queueFixture();

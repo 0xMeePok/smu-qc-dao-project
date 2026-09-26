@@ -394,10 +394,10 @@ function openOpportunity(item) {
 }
 
 function OpportunityTrust({ item }) {
-  const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt });
+  const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt, matching: item.matching });
   return (
     <span className="trust-status-row">
-      <span className="status-dot">{statusLabel}</span>
+      <span className={`status-dot${item.matching?.status === "awaiting_confirmation" ? " is-awaiting" : ""}`}>{statusLabel}</span>
       <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
     </span>
   );
@@ -418,7 +418,7 @@ function OpportunityRow({ item }) {
       <div className="opportunity-row-side">
         <strong>{item.amount}</strong>
         <small>
-          <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} showInstant={false} />
+          <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} showInstant={false} />
           <span aria-hidden="true"> · </span>
           {proposalLabel(item.proposalCount)}
         </small>
@@ -441,7 +441,7 @@ function OpportunityTile({ item, featured = false }) {
       <OpportunityTrust item={item} />
       <div className="opportunity-tile-foot">
         <strong>{item.amount}</strong>
-        <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} showInstant={false} />
+        <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} showInstant={false} />
       </div>
     </div>
   );
