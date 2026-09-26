@@ -4474,3 +4474,10 @@ footer.footer { background: transparent; }
 .detail-report { display: flex; justify-content: flex-end; }
 .detail-report .text-button { font-size: 14px; color: var(--muted); }
 .detail-report .text-button:hover { color: var(--ink-soft); }
+
+/* Back link: an underline split under the chevron and the text (they are
+   separate flex items), so hover nudges the chevron instead. */
+.back:hover { text-decoration: none; opacity: 0.8; }
+.back::before { display: inline-block; transition: transform 0.15s ease; }
+.back:hover::before { transform: translateX(-3px); }
+@media (prefers-reduced-motion: reduce) { .back:hover::before { transform: none; } }
