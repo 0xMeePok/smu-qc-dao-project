@@ -10,6 +10,7 @@ const STATUS_COPY = {
   checking: "Reading AuditRegistry",
   verified: "Verified on Arbitrum Sepolia",
   mismatch: "On-chain mismatch",
+  unanchored: "No on-chain match",
   unavailable: "Audit unavailable",
 };
 
@@ -194,8 +195,8 @@ export function AuditReceipt({
       ? "verified"
       : verification?.kind === "mismatch"
         ? "mismatch"
-        : ["unavailable", "unanchored"].includes(verification?.kind)
-          ? ["queued", "submitted", "pending", "failed"].includes(audit.status) ? audit.status : "unavailable"
+      : ["unavailable", "unanchored"].includes(verification?.kind)
+          ? verification.kind
           : audit.status;
   const chainAnchor = verification?.result?.anchor?.anchor;
   const chainTimestamp = chainAnchor?.timestamp ?? chainAnchor?.[5];

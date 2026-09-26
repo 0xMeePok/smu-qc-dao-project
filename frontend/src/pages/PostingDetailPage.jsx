@@ -353,7 +353,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             </span>
             <div className="trust-status-row">
               <span className="status-dot">{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
-              <VerifiedBadge audit={posting.audit} recordStatus={posting.status} />
+              <VerifiedBadge audit={posting.audit} recordStatus={posting.status} hidePending />
             </div>
           </div>
           <h1>{posting.title}</h1>

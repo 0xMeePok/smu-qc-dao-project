@@ -355,7 +355,7 @@ function OpportunityCard({ item }) {
       <div className="opportunity-activity">
         <div className="trust-status-row">
           <span className="status-dot">{statusLabel}</span>
-          <VerifiedBadge audit={item.audit} recordStatus={item.status} />
+          <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
         </div>
         <small>{proposalLabel}</small>
       </div>
@@ -663,7 +663,7 @@ function Discover({ params }) {
           <select value={filters.status} onChange={(event) => updateFilters({ status: event.target.value })}>
             <option value="">All statuses</option>
             {statuses.map((status) => (
-              <option value={status} key={status}>{status.replaceAll("_", " ")}</option>
+              <option value={status} key={status}>{opportunityStatusLabel(status)}</option>
             ))}
           </select>
         </label>

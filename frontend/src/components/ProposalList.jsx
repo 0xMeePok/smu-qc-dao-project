@@ -20,7 +20,7 @@ function Row({ item, onNavigate, onDelete }) {
     </div>
     <div className="table-row-actions">
       {isDraft && <span className="draft-badge">Draft</span>}
-      <VerifiedBadge audit={item.audit} recordStatus={item.status} />
+      <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
       <button className="text-button" type="button" onClick={() => onNavigate(isDraft ? `edit-proposal/${item.id}` : `proposal/${item.id}`)}>
         {isDraft ? "Resume editing" : "View proposal"}
       </button>

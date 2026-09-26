@@ -49,9 +49,18 @@ it("groups by parent listing, opens a receipt pane, detects mismatch, and retrie
   expect(screen.getByRole("heading", { name: /Campus cooling/ })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "View receipts" }));
   expect(await screen.findByText(/Mismatch detected/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Retry confirmation" }));
+  fireEvent.click(screen.getByRole("button", { name: "Recheck and save receipt" }));
   expect(await screen.findByText("Verification confirmed and receipt saved.")).toBeTruthy();
   expect(mocks.call).toHaveBeenCalledWith("adminRetryProposalAudit", { proposalId: "proposal1" });
+});
+it("shows a live verified result instead of a stale pending proposal receipt", async () => {
+  mocks.call.mockImplementation(async (name) => ({ data: name === "adminListProposalAudits"
+    ? { items: [{ ...item, status: "pending", audit: { ...item.audit, status: "pending" } }], cursor: null }
+    : name === "adminVerifyProposalAudit" ? { verified: true } : {} }));
+  render(<ProposalAuditQueue />);
+  const row = await screen.findByRole("row", { name: /Quantum routing/ });
+  expect((await screen.findByRole("button", { name: "On-chain verification: verified" })).closest("tr")).toBe(row);
+  expect(row.textContent).not.toContain("Pending");
 });
 // FUT-ARR-131: open parent listing audit receipt in the pane
 it("opens the parent listing audit receipt in the pane", async () => {
@@ -74,7 +83,7 @@ it("requests a status filter from the server", async () => {
   mocks.call.mockResolvedValue({ data: { items: [item], cursor: null } });
   render(<ProposalAuditQueue />);
   await screen.findByText("Quantum routing");
-  fireEvent.change(screen.getByLabelText("Filter by verification status"), { target: { value: "attention" } });
+  fireEvent.change(screen.getByLabelText("Filter by saved receipt status"), { target: { value: "attention" } });
   expect(await screen.findByText("Quantum routing")).toBeTruthy();
   expect(mocks.call).toHaveBeenCalledWith("adminListProposalAudits", { cursor: null, status: "attention" });
 });
@@ -93,7 +102,7 @@ it("preserves the queue and explains a failed admin retry", async () => {
     return { data: { items: [item], cursor: null } };
   });
   render(<ProposalAuditQueue />);
-  fireEvent.click(await screen.findByRole("button", { name: "Retry confirmation" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Recheck and save receipt" }));
   expect((await screen.findByRole("alert")).textContent).toContain("Proposal saved");
   expect(screen.getByText("Quantum routing")).toBeTruthy();
 });

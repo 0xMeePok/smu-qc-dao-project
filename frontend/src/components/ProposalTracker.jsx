@@ -52,7 +52,7 @@ export function ProposalTracker({ onNavigate }) {
         <label className="comment-sort">Status
           <select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="all">All statuses</option>
-            {statuses.map((value) => <option key={value} value={value}>{MATCHING_LABELS[value] || value}</option>)}
+            {statuses.map((value) => <option key={value} value={value}>{MATCHING_LABELS[value] || sentenceCase(value)}</option>)}
           </select>
         </label>
         <label className="comment-sort">Sort by

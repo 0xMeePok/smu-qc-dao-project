@@ -12,7 +12,7 @@ export const QUEUE_FILTERS = [
 ];
 
 export const PROPOSAL_SORTS = [
-  ["closing", "Closing soonest"],
+  ["closing", "Earliest deadline"],
   ["submitted", "Newest submission"],
 ];
 
@@ -44,7 +44,7 @@ const time = (value) => (value ? Date.parse(value) : NaN);
 export function sortProposalRows(rows, sort = "closing") {
   return [...(rows ?? [])].sort((a, b) => {
     if (sort === "submitted") return (time(b.createdAt ?? b.submittedAt) || 0) - (time(a.createdAt ?? a.submittedAt) || 0);
-    // Closing soonest, with postings that carry no deadline last.
+    // Earliest deadline first, with postings that carry no deadline last.
     const left = time(a.posting?.expiresAt), right = time(b.posting?.expiresAt);
     if (Number.isNaN(left) && Number.isNaN(right)) return 0;
     if (Number.isNaN(left)) return 1;

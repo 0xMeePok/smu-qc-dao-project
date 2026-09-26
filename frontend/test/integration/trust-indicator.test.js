@@ -84,7 +84,7 @@ describe("Integration Tests: Trust indicator treatment (QCDAO-80)", () => {
     assert.equal(unpublished.verification, VERIFIED_STATES.NOT_ANCHORED);
   });
 
-  it("[FIT-BAV-039] should surface pending and failed receipts without changing workflow or expiry labels", () => {
+  it("[FIT-BAV-039] should track pending and failed receipts without changing workflow or expiry labels", () => {
     const pending = listTrustView({ ...LIVE, audit: { status: "pending" } });
     assert.equal(pending.workflow, "Submitted");
     assert.equal(pending.verification, VERIFIED_STATES.PENDING);

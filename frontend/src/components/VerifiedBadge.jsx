@@ -53,9 +53,10 @@ const STATE_ICONS = {
 /**
  * Compact verification indicator. Pass a stored audit receipt, or an explicit
  * state when the caller has already mapped it. Hover, focus, or tap reveals
- * what was anchored versus what stays off-chain; Escape dismisses it.
+ * what was anchored versus what stays off-chain; Escape dismisses it. Browsing
+ * views may hide the ambiguous Pending chip while retaining receipt details.
  */
-export function VerifiedBadge({ audit, recordStatus, state, className = "" }) {
+export function VerifiedBadge({ audit, recordStatus, state, className = "", hidePending = false }) {
   const tooltipId = useId();
   const wrapRef = useRef(null);
   const tooltipRef = useRef(null);
@@ -66,6 +67,7 @@ export function VerifiedBadge({ audit, recordStatus, state, className = "" }) {
     : verifiedStateFromAudit(audit, { recordStatus });
   const copy = VERIFIED_BADGE_COPY[resolved];
   const Icon = STATE_ICONS[resolved];
+  const hidden = hidePending && resolved === VERIFIED_STATES.PENDING;
 
   useLayoutEffect(() => {
     if (!open) return undefined;
@@ -106,6 +108,8 @@ export function VerifiedBadge({ audit, recordStatus, state, className = "" }) {
   const keepParentFromActivating = (event) => {
     event.stopPropagation();
   };
+
+  if (hidden) return null;
 
   return (
     <span
