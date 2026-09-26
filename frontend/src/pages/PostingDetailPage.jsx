@@ -332,7 +332,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const tabs = [
     ["overview", "Overview"],
     ["proposals", `Proposals${proposalCount ? ` (${proposalCount})` : ""}`],
-    ...(showCollaboration ? [["funding", "Match & funding"], ["discussion", "Discussion"]] : []),
+    ...(showCollaboration ? [["funding", "Match & funding"]] : []),
     ["record", "Record"],
   ];
   const activeTab = tabs.some(([value]) => value === tab) ? tab : "overview";
@@ -363,7 +363,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               {isOpenFunding ? "Open funding opportunity" : "Problem statement"}
             </span>
             <div className="trust-status-row">
-              <span className={`status-dot${matchingStatus === "awaiting_confirmation" ? " is-awaiting" : ""}`}>{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
+              <span className={`status-dot${matchingStatus === "awaiting_confirmation" ? " is-awaiting" : expired || matchClosed || posting.status === "cancelled" ? " is-closed" : ""}`}>{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
               <VerifiedBadge audit={posting.audit} recordStatus={posting.status} hidePending />
             </div>
           </div>
@@ -460,6 +460,14 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
                 )}
               </div>
             )}
+
+            {/* Comments are occasional, so they sit under the brief (and render
+                nothing when there are none) rather than behind a tab that is
+                usually empty. */}
+            {showCollaboration && <>
+              <ReportableComments problemId={posting.id} />
+              <div className="detail-report"><ReportContentButton contentType="problem" contentId={posting.id} /></div>
+            </>}
           </div>
 
           <div className={panel("proposals")} role="tabpanel" id="posting-panel-proposals" aria-labelledby="posting-tab-proposals">
@@ -480,16 +488,12 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
             )}
           </div>
 
-          {showCollaboration && <>
+          {showCollaboration && (
             <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
               <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
               <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
             </div>
-            <div className={panel("discussion")} role="tabpanel" id="posting-panel-discussion" aria-labelledby="posting-tab-discussion">
-              <ReportableComments problemId={posting.id} />
-              <ReportContentButton contentType="problem" contentId={posting.id} />
-            </div>
-          </>}
+          )}
 
           <div className={panel("record")} role="tabpanel" id="posting-panel-record" aria-labelledby="posting-tab-record">
             <dl className="settings-group posting-record-facts">

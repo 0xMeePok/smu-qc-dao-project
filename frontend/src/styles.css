@@ -3552,9 +3552,13 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 .success-banner strong, .success-banner p { color: var(--success); }
 
 /* ---- Status & trust indicators ---- */
-.status-dot { gap: 6px; padding: 0; border: 0; background: transparent; color: var(--ink-soft); font-size: 13px; font-weight: 500; }
-.status-dot::before { width: 7px; height: 7px; background: var(--success-dot); }
+/* Workflow status: a quiet pill whose dot carries the state (green live,
+   amber waiting, grey closed). The base rule had been lost, which left the
+   label as bare text with no dot. */
+.status-dot { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border: 0; border-radius: var(--radius-pill); background: var(--surface-muted); color: var(--ink-soft); font-size: 13px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.status-dot::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--success-dot); }
 .status-dot.is-awaiting::before { background: var(--warning-dot); }
+.status-dot.is-closed::before { background: var(--subtle); }
 .verified-badge { border-radius: var(--radius-pill); padding: 2px 9px 2px 7px; font-weight: 500; }
 .opportunity-card-hit {
   position: absolute;
@@ -3862,7 +3866,6 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 .workspace-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .workspace-tabs button { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border: 0; border-radius: 16px; background: var(--surface); color: var(--ink); font-size: 16px; font-weight: 600; text-align: left; }
 .workspace-tabs button:hover { background: var(--surface-hover); }
-.workspace-tabs button.selected { background: var(--ink); color: var(--surface-solid); }
 .workspace-tabs svg { width: 18px; height: 18px; }
 .workspace-tabs-wrap + .page { padding-top: 28px; }
 
@@ -4064,7 +4067,13 @@ body { background: var(--page-bg); }
 }
 :is(.detail-main, .posting-tab) > .proposal-comparison { border: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .opportunity-tile:hover { box-shadow: var(--glass-shadow), 0 10px 30px var(--line); }
-.workspace-tabs button.selected { border-color: transparent; background: var(--ink); box-shadow: none; }
+/* Selected workspace: brand tint rather than a black slab, so the label and
+   icon keep their contrast in both themes. Icons are stroke drawings; without
+   fill: none they render as solid blobs. */
+.workspace-tabs button.selected { border-color: var(--brand-line); background: var(--brand-soft); color: var(--ink); box-shadow: var(--glass-shadow); }
+.workspace-tabs .ws-icon { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: var(--brand-soft); color: var(--brand); }
+.workspace-tabs .ws-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.workspace-tabs button.selected .ws-icon { background: var(--brand); color: #fff; }
 .table-header { background: transparent; }
 .comparison-card.is-checked { box-shadow: var(--glass-shadow), 0 0 0 2px var(--brand); }
 
@@ -4447,3 +4456,21 @@ footer.footer { background: transparent; }
 @media (max-width: 680px) {
   .posting-tabs .segmented > button { padding: 6px 12px; font-size: 13px; }
 }
+
+/* Detail pages: the status sits beside its eyebrow, not stranded at the far edge. */
+.detail-main > .card-top { justify-content: flex-start; flex-wrap: wrap; gap: 10px 14px; }
+/* A row's meta line holding a funding pill: lay the parts out inline. */
+.table-row-meta:has(.funding-pill) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-size: 13px; }
+.funding-note { color: var(--muted); }
+
+/* Sidebar countdown: "Open" beside the clock repeats the status pill, so the
+   tag appears only when it warns (approaching, imminent, awaiting). The tag
+   itself matches the status pill instead of an outlined chip. */
+.context-panel .expiry-normal .expiry-urgency { display: none; }
+.context-panel .expiry-urgency { justify-self: end; padding: 2px 9px; border: 0; background: var(--surface-muted); color: var(--ink-soft); font-size: 12px; font-weight: 600; }
+.context-panel .expiry-approaching .expiry-urgency { background: var(--warning-soft); color: var(--warning); }
+.context-panel .expiry-critical .expiry-urgency { background: var(--danger-soft); color: var(--danger); }
+/* The report link closes the Overview quietly, not as a lone heading-sized link. */
+.detail-report { display: flex; justify-content: flex-end; }
+.detail-report .text-button { font-size: 14px; color: var(--muted); }
+.detail-report .text-button:hover { color: var(--ink-soft); }

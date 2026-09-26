@@ -146,10 +146,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const backLabel = owns ? "Back to my proposals" : sponsors ? "Back to my problems" : "Back to opportunity";
   const showCollaboration = proposal.status !== "draft" && !isModerated(proposal);
   const reviewers = owns || sponsors;
+  const canReview = sponsors && !owns;
   const tabs = [
     ["overview", "Overview"],
     ...(showCollaboration ? [["funding", "Match & funding"]] : []),
-    ...(showCollaboration || reviewers ? [["discussion", reviewers ? "Feedback" : "Discussion"]] : []),
+    // Only the sponsor always has something here (the review form); everyone
+    // else sees feedback and comments under the proposal, when there are any.
+    ...(canReview ? [["feedback", "Feedback"]] : []),
     ["record", "Record"],
   ];
   const activeTab = tabs.some(([value]) => value === tab) ? tab : "overview";
@@ -212,6 +215,14 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
           <DetailItem heading="Team and relevant experience">{proposal.team}</DetailItem>
         </DetailGroup>
         {proposal.attachments?.length > 0 && <section className="detail-section detail-group"><h2>Supporting attachments</h2>{proposal.attachments.map((item) => <p key={item.id}><button className="text-button" onClick={() => download(item)}>Download {item.name}</button></p>)}</section>}
+        {/* The sponsor's feedback (for the author) and comments render nothing
+            when there are none, so they follow the proposal instead of an
+            usually empty tab. */}
+        {owns && <OwnerReviewPanel proposalId={proposal.id} revisionPathOpen={proposal.status === "submitted" && !locked} />}
+        {showCollaboration && <>
+          <ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId} />
+          <div className="detail-report"><ReportContentButton contentType="proposal" contentId={proposal.id} /></div>
+        </>}
       </div>
 
       {showCollaboration && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
@@ -221,9 +232,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         }} />
       </div>}
 
-      {(showCollaboration || reviewers) && <div className={panel("discussion")} role="tabpanel" id="proposal-panel-discussion" aria-labelledby="proposal-tab-discussion">
-        {reviewers && <OwnerReviewPanel proposalId={proposal.id} canRecord={sponsors && !owns} revisionPathOpen={proposal.status === "submitted" && !locked} />}
-        {showCollaboration && <><ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId} /><ReportContentButton contentType="proposal" contentId={proposal.id} /></>}
+      {canReview && <div className={panel("feedback")} role="tabpanel" id="proposal-panel-feedback" aria-labelledby="proposal-tab-feedback">
+        <OwnerReviewPanel proposalId={proposal.id} canRecord revisionPathOpen={proposal.status === "submitted" && !locked} />
       </div>}
 
       <div className={panel("record")} role="tabpanel" id="proposal-panel-record" aria-labelledby="proposal-tab-record">

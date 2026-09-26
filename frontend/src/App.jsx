@@ -268,7 +268,7 @@ function WorkspaceTabs({ route, workspaceRoutes }) {
           aria-current={route === key ? "page" : undefined}
           onClick={() => go(key)}
         >
-          <StakeholderIcon type={WORKSPACE_ICONS[key]} />
+          <span className="ws-icon"><StakeholderIcon type={WORKSPACE_ICONS[key]} /></span>
           <span>{label}</span>
         </button>
       ))}

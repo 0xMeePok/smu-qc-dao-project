@@ -207,6 +207,7 @@ describe("proposal funding on a problem detail page", () => {
     expect(problem.textContent).toContain("Routing degrades under demand spikes.");
     expect(problem.textContent).toContain("Perishable deliveries.");
     expect(screen.getByRole("tab", { name: "Proposals (2)" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Discussion" })).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "Record" }));
     expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");

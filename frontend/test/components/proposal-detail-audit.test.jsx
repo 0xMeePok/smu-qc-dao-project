@@ -116,7 +116,7 @@ it("groups the proposal into tabs instead of one long page", async () => {
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} justSubmitted />);
   const overview = await screen.findByRole("tab", { name: "Overview" });
   expect(overview.getAttribute("aria-selected")).toBe("true");
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Feedback", "Record"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Record"]);
   const approach = screen.getByRole("heading", { name: "The approach" }).closest("section");
   expect(approach.textContent).toContain("Hybrid annealing");
   expect(approach.textContent).toContain("Fits the constraints");
@@ -127,4 +127,10 @@ it("groups the proposal into tabs instead of one long page", async () => {
   expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");
   expect(document.getElementById("proposal-panel-record").className).toContain("is-active");
   expect(document.getElementById("proposal-panel-overview").className).not.toContain("is-active");
+});
+it("gives only the sponsor a Feedback tab, where the review form always is", async () => {
+  mocks.find.mockResolvedValue({ ...record, researcherId: `0x${"b".repeat(40)}`, postingOwnerId: account });
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+  await screen.findByRole("tab", { name: "Overview" });
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Feedback", "Record"]);
 });
