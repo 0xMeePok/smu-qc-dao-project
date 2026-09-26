@@ -5,7 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App.jsx";
 import { SessionProvider } from "./context/SessionContext.jsx";
 import { wagmiConfig } from "./lib/wagmi.js";
+import { applyTheme, initialTheme } from "./lib/theme.js";
 import "./styles.css";
+
+applyTheme(initialTheme());
 
 const queryClient = new QueryClient();
 

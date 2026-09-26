@@ -21,6 +21,23 @@ function developerLabel(row) {
   return row.developerName || "Unnamed developer";
 }
 
+// Dot colours for the two status columns. Advisory only: they echo the labels
+// beside them and never stand alone.
+function recommendationTone(row) {
+  const counts = row.recommendations ?? {};
+  if (!row.qualifyingCount) return "neutral";
+  if ((counts.do_not_recommend || 0) > (counts.recommend || 0) + (counts.recommend_with_revisions || 0)) return "danger";
+  return "brand";
+}
+
+function fundingTone(label) {
+  if (/fully funded|awaiting|confirmed|matched/i.test(label)) return "success";
+  if (/open for funding|paused/i.test(label)) return "warning";
+  return "neutral";
+}
+
+const FILTERS = [["", "All"], ...RECOMMENDATIONS];
+
 export function ProposalComparison({ problemId, refreshKey = "", onSelected, onNavigate }) {
   const { user } = useAuth();
   const [state, setState] = useState(null);
@@ -29,6 +46,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
   const [outcome, setOutcome] = useState("");
   const [sort, setSort] = useState("title:asc");
   const [openId, setOpenId] = useState("");
+  const [selectedId, setSelectedId] = useState("");
   const [pending, setPending] = useState(null);
   const [rationale, setRationale] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,6 +70,10 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
   if (!user?.id || !problemId) return null;
   const rows = sortComparisonRows(filterComparisonRows(state?.rows, outcome), sort, state?.problemMatching);
   const showDecision = state?.viewerIsOwner === true;
+  // Only a row the server still marks selectable can stay chosen after a reload.
+  const selected = showDecision ? state?.rows?.find((row) => row.id === selectedId && row.canSelect) ?? null : null;
+  const selectableCount = (state?.rows ?? []).filter((row) => row.canSelect).length;
+
   const select = async (event) => {
     event.preventDefault();
     if (!pending || busy) return;
@@ -66,6 +88,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
       const next = await getProposalComparison(problemId);
       setState(next);
       setPending(null);
+      setSelectedId("");
       setRationale("");
       onSelected?.();
     } catch (err) {
@@ -77,42 +100,60 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
 
   return <section id="proposal-comparison" className="detail-section proposal-comparison" aria-label="Proposal comparison">
     <h2>Compare proposals</h2>
-    <p className="field-hint">Evaluator recommendations are optional and advisory. The problem owner can select any eligible, fully funded proposal without one.</p>
+    <p className="field-hint">Each problem is matched with a single proposal. Evaluator recommendations are optional and advisory. The problem owner can select any eligible, fully funded proposal without one.</p>
+
     <div className="comparison-controls">
-      <label>Filter by evaluator recommendation
-        <select value={outcome} onChange={(event) => setOutcome(event.target.value)}>
-          <option value="">Any outcome</option>
-          {RECOMMENDATIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select>
-      </label>
-      <label>Sort
-        <select value={sort} onChange={(event) => setSort(event.target.value)}>
-          {COMPARISON_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select>
-      </label>
+      <div className="segmented" role="group" aria-label="Filter by evaluator recommendation">
+        {FILTERS.map(([value, label]) => (
+          <button key={value || "any"} type="button" className={outcome === value ? "selected" : ""}
+            aria-pressed={outcome === value} onClick={() => setOutcome(value)}>{label}</button>
+        ))}
+      </div>
+      <div className="comparison-controls-end">
+        {state && <span className="comparison-count">
+          {rows.length} {rows.length === 1 ? "proposal" : "proposals"}{showDecision ? ` · ${selectableCount} selectable` : ""}
+        </span>}
+        <label className="comparison-sort">
+          <span className="sr-only">Sort</span>
+          <select value={sort} onChange={(event) => setSort(event.target.value)}>
+            {COMPARISON_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+      </div>
     </div>
+
     {error && !pending && <p className="error-banner" role="alert">{error}</p>}
     {loading && !state ? <p role="status">Loading comparison…</p> : null}
-    {state && rows.length === 0 && <p className="table-empty">{state.rows?.length ? "No proposals match this recommendation." : "No submitted proposals to compare yet."}</p>}
-    {state && rows.length > 0 && <div className="comparison-scroll"><table className="comparison-table">
-      <thead><tr>
-        <th>Proposal</th><th>Developer and organisation</th><th>Quantum category</th><th>Requested funding</th>
-        <th>Evaluator recommendation</th><th>Qualifying comments</th><th>Comments</th><th>Status</th>{showDecision && <th>Decision</th>}
-      </tr></thead>
-      <tbody>
-        {rows.map((row) => <ComparisonRow key={row.id} row={row} problemMatching={state.problemMatching} showDecision={showDecision} open={openId === row.id}
-          onToggle={() => setOpenId((current) => current === row.id ? "" : row.id)}
-          onOpen={() => onNavigate?.(`proposal/${row.id}`)}
-          onSelect={() => { setError(""); setRationale(""); setPending(row); }} />)}
-      </tbody>
-    </table></div>}
+    {state && rows.length === 0 && <p className="comparison-empty">{state.rows?.length ? "No proposals match this recommendation." : "No submitted proposals to compare yet."}</p>}
+    {state && rows.length > 0 && <div className="comparison-list" role={showDecision ? "radiogroup" : undefined} aria-label={showDecision ? "Choose the proposal to match" : undefined}>
+      {rows.map((row) => <ComparisonRow key={row.id} row={row} problemMatching={state.problemMatching} showDecision={showDecision}
+        open={openId === row.id} checked={selected?.id === row.id}
+        onToggle={() => setOpenId((current) => current === row.id ? "" : row.id)}
+        onOpen={() => onNavigate?.(`proposal/${row.id}`)}
+        onChoose={() => setSelectedId((current) => current === row.id ? "" : row.id)} />)}
+    </div>}
     {state?.truncated && <p className="field-hint">Showing the first 200 proposals.</p>}
+
+    {selected && !pending && <div className="selection-bar-wrap">
+      <div className="selection-bar" role="region" aria-label="Selected proposal">
+        <span className="selection-bar-text">
+          <span className="muted">Selected </span><strong>{selected.title}</strong>
+          <span className="muted"> · {money(selected.currency, selected.amount)}</span>
+        </span>
+        <button type="button" className="text-button" onClick={() => setSelectedId("")}>Clear</button>
+        <button type="button" className="primary" onClick={() => { setError(""); setRationale(""); setPending(selected); }}>Confirm match</button>
+      </div>
+    </div>}
+
     {pending && <Modal labelledBy="comparison-select-title" onDismiss={() => { if (!busy) setPending(null); }}>
       <form onSubmit={select}>
         <div className="modal-head"><h2 id="comparison-select-title">Select this proposal?</h2></div>
         <div className="modal-body">
-          <strong>{pending.title}</strong>
-          <p>Selecting records your acceptance as the problem owner and your rationale in the audit record. Recommendations are optional and advisory: this does not mark the proposal as the highest scored or the preferred submission.</p>
+          <div className="selection-summary">
+            <span>{pending.title}</span>
+            <strong>{money(pending.currency, pending.amount)}</strong>
+          </div>
+          <p>Selecting records your acceptance as the problem owner and your rationale in the audit record. Funding for the other proposals pauses while the researcher confirms. Recommendations are optional and advisory: this does not mark the proposal as the highest scored or the preferred submission.</p>
           <label htmlFor="comparison-rationale">Selection rationale</label>
           <textarea id="comparison-rationale" value={rationale} minLength={10} maxLength={2000} required rows={4} disabled={busy} onChange={(event) => setRationale(event.target.value)} />
           <p className="field-hint">Required. 10–2000 characters, recorded with your selection.</p>
@@ -127,36 +168,35 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
   </section>;
 }
 
-function ComparisonRow({ row, problemMatching, showDecision, open, onToggle, onOpen, onSelect }) {
-  return <>
-    <tr>
-      <td>
-        <div className="comparison-proposal-name">
-          <button type="button" className="text-button comparison-expand" aria-expanded={open} aria-label={open ? `Hide details for ${row.title}` : `Show details for ${row.title}`} onClick={onToggle}>
-            <svg className={`dropdown-chevron${open ? " open" : ""}`} viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-              <polyline points="6 9 10 13 14 9" />
-            </svg>
-          </button>
-          <div>
+function ComparisonRow({ row, problemMatching, showDecision, open, checked, onToggle, onOpen, onChoose }) {
+  const status = proposalFundingLabel(row, problemMatching);
+  const eligible = Boolean(row.canSelect);
+  const decision = showDecision && !eligible ? row.selectionHint : "";
+  return <article className={`comparison-card${checked ? " is-checked" : ""}${showDecision && !eligible ? " is-ineligible" : ""}`}>
+    {showDecision && <button type="button" role="radio" className="comparison-radio" aria-checked={checked} disabled={!eligible}
+      aria-label={`Select ${row.title}`} title={eligible ? undefined : row.selectionHint || "Not selectable"} onClick={onChoose} />}
+    <div className="comparison-card-body">
+      <div className="comparison-card-head">
+        <button type="button" className="comparison-expand" aria-expanded={open}
+          aria-label={open ? `Hide details for ${row.title}` : `Show details for ${row.title}`} onClick={onToggle}>
+          <span className="comparison-title">
             <strong>{row.title}</strong>
-            <button type="button" className="text-button" onClick={onOpen}>Go to proposal</button>
-          </div>
-        </div>
-      </td>
-      <td>{developerLabel(row)}<small className="table-row-meta">{row.organisation || "Organisation unavailable"}</small></td>
-      <td>{categoryLabel(row.category)}</td>
-      <td>{money(row.currency, row.amount)}</td>
-      <td>{recommendationSummary(row)}</td>
-      <td>{row.qualifyingCount || 0}</td>
-      <td>{row.commentCount || 0}</td>
-      <td>{proposalFundingLabel(row, problemMatching)}</td>
-      {showDecision && <td>
-        {row.canSelect && <button type="button" className="primary" onClick={onSelect}>Select {row.title}</button>}
-        {row.selectionHint && <p className="field-hint">{row.selectionHint}</p>}
-      </td>}
-    </tr>
-    {open && <tr className="comparison-detail"><td colSpan={showDecision ? 9 : 8}><ExpandedProposal proposalId={row.id} /></td></tr>}
-  </>;
+            <svg className={`comparison-chevron${open ? " open" : ""}`} viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+          </span>
+          <span className="comparison-sub">{developerLabel(row)} · {row.organisation || "Organisation unavailable"} · {categoryLabel(row.category)}</span>
+        </button>
+        {decision && <span className="comparison-decision">{decision}</span>}
+      </div>
+      <dl className="comparison-metrics">
+        <div><dt>Requested</dt><dd className="numeric">{money(row.currency, row.amount)}</dd></div>
+        <div><dt>Evaluators</dt><dd><span className={`dot dot-${recommendationTone(row)}`} aria-hidden="true" />{recommendationSummary(row)}</dd></div>
+        <div><dt>Comments</dt><dd>{row.commentCount ? `${row.qualifyingCount || 0} qualifying · ${row.commentCount} total` : "None yet"}</dd></div>
+        <div><dt>Funding status</dt><dd><span className={`dot dot-${fundingTone(status)}`} aria-hidden="true" />{status}</dd></div>
+      </dl>
+      <button type="button" className="text-button comparison-open" onClick={onOpen}>Go to proposal</button>
+      {open && <div className="comparison-detail"><ExpandedProposal proposalId={row.id} /></div>}
+    </div>
+  </article>;
 }
 
 function ExpandedProposal({ proposalId }) {

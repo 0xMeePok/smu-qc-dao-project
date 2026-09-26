@@ -40,6 +40,15 @@ import {
 import { canEditOpportunity, isExpiredOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
+import { BriefPreview, ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
+
+// The four wizard steps and the validated fields each one holds.
+const PROBLEM_STEPS = [
+  { label: "The problem", fields: ["title", "businessContext", "summary", "currentApproach", "currentLimitations"] },
+  { label: "Outcomes", fields: ["expectedOutcome", "successCriteria", "dataAvailability", "categories"] },
+  { label: "Funding & timeline", fields: ["amount", "currency", "expiryDays", "expiryExtensionDays"] },
+  { label: "Review", fields: [] },
+];
 
 /**
  * QCDAO-48 - post a funded business problem statement.
@@ -200,6 +209,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
   const savedAttachmentIds = useRef(new Set());
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const formTop = useRef(null);
+  const wizard = useWizard(PROBLEM_STEPS);
   const pendingCountRef = useRef(0);
   const pendingRecordRef = useRef(null);
 
@@ -344,7 +354,11 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
 
     // Pending uploads are not in `attachments`. Submitting now would publish
     // without them and unmount the uploader, which cancels the transfers.
-    if (pendingCountRef.current > 0) return;
+    // The Review step shows the waiting submit button until they settle.
+    if (pendingCountRef.current > 0) {
+      wizard.goTo(PROBLEM_STEPS.length - 1);
+      return;
+    }
 
     // Imported lazily so the validator and the rules stay the single source of
     // truth for the shape, rather than this component re-deriving it.
@@ -352,6 +366,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
     const found = validatePosting(form);
     if (Object.keys(found).length > 0) {
       setErrors(found);
+      const invalidStep = wizard.stepWithError(found);
+      if (invalidStep !== null) wizard.goTo(invalidStep);
       // Guarded: scrollIntoView is absent in jsdom and in some embedded webviews,
       // and an exception here would swallow the field errors that were the whole
       // point of this branch.
@@ -371,6 +387,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
       return;
     }
 
+    // Progress, the receipt and any retry are shown on the Review step.
+    wizard.goTo(PROBLEM_STEPS.length - 1);
     setSubmitting(true);
     let latestAudit = auditProgress;
     let savingRecord = false;
@@ -505,6 +523,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
     setErrors({});
     setSubmitError(null);
     setPublished(null);
+    wizard.goTo(0);
     setAuditProgress(null);
     setConfirmedAudit(null);
     setSaveFailed(false);
@@ -613,6 +632,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
       />
       )}
 
+      <WizardSteps steps={PROBLEM_STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)} />
+
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>
           {/* Inert until the draft has loaded. Typing into the empty template was
@@ -623,6 +644,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             disabled={loadingDraft}
             style={{ border: 0, margin: 0, padding: 0, minInlineSize: "auto" }}
           >
+          <div className="wizard-card">
+          <WizardPanel index={0} current={wizard.current}>
           <Section step="1" legend="The problem" hint="What is going wrong, and in what business context." disabled={materialLocked}>
             <TextField
               id="title" label="Title" value={form.title} onChange={update} error={errors.title}
@@ -651,8 +674,10 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               value={form.currentLimitations} onChange={update} error={errors.currentLimitations}
             />
           </Section>
+          </WizardPanel>
 
-          <Section step="3" legend="What success looks like" disabled={materialLocked}>
+          <WizardPanel index={1} current={wizard.current}>
+          <Section step="3" legend="What success looks like" hint="How you will judge whether the work succeeded." disabled={materialLocked}>
             <TextField
               id="expectedOutcome" label="Expected outcome" rows={3}
               value={form.expectedOutcome} onChange={update} error={errors.expectedOutcome}
@@ -702,8 +727,10 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               <p className="field-error" role="alert">{errors.categories}</p>
             )}
           </Section>
+          </WizardPanel>
 
-          <Section step="5" legend="Funding and timing" disabled={materialLocked}>
+          <WizardPanel index={2} current={wizard.current}>
+          <Section step="5" legend="Funding and timing" hint="Budget, deadline and supporting documents." disabled={materialLocked}>
             <div className="funding-row">
               {/*
                 Deliberately NOT type="number". A focused number input steps its own
@@ -772,21 +799,55 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               retainStoredBytes={editing}
             />
           </Section>
+          </WizardPanel>
+
+          <WizardPanel index={3} current={wizard.current}>
+            <div className="wizard-review-head">
+              <h2>Review</h2>
+              <p className="field-hint">Check everything before you {editing ? "save your changes" : "submit"}.</p>
+            </div>
+            <ReviewRows
+              onEdit={wizard.goTo}
+              rows={[
+                { label: "Title", value: form.title.trim(), step: 0 },
+                { label: "Problem", value: form.summary.trim(), step: 0 },
+                { label: "Success criteria", value: form.successCriteria.trim(), step: 1 },
+                { label: "Technology areas", value: form.categories.map(categoryLabel).join(", "), empty: "None selected", step: 1 },
+                { label: "Funding", value: form.amount ? `${form.currency} ${Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: 2 },
+                { label: editing ? "Deadline" : "Open until", value: expiryPreview, empty: "Not set", step: 2 },
+                { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: 2 },
+              ]}
+            />
+          </WizardPanel>
 
           {editing && (
             <p className="field-hint">
               Your wallet signs updateOpportunity first. The posting is updated only after that transaction is confirmed on Arbitrum Sepolia.
             </p>
           )}
-          <SubmissionProgress audit={confirmedAudit} saving={submitting} entityLabel="Posting" editing={editing} />
-          <div className="form-actions">
-            <button className="primary" type="submit" disabled={submitting || pendingCount > 0}>
-              {submitting
-                ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
-                : pendingCount > 0
-                  ? "Waiting for attachments…"
-                  : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Submit problem statement"}
+          <div className="wizard-nav">
+            <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>
+              Back
             </button>
+            <div className="wizard-nav-end">
+              {!wizard.isLast && (
+                <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next}>Continue</button>
+              )}
+              {(wizard.isLast || editing || submitting || saveFailed || pendingCount > 0) && (
+                <button className="primary" type="submit" disabled={submitting || pendingCount > 0}>
+                  {submitting
+                    ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
+                    : pendingCount > 0
+                      ? "Waiting for attachments…"
+                      : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Submit problem statement"}
+                </button>
+              )}
+            </div>
+          </div>
+          </div>
+
+          <SubmissionProgress audit={confirmedAudit} saving={submitting} entityLabel="Posting" editing={editing} />
+          <div className="form-actions wizard-secondary">
             {!editing && (
             <button
               className="secondary"
@@ -803,10 +864,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             >
               Cancel
             </button>
+            {!editing && <DraftStatus savedAt={savedAt} saving={savingDraft} />}
           </div>
           </fieldset>
-
-          {!editing && <DraftStatus savedAt={savedAt} saving={savingDraft} />}
 
           {leaveTarget && (
             <LeaveDraftPrompt
@@ -825,7 +885,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           </SubmissionError>
           {Object.keys(errors).length > 0 && (
             <p className="field-hint" role="status">
-              {Object.keys(errors).length} field(s) need attention above.
+              {Object.keys(errors).length} field(s) need attention. Steps marked ! have the details.
             </p>
           )}
         </form>
@@ -834,41 +894,18 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />
         )}
 
-        <aside className="preview-panel" aria-label="Live preview">
-          <div className="preview-sticky">
-            <span className="eyebrow">How this will appear</span>
-            <div className="preview-card">
-              <div className="card-top">
-                <span className="eyebrow">Funded problem</span>
-                <span className="status-pill">Preview</span>
-              </div>
-              <h3>{form.title || "Untitled problem statement"}</h3>
-              <p>{form.summary || "The problem description will appear here as you type."}</p>
-              <div className="preview-meta">
-                <div>
-                  <small>Funding</small>
-                  <strong>
-                    {form.amount ? `${form.currency} ${Number(form.amount).toLocaleString()}` : "—"}
-                  </strong>
-                </div>
-                <div>
-                  <small>Open until</small>
-                  <span>{expiryPreview}</span>
-                </div>
-              </div>
-              {form.categories.length > 0 && (
-                <div className="tag-list">
-                  {form.categories.map((value) => (
-                    <span className="tag-chip static" key={value}>{categoryLabel(value)}</span>
-                  ))}
-                </div>
-              )}
-              <p className="field-hint">
-                Posted by {organisation || "your organisation"} · {attachments.length} attachment(s)
-              </p>
-            </div>
-          </div>
-        </aside>
+        <BriefPreview
+          kind="Business problem"
+          organisation={organisation}
+          title={form.title}
+          titleFallback="Untitled brief"
+          description={form.summary}
+          descriptionFallback="The problem description appears here as you type."
+          fundingLabel="Funding"
+          funding={form.amount ? `${form.currency} ${Number(form.amount).toLocaleString()}` : ""}
+          until={expiryPreview}
+          tags={form.categories.map(categoryLabel)}
+        />
       </div>
     </section>
   );

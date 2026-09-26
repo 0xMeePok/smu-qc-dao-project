@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 
+export function BrandMark({ size = 28 }) {
+  return <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+    <defs><linearGradient id="qc-brand-gradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3b9bff" /><stop offset="1" stopColor="#0060df" /></linearGradient></defs>
+    <rect width="32" height="32" rx="8" fill="url(#qc-brand-gradient)" />
+    <circle cx="14.5" cy="14.5" r="7" fill="none" stroke="#fff" strokeWidth="2.4" />
+    <circle cx="14.5" cy="14.5" r="2.1" fill="#fff" />
+    <path d="M19.6 19.6 23 23" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" />
+    <circle cx="23.6" cy="23.6" r="2" fill="#fff" />
+  </svg>;
+}
+
 export function ResponsiveHeader({ route, primaryRoutes, workspaceRoutes, desktopWorkspaces, accountControls, onNavigate }) {
   const [open, setOpen] = useState(false);
   const header = useRef(null);
@@ -7,7 +18,7 @@ export function ResponsiveHeader({ route, primaryRoutes, workspaceRoutes, deskto
 
   useEffect(() => { setOpen(false); }, [route]);
   useEffect(() => {
-    const desktop = window.matchMedia("(min-width: 1201px)");
+    const desktop = window.matchMedia("(min-width: 901px)");
     const closeOnDesktop = () => { if (desktop.matches) setOpen(false); };
     desktop.addEventListener("change", closeOnDesktop);
     return () => desktop.removeEventListener("change", closeOnDesktop);
@@ -31,7 +42,7 @@ export function ResponsiveHeader({ route, primaryRoutes, workspaceRoutes, deskto
     if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
   }}>
     <div className="topbar-left">
-      <button className="brand" type="button" onClick={() => navigate("home")} aria-label="QC DAO home"><span aria-hidden="true">Q</span>QC DAO</button>
+      <button className="brand" type="button" onClick={() => navigate("home")} aria-label="QC DAO home"><BrandMark />QC DAO</button>
       <button ref={toggle} className="mobile-menu-toggle" type="button" aria-label={open ? "Close navigation menu" : "Open navigation menu"}
         aria-expanded={open} aria-controls="header-navigation" onClick={() => setOpen((previous) => !previous)}>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">

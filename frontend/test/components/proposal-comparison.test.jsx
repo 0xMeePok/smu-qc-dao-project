@@ -97,12 +97,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("proposal comparison", () => {
-  it("[FUT-SPE-160] shows comparison columns and no score or reward-grade column", async () => {
+  it("[FUT-SPE-160] shows comparison fields and no score or reward-grade field", async () => {
     render(<ProposalComparison problemId="problem" />);
-    expect(await screen.findByRole("columnheader", { name: "Evaluator recommendation" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Decision" })).toBeTruthy();
+    expect(await screen.findByRole("radiogroup", { name: "Choose the proposal to match" })).toBeTruthy();
+    expect(screen.getAllByText("Evaluators")).toHaveLength(2);
     expect(screen.queryByText(/do not rank these proposals or choose a winner/)).toBeNull();
-    expect(screen.queryByRole("columnheader", { name: /score|grade|reward/i })).toBeNull();
+    const fields = [...document.querySelectorAll(".comparison-metrics dt")].map((term) => term.textContent);
+    expect(fields.some((field) => /score|grade|reward/i.test(field))).toBe(false);
     expect(screen.getAllByRole("button", { name: "Go to proposal" })).toHaveLength(2);
     expect(screen.getByText("1 Recommend with revisions")).toBeTruthy();
     expect(screen.queryByText(/0 Recommend/)).toBeNull();
@@ -114,7 +115,8 @@ describe("proposal comparison", () => {
       rows: [row({ canSelect: false, selectionHint: null, matching: { status: "awaiting_confirmation" } })],
     }));
     render(<ProposalComparison problemId="problem" onSelected={selected} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Select Alpha annealing" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Select Alpha annealing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm match" }));
     const dialog = screen.getByRole("dialog", { name: "Select this proposal?" });
     fireEvent.change(within(dialog).getByLabelText("Selection rationale"), { target: { value: "short" } });
     fireEvent.submit(dialog.querySelector("form"));
@@ -136,7 +138,7 @@ describe("proposal comparison", () => {
         qualifyingCount: 0, commentCount: 0 })],
     }));
     render(<ProposalComparison problemId="problem" />);
-    expect(await screen.findByRole("button", { name: "Select Alpha annealing" })).toBeTruthy();
+    expect((await screen.findByRole("radio", { name: "Select Alpha annealing" })).disabled).toBe(false);
     expect(screen.getByText("No qualifying recommendation")).toBeTruthy();
     expect(screen.getByText(/recommendations are optional and advisory/)).toBeTruthy();
     expect(screen.queryByText(/Needs a qualifying evaluator recommendation/)).toBeNull();
@@ -150,20 +152,21 @@ describe("proposal comparison", () => {
     }));
     render(<ProposalComparison problemId="problem" />);
     await screen.findByRole("button", { name: "Show details for Alpha annealing" });
-    expect(screen.queryByRole("columnheader", { name: "Decision" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Select / })).toBeNull();
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
     expect(screen.queryByText(/Needs full funding/)).toBeNull();
   });
 
   it("[FUT-SPE-163] filters by recommendation outcome and sorts by requested funding", async () => {
     render(<ProposalComparison problemId="problem" />);
-    await screen.findByRole("button", { name: "Select Alpha annealing" });
-    expect(screen.queryByRole("button", { name: "Select Bravo routes" })).toBeNull();
+    expect((await screen.findByRole("radio", { name: "Select Alpha annealing" })).disabled).toBe(false);
+    expect(screen.getByRole("radio", { name: "Select Bravo routes" }).disabled).toBe(true);
     expect(screen.getByText("Needs full funding.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText(/Filter by evaluator recommendation/), { target: { value: "recommend" } });
+    const filters = screen.getByRole("group", { name: "Filter by evaluator recommendation" });
+    fireEvent.click(within(filters).getByRole("button", { name: "Recommend" }));
     expect(screen.queryByRole("button", { name: "Show details for Alpha annealing" })).toBeNull();
     expect(screen.getByRole("button", { name: "Show details for Bravo routes" })).toBeTruthy();
-    fireEvent.change(screen.getByLabelText(/Filter by evaluator recommendation/), { target: { value: "" } });
+    fireEvent.click(within(filters).getByRole("button", { name: "All" }));
     fireEvent.change(screen.getByLabelText(/^Sort/), { target: { value: "amount:asc" } });
     const titles = screen.getAllByRole("button", { name: /^Show details for / }).map((button) => button.getAttribute("aria-label"));
     expect(titles).toEqual(["Show details for Bravo routes", "Show details for Alpha annealing"]);
@@ -172,7 +175,7 @@ describe("proposal comparison", () => {
   it("[FUT-SPE-164] expands a row to the proposal text and evaluator-badged comments", async () => {
     render(<ProposalComparison problemId="problem" />);
     fireEvent.click(await screen.findByRole("button", { name: "Show details for Alpha annealing" }));
-    const detail = (await screen.findByText("Compare with a classical baseline.")).closest("td");
+    const detail = (await screen.findByText("Compare with a classical baseline.")).closest(".comparison-detail");
     expect(within(detail).getByText("Tighten the benchmark.")).toBeTruthy();
     expect(within(detail).getByText("Recommend with revisions")).toBeTruthy();
     expect(within(detail).getByText("Evaluator")).toBeTruthy();
