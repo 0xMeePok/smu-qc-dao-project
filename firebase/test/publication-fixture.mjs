@@ -1,4 +1,11 @@
-import { doc, getDoc, setDoc, deleteField } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteField, Timestamp } from "firebase/firestore";
+import { PUBLISH_VALIDATION, isPublishableProblem } from "../functions/publicationValidation.js";
+
+// attestPublication stores expiresAt as a Timestamp; the validator only needs
+// toMillis(), which the client Timestamp provides too.
+function asTimestamp(value) {
+  return value instanceof Date ? Timestamp.fromDate(value) : value;
+}
 
 // Existing schema/role tests exercise the Firestore half of a chain-first write.
 // Seed the trusted function's output explicitly; separate security tests send
@@ -21,6 +28,16 @@ export async function seedPublicationFixture(env, reference, patch, update = fal
     if (!uid) return;
     await setDoc(doc(db, "recordReservations", `${scope}_${id}`), { uid });
     const { createdAt, updatedAt, audit, ...record } = next;
-    await setDoc(doc(db, "publicationProofs", `${scope}_${id}`), { uid, record, transactionHash: audit?.transactionHash ?? "" });
+    // Same marker attestPublication sets, computed by the same validator, so a
+    // test that sends an invalid posting still sees it refused.
+    const profile = scope === "problems" ? await getDoc(doc(db, "users", uid)) : null;
+    const publishable = scope === "problems" && isPublishableProblem(
+      { ...record, expiresAt: asTimestamp(record.expiresAt) },
+      { uid, profileOrganisation: profile?.data()?.organisation },
+    );
+    await setDoc(doc(db, "publicationProofs", `${scope}_${id}`), {
+      uid, record, transactionHash: audit?.transactionHash ?? "",
+      ...(publishable ? { validation: PUBLISH_VALIDATION } : {}),
+    });
   });
 }

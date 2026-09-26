@@ -29,6 +29,7 @@ import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
+import { PUBLISH_VALIDATION, isPublishableProblem } from "./publicationValidation.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
   selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
   getMockFundingPortfolio as readMockFundingPortfolio, sweepExpiredMockMatches,
@@ -356,9 +357,10 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
   const { id: ignoredId, createdAt, updatedAt, audit, ...content } = record;
   const proofRef = db.collection("publicationProofs").doc(resourceKey(scope, recordId));
   await db.runTransaction(async (tx) => {
-    const [maintenance, reservation] = await Promise.all([
+    const [maintenance, reservation, profile] = await Promise.all([
       tx.get(db.collection("maintenanceState").doc("registryCutover")),
       tx.get(db.collection("recordReservations").doc(resourceKey(scope, recordId))),
+      scope === "problems" ? tx.get(db.collection("users").doc(uid)) : Promise.resolve(null),
     ]);
     if (maintenance.data()?.active || reservation.data()?.retired) throw new HttpsError("failed-precondition", "Registry maintenance or retirement prevents publication.");
     const attachments = record.attachments ?? [];
@@ -376,7 +378,17 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
       if (reservation.data().state === "retired") throw new HttpsError("failed-precondition", "An attachment was removed. Select it again.");
       tx.update(reservation.ref, { sealed: true });
     }
-    tx.set(proofRef, { uid, record: content, transactionHash: audit.transactionHash, verifiedAt: Timestamp.now() });
+    // Marked only when the full marketplace schema holds. firestore.rules trusts a
+    // publish against this proof without re-running those checks, because running
+    // them there crossed Firestore's 1,000-expression cap. An unmarked proof still
+    // serves the other paths (edits), which keep their own rules validation.
+    const publishable = scope === "problems" && isPublishableProblem(content, {
+      uid, profileOrganisation: profile?.data()?.organisation,
+    });
+    tx.set(proofRef, {
+      uid, record: content, transactionHash: audit.transactionHash, verifiedAt: Timestamp.now(),
+      ...(publishable ? { validation: PUBLISH_VALIDATION } : {}),
+    });
   });
   return { verified: true };
 });
