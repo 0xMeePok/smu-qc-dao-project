@@ -56,6 +56,34 @@ export function proposalFundingLabel(proposal, problemMatching = proposal.proble
     : "Open for funding";
 }
 
+// Headline wording for display. The stored labels stay as they are because
+// sorting and older views read them; only the short status is reworded.
+const STATUS_WORDING = {
+  "Rejected": "Declined",
+  "Match confirmed": "Matched",
+  "Funding paused": "Paused",
+};
+
+const sentenceCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * The funding status as a short headline, an optional explanatory note and a
+ * tone, so it can be shown as a status pill rather than one run-on sentence:
+ * "Rejected · funders refunded" -> Declined / "Funders refunded" / neutral.
+ * Tones: success (funded or matched), warning (in progress or waiting),
+ * neutral (closed or refunded).
+ */
+export function proposalFundingStatus(proposal, problemMatching = proposal.problemMatching) {
+  const full = String(proposalFundingLabel(proposal, problemMatching) ?? "").replace(/_/g, " ");
+  const [head, ...rest] = full.split(" · ");
+  const label = STATUS_WORDING[head] ?? sentenceCase(head);
+  const detail = rest.length ? sentenceCase(rest.join(" · ")) : "";
+  const tone = /^(fully funded|matched)/i.test(label) ? "success"
+    : /^(open for funding|awaiting|paused)/i.test(label) ? "warning"
+    : "neutral";
+  return { label, detail, tone };
+}
+
 export function matchingError(error) {
   const code = String(error?.code ?? "").split("/").pop();
   if (code === "unauthenticated") return "Sign in again to continue.";

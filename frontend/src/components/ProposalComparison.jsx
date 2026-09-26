@@ -5,7 +5,7 @@ import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { RECOMMENDATIONS, recommendationLabel } from "../lib/comments.js";
 import { downloadAttachment, saveBlobAs } from "../lib/attachments.js";
 import { formatInstant } from "../lib/datetime.js";
-import { matchingError, proposalFundingLabel, selectMockProposal } from "../lib/matching.js";
+import { matchingError, proposalFundingStatus, selectMockProposal } from "../lib/matching.js";
 import { listReportableComments } from "../lib/moderation.js";
 import { findProposal } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
@@ -21,19 +21,13 @@ function developerLabel(row) {
   return row.developerName || "Unnamed developer";
 }
 
-// Dot colours for the two status columns. Advisory only: they echo the labels
-// beside them and never stand alone.
+// Dot colour for the evaluator summary. Advisory only: it echoes the label
+// beside it and never stands alone.
 function recommendationTone(row) {
   const counts = row.recommendations ?? {};
   if (!row.qualifyingCount) return "neutral";
   if ((counts.do_not_recommend || 0) > (counts.recommend || 0) + (counts.recommend_with_revisions || 0)) return "danger";
   return "brand";
-}
-
-function fundingTone(label) {
-  if (/fully funded|awaiting|confirmed|matched/i.test(label)) return "success";
-  if (/open for funding|paused/i.test(label)) return "warning";
-  return "neutral";
 }
 
 const FILTERS = [["", "All"], ...RECOMMENDATIONS];
@@ -169,7 +163,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
 }
 
 function ComparisonRow({ row, problemMatching, showDecision, open, checked, onToggle, onOpen, onChoose }) {
-  const status = proposalFundingLabel(row, problemMatching);
+  const funding = proposalFundingStatus(row, problemMatching);
   const eligible = Boolean(row.canSelect);
   const decision = showDecision && !eligible ? row.selectionHint : "";
   return <article className={`comparison-card${checked ? " is-checked" : ""}${showDecision && !eligible ? " is-ineligible" : ""}`}>
@@ -191,7 +185,13 @@ function ComparisonRow({ row, problemMatching, showDecision, open, checked, onTo
         <div><dt>Requested</dt><dd className="numeric">{money(row.currency, row.amount)}</dd></div>
         <div><dt>Evaluators</dt><dd><span className={`dot dot-${recommendationTone(row)}`} aria-hidden="true" />{recommendationSummary(row)}</dd></div>
         <div><dt>Comments</dt><dd>{row.commentCount ? `${row.qualifyingCount || 0} qualifying · ${row.commentCount} total` : "None yet"}</dd></div>
-        <div><dt>Funding status</dt><dd><span className={`dot dot-${fundingTone(status)}`} aria-hidden="true" />{status}</dd></div>
+        <div>
+          <dt>Funding status</dt>
+          <dd className="funding-status">
+            <span className={`funding-pill tone-${funding.tone}`}>{funding.label}</span>
+            {funding.detail && <small>{funding.detail}</small>}
+          </dd>
+        </div>
       </dl>
       <button type="button" className="text-button comparison-open" onClick={onOpen}>Go to proposal</button>
       {open && <div className="comparison-detail"><ExpandedProposal proposalId={row.id} /></div>}

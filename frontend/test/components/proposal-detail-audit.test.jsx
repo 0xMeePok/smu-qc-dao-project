@@ -111,3 +111,20 @@ it("reads the chain for a missing receipt and never auto-signs already verified 
   expect(screen.queryByText("Wallet picker")).toBeNull();
   expect(mocks.anchor).not.toHaveBeenCalled();
 });
+it("groups the proposal into tabs instead of one long page", async () => {
+  mocks.find.mockResolvedValue({ ...record, methodology: "Hybrid annealing", suitability: "Fits the constraints", timeline: "Six months", team: "Two researchers" });
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} justSubmitted />);
+  const overview = await screen.findByRole("tab", { name: "Overview" });
+  expect(overview.getAttribute("aria-selected")).toBe("true");
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Feedback", "Record"]);
+  const approach = screen.getByRole("heading", { name: "The approach" }).closest("section");
+  expect(approach.textContent).toContain("Hybrid annealing");
+  expect(approach.textContent).toContain("Fits the constraints");
+  expect(screen.getByRole("heading", { name: "Delivery" }).closest("section").textContent).toContain("Two researchers");
+  expect(screen.queryByRole("heading", { name: "What success looks like" })).toBeNull();
+  expect(document.getElementById("proposal-panel-record").className).not.toContain("is-active");
+  fireEvent.click(screen.getByRole("button", { name: "Check its on-chain verification" }));
+  expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");
+  expect(document.getElementById("proposal-panel-record").className).toContain("is-active");
+  expect(document.getElementById("proposal-panel-overview").className).not.toContain("is-active");
+});

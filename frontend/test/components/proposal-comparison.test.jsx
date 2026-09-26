@@ -24,6 +24,7 @@ vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.
 vi.mock("../../src/lib/moderation.js", () => ({ listReportableComments: (...args) => mocks.comments(...args) }));
 
 import { ProposalComparison } from "../../src/components/ProposalComparison.jsx";
+import { proposalFundingStatus } from "../../src/lib/matching.js";
 
 const row = (overrides = {}) => ({
   id: "alpha",
@@ -180,5 +181,33 @@ describe("proposal comparison", () => {
     expect(within(detail).getByText("Recommend with revisions")).toBeTruthy();
     expect(within(detail).getByText("Evaluator")).toBeTruthy();
     expect(mocks.comments).toHaveBeenCalledWith({ proposalId: "alpha" });
+  });
+
+  it("shows funding status as a short, toned status with its consequence as a note", async () => {
+    mocks.read.mockResolvedValue(comparison({
+      rows: [row({ canSelect: false, selectionHint: null, matching: { status: "declined" } })],
+    }));
+    const { container } = render(<ProposalComparison problemId="problem" />);
+    await screen.findByRole("button", { name: "Show details for Alpha annealing" });
+    const pill = container.querySelector(".funding-pill");
+    expect(pill.textContent).toBe("Declined");
+    expect(pill.className).toContain("tone-neutral");
+    expect(container.querySelector(".funding-status small").textContent).toBe("Funders refunded");
+    expect(container.textContent).not.toContain("Rejected");
+  });
+});
+
+describe("proposalFundingStatus", () => {
+  const status = (proposal, problemMatching) => proposalFundingStatus({ id: "p", amount: 100, ...proposal }, problemMatching);
+  it("splits every label into a headline, a note and a tone", () => {
+    expect(status({ matching: { status: "declined" } })).toEqual({ label: "Declined", detail: "Funders refunded", tone: "neutral" });
+    expect(status({ matching: { status: "cancelled" } })).toEqual({ label: "Cancelled", detail: "Funders refunded", tone: "neutral" });
+    expect(status({ matching: { status: "confirmed" } })).toEqual({ label: "Matched", detail: "Funding locked", tone: "success" });
+    expect(status({ matching: { status: "awaiting_confirmation" } })).toEqual({ label: "Awaiting creator acceptance", detail: "", tone: "warning" });
+    expect(status({ fundedAmount: 100 })).toEqual({ label: "Fully funded", detail: "Awaiting owner selection", tone: "success" });
+    expect(status({ fundedAmount: 10 })).toEqual({ label: "Open for funding", detail: "", tone: "warning" });
+    expect(status({}, { status: "confirmed" })).toEqual({ label: "Not selected", detail: "Funders refunded", tone: "neutral" });
+    expect(status({}, { status: "awaiting_confirmation", proposalId: "other" })).toEqual({ label: "Paused", detail: "Another proposal selected", tone: "warning" });
+    expect(status({ status: "withdrawn" })).toEqual({ label: "Withdrawn", detail: "", tone: "neutral" });
   });
 });

@@ -28,6 +28,7 @@ import {
   FundingPortfolio,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
+import HomePage from "./pages/HomePage.jsx";
 import ArchitectureHelpPage from "./pages/ArchitectureHelpPage.jsx";
 import CreatePostingPage from "./pages/CreatePostingPage.jsx";
 import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
@@ -295,6 +296,12 @@ function Shell({ route, children }) {
 
   return (
     <div className={`app-shell${onHome ? " is-home" : ""}`}>
+      {/* The Liquid Glass colour field every pane floats over. */}
+      <div className="ambient-backdrop" aria-hidden="true">
+        <span className="ambient-blob b1" />
+        <span className="ambient-blob b2" />
+        <span className="ambient-blob b3" />
+      </div>
       <ResponsiveHeader route={route} primaryRoutes={primaryRoutes} workspaceRoutes={workspaceRoutes}
         desktopWorkspaces={<WorkspacesLink route={route} workspaceRoutes={workspaceRoutes} />}
         accountControls={<AccountControls theme={theme} onToggleTheme={toggleTheme} canCreate={canCreate} workspaceRoutes={workspaceRoutes} />}
@@ -428,16 +435,16 @@ function OpportunityRow({ item }) {
   );
 }
 
-function OpportunityTile({ item, featured = false }) {
+function OpportunityTile({ item }) {
   const categories = categoryLine(item.categoryLabels);
   return (
-    <div className={`opportunity-tile${featured ? " is-featured" : ""}`}>
+    <div className="opportunity-tile">
       <button className="opportunity-card-hit" type="button" onClick={() => openOpportunity(item)} aria-label={`View ${item.title}`} />
       <small className="opportunity-tile-type">{item.type}</small>
       <strong className="opportunity-tile-title">{item.title}</strong>
       <span className="opportunity-tile-org">{item.owner}</span>
       <span className="opportunity-tile-spacer" />
-      {!featured && categories && <small className="opportunity-tile-tags">{categories}</small>}
+      {categories && <small className="opportunity-tile-tags">{categories}</small>}
       <OpportunityTrust item={item} />
       <div className="opportunity-tile-foot">
         <strong>{item.amount}</strong>
@@ -502,70 +509,22 @@ function OpportunityListSkeleton() {
   );
 }
 
-const STAKEHOLDER_ROLES = [
-  { type: "owner", step: "Defines", name: "Problem owner", text: "Publishes a problem with a budget and a deadline." },
-  { type: "researcher", step: "Delivers", name: "Researcher", text: "Proposes an approach and delivers the work in stages." },
-  { type: "evaluator", step: "Scores", name: "Evaluator", text: "Reviews proposals and checks each milestone." },
-  { type: "funder", step: "Backs", name: "Funder", text: "Commits funds that release as outcomes are met." },
-];
-
 function Home() {
   const { postings, loading, isAuthenticated } = usePublishedPostings();
-
+  const { roles } = useAuth();
+  const workspaceRoutes = getPermittedNavRoutes(roles)
+    .filter((r) => ["my-problems", "proposals", "evaluations", "funding"].includes(r.key));
   return (
-    <>
-      <section className="hero">
-        <div className="hero-copy">
-          <h1>Fund problems<br /><span>with clear outcomes.</span></h1>
-          <p>Publish important problems, compare proposals, and support the work through every delivery stage.</p>
-          <div className="actions">
-            <button className="primary large" type="button" onClick={() => go("discover")}>Explore opportunities</button>
-            <button className="secondary large" type="button" onClick={() => go("create")}>Publish a brief</button>
-          </div>
-        </div>
-      </section>
-
-      <section className="home-band home-roles">
-        <div className="home-band-inner">
-          <h2>Four roles. One clear path.</h2>
-          <div className="role-grid">
-            {STAKEHOLDER_ROLES.map((role) => (
-              <article className="role-card" key={role.type}>
-                <span className="role-card-icon"><StakeholderIcon type={role.type} /></span>
-                <small>{role.step}</small>
-                <h3>{role.name}</h3>
-                <p>{role.text}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="home-band home-open">
-        <div className="home-band-inner">
-          <div className="section-heading">
-            <div>
-              <h2>Open now.</h2>
-              <p>Business problems and open funding calls.</p>
-            </div>
-            <button className="text-button" type="button" onClick={() => go("discover")}>Browse all <ChevronIcon /></button>
-          </div>
-          {!isAuthenticated && <SignedOutNotice />}
-          {isAuthenticated && loading && <p className="lead">Loading opportunities…</p>}
-          {isAuthenticated && !loading && postings.length === 0 && (
-            <p className="lead">No open opportunities yet. Publish the first one.</p>
-          )}
-          {postings.length > 0 && (
-            <div className="opportunity-grid featured-grid">
-              {postings.slice(0, 3).map((item) => <OpportunityTile item={item} featured key={item.id} />)}
-            </div>
-          )}
-        </div>
-      </section>
-    </>
+    <HomePage
+      postings={postings}
+      loading={loading}
+      isAuthenticated={isAuthenticated}
+      onNavigate={go}
+      // Signed out there is no workspace yet; the guard on my-problems sends them to sign in.
+      onOpenWorkspaces={() => go(workspaceHome(workspaceRoutes) ?? "my-problems")}
+    />
   );
 }
-
 
 // Live postings, shared by Home and Discover. Reading one needs an active session,
 // so a signed-out visitor is never sent to Firestore just to be denied.

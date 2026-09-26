@@ -195,4 +195,31 @@ describe("proposal funding on a problem detail page", () => {
     fireEvent.click(screen.getByRole("button", { name: "View funded proposal" }));
     expect(onNavigate).toHaveBeenCalledWith("proposal/proposal1");
   });
+
+  it("groups the posting into tabs, one job at a time", async () => {
+    mocks.user = { id: OWNER, roles: ["owner"] };
+    mocks.posting = publishedPosting({ proposalCount: 2, businessContext: "Perishable deliveries." });
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    const overview = await screen.findByRole("tab", { name: "Overview" });
+    expect(overview.getAttribute("aria-selected")).toBe("true");
+    // The brief's fields sit together under one heading, not one card each.
+    const problem = screen.getByRole("heading", { name: "The problem" }).closest(".detail-group");
+    expect(problem.textContent).toContain("Routing degrades under demand spikes.");
+    expect(problem.textContent).toContain("Perishable deliveries.");
+    expect(screen.getByRole("tab", { name: "Proposals (2)" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+    expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");
+    expect(document.getElementById("posting-panel-record").className).toContain("is-active");
+    expect(document.getElementById("posting-panel-overview").className).not.toContain("is-active");
+    expect(document.getElementById("posting-panel-record").textContent).toContain("posting777");
+
+    // An in-page action opens the tab that holds its section.
+    const panel = document.getElementById("proposal-comparison");
+    panel.scrollIntoView = vi.fn();
+    fireEvent.click(screen.getByRole("button", { name: "Review proposals" }));
+    expect(screen.getByRole("tab", { name: "Proposals (2)" }).getAttribute("aria-selected")).toBe("true");
+    expect(panel.scrollIntoView).toHaveBeenCalled();
+  });
 });
+
