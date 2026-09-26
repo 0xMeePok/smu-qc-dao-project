@@ -95,82 +95,31 @@ function go(route) {
   window.location.hash = route.startsWith("/") ? route : `/${route}`;
 }
 
-function WorkspacesDropdown({ route, workspaceRoutes }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
-  const isCurrentWorkspace = workspaceRoutes.some((w) => w.key === route);
+const LAST_WORKSPACE_KEY = "qcdao-last-workspace";
 
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+function rememberWorkspace(key) {
+  try { window.localStorage.setItem(LAST_WORKSPACE_KEY, key); } catch { /* private mode */ }
+}
 
-  const workspaceDescriptions = {
-    "my-problems": "Manage owned challenges & proposals",
-    "proposals": "Track grant proposals & deliverables",
-    "evaluations": "Conduct evaluations & scoring",
-    "funding": "Oversee capital & escrow releases",
-  };
+// Where "Workspaces" leads: the last workspace opened, if it is still permitted,
+// otherwise the first one. The tabs on the page switch between them.
+function workspaceHome(workspaceRoutes) {
+  let last = null;
+  try { last = window.localStorage.getItem(LAST_WORKSPACE_KEY); } catch { /* private mode */ }
+  return workspaceRoutes.find((w) => w.key === last)?.key ?? workspaceRoutes[0]?.key;
+}
 
+function WorkspacesLink({ route, workspaceRoutes }) {
+  const active = workspaceRoutes.some((w) => w.key === route);
   return (
-    <div className="nav-dropdown-wrapper" ref={dropdownRef}>
-      <button
-        type="button"
-        className={`nav-dropdown-trigger ${isCurrentWorkspace ? "active" : ""}`}
-        onClick={() => setIsOpen((prev) => !prev)}
-        aria-expanded={isOpen}
-        aria-haspopup="true"
-      >
-        <span>Workspaces</span>
-        <svg
-          className={`dropdown-chevron ${isOpen ? "open" : ""}`}
-          viewBox="0 0 20 20"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <polyline points="6 9 10 13 14 9" />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div className="nav-dropdown-menu" role="menu">
-          <div className="nav-dropdown-header">
-            <span className="eyebrow">Member Workspaces</span>
-          </div>
-          {workspaceRoutes.map(({ key, label }) => {
-            const isActive = route === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                className={`nav-dropdown-item ${isActive ? "selected" : ""}`}
-                role="menuitem"
-                onClick={() => {
-                  setIsOpen(false);
-                  go(key);
-                }}
-              >
-                <div className="dropdown-item-content">
-                  <div className="dropdown-item-title">
-                    <strong>{label}</strong>
-                    {isActive && <span className="current-dot" />}
-                  </div>
-                  <small>{workspaceDescriptions[key] || ""}</small>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      className={`nav-dropdown-trigger${active ? " active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      onClick={() => go(workspaceHome(workspaceRoutes))}
+    >
+      Workspaces
+    </button>
   );
 }
 
@@ -251,9 +200,9 @@ function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut }) {
           </div>
           <div className="account-menu-divider" />
           <button type="button" role="menuitem" onClick={() => navigate("profile")}>Profile</button>
-          {workspaceRoutes.map(({ key, label }) => (
-            <button type="button" role="menuitem" key={key} onClick={() => navigate(key)}>{label}</button>
-          ))}
+          {workspaceRoutes.length > 0 && (
+            <button type="button" role="menuitem" onClick={() => navigate(workspaceHome(workspaceRoutes))}>Workspaces</button>
+          )}
           <div className="account-menu-divider" />
           <button type="button" role="menuitem" className="account-menu-signout" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
         </div>
@@ -338,12 +287,16 @@ function Shell({ route, children }) {
   const primaryRoutes = navRoutes.filter((r) => !workspaceKeys.has(r.key) && !accountKeys.has(r.key));
   const workspaceRoutes = navRoutes.filter((r) => workspaceKeys.has(r.key));
   const canCreate = navRoutes.some((r) => r.key === "create");
+
+  useEffect(() => {
+    if (workspaceKeys.has(route)) rememberWorkspace(route);
+  }, [route]);
   const onHome = route === "home";
 
   return (
     <div className={`app-shell${onHome ? " is-home" : ""}`}>
       <ResponsiveHeader route={route} primaryRoutes={primaryRoutes} workspaceRoutes={workspaceRoutes}
-        desktopWorkspaces={<WorkspacesDropdown route={route} workspaceRoutes={workspaceRoutes} />}
+        desktopWorkspaces={<WorkspacesLink route={route} workspaceRoutes={workspaceRoutes} />}
         accountControls={<AccountControls theme={theme} onToggleTheme={toggleTheme} canCreate={canCreate} workspaceRoutes={workspaceRoutes} />}
         onNavigate={go} />
 
