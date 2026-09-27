@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+// Keep the historical receipt/recovery fixtures on their original contract.
+// escrow-verification.test.jsx exercises the linked deployment.
+vi.mock("../../src/config/auditRegistry.contract.json", async () => ({ default: (await import("../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json")).default }));
+vi.mock("../../../firebase/functions/auditRegistry.contract.json", async () => ({ default: (await import("../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json")).default }));
 const mocks = vi.hoisted(() => ({ updates: [], find: vi.fn(), failedStatuses: new Set(), stored: null }));
 vi.mock("../../src/lib/proposals.js", () => ({
   findProposal: (...args) => mocks.find(...args),

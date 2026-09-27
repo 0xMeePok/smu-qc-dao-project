@@ -2,6 +2,11 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+// These frozen content fixtures predate escrow terms. Keep their legacy checks
+// while escrow-verification.test.jsx checks the additional immutable terms.
+vi.mock("../../src/config/auditRegistry.contract.json", async () => ({ default: (await import("../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json")).default }));
+vi.mock("../../../firebase/functions/auditRegistry.contract.json", async () => ({ default: (await import("../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json")).default }));
+
 const mocks = vi.hoisted(() => ({ server: null, getServer: vi.fn(), getCached: vi.fn() }));
 vi.mock("../../src/lib/firebase.js", () => ({ db: {}, functions: null }));
 vi.mock("../../src/lib/authFlow.js", () => ({ requireFirebase: vi.fn() }));

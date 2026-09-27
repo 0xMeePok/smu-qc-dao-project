@@ -214,6 +214,14 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
           <DetailItem heading="Milestones and deliverables">{proposal.milestones}</DetailItem>
           <DetailItem heading="Team and relevant experience">{proposal.team}</DetailItem>
         </DetailGroup>
+        {proposal.fundingTerms && <DetailGroup title="Escrow payment plan">
+          <DetailItem heading="Payment percentages">{proposal.fundingTerms.trancheBps.map(bps => `${bps / 100}%`).join(" / ")}</DetailItem>
+          <DetailItem heading="Approval windows">{proposal.fundingTerms.reviewWindows.map(seconds => `${seconds / 86400} days`).join(" / ")}</DetailItem>
+          <DetailItem heading="Later payment approval">{proposal.fundingTerms.funderVoting
+            ? "Both owners and a strict majority of committed funding."
+            : "Both the problem owner and proposal owner."}</DetailItem>
+          <p className="field-hint">The first payment requires both owners. Voiding opens fee-free individual claims for the unpaid balance.</p>
+        </DetailGroup>}
         {proposal.attachments?.length > 0 && <section className="detail-section detail-group"><h2>Supporting attachments</h2>{proposal.attachments.map((item) => <p key={item.id}><button className="text-button" onClick={() => download(item)}>Download {item.name}</button></p>)}</section>}
         {/* The sponsor's feedback (for the author) and comments render nothing
             when there are none, so they follow the proposal instead of an

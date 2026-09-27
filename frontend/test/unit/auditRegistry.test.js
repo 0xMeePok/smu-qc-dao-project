@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AUDIT_HASH_SCHEME,
+  AUDIT_REGISTRY_CONFIG,
   AUDIT_REGISTRY_ABI,
   AUDIT_REGISTRY_ADDRESS,
   AUDIT_REGISTRY_CHAIN_ID,
@@ -30,6 +31,7 @@ import {
   verifyProposalAudit,
   writeOpportunityAudit,
 } from "../../src/lib/auditRegistry.js";
+import { asEscrowProposal } from "../../../firebase/functions/auditCanonical.js";
 
 const CONTRACT = DEFAULT_AUDIT_REGISTRY_ADDRESS;
 const ACCOUNT = `0x${"a".repeat(40)}`;
@@ -238,11 +240,15 @@ describe("AuditRegistry transaction lifecycle", () => {
           expectedOpportunityRevisionIndex: 0,
         });
       const commit = entity === "opportunity" ? commitOpportunityAudit : commitProposalAudit;
+      const operation = entity === "proposal" && AUDIT_REGISTRY_CONFIG.contractName === "EscrowAuditRegistry"
+        ? asEscrowProposal(prepared, { token: AUDIT_REGISTRY_CONFIG.escrow.tokens[0].address, target: "1000000",
+          funderVoting: false, trancheBps: [10000], reviewWindows: [86400], milestoneHashes: [`0x${"4".repeat(64)}`] })
+        : prepared;
       const replacementHash = `0x${"3".repeat(64)}`;
       const statuses = [];
       let writes = 0;
       let waits = 0;
-      await assert.rejects(commit(prepared, {
+      await assert.rejects(commit(operation, {
         account: ACCOUNT,
         adapters: {
           writeContract: async () => { writes += 1; return TX_HASH; },
@@ -477,7 +483,7 @@ describe("AuditRegistry transaction lifecycle", () => {
 
     assert.throws(
       () => commitProposalAudit(prepareProposalUpdate(input)),
-      /Expected a prepared commitProposal operation/,
+      /Expected a prepared commitProposal(?:WithEscrow)? operation/,
     );
     assert.throws(
       () => updateProposalAudit(prepareProposalCommit(input)),

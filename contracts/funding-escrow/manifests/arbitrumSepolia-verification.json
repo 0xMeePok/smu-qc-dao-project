@@ -1,0 +1,15 @@
+{
+  "contractName": "EscrowAuditRegistry",
+  "address": "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD",
+  "factoryAddress": "0xe5d212491E544694d21c51EF9777F71B32fc5D41",
+  "chainId": 421614,
+  "bytecodeMatches": true,
+  "wiringMatches": true,
+  "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "registryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "factoryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "feeBps": 10,
+  "registryCodeHash": "0x4ef13640607e459d94ef0a1a44945b6ca93994295084b7d18e73b22044a748d4",
+  "factoryCodeHash": "0xced4f39980333f93bb5eda332ac669722babc1c0b8f1bc75859d7b2c6546abcf",
+  "readOnly": true
+}

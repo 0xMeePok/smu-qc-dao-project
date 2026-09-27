@@ -1,5 +1,7 @@
 import registry from "./auditRegistry.contract.json" with { type: "json" };
-import { prepareProposalCommit } from "./auditCanonical.js";
+import { asEscrowProposal, prepareProposalCommit } from "./auditCanonical.js";
+import { isEscrowRegistry } from "./escrowAudit.js";
+import { validateStoredFundingTerms } from "./escrowProposalTerms.js";
 
 // Frozen v1 field list. Changing a form label or adding a field must not change
 // historical hashes. Introduce a new scheme explicitly for future payloads.
@@ -15,13 +17,17 @@ export function proposalAuditPayload(record) {
   ]));
 }
 
-export function prepareStoredProposal(record) {
+export function prepareStoredProposal(record, { registryConfig = registry } = {}) {
+  if (record.fundingPlan !== undefined) throw new Error("Submit a complete escrow payment plan before verification.");
+  if (!isEscrowRegistry(registryConfig) && record.fundingTerms !== undefined) {
+    throw new Error("Escrow funding terms require the escrow-linked registry deployment.");
+  }
   const hashScheme = record.audit?.schemaVersion ?? 1;
   const proposal = proposalAuditPayload(record);
-  return prepareProposalCommit({
+  const prepared = prepareProposalCommit({
     recordId: record.id,
-    actor: registry.entityIdScheme === 2 ? record.researcherId : undefined,
-    opportunityActor: registry.entityIdScheme === 2 ? record.postingOwnerId : undefined,
+    actor: registryConfig.entityIdScheme === 2 ? record.researcherId : undefined,
+    opportunityActor: registryConfig.entityIdScheme === 2 ? record.postingOwnerId : undefined,
     opportunityRecordId: record.problemId,
     expectedOpportunityRevisionIndex: 0,
     hashScheme,
@@ -37,4 +43,5 @@ export function prepareStoredProposal(record) {
       attachments: [...(record.attachments ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
     },
   });
+  return isEscrowRegistry(registryConfig) ? asEscrowProposal(prepared, validateStoredFundingTerms(record, registryConfig)) : prepared;
 }

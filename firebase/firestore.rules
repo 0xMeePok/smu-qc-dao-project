@@ -317,13 +317,13 @@ service cloud.firestore {
     }
 
     function hasProposalSchema(data) {
-      return data.keys().toSet().hasOnly([
+      return data.keys().hasOnly([
         'researcherId', 'problemId', 'title', 'summary', 'amount',
         'status', 'audit', 'createdAt', 'updatedAt',
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
         'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
         'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit',
-        'withdrawalReason'
+        'withdrawalReason', 'fundingPlan', 'fundingTerms'
       ]); // Required fields are checked by value below and in the write rules.
     }
 
@@ -891,13 +891,24 @@ service cloud.firestore {
         && optionalString(data, 'category', 80);
     }
 
+    // Draft-only form fields. Published fundingTerms are validated against the
+    // mined canonical escrow by attestPublication and bound to its exact proof.
+    // correctionTouchesOnlyContent deliberately never permits changing them.
+    function draftFundingPlanIsBounded(data) {
+      let plan = data.get('fundingPlan', {});
+      return !data.keys().hasAny(['fundingTerms'])
+        && (plan == {} || (plan is map && plan.keys().hasOnly(['tranchePercentages', 'reviewDays', 'funderVoting'])
+          && boundedText(plan.tranchePercentages, 80) && boundedText(plan.reviewDays, 40)
+          && plan.funderVoting is bool));
+    }
+
     function validProposal(data) {
       return hasProposalSchema(data)
         && hasValidAudit(data)
         && isWalletAddress(data.researcherId)
         && isNonEmptyString(data.problemId, 128)
         && (data.status == 'draft'
-          ? draftProposalTextIsBounded(data)
+          ? (draftProposalTextIsBounded(data) && draftFundingPlanIsBounded(data))
           : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)))
         // A draft may not have reached the funding question yet. Absent falls
         // back to zero, which is bounded here and rejected by
@@ -918,7 +929,9 @@ service cloud.firestore {
         && (data.problemId.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.problemId.size() <= 128)
         && (data.title.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.title.size() <= 160)
         && (data.summary.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.summary.size() <= 4000)
-        && validAmount(data.amount)
+        // validSubmittedProposal also requires amount > 0. Avoid re-evaluating
+        // that lower bound here on the draft + receipt + two-attachment path.
+        && data.amount is number && data.amount <= 1000000000
         && optionalString(data, 'withdrawalReason', 1000)
         && validAttachments(data, true)
         && validSubmittedProposal(data, proposalId);

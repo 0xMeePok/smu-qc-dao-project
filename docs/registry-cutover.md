@@ -1,11 +1,16 @@
 # Fresh testnet registry cutover
 
+This page describes the earlier scheme-2 replacement. On 2026-09-27 the local
+active manifest was switched again to the escrow-linked registry; see the
+[current escrow integration notes](ESCROW_REGISTRY_INTEGRATION.md). This does not
+authorize running the retirement procedure below on additional records.
+
 The user selected retirement of existing testnet records on 2026-09-14. The replacement uses actor-bound entity IDs (scheme 2). Existing contracts remain immutable on-chain; retirement removes their records from the active site while retaining an operator-accessible archive. Users create new opportunities/proposals afterward. User profiles, authentication, token contracts and unrelated audits are preserved.
 
 ## Preparation
 
 - Preserve the old ABI/address in `contracts/audit-registry/legacy/arbitrumSepolia.contract.json`. Never mark scheme 2 on the old address.
-- The replacement is already deployed: `0x47dA28cAEf8021dD88fe18B80e367746e0036964`, transaction `0x02f73510e1b9e1753c14f6c2c2a0ca7ce213c94f31fee101fa7b436f59a2d36a`, block `308652359`. Its source is verified on Arbiscan. **Do not redeploy it**; the local frontend and Functions manifests already match.
+- The earlier replacement is already deployed: `0x47dA28cAEf8021dD88fe18B80e367746e0036964`, transaction `0x02f73510e1b9e1753c14f6c2c2a0ca7ce213c94f31fee101fa7b436f59a2d36a`, block `308652359`. Its source is verified on Arbiscan. **Do not redeploy it**; its preserved deployment record is now `contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.deployment.json`.
 - Authenticate the Firebase CLI with `firebase/node_modules/.bin/firebase login --reauth`. Administrative migration scripts also require Application Default Credentials or a server-only `GOOGLE_APPLICATION_CREDENTIALS` file with access to the intended project. Never put credentials in frontend environment variables or source control.
 - Inventory the actual target project and take a managed Firestore backup/export. Read-only preview of the bounded retirement pass:
 
@@ -41,7 +46,7 @@ Each invocation processes at most ten pages of 100 records. Every source removal
 
 4. Verify source collections and known child collections are empty, archived records match their originals, and the archive metadata is complete. Preserve the managed backup and the old manifest independently. Do not proceed if a phase failed or the archive is incomplete.
 
-5. Synchronize the **confirmed** replacement manifest with `node frontend/scripts/sync-audit-registry.mjs --deployment=contracts/audit-registry/manifests/arbitrumSepolia.json`. Rebuild the site using its existing production Firebase/App Check configuration, deploy the Functions with the same new registry, then deploy Hosting and the final Firestore/Storage rules together. The final rules reject reuse of retired record IDs even by the original owner or an old tab with a cached proof. Clear the maintenance marker only after the registry, site and backend agree. Refresh old browser tabs.
+5. For this earlier migration only, synchronize the **confirmed** replacement with `node frontend/scripts/sync-audit-registry.mjs --deployment=contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.deployment.json`. Rebuild the site using its existing production Firebase/App Check configuration, deploy the Functions with the same new registry, then deploy Hosting and the final Firestore/Storage rules together. The final rules reject reuse of retired record IDs even by the original owner or an old tab with a cached proof. Clear the maintenance marker only after the registry, site and backend agree. Refresh old browser tabs. Use the current escrow integration notes for the subsequent escrow deployment.
 
 6. Test a fresh authenticated journey: profile, draft, PDF upload/removal, opportunity publication/correction, proposal submission/correction/withdrawal, marketplace paging and metrics. Verify old IDs are rejected and archived PDFs are retained. Existing financial records are archived, so there is no old funding total to promote or certify.
 

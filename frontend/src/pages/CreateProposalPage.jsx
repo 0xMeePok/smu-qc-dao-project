@@ -30,8 +30,13 @@ import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import ProposalDetailPage from "./ProposalDetailPage.jsx";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
+import { fundingAmountText } from "../../../firebase/functions/escrowProposalTerms.js";
+import { EscrowPaymentPlanFields } from "../components/EscrowPaymentPlanFields.jsx";
 
 const ALL_FIELDS = [...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS];
+const ESCROW_LINKED = isEscrowRegistry(AUDIT_REGISTRY_CONFIG);
 
 function abandonDraftAttachments(items, ownerId, proposalId) {
   return Promise.allSettled(items.map((attachment) => deleteAttachment({
@@ -45,16 +50,26 @@ function snapshotOf(form, attachments) {
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, String(form[key] ?? "")])),
     category: form.category ?? "",
     amount: String(form.amount ?? ""),
+    tranchePercentages: form.tranchePercentages ?? "100",
+    reviewDays: form.reviewDays ?? "7",
+    funderVoting: form.funderVoting ?? false,
     attachments: attachments.map((item) => item.id).sort(),
   });
 }
 
 /** Seeds the form from a stored record, so a resumed draft or an edit starts where it left off. */
 export function formFromProposal(record) {
+  const terms = record?.fundingTerms;
   return {
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, record?.[key] ?? ""])),
     category: record?.category ?? "",
-    amount: record?.amount ? String(record.amount) : "",
+    amount: record?.amount ? (ESCROW_LINKED ? fundingAmountText(record.amount) : String(record.amount)) : "",
+    ...(ESCROW_LINKED ? {
+      tranchePercentages: terms ? terms.trancheBps.map(bps => bps / 100).join(", ") : record?.fundingPlan?.tranchePercentages ?? "100",
+      reviewDays: terms ? terms.reviewWindows.map(seconds => seconds / 86400).join(", ") : record?.fundingPlan?.reviewDays ?? "7",
+      funderVoting: terms?.funderVoting ?? record?.fundingPlan?.funderVoting ?? false,
+      ...(terms && record.status !== "draft" ? { immutableFundingTerms: terms } : {}),
+    } : {}),
   };
 }
 
@@ -104,6 +119,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       return ALL_FIELDS.some(([key]) => String(form[key] ?? "").trim().length > 0)
         || String(form.category ?? "").length > 0
         || String(form.amount ?? "").trim().length > 0
+        || (ESCROW_LINKED && ((form.tranchePercentages ?? "100") !== "100" || (form.reviewDays ?? "7") !== "7" || form.funderVoting === true))
         || attachments.length > 0;
     }
     return snapshotOf(form, attachments) !== baseline;
@@ -301,7 +317,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   const textField = ([key, label, max]) => <Field key={key} htmlFor={`proposal-${key}`} label={label} error={errors[key]}>
     {({ id, describedBy, invalid }) => {
       const Tag = key === "title" ? "input" : "textarea";
-      return <Tag id={id} rows={key === "title" ? undefined : 4} value={form[key] || ""} maxLength={max} aria-describedby={describedBy} aria-invalid={invalid} required onChange={(event) => update(key, event.target.value)} />;
+      return <Tag id={id} rows={key === "title" ? undefined : 4} value={form[key] || ""} maxLength={max} disabled={ESCROW_LINKED && editing && key === "milestones"} aria-describedby={describedBy} aria-invalid={invalid} required onChange={(event) => update(key, event.target.value)} />;
     }}
   </Field>;
 
@@ -327,8 +343,9 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           {isOpenFunding && <fieldset className="field-group" disabled={disabled}><legend>Problem framing</legend><p className="field-hint">The funder acts as the problem owner for selection. Your proposal follows the same evaluation, selection and approval process as a funded problem proposal.</p>{PROBLEM_FRAMING_FIELDS.map(textField)}</fieldset>}
           <fieldset className="field-group" disabled={disabled}><legend>Funding and supporting material</legend>
             <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} error={errors.amount}>
-              {({ id, describedBy, invalid }) => <input id={id} type="number" min="0.000001" max="1000000000" step="any" required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
+              {({ id, describedBy, invalid }) => <input id={id} type={ESCROW_LINKED ? "text" : "number"} inputMode="decimal" min="0.000001" max="1000000000" step="any" disabled={ESCROW_LINKED && editing} required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
             </Field>
+            {ESCROW_LINKED && <EscrowPaymentPlanFields form={form} disabled={disabled || editing} error={errors.fundingPlan} onChange={update} />}
             {editing && <p className="field-hint">Supporting PDFs cannot be changed after submission. They stay as the files under review.</p>}
             <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments} onChange={setAttachments} onPendingChange={setPending} disabled={disabled || editing} />
           </fieldset>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,14 +32,29 @@ it("the default registry sync preserves the active manifest's address and entity
   const directory = await mkdtemp(path.join(tmpdir(), "qc-registry-sync-"));
   try {
     const output = path.join(directory, "registry.json");
+    const configured = JSON.parse(await readFile(path.join(frontendDirectory, "src/config/auditRegistry.contract.json"), "utf8"));
+    const extra = [];
+    // Frontend CI does not compile Solidity. Supply the checked-in interfaces
+    // explicitly so this checks default deployment selection on a clean clone.
+    if (configured.escrow) {
+      for (const [flag, contractName, abi] of [
+        ["factory-artifact", "FundingEscrowFactory", configured.escrow.factoryAbi],
+        ["escrow-artifact", "FundingEscrow", configured.escrow.escrowAbi],
+      ]) {
+        const file = path.join(directory, `${contractName}.json`);
+        await writeFile(file, JSON.stringify({ contractName, abi }));
+        extra.push(`--${flag}`, file);
+      }
+    }
     execFileSync(process.execPath, [
       path.join(frontendDirectory, "scripts/sync-audit-registry.mjs"),
       "--artifact", path.join(frontendDirectory, "src/config/auditRegistry.contract.json"),
       "--output", output,
+      ...extra,
     ], { cwd: directory, encoding: "utf8", maxBuffer: 4000 });
     const actual = JSON.parse(await readFile(output, "utf8"));
     const active = JSON.parse(await readFile(path.join(repositoryDirectory, "contracts/audit-registry/manifests/arbitrumSepolia.json"), "utf8"));
-    assert.equal(actual.address, active.address);
+    assert.equal(actual.address, active.registry?.address ?? active.address);
     assert.equal(actual.chainId, active.chainId);
     assert.equal(actual.entityIdScheme, active.entityIdScheme);
   } finally {
