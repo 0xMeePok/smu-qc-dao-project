@@ -180,14 +180,23 @@ describe("author notices and reportable comments", () => {
     expect(screen.getByLabelText("Write a comment")).toBeTruthy();
   });
 
-  it("tells an evaluator when another evaluator already holds the recommendation", async () => {
+  // QCDAO-91: evaluators each file their own recommendation, once.
+  it("lets another evaluator recommend too, but refuses a second from the same evaluator", async () => {
     mocks.user = { id: "evaluator", roles: ["evaluator"] };
-    mocks.comments.mockResolvedValue({ items: [{
-      id: "comment1", body: "A sound approach.", authorName: "First evaluator", createdAt: row.createdAt,
+    const comment = (authorId) => ({ items: [{
+      id: "comment1", body: "A sound approach.", authorName: "First evaluator", authorId, createdAt: row.createdAt,
       proposalId: "proposal1", parentId: null, qualifying: true, badge: "evaluator", recommendation: "recommend",
     }] });
+    mocks.comments.mockResolvedValue(comment("other-evaluator"));
     render(<ReportableComments problemId="problem1" proposalId="proposal1" authorId="alice" />);
-    await screen.findByText("Another evaluator has already recommended this solution.");
+    await screen.findByText("A sound approach.");
+    expect(screen.getByText("Recommendation")).toBeTruthy();
+    expect(screen.getByText("Evaluator · Recommend")).toBeTruthy();
+    cleanup();
+
+    mocks.comments.mockResolvedValue(comment("evaluator"));
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" authorId="alice" />);
+    await screen.findByText("You have already recommended this solution. Edit or delete that comment to change it.");
     expect(screen.queryByText("Recommendation")).toBeNull();
   });
 

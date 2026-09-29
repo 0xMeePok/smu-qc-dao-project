@@ -129,6 +129,8 @@ describe("saving a proposal over several sittings", () => {
     fireEvent.click(screen.getByRole("combobox"));
     fireEvent.click(screen.getByRole("option", { name: "Quantum annealing" }));
     fireEvent.change(screen.getByLabelText("Requested funding amount (USDC)"), { target: { value: "1000" } });
+    // QCDAO-91: submit from the wizard's Review step.
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
     await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1));
     expect(mocks.submit.mock.calls[0][0]).toMatchObject({ proposalId: "draft-1", fromDraft: true });
@@ -274,6 +276,8 @@ describe("nothing is written before the transaction confirms", () => {
     fireEvent.click(screen.getByRole("combobox"));
     fireEvent.click(screen.getByRole("option", { name: "Quantum annealing" }));
     fireEvent.change(screen.getByLabelText("Requested funding amount (USDC)"), { target: { value: "1000" } });
+    // QCDAO-91: submit from the wizard's Review step.
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
     await waitFor(() => expect(mocks.submit).toHaveBeenCalled());
     expect(order).toEqual(["anchor", "write"]);
@@ -293,6 +297,8 @@ describe("nothing is written before the transaction confirms", () => {
     fireEvent.click(screen.getByRole("combobox"));
     fireEvent.click(screen.getByRole("option", { name: "Quantum annealing" }));
     fireEvent.change(screen.getByLabelText("Requested funding amount (USDC)"), { target: { value: "1000" } });
+    // QCDAO-91: submit from the wizard's Review step.
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
     await waitFor(() => expect(mocks.submit).toHaveBeenCalled());
     // The confirmation screen, not an error banner.

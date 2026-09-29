@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
-import { RECOMMENDATIONS, recommendationLabel } from "../lib/comments.js";
+import { RECOMMENDATIONS } from "../lib/comments.js";
 import { downloadAttachment, saveBlobAs } from "../lib/attachments.js";
 import { formatInstant } from "../lib/datetime.js";
 import { matchingError, proposalFundingStatus, selectMockProposal } from "../lib/matching.js";
@@ -11,23 +11,15 @@ import { findProposal } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import {
   COMPARISON_SORTS, categoryLabel, comparisonError, filterComparisonRows, getProposalComparison,
-  recommendationSummary, sortComparisonRows,
+  sortComparisonRows,
 } from "../lib/proposalComparison.js";
 import { Modal } from "./Modal.jsx";
+import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 
 const money = (currency, amount) => `${currency || ""} ${Number(amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`.trim();
 
 function developerLabel(row) {
   return row.developerName || "Unnamed developer";
-}
-
-// Dot colour for the evaluator summary. Advisory only: it echoes the label
-// beside it and never stands alone.
-function recommendationTone(row) {
-  const counts = row.recommendations ?? {};
-  if (!row.qualifyingCount) return "neutral";
-  if ((counts.do_not_recommend || 0) > (counts.recommend || 0) + (counts.recommend_with_revisions || 0)) return "danger";
-  return "brand";
 }
 
 const FILTERS = [["", "All"], ...RECOMMENDATIONS];
@@ -42,8 +34,6 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
   const [openId, setOpenId] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [pending, setPending] = useState(null);
-  const [rationale, setRationale] = useState("");
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!user?.id || !problemId) {
@@ -67,30 +57,6 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
   // Only a row the server still marks selectable can stay chosen after a reload.
   const selected = showDecision ? state?.rows?.find((row) => row.id === selectedId && row.canSelect) ?? null : null;
   const selectableCount = (state?.rows ?? []).filter((row) => row.canSelect).length;
-
-  const select = async (event) => {
-    event.preventDefault();
-    if (!pending || busy) return;
-    if (rationale.trim().length < 10) {
-      setError("Enter a reason of at least 10 characters for the decision record.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await selectMockProposal({ problemId, proposalId: pending.id, rationale: rationale.trim() });
-      const next = await getProposalComparison(problemId);
-      setState(next);
-      setPending(null);
-      setSelectedId("");
-      setRationale("");
-      onSelected?.();
-    } catch (err) {
-      setError(matchingError(err));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return <section id="proposal-comparison" className="detail-section proposal-comparison" aria-label="Proposal comparison">
     <h2>Compare proposals</h2>
@@ -131,35 +97,66 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
     {selected && !pending && <div className="selection-bar-wrap">
       <div className="selection-bar" role="region" aria-label="Selected proposal">
         <span className="selection-bar-text">
-          <span className="muted">Selected </span><strong>{selected.title}</strong>
+          <span className="muted">Chosen </span><strong>{selected.title}</strong>
           <span className="muted"> · {money(selected.currency, selected.amount)}</span>
         </span>
         <button type="button" className="text-button" onClick={() => setSelectedId("")}>Clear</button>
-        <button type="button" className="primary" onClick={() => { setError(""); setRationale(""); setPending(selected); }}>Confirm match</button>
+        <button type="button" className="primary" onClick={() => { setError(""); setPending(selected); }}>Confirm match</button>
       </div>
     </div>}
 
-    {pending && <Modal labelledBy="comparison-select-title" onDismiss={() => { if (!busy) setPending(null); }}>
-      <form onSubmit={select}>
-        <div className="modal-head"><h2 id="comparison-select-title">Select this proposal?</h2></div>
-        <div className="modal-body">
-          <div className="selection-summary">
-            <span>{pending.title}</span>
-            <strong>{money(pending.currency, pending.amount)}</strong>
-          </div>
-          <p>Selecting records your acceptance as the problem owner and your rationale in the audit record. Funding for the other proposals pauses while the researcher confirms. Recommendations are optional and advisory: this does not mark the proposal as the highest scored or the preferred submission.</p>
-          <label htmlFor="comparison-rationale">Selection rationale</label>
-          <textarea id="comparison-rationale" value={rationale} minLength={10} maxLength={2000} required rows={4} disabled={busy} onChange={(event) => setRationale(event.target.value)} />
-          <p className="field-hint">Required. 10–2000 characters, recorded with your selection.</p>
-          {error && <p className="error-banner" role="alert">{error}</p>}
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="secondary" disabled={busy} onClick={() => setPending(null)}>Cancel</button>
-          <button type="submit" className="primary" disabled={busy}>{busy ? "Saving…" : "Select and accept"}</button>
-        </div>
-      </form>
-    </Modal>}
+    {pending && <SelectProposalDialog problemId={problemId} proposal={pending} onCancel={() => setPending(null)}
+      onSelected={async () => {
+        setState(await getProposalComparison(problemId));
+        setPending(null);
+        setSelectedId("");
+        onSelected?.();
+      }} />}
   </section>;
+}
+
+/** Owner selection with its rationale; also used by the Action Needed tab. */
+export function SelectProposalDialog({ problemId, proposal, onCancel, onSelected }) {
+  const [rationale, setRationale] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const select = async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    if (rationale.trim().length < 10) {
+      setError("Enter a reason of at least 10 characters for the decision record.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await selectMockProposal({ problemId, proposalId: proposal.id, rationale: rationale.trim() });
+      await onSelected?.();
+    } catch (err) {
+      setError(matchingError(err));
+      setBusy(false);
+    }
+  };
+  return <Modal labelledBy="comparison-select-title" onDismiss={() => { if (!busy) onCancel(); }}>
+    <form onSubmit={select}>
+      <div className="modal-head"><h2 id="comparison-select-title">Select this proposal?</h2></div>
+      <div className="modal-body">
+        <div className="selection-summary">
+          <span>{proposal.title}</span>
+          <strong>{money(proposal.currency, proposal.amount)}</strong>
+        </div>
+        <p>Selecting records your acceptance as the problem owner and your rationale in the audit record. Funding for the other proposals pauses while the researcher confirms. Recommendations are optional and advisory: this does not mark the proposal as the highest scored or the preferred submission.</p>
+        <label htmlFor="comparison-rationale">Selection rationale</label>
+        <textarea id="comparison-rationale" value={rationale} minLength={10} maxLength={2000} required rows={4} disabled={busy} onChange={(event) => setRationale(event.target.value)} />
+        <p className="field-hint">Required. 10–2000 characters, recorded with your selection.</p>
+        {error && <p className="error-banner" role="alert">{error}</p>}
+      </div>
+      <div className="modal-actions">
+        <button type="button" className="secondary" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button type="submit" className="primary" disabled={busy}>{busy ? "Saving…" : "Select and accept"}</button>
+      </div>
+    </form>
+  </Modal>;
 }
 
 function ComparisonRow({ row, problemMatching, showDecision, open, checked, onToggle, onOpen, onChoose }) {
@@ -183,12 +180,12 @@ function ComparisonRow({ row, problemMatching, showDecision, open, checked, onTo
       </div>
       <dl className="comparison-metrics">
         <div><dt>Requested</dt><dd className="numeric">{money(row.currency, row.amount)}</dd></div>
-        <div><dt>Evaluators</dt><dd><span className={`dot dot-${recommendationTone(row)}`} aria-hidden="true" />{recommendationSummary(row)}</dd></div>
+        <div><dt>Evaluators</dt><dd className="status-badges"><EvaluationBadges counts={row.recommendations ?? {}} /></dd></div>
         <div><dt>Comments</dt><dd>{row.commentCount ? `${row.qualifyingCount || 0} qualifying · ${row.commentCount} total` : "None yet"}</dd></div>
         <div>
           <dt>Funding status</dt>
           <dd className="funding-status">
-            <span className={`funding-pill tone-${funding.tone}`}>{funding.label}</span>
+            <StatusBadge status={funding.status} />
             {funding.detail && <small>{funding.detail}</small>}
           </dd>
         </div>
@@ -251,12 +248,12 @@ function ExpandedProposal({ proposalId }) {
 
 function CommentView({ item, nested = false }) {
   const removed = Boolean(item.deleted || item.deletedAt);
-  const outcome = !removed && item.qualifying && recommendationLabel(item.recommendation);
+  const outcome = !removed && item.qualifying ? item.recommendation : null;
   const evaluator = item.badge === "evaluator" || item.authorRole === "evaluator";
   const role = evaluator ? "Evaluator" : item.authorRole === "administrator" ? "Administrator" : item.authorRole === "user" ? "User" : "";
   const chip = evaluator ? "role-chip-evaluator" : item.authorRole === "administrator" ? "role-chip-admin" : "role-chip-user";
   return <article className={nested ? "comment-reply" : "matching-candidate"}>
-    {outcome && <p className="comment-recommendation">{outcome}</p>}
+    {outcome && <p className="comment-recommendation"><StatusBadge status={outcome} prefix="Evaluator · " /></p>}
     <p className={removed ? "proposal-text comment-removed" : "proposal-text"}>{removed ? "This comment was removed" : item.body}</p>
     {!removed && <div className="comment-meta">
       <small>{item.authorName || "Member"} · {formatInstant(item.createdAt)}{item.editedAt ? " · Edited" : ""}</small>

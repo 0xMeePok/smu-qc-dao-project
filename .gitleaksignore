@@ -14,3 +14,14 @@ ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/.env.examp
 ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:12
 ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:13
 ae73399b778e5864611be15e6ba3a86da823af52:contracts/stable-faucet/site/tests/api.test.ts:generic-api-key:14
+
+# Funding escrow smoke manifest: "token" is the public test-token contract address.
+# Escrow tests: "ERC20InsufficientAllowance"/"ERC20InsufficientBalance" are OpenZeppelin error names.
+contracts/funding-escrow/manifests/arbitrumSepolia-smoke.json:generic-api-key:8
+contracts/funding-escrow/manifests/arbitrumSepolia-smoke.json:generic-api-key:200
+contracts/funding-escrow/test/FundingEscrow.test.js:generic-api-key:62
+contracts/funding-escrow/test/FundingEscrow.test.js:generic-api-key:64
+edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/manifests/arbitrumSepolia-smoke.json:generic-api-key:8
+edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/manifests/arbitrumSepolia-smoke.json:generic-api-key:200
+edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/test/FundingEscrow.test.js:generic-api-key:62
+edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/test/FundingEscrow.test.js:generic-api-key:64

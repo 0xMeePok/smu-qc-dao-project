@@ -28,6 +28,7 @@ Access evaluation uses set intersection: an authenticated user is granted access
 | `#/opportunity/:id` | Opportunity Detail | Allow | Allow | Allow | None (Public) |
 | `#/login` | Role Authentication | Allow | Redirect to Home | Redirect to Home | Preserves ?redirect= param |
 | `#/create` | Publish Problem Statement / Brief | 401 Redirect | Allow (All 3 Brief Types) | 403 Forbidden | 401 Redirect / 403 Access Denied |
+| `#/actions` | Action Needed (items waiting on the member, acted on in place) | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
 | `#/my-problems` | Manage Owned Problems & Submissions | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
 | `#/proposals` | Researcher Proposal Dashboard | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
 | `#/evaluations` | Expert Evaluation & Scoring Queue | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
@@ -50,6 +51,7 @@ Each user sees navigation links corresponding to their granted capabilities:
   - `Home` (`#/home`)
   - `Discover` (`#/discover`)
   - `Create Brief` (`#/create`)
+  - `Action Needed` (`#/actions`)
   - `My Problems` (`#/my-problems`)
   - `My Proposals` (`#/proposals`)
   - `Evaluation Queue` (`#/evaluations`)
@@ -57,7 +59,7 @@ Each user sees navigation links corresponding to their granted capabilities:
 - **DAO Admin (`admin`)**:
   - `Home` (`#/home`)
   - `Discover` (`#/discover`)
-  - `Admin Audit` (`#/admin`)
+  - `Admin Audit` (`#/admin`) — opens on **Content moderation** while reports are pending
 
 ---
 
@@ -108,6 +110,12 @@ carrying exactly one of `recommend`, `recommend_with_revisions` or `do_not_recom
 server maintains `proposals/{id}.matching.evaluationComplete` from that same rule, so no separate evaluation record
 is stored.
 
+Since QCDAO-91 **any number of evaluators** may recommend the same proposal, **one recommendation each**, and never
+their own proposal. `proposals/{id}.matching.recommendations` maps each evaluator to `{ commentId, recommendation, at }`;
+every recommendation rewrites that map, so two filings at once serialise on the proposal document and a second from
+the same evaluator is refused ("Edit or delete that comment to change it"). `Awaiting recommendation` lists proposals
+the signed-in evaluator has not recommended yet, whatever other evaluators have filed.
+
 An evaluator recommendation comment, a funder comment, and any other stakeholder comment stay advisory. None of them creates an owner review outcome.
 
 ## 8. Owner interim review
@@ -115,3 +123,17 @@ An evaluator recommendation comment, a funder comment, and any other stakeholder
 Only the designated problem owner (`problems.ownerId`) can record an interim review on a proposal that is still under consideration. The owner chooses one outcome — record feedback, request revisions, or record that the proposal is not progressing — and must write a rationale. The developer sees the latest outcome on `#/proposals` and the full record on the proposal page.
 
 A revision request uses the existing author correction path when that path is already open. It does not select a winner, reject a winner, or set a proposal to selected or awaiting creator acceptance. That terminal decision remains QCDAO-81, made only by the designated problem owner after the funding target is met. Evaluator recommendations are optional and advisory.
+
+## 9. Action Needed workspace (QCDAO-91)
+
+`#/actions` is the first workspace tab for every member, with a live count. The `listActionItems` callable reads
+existing records only and returns what waits on the signed-in member:
+
+| Group | Who | Condition | Acted on in place with |
+|---|---|---|---|
+| Ready to select | Problem owner | Fully funded, selectable proposal on a live problem they own | The comparison's selection dialog (rationale required) |
+| Awaiting my review | Problem owner | Proposal still under consideration with no owner review yet | The owner review form |
+| Selection to accept | Proposal creator | Their proposal is selected and the acceptance window is still open | The matching panel's accept / reject dialog |
+| Awaiting my recommendation | Assigned evaluator | Proposal they have not recommended (first queue page) | Links to the proposal's recommendation form |
+
+Administrators have no Action Needed tab; the admin page opens on Content moderation while reports are pending.

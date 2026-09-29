@@ -21,24 +21,17 @@ import {
 import { AuditReceipt } from "./AuditReceipt.jsx";
 import { AuditDetailPane } from "./AuditDetailPane.jsx";
 import { LiveVerifiedBadge } from "./LiveVerifiedBadge.jsx";
+import { StatusBadge } from "./StatusBadge.jsx";
+import { WORKFLOW_STATUS, opportunityWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
 
 const PAGE_SIZE = 25;
 const MAX_FILTER_SCANS = 8;
 const VISIBLE_STATUSES = ["submitted", "open", "cancelled"];
-
-const STATUS_LABELS = {
-  submitted: "Submitted",
-  open: "Open",
-  cancelled: "Withdrawn",
+// Filters offer shared QCDAO-91 statuses; each maps back to the stored values it covers.
+const STATUS_FILTERS = {
+  [WORKFLOW_STATUS.SUBMITTED]: ["submitted", "open"],
+  [WORKFLOW_STATUS.DECLINED]: ["cancelled"],
 };
-
-function StatusBadge({ status }) {
-  return (
-    <span className={`submission-status-badge badge-${status}`}>
-      {STATUS_LABELS[status] || status}
-    </span>
-  );
-}
 
 function formatAmount(amount, currency) {
   if (amount == null || amount === "") return "—";
@@ -64,9 +57,7 @@ function receiptFor(item, variant) {
 }
 
 function statusFilters(statusFilter) {
-  return statusFilter === "all"
-    ? [where("status", "in", VISIBLE_STATUSES)]
-    : [where("status", "==", statusFilter)];
+  return [where("status", "in", STATUS_FILTERS[statusFilter] ?? VISIBLE_STATUSES)];
 }
 
 async function fetchPage({ kind, statusFilter, cursor }) {
@@ -240,9 +231,7 @@ function SubmissionLogs({ kind }) {
             aria-label="Filter by status"
           >
             <option value="all">All statuses</option>
-            <option value="submitted">Submitted</option>
-            <option value="open">Open</option>
-            <option value="cancelled">Withdrawn</option>
+            {Object.keys(STATUS_FILTERS).map((status) => <option key={status} value={status}>{workflowStatusLabel(status)}</option>)}
           </select>
         </div>
         <button
@@ -280,7 +269,7 @@ function SubmissionLogs({ kind }) {
           <tbody>
             {visibleItems.map((item) => (
               <tr className="audit-nav-row" key={item.id}>
-                <td><StatusBadge status={item.status} /></td>
+                <td><StatusBadge status={opportunityWorkflowStatus(item)} /></td>
                 <td>
                   <strong>{item.title || "Untitled"}</strong>
                   <div className="table-row-meta"><code>problems/{item.id}</code></div>

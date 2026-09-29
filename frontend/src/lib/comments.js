@@ -2,14 +2,11 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { toDate } from "./datetime.js";
+import { RECOMMENDATION_STATUSES, workflowStatusLabel } from "../config/workflowStatus.js";
 
 export const COMMENT_EDIT_WINDOW_MS = 15 * 60 * 1000;
 export const COMMENT_BODY_MAX = 5000;
-export const RECOMMENDATIONS = [
-  ["recommend", "Recommend"],
-  ["recommend_with_revisions", "Recommend with revisions"],
-  ["do_not_recommend", "Do not recommend"],
-];
+export const RECOMMENDATIONS = RECOMMENDATION_STATUSES.map((status) => [status, workflowStatusLabel(status)]);
 
 async function call(name, payload = {}) {
   requireFirebase();

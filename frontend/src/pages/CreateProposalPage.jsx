@@ -26,12 +26,26 @@ import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { useAccount } from "wagmi";
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../lib/proposalValidation.js";
 import { getMockMatching, proposalMatchingLocked } from "../lib/matching.js";
-import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
+import { PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
+import { proposalWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
 import ProposalDetailPage from "./ProposalDetailPage.jsx";
+import { ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
 
 const ALL_FIELDS = [...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS];
+const keysOf = (fields) => fields.map(([key]) => key);
+
+// Mirrors the brief wizard; open-funding proposals add the framing step.
+function proposalSteps(openFunding) {
+  return [
+    { key: "approach", label: "Your approach", fields: [...keysOf(PROPOSAL_FIELDS.slice(0, 2)), "category", ...keysOf(PROPOSAL_FIELDS.slice(2, 4))] },
+    ...(openFunding ? [{ key: "framing", label: "Problem framing", fields: keysOf(PROBLEM_FRAMING_FIELDS) }] : []),
+    { key: "outcomes", label: "Outcomes & delivery", fields: keysOf(PROPOSAL_FIELDS.slice(4)) },
+    { key: "funding", label: "Funding & documents", fields: ["amount"] },
+    { key: "review", label: "Review", fields: [] },
+  ];
+}
 
 function abandonDraftAttachments(items, ownerId, proposalId) {
   return Promise.allSettled(items.map((attachment) => deleteAttachment({
@@ -120,6 +134,11 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     ],
     onNavigate,
   });
+
+  const openFunding = posting?.opportunityType === OPEN_FUNDING_TYPE;
+  const steps = useMemo(() => proposalSteps(openFunding), [openFunding]);
+  const wizard = useWizard(steps);
+  const stepIndex = (key) => steps.findIndex((step) => step.key === key);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,13 +243,17 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     const validation = validateProposal(form, posting);
     setErrors(validation);
     if (Object.keys(validation).length) {
-      requestAnimationFrame(() => formRef.current?.querySelector('[aria-invalid="true"]')?.focus());
+      const invalidStep = wizard.stepWithError(validation);
+      if (invalidStep !== null) wizard.goTo(invalidStep);
+      requestAnimationFrame(() => formRef.current?.querySelector('.wizard-panel.is-active [aria-invalid="true"]')?.focus());
       return;
     }
     if (!isConnected || address?.toLowerCase() !== user.id.toLowerCase()) {
       setError("Connect the wallet that owns this account to sign and submit.");
       return;
     }
+    // Progress, the receipt and any retry are shown on the Review step.
+    wizard.goTo(steps.length - 1);
     submitting.current = true; setBusy(true); setError("");
     let audit = null;
     setSaveFailed(false);
@@ -293,54 +316,92 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   // Nothing may be edited once evaluation begins; firestore.rules enforces the
   // same boundary, so a stale tab cannot write past it either.
   if (editProposalId && record && (proposalMatchingLocked(record) || !["draft", "submitted"].includes(record.status))) {
-    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{proposalMatchingLocked(record) ? "Funding or matching has started. The proposal is locked to preserve the funders’ commitment." : `Its status is ${record.status}. A proposal is locked once evaluation begins.`}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View proposal</button></section>;
+    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{proposalMatchingLocked(record) ? "Funding or matching has started. The proposal is locked to preserve the funders’ commitment." : `Its status is ${workflowStatusLabel(proposalWorkflowStatus(record))}. A proposal is locked once evaluation begins.`}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View proposal</button></section>;
   }
-  const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
+  const isOpenFunding = openFunding;
   const blocked = proposalBlockReason(posting, now);
   const disabled = busy || savingDraft || Boolean(blocked);
+  const showForm = !(active && !editing && !draftExists);
   const textField = ([key, label, max]) => <Field key={key} htmlFor={`proposal-${key}`} label={label} error={errors[key]}>
     {({ id, describedBy, invalid }) => {
       const Tag = key === "title" ? "input" : "textarea";
       return <Tag id={id} rows={key === "title" ? undefined : 4} value={form[key] || ""} maxLength={max} aria-describedby={describedBy} aria-invalid={invalid} required onChange={(event) => update(key, event.target.value)} />;
     }}
   </Field>;
+  const text = (key) => String(form[key] ?? "").trim();
 
   return <section className="page create-page">
     <button className="back" onClick={back}>{editing ? "Back to proposal" : "Back to opportunity"}</button>
     <div className="page-heading"><span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
       <h1>{editing ? "Edit your proposal" : draftExists ? "Resume your draft" : "Submit a proposal"}</h1>
       <p>Respond to {posting.title}. All fields are required to submit; you can save an unfinished draft at any point. Supporting PDFs are optional.</p></div>
+    {showForm && <WizardSteps steps={steps} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
+      completeSteps={wizard.completeSteps(validateProposal(form, posting))} visitedSteps={wizard.visited} lockForward={pending} />}
     <div className="form-layout">
       <form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
         <SubmissionError message={error} />
-        {active && !editing && !draftExists ? <div className="empty"><h2>You already have an active proposal</h2><p>Withdraw it before submitting a replacement.</p><button className="primary" type="button" onClick={() => onNavigate(`proposal/${active.id}`)}>View my proposal</button></div> : <>
+        {!showForm ? <div className="empty"><h2>You already have an active proposal</h2><p>Withdraw it before submitting a replacement.</p><button className="primary" type="button" onClick={() => onNavigate(`proposal/${active.id}`)}>View my proposal</button></div> : <>
           {blocked && <p className="error-banner" role="alert">{blocked}</p>}
           {editing && <p className="field-hint" role="status">This proposal has been submitted but not yet evaluated. Saving your changes records the edit — the changed fields, your wallet and the time — and returns the proposal for wallet verification, which appends a revision on Arbitrum Sepolia beside the original.</p>}
-          <fieldset className="field-group" disabled={disabled}>
-            <legend>Your approach</legend>
-            {PROPOSAL_FIELDS.slice(0, 2).map(textField)}
-            <Field htmlFor="proposal-category" label="Quantum or quantum-adjacent category" error={errors.category}>
-              {({ id, describedBy, invalid }) => <ProposalCategorySelect id={id} value={form.category || ""} disabled={disabled} invalid={invalid} describedBy={describedBy} onChange={(value) => update("category", value)} />}
-            </Field>
-            {PROPOSAL_FIELDS.slice(2).map(textField)}
-          </fieldset>
-          {isOpenFunding && <fieldset className="field-group" disabled={disabled}><legend>Problem framing</legend><p className="field-hint">The funder acts as the problem owner for selection. Your proposal follows the same evaluation, selection and approval process as a funded problem proposal.</p>{PROBLEM_FRAMING_FIELDS.map(textField)}</fieldset>}
-          <fieldset className="field-group" disabled={disabled}><legend>Funding and supporting material</legend>
-            <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} error={errors.amount}>
-              {({ id, describedBy, invalid }) => <input id={id} type="number" min="0.000001" max="1000000000" step="any" required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
-            </Field>
-            {editing && <p className="field-hint">Supporting PDFs cannot be changed after submission. They stay as the files under review.</p>}
-            <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments} onChange={setAttachments} onPendingChange={setPending} disabled={disabled || editing} />
-          </fieldset>
-          <p className="field-hint">{editing
-            ? "Your wallet signs the amendment first. The proposal is updated only after that transaction is confirmed on Arbitrum Sepolia, so the stored version always matches its on-chain record."
-            : "Your wallet signs first. The proposal is saved only after that transaction is confirmed on Arbitrum Sepolia, so nothing enters evaluation unverified."}</p>
-          <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
-          <div className="form-actions">
-            <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Sign and submit proposal"}</button>
-            {!editing && <button className="secondary" type="button" disabled={disabled || pending} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>}
+          <div className="wizard-card">
+            <WizardPanel index={stepIndex("approach")} current={wizard.current}>
+              <fieldset className="field-group" disabled={disabled}>
+                <legend>Your approach</legend>
+                {PROPOSAL_FIELDS.slice(0, 2).map(textField)}
+                <Field htmlFor="proposal-category" label="Quantum or quantum-adjacent category" error={errors.category}>
+                  {({ id, describedBy, invalid }) => <ProposalCategorySelect id={id} value={form.category || ""} disabled={disabled} invalid={invalid} describedBy={describedBy} onChange={(value) => update("category", value)} />}
+                </Field>
+                {PROPOSAL_FIELDS.slice(2, 4).map(textField)}
+              </fieldset>
+            </WizardPanel>
+            {isOpenFunding && <WizardPanel index={stepIndex("framing")} current={wizard.current}>
+              <fieldset className="field-group" disabled={disabled}><legend>Problem framing</legend><p className="field-hint">The funder acts as the problem owner for selection. Your proposal follows the same evaluation, selection and approval process as a funded problem proposal.</p>{PROBLEM_FRAMING_FIELDS.map(textField)}</fieldset>
+            </WizardPanel>}
+            <WizardPanel index={stepIndex("outcomes")} current={wizard.current}>
+              <fieldset className="field-group" disabled={disabled}><legend>Outcomes and delivery</legend>{PROPOSAL_FIELDS.slice(4).map(textField)}</fieldset>
+            </WizardPanel>
+            <WizardPanel index={stepIndex("funding")} current={wizard.current}>
+              <fieldset className="field-group" disabled={disabled}><legend>Funding and supporting material</legend>
+                <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} error={errors.amount}>
+                  {({ id, describedBy, invalid }) => <input id={id} type="number" min="0.000001" max="1000000000" step="any" required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
+                </Field>
+                {editing && <p className="field-hint">Supporting PDFs cannot be changed after submission. They stay as the files under review.</p>}
+                <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments} onChange={setAttachments} onPendingChange={(count) => setPending(count > 0)} disabled={disabled || editing} />
+              </fieldset>
+            </WizardPanel>
+            <WizardPanel index={stepIndex("review")} current={wizard.current}>
+              <div className="wizard-review-head">
+                <h2>Review</h2>
+                <p className="field-hint">Check everything before you {editing ? "save your changes" : "submit"}.</p>
+              </div>
+              <ReviewRows onEdit={wizard.goTo} rows={[
+                { label: "Title", value: text("title"), step: stepIndex("approach") },
+                { label: "Approach", value: text("summary"), step: stepIndex("approach") },
+                { label: "Category", value: PROPOSAL_CATEGORIES.find((item) => item.value === form.category)?.label ?? "", empty: "Not chosen", step: stepIndex("approach") },
+                ...(isOpenFunding ? [{ label: "Proposed problem", value: text("proposedProblem"), step: stepIndex("framing") }] : []),
+                { label: "Success criteria", value: text("successCriteria"), step: stepIndex("outcomes") },
+                { label: "Timeline", value: text("timeline"), step: stepIndex("outcomes") },
+                { label: "Requested funding", value: form.amount ? `${posting.currency} ${Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: stepIndex("funding") },
+                { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: stepIndex("funding") },
+              ]} />
+              <p className="field-hint">{editing
+                ? "Your wallet signs the amendment first. The proposal is updated only after that transaction is confirmed on Arbitrum Sepolia, so the stored version always matches its on-chain record."
+                : "Your wallet signs first. The proposal is saved only after that transaction is confirmed on Arbitrum Sepolia, so nothing enters evaluation unverified."}</p>
+            </WizardPanel>
+            <div className="wizard-nav">
+              <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>Back</button>
+              <div className="wizard-nav-end">
+                {!wizard.isLast && <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pending}>Continue</button>}
+                {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Sign and submit proposal"}</button>}
+              </div>
+            </div>
           </div>
-          {!editing && <DraftStatus savedAt={savedAt} saving={savingDraft} />}
+          <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
+          {!editing && <div className="form-actions wizard-secondary">
+            <button className="secondary" type="button" disabled={disabled || pending} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>
+            <DraftStatus savedAt={savedAt} saving={savingDraft} />
+          </div>}
+          {Object.values(errors).some(Boolean) && <p className="field-hint" role="status">{Object.values(errors).filter(Boolean).length} field(s) need attention. Steps marked ! have the details.</p>}
         </>}
         {leaveTarget && (
           <LeaveDraftPrompt

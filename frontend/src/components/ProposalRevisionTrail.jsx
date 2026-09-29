@@ -3,6 +3,8 @@ import { listProposalRevisions } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { formatInstant } from "../lib/datetime.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
+import { proposalWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
+import { StatusBadge } from "./StatusBadge.jsx";
 
 const FIELD_LABELS = {
   ...Object.fromEntries([...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS].map(([key, label]) => [key, label])),
@@ -19,7 +21,9 @@ function shortWallet(address) {
 
 function summary(entry) {
   if (entry.status === "withdrawn" && entry.previousStatus !== "withdrawn") return "Withdrawn from evaluation";
-  if (entry.status !== entry.previousStatus) return `Status changed from ${entry.previousStatus} to ${entry.status}`;
+  if (entry.status !== entry.previousStatus) {
+    return `Status changed from ${workflowStatusLabel(proposalWorkflowStatus({ status: entry.previousStatus }))} to ${workflowStatusLabel(proposalWorkflowStatus({ status: entry.status }))}`;
+  }
   return "Edited after submission";
 }
 
@@ -47,7 +51,7 @@ export function ProposalRevisionTrail({ proposalId, field, uid }) {
     <p className="field-hint">Every change made after submission. Recorded by the platform, not by the author.</p>
     <ol className="revision-trail">
       {entries.map((entry) => <li key={entry.id}>
-        <p><strong>{summary(entry)}</strong> · <time>{formatInstant(entry.at)}</time></p>
+        <p><strong>{summary(entry)}</strong>{entry.status !== entry.previousStatus && <> <StatusBadge status={proposalWorkflowStatus({ status: entry.status })} /></>} · <time>{formatInstant(entry.at)}</time></p>
         <p className="table-row-meta">By {shortWallet(entry.actor)}</p>
         {entry.changedFields?.length > 0 && <p className="table-row-meta">
           Changed: {entry.changedFields.map((key) => FIELD_LABELS[key] ?? key).join(", ")}

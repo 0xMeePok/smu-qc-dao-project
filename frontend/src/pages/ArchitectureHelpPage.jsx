@@ -1,4 +1,5 @@
 import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
+import { StatusLegend } from "../components/StatusBadge.jsx";
 import { useSession } from "../context/SessionContext.jsx";
 import { isAdmin } from "../lib/roles.js";
 
@@ -30,8 +31,18 @@ export default function ArchitectureHelpPage({ onNavigate }) {
         <h2>How to read a verification chip</h2>
         <p>
           Verified, pending, failed, and not anchored describe that hash check.
-          They are not scores, roles, or workflow states such as Open or Draft.
+          They are not scores, roles, or workflow states such as Submitted or Draft.
         </p>
+      </div>
+
+      <div className="detail-section" id="workflow-status">
+        <h2>Workflow status reference</h2>
+        <p>
+          Every card, table, detail page, dashboard, audit trail and notification
+          shows a status from this one list. Hover or focus a badge anywhere to see
+          what it means and what happens next.
+        </p>
+        <StatusLegend />
       </div>
 
       {showAuditTrail ? (

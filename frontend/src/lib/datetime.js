@@ -1,4 +1,5 @@
 import { deadlinePassed } from "../../../firebase/functions/opportunityExpiry.js";
+import { WORKFLOW_STATUS, workflowStatusLabel } from "../config/workflowStatus.js";
 
 /** UTC date and countdown formatters. */
 
@@ -72,7 +73,7 @@ export function countdownParts(target, now = new Date()) {
 export function formatCountdown(target, now = new Date()) {
   const parts = countdownParts(target, now);
   if (!parts) return "—";
-  if (parts.expired) return "Expired";
+  if (parts.expired) return workflowStatusLabel(WORKFLOW_STATUS.EXPIRED);
 
   return `${parts.days}d ${pad(parts.hours)}h ${pad(parts.minutes)}m left`;
 }
@@ -96,7 +97,7 @@ export function expiryUrgencyLabel(urgency) {
     normal: "Open",
     approaching: "Approaching deadline",
     critical: "Deadline imminent",
-    expired: "Expired",
+    expired: workflowStatusLabel(WORKFLOW_STATUS.EXPIRED),
     unknown: "Deadline unavailable",
   }[urgency] ?? "Deadline unavailable";
 }

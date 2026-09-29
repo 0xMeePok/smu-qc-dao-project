@@ -38,7 +38,7 @@ import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
-import { listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
+import { listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
@@ -205,6 +205,12 @@ export const listMyProposalQueue = onCall(MEMBER_CALL_OPTIONS, async (request) =
 export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return evaluatorQueue({ db, uid, cursor: request.data?.cursor ?? null, filter: request.data?.filter ?? "pending" });
+});
+
+// QCDAO-91 shared "Action Needed" workspace tab.
+export const listActionItems = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return actionItems({ db, uid });
 });
 
 export const recordOwnerReview = onCall(MEMBER_CALL_OPTIONS, async (request) => {

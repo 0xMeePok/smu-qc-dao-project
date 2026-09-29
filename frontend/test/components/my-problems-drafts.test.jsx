@@ -1,5 +1,6 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** QCDAO-50 - drafts on the owner's workspace. */
@@ -168,12 +169,20 @@ it("QCDAO-132 can load and resume a draft older than the first 50 postings", asy
 });
 
 /** QCDAO-62/63 - the researcher's tracking list and the evaluator's queue. */
-const queues = vi.hoisted(() => ({ mine: { items: [] }, drafts: [], evaluator: async () => ({ items: [], nextCursor: null }), navigated: [] }));
+const queues = vi.hoisted(() => ({ mine: { items: [] }, drafts: [], evaluator: async () => ({ items: [], nextCursor: null }), navigated: [],
+  actions: null, selected: [], confirmed: [] }));
 
 vi.mock("../../src/lib/proposalQueues.js", async (importOriginal) => ({
   ...(await importOriginal()),
   listMyProposalQueue: async () => queues.mine,
   listEvaluatorQueue: async (payload) => queues.evaluator(payload),
+  listActionItems: async () => queues.actions,
+}));
+
+vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  selectMockProposal: async (payload) => { queues.selected.push(payload); },
+  confirmMockProposal: async (payload) => { queues.confirmed.push(payload); },
 }));
 
 vi.mock("../../src/lib/proposals.js", async (importOriginal) => ({
@@ -182,7 +191,7 @@ vi.mock("../../src/lib/proposals.js", async (importOriginal) => ({
   deleteProposalDraft: async () => {},
 }));
 
-const { EvaluatorQueue, ResearcherProposals } = await import("../../src/components/RoleViews.jsx");
+const { ActionNeeded, EvaluatorQueue, ResearcherProposals } = await import("../../src/components/RoleViews.jsx");
 
 const navigate = (route) => queues.navigated.push(route);
 const SOON = "2026-09-20T00:00:00.000Z";
@@ -194,10 +203,10 @@ describe("QCDAO-62 tracking my own proposals", () => {
     queues.navigated = [];
     queues.drafts = [];
     queues.mine = { items: [
-      { id: "p1", title: "Quantum routing", status: "submitted", createdAt: "2026-09-01T00:00:00.000Z",
+      { id: "p1", title: "Quantum routing", status: "submitted", workflowStatus: "submitted", createdAt: "2026-09-01T00:00:00.000Z",
         problemId: "problem-1", posting: { id: "problem-1", title: "Cold-chain routing", status: "open", expiresAt: LATER },
         comments: 2, qualifying: 1, recommendations: ["recommend"] },
-      { id: "p2", title: "Annealing study", status: "withdrawn", createdAt: "2026-09-05T00:00:00.000Z",
+      { id: "p2", title: "Annealing study", status: "withdrawn", workflowStatus: "declined", createdAt: "2026-09-05T00:00:00.000Z",
         problemId: "problem-2", posting: { id: "problem-2", title: "Scheduling", status: "open", expiresAt: SOON },
         comments: 0, qualifying: 0, recommendations: [] },
     ] };
@@ -206,9 +215,11 @@ describe("QCDAO-62 tracking my own proposals", () => {
   it("shows feedback progress, comment count and a deep link into the proposal", async () => {
     render(<ResearcherProposals onNavigate={navigate} />);
     await screen.findByText("Quantum routing");
-    expect(screen.getByText(/1 evaluator recommendation: Recommend/)).toBeTruthy();
+    // QCDAO-91: lifecycle and evaluator feedback render as shared status badges.
+    expect(screen.getByText("Evaluator · Recommend")).toBeTruthy();
     expect(screen.getByText(/2 comments/)).toBeTruthy();
-    expect(screen.getByText(/Awaiting evaluator recommendation/)).toBeTruthy();
+    expect(screen.getByText("Awaiting evaluator feedback")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Declined" })).toBeTruthy();
     // The opportunity is named, not linked: only the proposal is clickable.
     expect(screen.getByText(/Proposal for: Cold-chain routing/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Cold-chain routing" })).toBeNull();
@@ -223,8 +234,8 @@ describe("QCDAO-62 tracking my own proposals", () => {
     const { container } = render(<ResearcherProposals onNavigate={navigate} />);
     await screen.findByText("Quantum routing");
     const row = screen.getByText("Quantum routing").closest(".table-row");
-    expect(row.querySelector(".expiry-urgency").textContent).toBe("Awaiting creator acceptance");
-    expect(container.textContent).toContain("Awaiting creator acceptance");
+    expect(row.querySelector(".expiry-urgency").textContent).toBe("Pending approval");
+    expect(container.textContent).toContain("Pending approval");
   });
 
   it("orders by closing soonest and filters by workflow status", async () => {
@@ -232,7 +243,7 @@ describe("QCDAO-62 tracking my own proposals", () => {
     await screen.findByText("Quantum routing");
     const titles = () => [...container.querySelectorAll(".table-row")].map((row) => row.querySelector("strong")?.textContent);
     expect(titles()).toEqual(["Annealing study", "Quantum routing"]);
-    fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "withdrawn" } });
+    fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "declined" } });
     await waitFor(() => expect(titles()).toEqual(["Annealing study"]));
   });
 });
@@ -255,7 +266,7 @@ describe("QCDAO-63 the evaluator recommendation queue", () => {
     render(<EvaluatorQueue onNavigate={navigate} />);
     await screen.findByText("Soon solution");
     expect(screen.getByText(/Scheduling/)).toBeTruthy();
-    expect(screen.getByText(/No recommendation yet/)).toBeTruthy();
+    expect(screen.getByText("Awaiting evaluator feedback")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open proposal" }));
     expect(queues.navigated).toContain("proposal/s1");
   });
@@ -264,7 +275,7 @@ describe("QCDAO-63 the evaluator recommendation queue", () => {
     render(<EvaluatorQueue onNavigate={navigate} />);
     await screen.findByText("Soon solution");
     fireEvent.click(screen.getByRole("tab", { name: "My recommendations" }));
-    await screen.findByText(/My recommendation: Recommend with revisions/);
+    await screen.findByText("My recommendation · Recommend with revisions");
     expect(screen.queryByText("Soon solution")).toBeNull();
   });
 
@@ -297,12 +308,55 @@ describe("QCDAO-63 the evaluator recommendation queue", () => {
     await waitFor(() => expect(screen.getByText("Awaiting acceptance")).toBeTruthy());
 
     const locked = screen.getByText("Awaiting acceptance").closest(".table-row");
-    expect(locked.querySelector(".status-dot").textContent).toBe("Awaiting creator acceptance");
-    expect(locked.querySelector(".status-dot").className).toContain("is-awaiting");
+    expect(locked.querySelector(".workflow-badge").textContent).toBe("Pending approval");
+    expect(locked.querySelector(".workflow-badge").className).toContain("tone-warning");
     expect(locked.textContent).not.toContain("Edit");
 
     const open = screen.getByText("Still open").closest(".table-row");
-    expect(open.querySelector(".status-dot").textContent).not.toBe("Awaiting creator acceptance");
+    expect(open.querySelector(".workflow-badge").textContent).toBe("Submitted");
     expect(open.textContent).toContain("Edit");
+  });
+});
+
+describe("[QCDAO-91] the shared Action Needed tab", () => {
+  afterEach(cleanup);
+  const item = (id, extra = {}) => ({ id, title: `Proposal ${id}`, problemId: "problem-1",
+    posting: { id: "problem-1", title: "Cold-chain routing" }, amount: 100, currency: "SGD", fundedAmount: 100,
+    workflowStatus: "submitted", recommendations: { recommend: 1, recommend_with_revisions: 0, do_not_recommend: 0 },
+    submittedAt: SOON, ...extra });
+  const empty = { total: 0, owner: { readyToSelect: [], awaitingReview: [] }, researcher: { selectionToAccept: [] }, evaluator: null };
+  const renderTab = () => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <ActionNeeded onNavigate={navigate} />
+  </QueryClientProvider>);
+  beforeEach(() => { queues.navigated = []; queues.selected = []; queues.confirmed = []; });
+
+  it("groups what waits on me by role and selects in place with the comparison's dialog", async () => {
+    queues.actions = { total: 4, owner: { readyToSelect: [item("s1")], awaitingReview: [item("r1", { revisionPathOpen: true })] },
+      researcher: { selectionToAccept: [item("a1", { workflowStatus: "selected", deadlineAt: LATER })] },
+      evaluator: { awaitingRecommendation: [item("e1")], more: true } };
+    renderTab();
+    await screen.findByText("Ready to select");
+    for (const heading of ["Awaiting my review", "Selection to accept", "Awaiting my recommendation"]) expect(screen.getByText(heading)).toBeTruthy();
+    expect(screen.getAllByText("Evaluator · Recommend")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Open the evaluation queue" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select…" }));
+    const dialog = screen.getByRole("dialog", { name: "Select this proposal?" });
+    fireEvent.change(within(dialog).getByLabelText("Selection rationale"), { target: { value: "Meets every constraint posted." } });
+    queues.actions = empty;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Select and accept" }));
+    await screen.findByText(/Selection recorded/);
+    expect(queues.selected).toEqual([{ problemId: "problem-1", proposalId: "s1", rationale: "Meets every constraint posted." }]);
+    await screen.findByText("Nothing needs your attention right now.");
+  });
+
+  it("answers a selection with the matching panel's accept dialog", async () => {
+    queues.actions = { ...empty, total: 1, researcher: { selectionToAccept: [item("a1", { workflowStatus: "selected", deadlineAt: LATER })] } };
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept…" }));
+    const dialog = screen.getByRole("dialog", { name: "Accept this selection?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Record my acceptance" }));
+    await screen.findByText(/Your acceptance is recorded/);
+    expect(queues.confirmed).toEqual([{ problemId: "problem-1", proposalId: "a1" }]);
   });
 });

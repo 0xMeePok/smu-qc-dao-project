@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
-import { completeMockEvaluation, confirmMockProposal, declineMockProposal, forceExpireMockMatch, fundMockProposal, getMockMatching, MATCHING_LABELS, matchingError, proposalFundingLabel } from "../lib/matching.js";
+import { completeMockEvaluation, confirmMockProposal, declineMockProposal, forceExpireMockMatch, fundMockProposal, getMockMatching, matchingError, proposalFundingStatus } from "../lib/matching.js";
+import { WORKFLOW_STATUS, contributionWorkflowStatus, eventLabel, eventWorkflowStatus } from "../config/workflowStatus.js";
+import { StatusBadge } from "./StatusBadge.jsx";
 import { findProposal } from "../lib/proposals.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
@@ -8,6 +10,54 @@ import { Modal } from "./Modal.jsx";
 import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
 
 const money = (currency, amount) => `${currency} ${Number(amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+
+// The creator's accept or reject reads the same here and in the Action Needed tab.
+const RESPONSE_COPY = {
+  confirm: { title: "Accept this selection?", submit: "Record my acceptance",
+    body: "The problem owner already accepted by selecting your proposal. Your acceptance completes the agreement and locks this proposal’s funds. All other proposals on this problem will be cancelled and their funders refunded. Rejection and reopening are no longer available once the match is confirmed." },
+  decline: { title: "Reject this selection?", submit: "Reject and refund funders",
+    body: "The selected proposal will be excluded from further selection and all its contributions refunded. The other proposals reopen for funding, keeping their existing contributions until the original posting deadline. This rejection is recorded with your reason." },
+};
+
+function SelectionResponseFields({ kind, rationale, onRationale, busy }) {
+  return <>
+    <p>{RESPONSE_COPY[kind].body}</p>
+    {kind === "decline" && <><label htmlFor="matching-rationale">Reason for rejecting</label><textarea id="matching-rationale" value={rationale} minLength={10} maxLength={2000} required rows={4} disabled={busy} onChange={(event) => onRationale(event.target.value)} /><p className="field-hint">Required. Recorded with your rejection.</p></>}
+  </>;
+}
+
+/** The selected creator's accept ("confirm") or reject ("decline"), outside the panel. */
+export function SelectionResponseDialog({ kind, problemId, proposal, onCancel, onDone }) {
+  const [rationale, setRationale] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    if (kind === "decline" && rationale.trim().length < 10) {
+      setError("Enter a reason of at least 10 characters for the decision record.");
+      return;
+    }
+    setBusy(true); setError("");
+    try {
+      const payload = { problemId, proposalId: proposal.id };
+      if (kind === "decline") await declineMockProposal({ ...payload, reason: rationale.trim() });
+      else await confirmMockProposal(payload);
+      await onDone?.(kind);
+    } catch (err) {
+      setError(matchingError(err));
+      setBusy(false);
+    }
+  };
+  return <Modal labelledBy="matching-action-title" onDismiss={() => { if (!busy) onCancel(); }}>
+    <form onSubmit={submit}><div className="modal-head"><h2 id="matching-action-title">{RESPONSE_COPY[kind].title}</h2></div>
+      <div className="modal-body"><strong>{proposal.title}</strong>
+        <SelectionResponseFields kind={kind} rationale={rationale} onRationale={setRationale} busy={busy} />
+        {error && <p className="error-banner" role="alert">{error}</p>}
+      </div><div className="modal-actions"><button type="button" className="secondary" disabled={busy} onClick={onCancel}>Cancel</button><button type="submit" className="primary" disabled={busy}>{busy ? "Saving…" : RESPONSE_COPY[kind].submit}</button></div>
+    </form>
+  </Modal>;
+}
 
 export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
   const { user } = useAuth();
@@ -161,8 +211,8 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
     {(waiting || confirmed || (invalidated && state.matching.selectedAt)) && <dl className="matching-approval">
       <dt>Selected by</dt><dd>{state.matching.selectedBy || state.matching.ownerApprovedBy || "Problem owner"}{state.matching.selectedAt && ` · ${formatInstant(state.matching.selectedAt)}`}</dd>
       <dt>Selection reason</dt><dd>{state.matching.rationale || "Recorded in the selection event"}</dd>
-      <dt>Problem owner acceptance</dt><dd>{state.matching.ownerApprovedAt ? `Accepted ${formatInstant(state.matching.ownerApprovedAt)}` : "Awaiting problem owner acceptance"}</dd>
-      <dt>Proposal creator acceptance</dt><dd>{state.matching.creatorApprovedAt ? `Accepted ${formatInstant(state.matching.creatorApprovedAt)}` : invalidated ? "Not accepted before closure" : "Awaiting proposal creator acceptance"}</dd>
+      <dt>Problem owner acceptance</dt><dd>{state.matching.ownerApprovedAt ? <><StatusBadge status={WORKFLOW_STATUS.ACCEPTED} /> {formatInstant(state.matching.ownerApprovedAt)}</> : <StatusBadge status={WORKFLOW_STATUS.PENDING_APPROVAL} />}</dd>
+      <dt>Proposal creator acceptance</dt><dd>{state.matching.creatorApprovedAt ? <><StatusBadge status={WORKFLOW_STATUS.ACCEPTED} /> {formatInstant(state.matching.creatorApprovedAt)}</> : invalidated ? "Not accepted before closure" : <StatusBadge status={WORKFLOW_STATUS.PENDING_APPROVAL} />}</dd>
     </dl>}
     <div className="matching-actions matching-receipts">
     {selectedAudit && <button type="button" className="text-button" onClick={() => showReceipt(selectedAudit)}>View selection record</button>}
@@ -176,14 +226,14 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
       <p>The problem owner accepted by selecting this proposal. The creator still needs to accept.</p>
       <p>Funding is paused for every proposal on this problem. Either party can reject this selection before the creator accepts. Rejection refunds all contributions to the selected proposal and reopens the other proposals for funding. If the creator misses the deadline, this problem is invalidated and all still-pledged contributions to every proposal are refunded.</p><ExpiryCountdown expiresAt={state.matching.deadlineAt} />{shorterWindow && <p>The remaining posting window is shorter than seven days, so the posting deadline governs acceptance.</p>}</div>}
     {confirmed && <p className="matching-notice" role="status">Both parties approved. The selected proposal’s funds are locked. All other proposals are cancelled and their funders refunded.</p>}
-    {invalidated && <div className="matching-notice" role="status"><strong>Problem invalidated</strong><p>{state.matching.invalidationReason === "posting_expired" ? "The original posting deadline passed." : "The acceptance window closed without a confirmed agreement."} All still-pledged mock contributions have been refunded. Funding and selection are closed.</p></div>}
-    {reopened && <div className="matching-notice" role="status"><strong>Selection rejected · problem reopened</strong><p>The rejected proposal’s contributions were refunded. Other proposals keep their contributions and can be funded or selected until the original posting deadline.</p>{state.matching.postingExpiresAt && <ExpiryCountdown expiresAt={state.matching.postingExpiresAt} />}</div>}
+    {invalidated && <div className="matching-notice" role="status"><strong><StatusBadge status={WORKFLOW_STATUS.INVALIDATED} /> Problem closed</strong><p>{state.matching.invalidationReason === "posting_expired" ? "The original posting deadline passed." : "The acceptance window closed without a confirmed agreement."} All still-pledged mock contributions have been refunded. Funding and selection are closed.</p></div>}
+    {reopened && <div className="matching-notice" role="status"><strong><StatusBadge status={WORKFLOW_STATUS.DECLINED} /> Selection rejected · problem reopened</strong><p>The rejected proposal’s contributions were refunded. Other proposals keep their contributions and can be funded or selected until the original posting deadline.</p>{state.matching.postingExpiresAt && <ExpiryCountdown expiresAt={state.matching.postingExpiresAt} />}</div>}
     {notice && <p className="proposal-success" role="status">{notice}</p>}
     {error && !pending && <p className="error-banner" role="alert">{error}</p>}
     {loading && !state ? <p role="status">Loading funding status…</p> : null}
     {state && items.length === 0 && <p>No proposals available for funding yet.</p>}
     <div className="matching-candidates">{items.map((item) => <article className="matching-candidate" key={item.id}>
-      <h3>{item.title}</h3><span className="status-dot">{proposalFundingLabel(item, state.matching)}</span>
+      <h3>{item.title}</h3><StatusBadge status={proposalFundingStatus(item, state.matching).status} />{proposalFundingStatus(item, state.matching).detail && <span className="funding-note">{proposalFundingStatus(item, state.matching).detail}</span>}
       <p><strong>{money(item.currency, item.fundedAmount)}</strong> of {money(item.currency, item.amount)}</p>
       <p className="field-hint">{["voided", "declined", "cancelled"].includes(item.matching?.status) || invalidated ? "Funding shown is historical. Contributions have been refunded; this proposal is closed." : <>Proposal funding target: {item.fundedAmount >= item.amount ? "Met" : "Not yet met"}. {waiting ? "Funding is paused during the shared acceptance window." : confirmed ? "Matching is complete for this problem." : "The problem owner can select this proposal from the comparison once it is fully funded. Expert evaluation is optional."}</>}</p>
       {item.matching?.evaluationComplete && <p className="field-hint">Optional expert evaluation: Complete</p>}
@@ -201,21 +251,20 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
       {cursor && <button type="button" className="secondary" disabled={loading || busy} onClick={() => setPage(null)}>First proposals</button>}
       {state?.nextCursor && <button type="button" className="secondary" disabled={loading || busy} onClick={() => setPage({ problemId, cursor: state.nextCursor })}>Next proposals</button>}
     </div>}
-    {contributions.length > 0 && <div className="matching-contributions"><h3>Your mock contributions</h3>{contributions.map((item) => <p key={item.id}>{money(item.currency, item.amount)} · {MATCHING_LABELS[item.status] || item.status}{item.status === "refunded" ? " to you" : ""}</p>)}</div>}
+    {contributions.length > 0 && <div className="matching-contributions"><h3>Your mock contributions</h3>{contributions.map((item) => <p key={item.id}>{money(item.currency, item.amount)} <StatusBadge status={contributionWorkflowStatus(item.status)} />{item.status === "refunded" && <span className="funding-note">Returned to you</span>}</p>)}</div>}
     <button className="text-button" type="button" disabled={busy || loading} onClick={refresh}>{loading ? "Refreshing…" : "Refresh funding status"}</button>
     {state?.canForceExpire && waiting && <button className="text-button danger-text" type="button" disabled={busy || loading} onClick={() => openAction("expire", { id: state.matching.proposalId, title: "Expire the current confirmation window" })}>Expire window for demonstration</button>}
-    {state?.history?.length > 0 && <div className="matching-history"><h3>Decision record</h3><p className="field-hint">Off-chain receipts recorded by the server. No blockchain transaction or wallet signature is required for selection or acceptance.</p>{state.history.map((entry) => <details key={entry.id} id={`matching-event-${entry.id}`}><summary>{entry.type.replaceAll("_", " ")} · {formatInstant(entry.createdAt)}</summary><dl><dt>Actor</dt><dd>{entry.actorId || (["funding_contributed", "funding_target_reached"].includes(entry.type) ? "Private contributor" : "Scheduled expiry")}</dd><dt>Role</dt><dd>{entry.actorRole || "Member"}</dd>{entry.actorWallet && <><dt>Connected wallet</dt><dd>{entry.actorWallet}</dd></>}<dt>Proposal</dt><dd>{entry.proposalId || "All proposals"}</dd>{entry.reason && <><dt>Reason</dt><dd>{entry.reason}</dd></>}<dt>Receipt</dt><dd>Recorded off-chain</dd><dt>Record reference</dt><dd>{entry.id}</dd>{entry.deadlineAt && <><dt>Acceptance deadline</dt><dd>{formatInstant(entry.deadlineAt)}</dd>{waiting && entry.proposalId === state.matching.proposalId && <><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={state.matching.deadlineAt} showInstant={false} /></dd></>}</>}</dl>{["owner_selected", "owner_confirmed", "creator_confirmed", "match_confirmed"].includes(entry.type) && entry.proposalId ? <button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={() => openProposalAudit(entry.proposalId)}>View audit receipt</button> : null}</details>)}{state.historyTruncated && <p className="field-hint">Showing the latest 100 events.</p>}</div>}
+    {state?.history?.length > 0 && <div className="matching-history"><h3>Decision record</h3><p className="field-hint">Off-chain receipts recorded by the server. No blockchain transaction or wallet signature is required for selection or acceptance.</p>{state.history.map((entry) => <details key={entry.id} id={`matching-event-${entry.id}`}><summary>{eventLabel(entry.type)} {eventWorkflowStatus(entry.type) && <StatusBadge status={eventWorkflowStatus(entry.type)} interactive={false} />} · {formatInstant(entry.createdAt)}</summary><dl><dt>Actor</dt><dd>{entry.actorId || (["funding_contributed", "funding_target_reached"].includes(entry.type) ? "Private contributor" : "Scheduled expiry")}</dd><dt>Role</dt><dd>{entry.actorRole || "Member"}</dd>{entry.actorWallet && <><dt>Connected wallet</dt><dd>{entry.actorWallet}</dd></>}<dt>Proposal</dt><dd>{entry.proposalId || "All proposals"}</dd>{entry.reason && <><dt>Reason</dt><dd>{entry.reason}</dd></>}<dt>Receipt</dt><dd>Recorded off-chain</dd><dt>Record reference</dt><dd>{entry.id}</dd>{entry.deadlineAt && <><dt>Acceptance deadline</dt><dd>{formatInstant(entry.deadlineAt)}</dd>{waiting && entry.proposalId === state.matching.proposalId && <><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={state.matching.deadlineAt} showInstant={false} /></dd></>}</>}</dl>{["owner_selected", "owner_confirmed", "creator_confirmed", "match_confirmed"].includes(entry.type) && entry.proposalId ? <button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={() => openProposalAudit(entry.proposalId)}>View audit receipt</button> : null}</details>)}{state.historyTruncated && <p className="field-hint">Showing the latest 100 events.</p>}</div>}
     {pending && <Modal labelledBy="matching-action-title" onDismiss={() => { if (!busy) setPending(null); }}>
-      <form onSubmit={act}><div className="modal-head"><h2 id="matching-action-title">{pending.kind === "fund" ? "Fund this proposal with mock funds" : pending.kind === "decline" ? "Reject this selection?" : pending.kind === "evaluate" ? "Complete mock expert evaluation?" : pending.kind === "expire" ? "Expire this window now?" : "Accept this selection?"}</h2></div>
+      <form onSubmit={act}><div className="modal-head"><h2 id="matching-action-title">{pending.kind === "fund" ? "Fund this proposal with mock funds" : pending.kind === "decline" ? RESPONSE_COPY.decline.title : pending.kind === "evaluate" ? "Complete mock expert evaluation?" : pending.kind === "expire" ? "Expire this window now?" : RESPONSE_COPY.confirm.title}</h2></div>
         <div className="modal-body"><strong>{pending.item.title}</strong>
           {pending.kind === "fund" ? <><p>This records a simulated contribution. No wallet payment is needed.</p><label htmlFor="mock-funding-amount">Amount ({pending.item.currency})</label><input id="mock-funding-amount" type="number" inputMode="decimal" min="0.01" max={pending.remaining} step="0.01" value={amount} disabled={busy} onChange={(event) => { setAmount(event.target.value); setPending((current) => ({ ...current, requestId: crypto.randomUUID() })); }} required /></>
-            : pending.kind === "decline" ? <p>The selected proposal will be excluded from further selection and all its contributions refunded. The other proposals reopen for funding, keeping their existing contributions until the original posting deadline. This rejection is recorded with your reason.</p>
+            : pending.kind === "decline" ? <SelectionResponseFields kind="decline" rationale={rationale} onRationale={setRationale} busy={busy} />
               : pending.kind === "evaluate" ? <p>Administrator demo control: records an optional expert evaluation marker for this proposal. Selection requires full funding, not evaluation. This is a simulated evaluation, with your account recorded in the decision history.</p>
                 : pending.kind === "expire" ? <p>Administrator demo control: immediately invalidates this problem and refunds all still-pledged contributions to every proposal.</p>
-              : <p>The problem owner already accepted by selecting your proposal. Your acceptance completes the agreement and locks this proposal’s funds. All other proposals on this problem will be cancelled and their funders refunded. Rejection and reopening are no longer available once the match is confirmed.</p>}
-          {pending.kind === "decline" && <><label htmlFor="matching-rationale">Reason for rejecting</label><textarea id="matching-rationale" value={rationale} minLength={10} maxLength={2000} required rows={4} disabled={busy} onChange={(event) => setRationale(event.target.value)} /><p className="field-hint">Required. Recorded with your rejection.</p></>}
+              : <SelectionResponseFields kind="confirm" />}
           {error && <p className="error-banner" role="alert">{error}</p>}
-        </div><div className="modal-actions"><button type="button" className="secondary" disabled={busy} onClick={() => setPending(null)}>Cancel</button><button type="submit" className="primary" disabled={busy}>{busy ? "Saving…" : pending.kind === "fund" ? "Record mock contribution" : pending.kind === "decline" ? "Reject and refund funders" : pending.kind === "evaluate" ? "Record mock evaluation" : pending.kind === "expire" ? "Expire and refund" : "Record my acceptance"}</button></div>
+        </div><div className="modal-actions"><button type="button" className="secondary" disabled={busy} onClick={() => setPending(null)}>Cancel</button><button type="submit" className="primary" disabled={busy}>{busy ? "Saving…" : pending.kind === "fund" ? "Record mock contribution" : pending.kind === "decline" ? RESPONSE_COPY.decline.submit : pending.kind === "evaluate" ? "Record mock evaluation" : pending.kind === "expire" ? "Expire and refund" : RESPONSE_COPY.confirm.submit}</button></div>
       </form>
     </Modal>}
     {relatedAudit && <RelatedAuditReceiptPane kind={relatedAudit.kind} record={relatedAudit.record} loading={relatedAudit.loading} error={relatedAudit.error} onClose={() => { relatedAuditRequest.current += 1; setRelatedAudit(null); }} />}

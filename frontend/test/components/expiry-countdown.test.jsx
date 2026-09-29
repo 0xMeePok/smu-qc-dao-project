@@ -67,8 +67,9 @@ describe("ExpiryCountdown", () => {
     expect(vi.getTimerCount()).toBe(0);
     cleanup();
 
+    // QCDAO-91: a withdrawn opportunity reads as the shared Declined status.
     render(<ExpiryCountdown expiresAt={new Date("2026-12-01T00:00:00Z")} status="cancelled" />);
-    expect(screen.getByText("Withdrawn")).toBeTruthy();
+    expect(screen.getByText("Declined")).toBeTruthy();
     cleanup();
 
     render(<ExpiryCountdown expiresAt={new Date("2026-12-01T00:00:00Z")} status="in_review" />);
@@ -82,21 +83,21 @@ describe("ExpiryCountdown", () => {
       <ExpiryCountdown expiresAt={expiresAt} status="submitted" matching={{ status: "awaiting_confirmation", deadlineAt }} />,
     );
     expect(screen.getByText("7d 00h 00m left")).toBeTruthy();
-    expect(screen.getByText("Awaiting creator acceptance")).toBeTruthy();
+    expect(screen.getByText("Pending approval")).toBeTruthy();
     expect(screen.getByLabelText(/Creator response ends 2026-09-08 00:00:00 UTC/)).toBeTruthy();
 
     rerender(<ExpiryCountdown expiresAt={expiresAt} status="submitted" matching={{ status: "open", reopenedAt: NOW }} />);
     expect(screen.getByText("30d 00h 00m left")).toBeTruthy();
     expect(screen.getByText("Open")).toBeTruthy();
-    expect(screen.queryByText("Awaiting creator acceptance")).toBeNull();
+    expect(screen.queryByText("Pending approval")).toBeNull();
   });
 
   it("[QCDAO-86] labels a confirmed match as closed even before posting expiry", () => {
     const { container } = render(
       <ExpiryCountdown expiresAt={new Date("2026-10-01T00:00:00Z")} status="submitted" matching={{ status: "confirmed", confirmedAt: NOW }} />,
     );
-    expect(screen.getByText("Match confirmed")).toBeTruthy();
-    expect(screen.getByLabelText("Match confirmed at 2026-09-01 00:00:00 UTC.")).toBeTruthy();
+    expect(screen.getByText("Decision recorded")).toBeTruthy();
+    expect(screen.getByLabelText("Decision recorded at 2026-09-01 00:00:00 UTC.")).toBeTruthy();
     expect(screen.getByText("2026-09-01 00:00:00 UTC")).toBeTruthy();
     expect(screen.queryByText("2026-10-01 00:00:00 UTC")).toBeNull();
     expect(screen.queryByText(/left$/)).toBeNull();

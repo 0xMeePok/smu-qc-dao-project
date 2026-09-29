@@ -17,7 +17,9 @@ import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { PROPOSAL_CATEGORIES } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
-import { getMockMatching, mergeMatchingState, proposalFundingLabel, proposalMatchingLocked } from "../lib/matching.js";
+import { getMockMatching, mergeMatchingState, proposalFundingStatus, proposalMatchingLocked } from "../lib/matching.js";
+import { recommendationCounts, recommendationEntries } from "../config/workflowStatus.js";
+import { EvaluationBadges, StatusBadge } from "../components/StatusBadge.jsx";
 import { isModerated } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
 import { ReportableComments } from "../components/ReportableComments.jsx";
@@ -92,6 +94,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     }, 10_000);
     return () => { active = false; clearInterval(timer); };
   }, [proposalId, Boolean(proposal), auditBusy, proposal?.audit?.status]);
+  // Keeps the evaluation badges in step with a recommendation just filed below.
+  const reloadProposal = () => findProposal(proposalId, { fromServer: true }).then((current) => {
+    if (current) setProposal((previous) => ({ ...current,
+      matching: mergeMatchingState(previous?.matching, current.matching),
+      problemMatching: current.problemMatching || previous?.problemMatching,
+    }));
+  }).catch(() => { /* The badges catch up on the next load. */ });
   const withdraw = async () => {
     const withdrawalReason = (anchoredWithdrawal?.reason ?? reason).trim();
     if (!anchoredWithdrawal) {
@@ -162,6 +171,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     document.getElementById("proposal-panel-record")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
   const locked = proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status);
+  const funding = proposalFundingStatus(proposal);
   return <section className="page detail-page">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
     {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. <button type="button" className="text-button" onClick={openRecord}>Check its on-chain verification</button> under Record.</p>}
@@ -169,7 +179,12 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     <div className="detail-layout"><article className="detail-main">
       <div className="card-top">
         <span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
-        <div className="trust-status-row"><span className="status-dot">{proposalFundingLabel(proposal)}</span><VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending /></div>
+        <div className="trust-status-row">
+          <StatusBadge status={funding.status} />
+          {funding.detail && <span className="funding-note">{funding.detail}</span>}
+          {proposal.status !== "draft" && <EvaluationBadges counts={recommendationCounts(proposal)} />}
+          <VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending />
+        </div>
       </div>
       <h1>{proposal.title}</h1>
       <p className="lead">{proposal.summary}</p>
@@ -190,7 +205,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
 
       <div className={panel("overview")} role="tabpanel" id="proposal-panel-overview" aria-labelledby="proposal-tab-overview">
-        {proposal.status === "withdrawn" && <DetailGroup title="Withdrawn">
+        {proposal.status === "withdrawn" && <DetailGroup title="Withdrawal">
           <DetailItem heading="Withdrawal reason">{proposal.withdrawalReason}</DetailItem>
         </DetailGroup>}
         {isOpenFunding && <>
@@ -220,7 +235,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
             usually empty tab. */}
         {owns && <OwnerReviewPanel proposalId={proposal.id} revisionPathOpen={proposal.status === "submitted" && !locked} />}
         {showCollaboration && <>
-          <ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId} />
+          <ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId}
+            recommenders={Object.keys(recommendationEntries(proposal))} onRecommendationChange={reloadProposal} />
           <div className="detail-report"><ReportContentButton contentType="proposal" contentId={proposal.id} /></div>
         </>}
       </div>
@@ -228,7 +244,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       {showCollaboration && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
         <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
-          if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
+          if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...current.matching, ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
         }} />
       </div>}
 

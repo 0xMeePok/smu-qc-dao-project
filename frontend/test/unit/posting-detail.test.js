@@ -38,11 +38,12 @@ function source(relativeFromTest) {
 
 describe("[QCDAO-54] view posting detail page", () => {
   it("[FUT-OPD-120] labels workflow status and overlays Expired only while responses are still open", () => {
+    // QCDAO-91 ticket vocabulary: stored states fold into the shared statuses.
     assert.equal(opportunityStatusLabel("submitted"), "Submitted");
-    assert.equal(opportunityStatusLabel("in_review"), "In review");
+    assert.equal(opportunityStatusLabel("in_review"), "Submitted");
     assert.equal(opportunityStatusLabel("submitted", { expiresAt: PAST, now: NOW }), "Expired");
-    assert.equal(opportunityStatusLabel("funded", { expiresAt: PAST, now: NOW }), "Funded");
-    assert.equal(opportunityStatusLabel("cancelled", { expiresAt: PAST, now: NOW }), "Withdrawn");
+    assert.equal(opportunityStatusLabel("funded", { expiresAt: PAST, now: NOW }), "Decision recorded");
+    assert.equal(opportunityStatusLabel("cancelled", { expiresAt: PAST, now: NOW }), "Declined");
     assert.equal(opportunityStatusLabel("expired", { expiresAt: PAST, now: NOW }), "Expired");
   });
 

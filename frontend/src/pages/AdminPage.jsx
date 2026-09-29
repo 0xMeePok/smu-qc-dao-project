@@ -32,12 +32,19 @@ export default function AdminPage({ onNavigate }) {
   const [error, setError] = useState(null);
   const [successBanner, setSuccessBanner] = useState(null);
   const [pendingModeration, setPendingModeration] = useState(null);
+  // QCDAO-91: pending reports open first, unless the admin already picked a tab.
+  const tabChosen = useRef(false);
+  const chooseTab = (tab) => { tabChosen.current = true; setActiveTab(tab); };
 
   useEffect(() => {
     if (!isSignedIn || !isAdmin(profile?.role) || profile?.suspended) return undefined;
     let active = true;
     listModerationQueue({ status: "pending", sort: "oldest" })
-      .then((data) => { if (active) setPendingModeration(data.pendingCount ?? 0); })
+      .then((data) => {
+        if (!active) return;
+        setPendingModeration(data.pendingCount ?? 0);
+        if ((data.pendingCount ?? 0) > 0 && !tabChosen.current) setActiveTab("moderation");
+      })
       .catch(() => { if (active) setPendingModeration(null); });
     return () => { active = false; };
   }, [isSignedIn, profile?.role, profile?.suspended]);
@@ -146,7 +153,7 @@ export default function AdminPage({ onNavigate }) {
       )}
 
       <div className="admin-tabs-nav" role="tablist" aria-label="Administrator sections">
-        <button type="button" id="admin-tab-moderation" role="tab" aria-selected={activeTab === "moderation"} aria-controls="admin-panel-moderation" className={`admin-tab-btn ${activeTab === "moderation" ? "active" : ""}`} onClick={() => setActiveTab("moderation")}>Content moderation{pendingModeration !== null ? ` (${pendingModeration})` : ""}</button>
+        <button type="button" id="admin-tab-moderation" role="tab" aria-selected={activeTab === "moderation"} aria-controls="admin-panel-moderation" className={`admin-tab-btn ${activeTab === "moderation" ? "active" : ""}`} onClick={() => chooseTab("moderation")}>Content moderation{pendingModeration !== null ? ` (${pendingModeration})` : ""}</button>
         <button
           type="button"
           id="admin-tab-users"
@@ -154,7 +161,7 @@ export default function AdminPage({ onNavigate }) {
           aria-selected={activeTab === "users"}
           aria-controls="admin-panel-users"
           className={`admin-tab-btn ${activeTab === "users" ? "active" : ""}`}
-          onClick={() => setActiveTab("users")}
+          onClick={() => chooseTab("users")}
         >
           User Directory & Roles ({totalUsers})
         </button>
@@ -165,7 +172,7 @@ export default function AdminPage({ onNavigate }) {
           aria-selected={activeTab === "proposals"}
           aria-controls="admin-panel-proposals"
           className={`admin-tab-btn ${activeTab === "proposals" ? "active" : ""}`}
-          onClick={() => setActiveTab("proposals")}
+          onClick={() => chooseTab("proposals")}
         >
           Proposal Audit Trail
         </button>
@@ -176,7 +183,7 @@ export default function AdminPage({ onNavigate }) {
           aria-selected={activeTab === "postings"}
           aria-controls="admin-panel-postings"
           className={`admin-tab-btn ${activeTab === "postings" ? "active" : ""}`}
-          onClick={() => setActiveTab("postings")}
+          onClick={() => chooseTab("postings")}
         >
           Problem Statement Logs
         </button>
@@ -187,7 +194,7 @@ export default function AdminPage({ onNavigate }) {
           aria-selected={activeTab === "funding"}
           aria-controls="admin-panel-funding"
           className={`admin-tab-btn ${activeTab === "funding" ? "active" : ""}`}
-          onClick={() => setActiveTab("funding")}
+          onClick={() => chooseTab("funding")}
         >
           Open Funding Logs
         </button>
@@ -198,7 +205,7 @@ export default function AdminPage({ onNavigate }) {
           aria-selected={activeTab === "audits"}
           aria-controls="admin-panel-audits"
           className={`admin-tab-btn ${activeTab === "audits" ? "active" : ""}`}
-          onClick={() => setActiveTab("audits")}
+          onClick={() => chooseTab("audits")}
         >
           Governance Audit Trail
         </button>

@@ -177,3 +177,48 @@ These records do not set `selected`, `awaiting_confirmation`, `accepted`, or `re
 ### `proposals/{proposalId}/ownerReviews/{reviewId}`
 
 Append-only and server-owned. Clients cannot read or write the subcollection or `ownerReviewLatest/current`. The author, the designated owner, and administrators read the trail through `listOwnerReviews`. The author's queue reads the latest summary through `listMyProposalQueue`. A retried submit with the same `requestId` returns the original record.
+
+## Workflow status model (QCDAO-91)
+
+Stored fields keep their values; what members see is derived from them by one
+shared module, `firebase/functions/workflowStatus.js`, which Cloud Functions and
+the frontend both import (`frontend/src/config/workflowStatus.js` re-exports it).
+It holds the enumeration and, per status, the label, colour tone, icon, what it
+means and what happens next. The frontend renders every status through
+`StatusBadge`, whose tooltip shows that meaning; the full legend is on the help
+page (`#/architecture`). `frontend/test/unit/workflow-status.test.js` fails if a
+status is rendered outside the mapping.
+
+| Status | Shown for |
+| --- | --- |
+| Draft | `problems.status` or `proposals.status` = `draft` |
+| Submitted | opportunity `submitted` / `open` / `in_review`; proposal `submitted` / `under_review` while open, fully funded or paused |
+| Awaiting evaluator feedback | proposal with no qualifying evaluator recommendation (a second badge beside its lifecycle status) |
+| Selected | proposal `matching.status` = `awaiting_confirmation` |
+| Pending approval | opportunity `matching.status` = `awaiting_confirmation`; a pledged contribution |
+| Accepted | proposal `matching.status` = `confirmed` (or legacy `accepted`); a locked contribution |
+| Decision recorded | opportunity `matching.status` = `confirmed` (or legacy `matched` / `funded` / `completed`) |
+| Invalidated | opportunity `matching.status` = `invalidated`; its selected proposal (`voided`) |
+| Declined | opportunity `cancelled` (owner withdrew); proposal `withdrawn`, `rejected` or `matching.status` = `declined` |
+| Expired | opportunity `expired`, or still open past `expiresAt` |
+| Refunded | proposal `matching.status` = `cancelled`, or not chosen when another proposal was confirmed; a refunded contribution |
+
+Evaluator outcomes (`Recommend`, `Recommend with revisions`, `Do not recommend`)
+and owner review outcomes (`Feedback recorded`, `Revision requested`,
+`Not progressing`) are entries in the same mapping. Matching events map to the
+status they leave behind for the decision record, and member notices store it as
+`workflowStatus` (older notices derive it from `kind` or `eventType`).
+
+With two or more evaluations a proposal shows one `Combined evaluations` badge
+("3 evaluations"): one icon per outcome given, a lone outcome shown twice; green
+if all recommend, red if none do, amber otherwise. Hovering lists how many
+recommended, recommended with revisions, and did not recommend.
+
+### `proposals/{proposalId}.matching.recommendations`
+
+Server-maintained map of evaluator id → `{ commentId, recommendation, at }`, one
+entry per evaluator with a qualifying recommendation. It is rebuilt from the
+qualifying comments on every comment write, so proposals that still carry the
+earlier single `recommendedBy` / `recommendationCommentId` / `recommendation`
+fields converge to the map on their next comment write; readers fall back to
+those fields until then.

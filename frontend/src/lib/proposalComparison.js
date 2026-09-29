@@ -2,7 +2,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { RECOMMENDATIONS } from "./comments.js";
-import { proposalFundingLabel } from "./matching.js";
+import { proposalFundingStatus } from "./matching.js";
 import { PROPOSAL_CATEGORIES } from "../config/proposal.js";
 
 export const COMPARISON_SORTS = [
@@ -30,15 +30,6 @@ export function categoryLabel(value) {
   return PROPOSAL_CATEGORIES.find((item) => item.value === value)?.label || value || "Unspecified category";
 }
 
-export function recommendationSummary(row) {
-  if (!row?.qualifyingCount) return "No qualifying recommendation";
-  const named = RECOMMENDATIONS
-    .map(([id, label]) => [row.recommendations?.[id] || 0, label])
-    .filter(([count]) => count > 0)
-    .map(([count, label]) => `${count} ${label}`);
-  return named.join(" · ") || "No qualifying recommendation";
-}
-
 export function filterComparisonRows(rows, outcome) {
   const list = rows ?? [];
   if (!outcome || !RECOMMENDATIONS.some(([id]) => id === outcome)) return list;
@@ -52,7 +43,10 @@ function sortValue(row, key, problemMatching) {
   if (key === "amount") return Number(row.amount) || 0;
   if (key === "qualifyingCount") return row.qualifyingCount || 0;
   if (key === "commentCount") return row.commentCount || 0;
-  if (key === "status") return proposalFundingLabel(row, problemMatching).toLowerCase();
+  if (key === "status") {
+    const funding = proposalFundingStatus(row, problemMatching);
+    return `${funding.label} ${funding.detail}`.toLowerCase();
+  }
   return String(row.title || "").toLowerCase();
 }
 

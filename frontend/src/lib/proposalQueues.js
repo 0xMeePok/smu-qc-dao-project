@@ -1,11 +1,9 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
-import { recommendationLabel } from "./comments.js";
 
 /** QCDAO-62/63 workspace queues. Both read records that already exist. */
-// A solution carries one recommendation, so "pending" already means nobody has
-// recommended it yet - there is no wider pool to show.
+// Each evaluator files their own recommendation, so "pending" means not yet by me.
 export const QUEUE_FILTERS = [
   ["pending", "Awaiting recommendation"],
   ["submitted", "My recommendations"],
@@ -23,16 +21,10 @@ async function call(name, payload = {}) {
 
 export const listMyProposalQueue = () => call("listMyProposalQueue");
 export const listEvaluatorQueue = (payload = {}) => call("listEvaluatorQueue", payload);
+export const listActionItems = () => call("listActionItems");
+export const ACTION_ITEMS_KEY = ["actionItems"];
 
-/** Evaluator-feedback progress: qualifying recommendation comments, not scores. */
-export function feedbackLabel(row) {
-  const count = row?.qualifying ?? 0;
-  if (!count) return "Awaiting evaluator recommendation";
-  const named = (row.recommendations ?? []).map(recommendationLabel).filter(Boolean);
-  return `${count} evaluator recommendation${count === 1 ? "" : "s"}${named.length ? `: ${named.join(", ")}` : ""}`;
-}
-
-export { ownerReviewTrackerLabel } from "./ownerReviews.js";
+export { ownerReviewStatus } from "./ownerReviews.js";
 
 export function commentCountLabel(row) {
   const count = row?.comments ?? 0;
@@ -53,12 +45,15 @@ export function sortProposalRows(rows, sort = "closing") {
   });
 }
 
+// Rows filter on the shared QCDAO-91 status, not the stored field.
+const statusOf = (row) => row?.workflowStatus || row?.status;
+
 export function filterProposalRows(rows, status = "all") {
-  return status === "all" ? [...(rows ?? [])] : (rows ?? []).filter((row) => row.status === status);
+  return status === "all" ? [...(rows ?? [])] : (rows ?? []).filter((row) => statusOf(row) === status);
 }
 
 export function statusOptions(rows) {
-  return [...new Set((rows ?? []).map((row) => row.status).filter(Boolean))].sort();
+  return [...new Set((rows ?? []).map(statusOf).filter(Boolean))].sort();
 }
 
 export function queueError(error) {
