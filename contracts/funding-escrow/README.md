@@ -11,7 +11,9 @@ a new linked deployment inheriting its posting, proposal, revision and audit log
 The existing `AuditRegistry.sol` source is preserved exactly so live bytecode
 verification remains compatible. A versioned `AuditRegistryExtensible.sol` copy
 provides the public/virtual hooks for inheritance. Local app manifests select the
-new deployment; the live site/backend and previously deployed tokens are unchanged.
+new deployment and the local frontend implements wallet funding, approvals, votes,
+payments and refunds. This UI work has not deployed the live site/backend/rules or
+submitted new live signed transactions; previously deployed tokens are unchanged.
 See [deployment addresses and smoke-test evidence](../../docs/ESCROW_REGISTRY_INTEGRATION.md).
 
 ## Run and validation
@@ -52,6 +54,9 @@ admin. Revocation and ownership changes take effect for moderation immediately.
 The fee recipient remains the owner snapshotted when that escrow was created.
 
 The platform signer selects fully funded proposals and executes approved payments.
+In the implemented application flow it connects its own wallet and signs those
+transactions directly. No server relay or automatic payment executor is included;
+the private key is never sent to Firebase or placed in frontend configuration.
 It cannot choose another proposal recipient, approve on anyone's behalf, bypass
 votes, or withdraw funds. The problem and proposal owners must be different wallets.
 Each owner signs its own on-chain approval. A lost platform key delays payments,
@@ -173,8 +178,8 @@ are atomic; a failed transfer leaves the tranche available for retry or later re
 
 When an admin voids the escrow, **only `totalDeposited - totalReleased` becomes
 refundable, immediately and with no refund fee**. Prior payouts and their fees
-remain paid. Example: target 1,000, first tranche 200, fee 1%: proposal owner receives
-198 and fee recipient receives 2; a subsequent void refunds the remaining 800.
+remain paid. Example: target 1,000, upfront tranche 500, fee 1%: proposal owner receives
+495 and fee recipient receives 5; a subsequent void refunds the remaining 500.
 
 Deposits maintain each funder's cumulative contribution in first-deposit order,
 including every top-up. These intervals become fixed when the target is reached.
@@ -250,6 +255,43 @@ its behavior. Direct donations create no claim and have no admin sweep.
 
 ## Dashboard and audit interface
 
+The frontend proposal page's **Open escrow** button opens a wallet-backed panel.
+It verifies the canonical registry/factory links, immutable terms and current
+proposal hashes, then reads contract state and the connected wallet's balances at
+one block. It shows the funded target, gross released amount, unpaid balance,
+contribution, claimable refund and current deadline. Writes require the connected
+Arbitrum Sepolia wallet to match the signed-in account and the applicable on-chain
+role. Firebase administrator status does not substitute for the platform signer.
+
+The panel supports exact-amount token approvals/deposits and top-ups; platform
+selection; both owners' upfront approvals; platform upfront release; delivery
+evidence submission; each owner's separate completion approval; optional weighted
+funder votes; platform final release; expiry/withdrawal refund opening; and each
+wallet's refund claim. The application always uses two halves, `[5000, 5000]`.
+Before payout two, the proposal owner must confirm completion and the problem owner
+must accept it as delivered; when enabled, funder yes votes must exceed 50% of all
+contributed units. Evidence submission alone does not approve completion.
+
+Readable evidence is saved before its wallet transaction in the immutable Firestore
+path `proposals/{proposalId}/deliveryEvidence/{evidenceHash}`. Its digest is Keccak-256
+of UTF-8 `JSON.stringify({ scheme: "qcdao.escrow.delivery.v1", summary, url })`, in that
+field order. The summary is trimmed/NFC-normalized (2–4,000 characters); the required
+HTTPS URL is trimmed only (at most 2,048 characters). The record contains only those
+two fields, the authenticated proposal owner's `ownerId`, and server `createdAt`.
+Only that author can create it; authorized parent proposal viewers can read it;
+clients cannot update or delete it. The UI recomputes the hash before displaying
+evidence for approval, voting or final release. A missing/mismatched record disables
+those actions, and replacing evidence resets approvals/votes on-chain. The URL's
+remote content is not itself committed by this digest.
+
+The wallet service refreshes verified state before each action, waits for receipts,
+and never automatically retries a write. An unknown confirmation result can be
+checked by its existing transaction hash. Opportunity lists and advisory evaluator
+comparisons link escrow proposals to this panel; they do not offer mock funding or
+selection. Functions independently reject mock mutations for escrow proposals.
+The current wallet view is per proposal; a global portfolio/indexer and contract
+moderation/selection-management controls are not included in this panel.
+
 `depositorSummary(wallet)` returns `{ deposited, depositCount, refunded, claimable,
 released, status }`. `deposited` and top-up count are lifetime history and never
 cleared. `released` includes the wallet's gross share of fees; `claimable` is the
@@ -306,11 +348,13 @@ atomic `commitProposalWithEscrow` call and immutable funding terms. The deployme
 verifier and manifest sync support the new registry/factory pair. See
 [application integration and cutover instructions](../../docs/ESCROW_REGISTRY_INTEGRATION.md).
 The new registry/factory pair is deployed and selected in the local frontend and
-Firebase manifests. The hosted site and deployed backend remain unchanged during
-local testing. Deposit/refund dashboards, wallet approval/vote controls and backend
-platform relaying remain separate application work; the existing mock funding
-controls have not been replaced. Contracts cannot wake themselves to execute a
-release, and the platform signing key must remain server-side.
+Firebase manifests. The wallet panel and service described above are implemented
+locally. Deploy the rebuilt frontend, matching Functions and Firestore rules together
+when the application cutover is approved: publication verification, escrow routing
+markers, mock-action rejection and immutable delivery-evidence access must agree.
+The hosted site, deployed backend/rules and live records have not been changed by
+this wallet UI work. Contracts cannot wake themselves to execute a release; the
+configured platform signer executes approved payments through its connected wallet.
 
 Old registry postings/proposals do not move automatically. Retain their original
 registry namespace and audit history; create new linked postings/proposals through
@@ -319,7 +363,9 @@ between old/new identities; do not silently reuse old evidence or relabel old fu
 Deployment and a one-mock-USDC smoke test completed on 2026-09-27. The smoke test
 checked two payouts, funder voting, top-ups and fee-free partial pull refunds,
 then returned the mock tokens and unused test-wallet gas. Its transaction journal
-is in `manifests/arbitrumSepolia-smoke.json`. No historical migration or live-site
+is in `manifests/arbitrumSepolia-smoke.json`. That earlier generic-contract fixture
+used 40%/30%/30%, before the fixed application split; it was not a signed live test
+of the new wallet UI. No historical migration or live-site
 cutover has been performed. The current confirmed deployment record is
 `../audit-registry/manifests/arbitrumSepolia.json`; do not deploy replacements when
 testing or retrying explorer source verification.

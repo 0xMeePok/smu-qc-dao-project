@@ -1,0 +1,190 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { formatUnits, keccak256, stringToHex } from "viem";
+import { useAccount } from "wagmi";
+import { useAuth } from "../context/AuthContext.jsx";
+import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isModerated } from "../lib/moderation.js";
+import { confirmEscrowTransaction, escrowErrorMessage, hashEscrowEvidence, readEscrow, writeEscrowAction } from "../lib/escrow.js";
+import { loadEscrowEvidence, saveEscrowEvidence } from "../lib/escrowEvidence.js";
+import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
+import { Field } from "./Field.jsx";
+
+const STATE_LABELS = ["Open for funding", "Awaiting upfront approval", "Fully paid", "Refunded", "Cancelled", "Expired", "Delivery in progress", "Voided"];
+const explorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`;
+const nonzero = value => value && !/^0x0{64}$/i.test(value);
+const instant = seconds => seconds > 0n ? new Date(Number(seconds) * 1000).toLocaleString() : "—";
+const refundActions = new Set(["claimRefund", "expire", "refundInvalidated"]);
+const pendingTransactions = new Map();
+const pendingKey = (proposalId, account) => `qcdao:escrow-pending:${AUDIT_REGISTRY_CHAIN_ID}:${AUDIT_REGISTRY_CONFIG.address}:${proposalId}:${account?.toLowerCase() ?? ""}`;
+function savedTransaction(key) {
+  let hash;
+  try { hash = sessionStorage.getItem(key); } catch { hash = pendingTransactions.get(key); }
+  return /^0x[0-9a-f]{64}$/i.test(hash ?? "") ? hash : null;
+}
+function saveTransaction(key, hash) {
+  if (hash) pendingTransactions.set(key, hash); else pendingTransactions.delete(key);
+  try { if (hash) sessionStorage.setItem(key, hash); else sessionStorage.removeItem(key); } catch { /* The current tab still retains the pending hash. */ }
+}
+
+export function EscrowFundingView({ state, evidence, loading, error, busy, progress, walletReady, walletMessage,
+  amount, setAmount, delivery, setDelivery, onAction, onRefresh, onConnect, unresolvedTransaction, onConfirm, moderated }) {
+  const money = units => `${formatUnits(units ?? 0n, state?.decimals ?? 6)} ${state?.symbol ?? ""}`;
+  const disabled = busy || !walletReady || loading || Boolean(unresolvedTransaction);
+  const evidenceReady = evidence && state?.currentMilestone?.evidenceHash === evidence.hash;
+  const action = (name, label, extra = {}, allowed = state?.can[name]) => <button type="button" className="primary small"
+    disabled={disabled || !allowed || (moderated && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
+  return <section className="card escrow-funding" aria-labelledby="escrow-funding-title">
+    <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
+      <button type="button" className="secondary small" disabled={busy || loading} onClick={onRefresh}>Refresh escrow</button></div>
+    {loading && <p role="status">Reading the verified escrow…</p>}
+    {error && <p className="error-banner" role="alert">{error}</p>}
+    {progress && <p role="status">{progress.status === "awaiting_signature" ? "Confirm the transaction in your wallet."
+      : progress.status === "pending" ? "Transaction submitted. Waiting for confirmation…" : "Transaction confirmed."}
+      {progress.transactionHash && <> <a href={explorer("tx", progress.transactionHash)} target="_blank" rel="noreferrer">View transaction</a></>}</p>}
+    {unresolvedTransaction && <p role="alert">This transaction is awaiting confirmation. Check it before starting another payment. <a href={explorer("tx", unresolvedTransaction)} target="_blank" rel="noreferrer">View pending transaction</a>{" "}
+      <button type="button" className="secondary small" disabled={busy} onClick={onConfirm}>Retry confirmation</button></p>}
+    {!walletReady && <p className="field-hint">{walletMessage} <button type="button" className="text-button" onClick={onConnect}>Connect wallet</button></p>}
+    {moderated && <p className="field-hint">This proposal is moderated. Funding and approval actions are paused here; available refunds can still be claimed.</p>}
+    {state && <>
+      <p><strong>{STATE_LABELS[state.state] ?? "Unknown state"}</strong> · <a href={explorer("address", state.address)} target="_blank" rel="noreferrer">View escrow contract</a></p>
+      <dl className="settings-group">
+        <div className="settings-row"><dt>Funded / target</dt><dd>{money(state.totalDeposited)} / {money(state.fundingTarget)}</dd></div>
+        <div className="settings-row"><dt>Released before fees</dt><dd>{money(state.totalReleased)}</dd></div>
+        <div className="settings-row"><dt>Held for unpaid work</dt><dd>{money(state.outstandingBalance)}</dd></div>
+        <div className="settings-row"><dt>Your contribution</dt><dd>{money(state.wallet.contribution)}</dd></div>
+        <div className="settings-row"><dt>Your available refund</dt><dd>{money(state.wallet.depositor?.claimable)}</dd></div>
+        <div className="settings-row"><dt>{state.state === 0 ? "Funding closes" : "Current approval deadline"}</dt><dd>{instant(state.state === 0 ? state.expiresAt : state.approvalDeadline)}</dd></div>
+      </dl>
+      {state.state === 0 && state.remaining > 0n && <div className="field-group">
+        <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Wallet balance: ${money(state.wallet.balance)}.`}>
+          {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
+        </Field>
+        <p className="field-hint">Your wallet approves only the entered token amount, then deposits it into this proposal’s escrow. Each step needs confirmation.</p>
+        {action("deposit", "Fund escrow", { amount })}
+      </div>}
+      {state.state === 0 && state.remaining === 0n && <div className="field-group">
+        <p>The target is fully funded. The platform wallet starts selection, then both owners approve the upfront payment.</p>
+        {state.roles.platform ? action("lockSelection", "Start upfront approval") : <p className="field-hint">Waiting for the configured platform wallet.</p>}
+      </div>}
+      {state.state === 1 && <div className="field-group">
+        <h4>Upfront 50%</h4><p>Problem owner: {state.ownerApproved ? "approved" : "pending"}. Proposal owner: {state.solutionApproved ? "approved" : "pending"}.</p>
+        {(state.roles.problemOwner || state.roles.proposalOwner) && action("approveSelection", "Approve upfront payment")}
+        {state.roles.platform && action("release", "Release upfront 50%")}
+        <p className="field-hint">Only the configured platform wallet can execute the approved payout. If upfront approval lapses, refunds become available at the funding deadline.</p>
+      </div>}
+      {state.state === 6 && <>
+        <div className="field-group"><h4>Delivery evidence</h4>
+          {evidenceReady ? <><p style={{ whiteSpace: "pre-wrap" }}>{evidence.summary}</p><a href={evidence.url} target="_blank" rel="noreferrer">Review delivery evidence</a><p className="field-hint">This evidence matches the hash submitted on-chain.</p></>
+            : <p>{nonzero(state.currentMilestone?.evidenceHash) ? "The on-chain evidence is not available or does not match its saved content. Approvals are disabled until matching evidence can be reviewed." : "The proposal owner must submit delivery evidence before final approval."}</p>}
+          {state.roles.proposalOwner && <>
+            <Field label="Delivery summary" htmlFor="escrow-delivery-summary">{({ id }) => <textarea id={id} maxLength={4000} value={delivery.summary} disabled={disabled} onChange={event => setDelivery({ ...delivery, summary: event.target.value })} />}</Field>
+            <Field label="Evidence link (HTTPS)" htmlFor="escrow-delivery-url">{({ id }) => <input id={id} type="url" maxLength={2048} value={delivery.url} disabled={disabled} onChange={event => setDelivery({ ...delivery, url: event.target.value })} />}</Field>
+            <p className="field-hint">Share a link reviewers can access. Replacing evidence resets both owner approvals and all funder votes.</p>
+            {action("submitMilestone", nonzero(state.currentMilestone?.evidenceHash) ? "Submit replacement evidence" : "Submit delivery evidence")}
+          </>}
+        </div>
+        <div className="field-group"><h4>Final 50% approval</h4>
+          <p>Problem owner: {state.ownerApproved ? "accepted as delivered" : "pending"}. Proposal owner: {state.solutionApproved ? "completion confirmed" : "pending"}.</p>
+          {(state.roles.problemOwner || state.roles.proposalOwner) && action("approveMilestone", state.roles.problemOwner ? "Accept as delivered" : "Confirm completion", {}, evidenceReady && state.can.approveMilestone)}
+          {state.funderVoting && <>
+            <p>Yes voting weight: {money(state.yesWeight)} of {money(state.totalDeposited)}. More than 50% of all contributed funds must vote yes.</p>
+            {state.roles.funder && (state.wallet.hasVoted ? <p>Your vote is recorded for this evidence.</p> : <div className="actions">
+              {action("voteMilestone", "Vote yes", { approve: true }, evidenceReady && state.can.voteMilestone)}
+              {action("voteMilestone", "Vote no", { approve: false }, evidenceReady && state.can.voteMilestone)}
+            </div>)}
+          </>}
+          {state.roles.platform && action("releaseMilestone", "Release final 50%", {}, evidenceReady && state.can.releaseMilestone)}
+          <p className="field-hint">Both owners{state.funderVoting ? " and a funding-weighted majority" : ""} must approve the same evidence. The platform wallet then executes the final payout.</p>
+        </div>
+      </>}
+      {(state.can.claimRefund || state.can.expire || state.can.refundInvalidated) && <div className="field-group"><h4>Refunds</h4>
+        {state.can.refundInvalidated && action("refundInvalidated", "Open withdrawal refunds")}
+        {state.can.expire && action("expire", "Open expired escrow refunds")}
+        {state.can.claimRefund && action("claimRefund", "Claim my refund")}
+        <p className="field-hint">Refunds return only the unpaid balance. Earlier payouts remain paid.</p>
+      </div>}
+    </>}
+  </section>;
+}
+
+export function EscrowFundingPanel({ proposal, onStateChange }) {
+  const { user } = useAuth();
+  const { address, isConnected, chainId } = useAccount();
+  const storageKey = pendingKey(proposal.id, address);
+  const moderated = isModerated(proposal);
+  const [state, setState] = useState(null), [evidence, setEvidence] = useState(null);
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [progress, setProgress] = useState(null), [unresolvedTransaction, setUnresolvedTransaction] = useState(() => savedTransaction(storageKey));
+  const [amount, setAmount] = useState(""), [delivery, setDelivery] = useState({ summary: "", url: "" });
+  const [connect, setConnect] = useState(false);
+  const current = useRef({ proposal, onStateChange }); current.current = { proposal, onStateChange };
+  const currentStorageKey = useRef(storageKey); currentStorageKey.current = storageKey;
+  const generation = useRef(0), writing = useRef(false);
+  useEffect(() => { setUnresolvedTransaction(savedTransaction(storageKey)); }, [storageKey]);
+  const walletReady = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
+  const walletMessage = !isConnected ? "Connect your signed-in wallet to fund, approve or claim refunds."
+    : address?.toLowerCase() !== user?.id?.toLowerCase() ? "Connect the wallet belonging to your signed-in account."
+      : "Switch your wallet to Arbitrum Sepolia to continue.";
+  const refresh = useCallback(async () => {
+    const request = ++generation.current;
+    setLoading(true);
+    try {
+      const next = await readEscrow({ proposal: current.current.proposal, account: address });
+      let saved = null, evidenceError = "";
+      if (nonzero(next.currentMilestone?.evidenceHash)) {
+        try {
+          const raw = await loadEscrowEvidence(current.current.proposal.id, next.currentMilestone.evidenceHash);
+          if (raw && hashEscrowEvidence(raw) === next.currentMilestone.evidenceHash) saved = { ...raw, hash: next.currentMilestone.evidenceHash };
+        } catch { evidenceError = "Delivery evidence could not be loaded. Refresh before approving; escrow balances and refunds remain available."; }
+      }
+      if (request !== generation.current) return;
+      setState(next); setEvidence(saved); setError(evidenceError); current.current.onStateChange?.(next);
+    } catch (err) {
+      if (request === generation.current) { setState(null); setEvidence(null); setError(escrowErrorMessage(err)); current.current.onStateChange?.(null); }
+    } finally { if (request === generation.current) setLoading(false); }
+  }, [proposal.id, address]);
+  useEffect(() => {
+    setState(null); setEvidence(null);
+    refresh();
+    const timer = setInterval(() => { if (!writing.current) refresh(); }, 30_000);
+    return () => { generation.current += 1; clearInterval(timer); };
+  }, [refresh]);
+  const act = async (action, extra = {}) => {
+    if (!walletReady || writing.current || unresolvedTransaction || (moderated && !refundActions.has(action))) return;
+    writing.current = true; setBusy(true); setError(""); setProgress(null);
+    const remember = hash => { saveTransaction(storageKey, hash); if (currentStorageKey.current === storageKey) setUnresolvedTransaction(hash); };
+    try {
+      const payload = { proposal: current.current.proposal, account: address, action, selectionId: state?.selectionId, ...extra, onProgress: next => {
+        setProgress(next);
+        if (next.status === "pending") remember(next.transactionHash);
+        if (next.status === "confirmed") remember(null);
+      } };
+      if (action === "submitMilestone") {
+        payload.evidence = { summary: delivery.summary.trim().normalize("NFC"), url: delivery.url.trim() };
+        payload.evidenceHash = hashEscrowEvidence(payload.evidence);
+        await saveEscrowEvidence({ proposalId: proposal.id, ownerId: user.id, evidence: payload.evidence, evidenceHash: payload.evidenceHash });
+      } else if (["approveMilestone", "voteMilestone", "releaseMilestone"].includes(action)) {
+        if (!evidence || evidence.hash !== state?.currentMilestone?.evidenceHash) throw new Error("Refresh and review the current delivery evidence first.");
+        payload.evidenceHash = evidence.hash;
+      } else if (action === "lockSelection") payload.selectionId = keccak256(stringToHex(crypto.randomUUID()));
+      await writeEscrowAction(payload);
+      await refresh();
+      if (action === "deposit") setAmount("");
+    } catch (err) {
+      setError(escrowErrorMessage(err));
+      if (err.transactionHash && !err.transactionSettled) remember(err.transactionHash);
+      if (err.transactionSettled) { remember(null); setProgress(null); }
+    } finally { writing.current = false; setBusy(false); }
+  };
+  const confirmPending = async () => {
+    if (writing.current || !unresolvedTransaction) return;
+    writing.current = true; setBusy(true);
+    const settled = () => { saveTransaction(storageKey, null); if (currentStorageKey.current === storageKey) { setUnresolvedTransaction(null); setProgress(null); } };
+    try { await confirmEscrowTransaction(unresolvedTransaction); settled(); await refresh(); }
+    catch (err) { setError(escrowErrorMessage(err)); if (err.transactionSettled) settled(); }
+    finally { writing.current = false; setBusy(false); }
+  };
+  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, unresolvedTransaction, moderated }}
+    onAction={act} onRefresh={refresh} onConnect={() => setConnect(true)} onConfirm={confirmPending} />
+    {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}</>;
+}

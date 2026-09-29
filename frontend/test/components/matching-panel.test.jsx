@@ -406,3 +406,21 @@ it('shows an invalidation receipt and blocks stale funding or selection capabili
   fireEvent.click(screen.getByRole('button', { name: /View invalidation record/ }));
   expect(document.getElementById('matching-event-closed').open).toBe(true);
 });
+
+it('routes escrow proposals to their wallet detail and ignores stale mock capabilities and status', async () => {
+  const navigate = vi.fn();
+  mocks.read.mockResolvedValue(waiting({ canForceExpire: true,
+    proposals: [candidate({ fundingTerms: { trancheBps: [5000, 5000] }, canFund: true, canConfirm: true, canDecline: true, canCompleteEvaluation: true })],
+    contributions: [{ id: 'old', amount: 100, currency: 'USD', status: 'locked' }],
+  }));
+  render(<MatchingPanel problemId="problem-1" onNavigate={navigate} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'View escrow proposal' }));
+  expect(navigate).toHaveBeenCalledWith('proposal/proposal-1');
+  for (const name of ['Fund proposal', 'Accept as proposal creator', 'Reject selection', 'Complete mock evaluation', 'Expire window for demonstration']) {
+    expect(screen.queryByRole('button', { name })).toBeNull();
+  }
+  expect(screen.queryByText('Mock funds')).toBeNull();
+  expect(screen.queryByText('Your mock contributions')).toBeNull();
+  expect(screen.queryByText('Seven-day acceptance window')).toBeNull();
+  expect(screen.queryByRole('progressbar')).toBeNull();
+});

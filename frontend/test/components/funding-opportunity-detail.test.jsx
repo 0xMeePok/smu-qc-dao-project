@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   verifyProblem: vi.fn(async () => ({ verified: false })),
 }));
 
-vi.mock("wagmi", () => ({
+vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(),
   useAccount: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true }),
 }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({

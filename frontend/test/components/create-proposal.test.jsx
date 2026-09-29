@@ -17,7 +17,7 @@ vi.mock("../../src/lib/proposals.js", () => ({
   saveProposalDraft: (...args) => mocks.saveDraft(...args),
   updateProposal: (...args) => mocks.update(...args),
 }));
-vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, address: "0xabc" }) }));
+vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: "0xabc" }) }));
 vi.mock("../../src/lib/proposalAudit.js", () => ({
   proposalAuditReceipt: () => ({ status: "queued" }),
   anchorProposalBeforeWrite: (...args) => mocks.anchor(...args),

@@ -211,3 +211,16 @@ describe("proposalFundingStatus", () => {
     expect(status({ status: "withdrawn" })).toEqual({ label: "Withdrawn", detail: "", tone: "neutral" });
   });
 });
+
+it('keeps escrow evaluator comparison and links to detail without offering mock selection', async () => {
+  const navigate = vi.fn();
+  mocks.read.mockResolvedValue(comparison({ rows: [row({ fundingTerms: { trancheBps: [5000, 5000] }, canSelect: true, matching: { status: 'confirmed' } })] }));
+  render(<ProposalComparison problemId="problem" onNavigate={navigate} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'View escrow proposal' }));
+  expect(navigate).toHaveBeenCalledWith('proposal/alpha');
+  expect(screen.queryByRole('radio')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Confirm match' })).toBeNull();
+  expect(screen.getByText('On-chain escrow')).toBeTruthy();
+  expect(screen.getByText('1 Recommend with revisions')).toBeTruthy();
+  expect(mocks.select).not.toHaveBeenCalled();
+});

@@ -3,6 +3,8 @@ import { ProposalTracker } from "./ProposalTracker.jsx";
 import { QUEUE_FILTERS, listEvaluatorQueue, queueError, sortProposalRows } from "../lib/proposalQueues.js";
 import { recommendationLabel } from "../lib/comments.js";
 import { MockFundingPortfolio } from "./MockFundingPortfolio.jsx";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
@@ -199,7 +201,9 @@ export function MyProblems({ onNavigate }) {
       </button>}
       <ProposalList received onNavigate={onNavigate} />
 
-      <MockFundingPortfolio onNavigate={onNavigate} />
+      {isEscrowRegistry(AUDIT_REGISTRY_CONFIG)
+        ? <p className="field-hint">Open a proposal’s escrow to view your wallet contribution, vote on delivery, or claim an available refund.</p>
+        : <MockFundingPortfolio onNavigate={onNavigate} />}
 
       {pendingDelete && (
         <Modal

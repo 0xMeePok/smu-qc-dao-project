@@ -4481,3 +4481,12 @@ footer.footer { background: transparent; }
 .back::before { display: inline-block; transition: transform 0.15s ease; }
 .back:hover::before { transform: translateX(-3px); }
 @media (prefers-reduced-motion: reduce) { .back:hover::before { transform: none; } }
+
+/* Escrow amounts and deadlines must remain fully readable on narrow screens. */
+.escrow-funding .settings-row dd { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.escrow-funding .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.escrow-funding > .field-group { margin-top: 16px; }
+@media (max-width: 600px) {
+  .escrow-funding .settings-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .escrow-funding .settings-row dd { text-align: left; }
+}

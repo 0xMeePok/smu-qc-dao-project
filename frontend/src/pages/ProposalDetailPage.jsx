@@ -1,5 +1,7 @@
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
+import { EscrowFundingPanel } from "../components/EscrowFundingPanel.jsx";
+import { readEscrow } from "../lib/escrow.js";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useAccount } from "wagmi";
@@ -46,19 +48,21 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   // edited into something the receipt no longer describes.
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
   const [tab, setTab] = useState("overview");
+  const [escrowState, setEscrowState] = useState(null);
   useEffect(() => {
-    if (confirm && !anchoredWithdrawal && !withdrawing && (proposalMatchingLocked(proposal)
-      || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status))) {
+    const fundingStarted = proposal?.fundingTerms ? escrowState?.totalDeposited > 0n : proposalMatchingLocked(proposal)
+      || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status);
+    if (confirm && !anchoredWithdrawal && !withdrawing && fundingStarted) {
       setConfirm(false);
       setError("Funding or matching has started. This proposal can no longer be withdrawn.");
     }
-  }, [confirm, proposal?.matching, proposal?.problemMatching, anchoredWithdrawal, withdrawing]);
+  }, [confirm, proposal?.matching, proposal?.problemMatching, proposal?.fundingTerms, escrowState, anchoredWithdrawal, withdrawing]);
   const anchorInFlight = useRef(new Set());
   const activeProposalId = useRef(proposalId);
   activeProposalId.current = proposalId;
   useEffect(() => {
     let cancelled = false;
-    setLoading(true); setProposal(null); setError(""); setConfirm(false);
+    setLoading(true); setProposal(null); setEscrowState(null); setError(""); setConfirm(false);
     setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab("overview");
     setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
@@ -109,10 +113,15 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     let anchored = anchoredWithdrawal;
     try {
       if (!anchored) {
-        const current = await getMockMatching(proposal.problemId, { proposalId });
-        const candidate = current.proposals.find((item) => item.id === proposalId);
-        if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
-          || ["awaiting_confirmation", "confirmed", "invalidated"].includes(current.matching.status)) {
+        let fundingStarted;
+        if (proposal.fundingTerms) fundingStarted = (await readEscrow({ proposal, account: address })).totalDeposited > 0n;
+        else {
+          const current = await getMockMatching(proposal.problemId, { proposalId });
+          const candidate = current.proposals.find((item) => item.id === proposalId);
+          fundingStarted = !candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
+            || ["awaiting_confirmation", "confirmed", "invalidated"].includes(current.matching.status);
+        }
+        if (fundingStarted) {
           setConfirm(false);
           setError("Funding or matching has started. This proposal can no longer be withdrawn.");
           return;
@@ -146,11 +155,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const backRoute = owns ? "proposals" : sponsors ? "my-problems" : `posting/${proposal.problemId}`;
   const backLabel = owns ? "Back to my proposals" : sponsors ? "Back to my problems" : "Back to opportunity";
   const showCollaboration = proposal.status !== "draft" && !isModerated(proposal);
+  const showEscrow = proposal.status !== "draft" && Boolean(proposal.fundingTerms);
+  const showFunding = showEscrow || showCollaboration;
   const reviewers = owns || sponsors;
   const canReview = sponsors && !owns;
   const tabs = [
     ["overview", "Overview"],
-    ...(showCollaboration ? [["funding", "Match & funding"]] : []),
+    ...(showFunding ? [["funding", showEscrow ? "Escrow & funding" : "Match & funding"]] : []),
     // Only the sponsor always has something here (the review form); everyone
     // else sees feedback and comments under the proposal, when there are any.
     ...(canReview ? [["feedback", "Feedback"]] : []),
@@ -162,7 +173,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     flushSync(() => setTab("record"));
     document.getElementById("proposal-panel-record")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
-  const locked = proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status);
+  const locked = proposal.fundingTerms ? !escrowState || escrowState.totalDeposited > 0n
+    : proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status);
   return <section className="page detail-page">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
     {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. <button type="button" className="text-button" onClick={openRecord}>Check its on-chain verification</button> under Record.</p>}
@@ -231,11 +243,11 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         </>}
       </div>
 
-      {showCollaboration && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
-        <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onChange={(next) => {
+      {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
+        {proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} /> : <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
           if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
-        }} />
+        }} />}
       </div>}
 
       {canReview && <div className={panel("feedback")} role="tabpanel" id="proposal-panel-feedback" aria-labelledby="proposal-tab-feedback">
@@ -248,6 +260,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       </div>
     </article><aside className="context-panel"><span className="eyebrow">Requested</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
+      {showEscrow && <button className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
           that point on. */}

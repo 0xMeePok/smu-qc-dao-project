@@ -63,14 +63,15 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
 
   if (!user?.id || !problemId) return null;
   const rows = sortComparisonRows(filterComparisonRows(state?.rows, outcome), sort, state?.problemMatching);
-  const showDecision = state?.viewerIsOwner === true;
+  const hasLegacyRows = (state?.rows ?? []).some((row) => !Object.hasOwn(row, "fundingTerms"));
+  const showDecision = state?.viewerIsOwner === true && hasLegacyRows;
   // Only a row the server still marks selectable can stay chosen after a reload.
-  const selected = showDecision ? state?.rows?.find((row) => row.id === selectedId && row.canSelect) ?? null : null;
-  const selectableCount = (state?.rows ?? []).filter((row) => row.canSelect).length;
+  const selected = showDecision ? state?.rows?.find((row) => row.id === selectedId && row.canSelect && !Object.hasOwn(row, "fundingTerms")) ?? null : null;
+  const selectableCount = (state?.rows ?? []).filter((row) => row.canSelect && !Object.hasOwn(row, "fundingTerms")).length;
 
   const select = async (event) => {
     event.preventDefault();
-    if (!pending || busy) return;
+    if (!pending || busy || Object.hasOwn(pending, "fundingTerms")) return;
     if (rationale.trim().length < 10) {
       setError("Enter a reason of at least 10 characters for the decision record.");
       return;
@@ -94,7 +95,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
 
   return <section id="proposal-comparison" className="detail-section proposal-comparison" aria-label="Proposal comparison">
     <h2>Compare proposals</h2>
-    <p className="field-hint">Each problem is matched with a single proposal. Evaluator recommendations are optional and advisory. The problem owner can select any eligible, fully funded proposal without one.</p>
+    <p className="field-hint">Evaluator recommendations are optional and advisory. Open an escrow proposal to view live wallet funding and delivery approvals.{hasLegacyRows && " Legacy proposals can be selected here once fully funded."}</p>
 
     <div className="comparison-controls">
       <div className="segmented" role="group" aria-label="Filter by evaluator recommendation">
@@ -164,10 +165,11 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
 
 function ComparisonRow({ row, problemMatching, showDecision, open, checked, onToggle, onOpen, onChoose }) {
   const funding = proposalFundingStatus(row, problemMatching);
-  const eligible = Boolean(row.canSelect);
-  const decision = showDecision && !eligible ? row.selectionHint : "";
-  return <article className={`comparison-card${checked ? " is-checked" : ""}${showDecision && !eligible ? " is-ineligible" : ""}`}>
-    {showDecision && <button type="button" role="radio" className="comparison-radio" aria-checked={checked} disabled={!eligible}
+  const escrow = Object.hasOwn(row, "fundingTerms");
+  const eligible = !escrow && Boolean(row.canSelect);
+  const decision = showDecision && !eligible && !escrow ? row.selectionHint : "";
+  return <article className={`comparison-card${checked ? " is-checked" : ""}${showDecision && !eligible && !escrow ? " is-ineligible" : ""}`}>
+    {showDecision && !escrow && <button type="button" role="radio" className="comparison-radio" aria-checked={checked} disabled={!eligible}
       aria-label={`Select ${row.title}`} title={eligible ? undefined : row.selectionHint || "Not selectable"} onClick={onChoose} />}
     <div className="comparison-card-body">
       <div className="comparison-card-head">
@@ -193,7 +195,7 @@ function ComparisonRow({ row, problemMatching, showDecision, open, checked, onTo
           </dd>
         </div>
       </dl>
-      <button type="button" className="text-button comparison-open" onClick={onOpen}>Go to proposal</button>
+      <button type="button" className="text-button comparison-open" onClick={onOpen}>{escrow ? "View escrow proposal" : "Go to proposal"}</button>
       {open && <div className="comparison-detail"><ExpandedProposal proposalId={row.id} /></div>}
     </div>
   </article>;

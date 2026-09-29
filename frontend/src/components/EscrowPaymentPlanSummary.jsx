@@ -10,6 +10,6 @@ export function EscrowPaymentPlanSummary({ trancheBps = [5000, 5000], funderVoti
     {trancheBps.length > 1 && <p className="field-hint">{funderVoting
       ? "Completion requires agreement from all three parties: the proposal owner, the problem owner, and the funders through a funding-weighted majority."
       : "Completion requires agreement from the proposal owner and the problem owner. Funders do not vote in this variant."} Replacing delivery evidence requires fresh approvals{funderVoting ? " and votes" : ""}.</p>}
-    <p className="field-hint">Percentages are before platform fees. If the approval deadline passes, the unpaid balance becomes refundable to funders.</p>
+    <p className="field-hint">Percentages are before platform fees. If the final approval deadline passes, the unpaid balance becomes refundable to funders.</p>
   </>;
 }

@@ -34,6 +34,7 @@ import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/functions/escrowProposalTerms.js";
 import { EscrowPaymentPlanFields } from "../components/EscrowPaymentPlanFields.jsx";
+import { readEscrow } from "../lib/escrow.js";
 
 const ALL_FIELDS = [...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS];
 const ESCROW_LINKED = isEscrowRegistry(AUDIT_REGISTRY_CONFIG);
@@ -253,11 +254,18 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     setConfirmedAudit(null);
     try {
       if (editing) {
-        const current = await getMockMatching(posting.id, { proposalId });
-        const candidate = current.proposals.find((item) => item.id === proposalId);
-        if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
-          || ["awaiting_confirmation", "confirmed", "invalidated"].includes(current.matching.status)) {
-          throw new Error("Funding or matching has started. This proposal can no longer be edited.");
+        if (form.immutableFundingTerms) {
+          const current = await findProposal(proposalId, { fromServer: true });
+          if (!current || (await readEscrow({ proposal: current, account: address })).totalDeposited > 0n) {
+            throw new Error("Funding has started. This proposal can no longer be edited.");
+          }
+        } else {
+          const current = await getMockMatching(posting.id, { proposalId });
+          const candidate = current.proposals.find((item) => item.id === proposalId);
+          if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
+            || ["awaiting_confirmation", "confirmed", "invalidated"].includes(current.matching.status)) {
+            throw new Error("Funding or matching has started. This proposal can no longer be edited.");
+          }
         }
       }
       const record = buildProposalDocument({

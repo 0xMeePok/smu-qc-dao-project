@@ -39,7 +39,7 @@ const revisionsRef = (id) => collection(db, "proposals", id, "revisions");
 // Unfunded siblings inherit cancellation from their parent's confirmed match.
 // This avoids an unbounded server transaction while keeping every list truthful.
 async function withMatchingState(rows, { fromServer = false } = {}) {
-  const ids = [...new Set(rows.filter((row) => row.status !== "draft").map((row) => row.problemId).filter(Boolean))];
+  const ids = [...new Set(rows.filter((row) => row.status !== "draft" && !row.fundingTerms).map((row) => row.problemId).filter(Boolean))];
   const parents = new Map();
   await Promise.all(ids.map(async (id) => {
     try {
@@ -48,6 +48,7 @@ async function withMatchingState(rows, { fromServer = false } = {}) {
     } catch { /* Existing proposal content remains readable if its parent is unavailable. */ }
   }));
   return rows.map((row) => {
+    if (row.fundingTerms) return row;
     const problemMatching = parents.get(row.problemId);
     if (!problemMatching) return row;
     const cancelled = ["confirmed", "invalidated"].includes(problemMatching.status) && problemMatching.proposalId !== row.id

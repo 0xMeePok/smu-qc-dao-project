@@ -39,6 +39,7 @@ export function mergeMatchingState(previous, current) {
 }
 
 export function proposalFundingLabel(proposal, problemMatching = proposal.problemMatching) {
+  if (Object.hasOwn(proposal, "fundingTerms")) return "On-chain escrow";
   const status = proposal.matching?.status;
   if (status && status !== "funding") return MATCHING_LABELS[status] || status;
   if (proposal.status && !["submitted", "under_review"].includes(proposal.status)) return proposal.status;
@@ -74,6 +75,8 @@ const sentenceCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
  * neutral (closed or refunded).
  */
 export function proposalFundingStatus(proposal, problemMatching = proposal.problemMatching) {
+  if (Object.hasOwn(proposal, "fundingTerms")) return { label: "On-chain escrow",
+    detail: "Open the proposal for wallet funding and delivery status.", tone: "neutral" };
   const full = String(proposalFundingLabel(proposal, problemMatching) ?? "").replace(/_/g, " ");
   const [head, ...rest] = full.split(" · ");
   const label = STATUS_WORDING[head] ?? sentenceCase(head);

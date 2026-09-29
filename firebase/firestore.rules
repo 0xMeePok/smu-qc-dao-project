@@ -1342,6 +1342,25 @@ service cloud.firestore {
         && validSlot();
     }
 
+    // Share the proposal ACL with its immutable delivery-evidence documents.
+    function submittedProposalVisibleToMembers(data) {
+      return hasCompletedProfile(request.auth.uid)
+        && data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
+        && !(data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
+        && data.keys().hasAny(['problemId'])
+        && exists(/databases/$(database)/documents/problems/$(data.problemId))
+        && (get(/databases/$(database)/documents/problems/$(data.problemId)).data.ownerId == request.auth.uid
+          || (get(/databases/$(database)/documents/problems/$(data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
+            && !(get(/databases/$(database)/documents/problems/$(data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])));
+    }
+
+    function proposalOwnedByViewer(data) {
+      return isActiveUser(request.auth.uid)
+        && (data.researcherId == request.auth.uid
+          || isModerationAdmin(request.auth.uid)
+          || data.get('postingOwnerId', '') == request.auth.uid);
+    }
+
     match /proposals/{proposalId} {
       // Author, sponsor and admins keep their existing get/list paths. Drafts stay
       // author-only. Submitted (and later) proposals follow the parent problem's
@@ -1354,28 +1373,8 @@ service cloud.firestore {
       // a problemId equality filter, so putting submittedProposalVisibleToMembers
       // on `read` would let any member query every submitted proposal
       // platform-wide. Per-posting lists go through listPostedProposals.
-      function submittedProposalVisibleToMembers() {
-        return hasCompletedProfile(request.auth.uid)
-          && resource.data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
-          && !(resource.data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
-          && resource.data.keys().hasAny(['problemId'])
-          && exists(/databases/$(database)/documents/problems/$(resource.data.problemId))
-          && (
-            get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.ownerId == request.auth.uid
-            || (
-              get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
-              && !(get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
-            )
-          );
-      }
-      function proposalOwnedByViewer() {
-        return isActiveUser(request.auth.uid)
-          && (resource.data.researcherId == request.auth.uid
-            || isModerationAdmin(request.auth.uid)
-            || resource.data.get('postingOwnerId', '') == request.auth.uid);
-      }
-      allow get: if proposalOwnedByViewer() || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers());
-      allow list: if proposalOwnedByViewer();
+      allow get: if proposalOwnedByViewer(resource.data) || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers(resource.data));
+      allow list: if proposalOwnedByViewer(resource.data);
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
         && resource.data.status == 'draft'
@@ -1444,6 +1443,28 @@ service cloud.firestore {
             : validProposalCorrection(before, after))));
       }
       allow update: if proposalUpdateIsAllowed();
+    }
+
+    match /proposals/{proposalId}/deliveryEvidence/{evidenceHash} {
+      function parentProposal() {
+        return get(/databases/$(database)/documents/proposals/$(proposalId)).data;
+      }
+      allow read: if proposalOwnedByViewer(parentProposal())
+        || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers(parentProposal()));
+      allow create: if isActiveUser(request.auth.uid)
+        && hasCompletedProfile(request.auth.uid)
+        && parentProposal().researcherId == request.auth.uid
+        && parentProposal().status != 'draft'
+        && 'fundingTerms' in parentProposal()
+        && evidenceHash.matches('^0x[0-9a-f]{64}$')
+        && request.resource.data.keys().hasOnly(['summary', 'url', 'ownerId', 'createdAt'])
+        && request.resource.data.keys().hasAll(['summary', 'url', 'ownerId', 'createdAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && isNonEmptyString(request.resource.data.summary, 4000)
+        && request.resource.data.url is string && request.resource.data.url.size() <= 2048
+        && request.resource.data.url.matches('^https://[^\\s]+$')
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
     }
 
     match /proposals/{proposalId}/revisions/{revisionId} {
