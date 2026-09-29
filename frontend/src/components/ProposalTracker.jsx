@@ -1,24 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
+import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
-import { MATCHING_LABELS } from "../lib/matching.js";
 import { PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
+import { recommendationCounts, workflowStatusLabel } from "../config/workflowStatus.js";
 import {
   PROPOSAL_SORTS,
   commentCountLabel,
-  feedbackLabel,
   filterProposalRows,
-  ownerReviewTrackerLabel,
+  ownerReviewStatus,
   listMyProposalQueue,
   queueError,
   sortProposalRows,
   statusOptions,
 } from "../lib/proposalQueues.js";
-
-function sentenceCase(value) {
-  const text = String(value ?? "").replaceAll("_", " ");
-  return text ? text[0].toUpperCase() + text.slice(1) : "";
-}
 
 /** QCDAO-62 - every submitted proposal with where it stands, without asking anyone. */
 export function ProposalTracker({ onNavigate }) {
@@ -52,7 +47,7 @@ export function ProposalTracker({ onNavigate }) {
         <label className="comment-sort">Status
           <select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="all">All statuses</option>
-            {statuses.map((value) => <option key={value} value={value}>{MATCHING_LABELS[value] || sentenceCase(value)}</option>)}
+            {statuses.map((value) => <option key={value} value={value}>{workflowStatusLabel(value)}</option>)}
           </select>
         </label>
         <label className="comment-sort">Sort by
@@ -65,7 +60,7 @@ export function ProposalTracker({ onNavigate }) {
     {loading ? <p className="table-empty" role="status">Loading proposals…</p>
       : error ? <p className="error-banner" role="alert">{error}</p>
       : !visible.length ? <p className="table-empty">No proposals yet. Choose an open opportunity to submit your approach.</p>
-      : visible.map((item) => <div className="table-row" key={item.id}>
+      : visible.map((item) => { const review = ownerReviewStatus(item.ownerReview); return <div className="table-row" key={item.id}>
         <div>
           {/* The bold line is this member's own proposal; the opportunity it answers
               is named beneath it, so neither title can be mistaken for the other. */}
@@ -73,18 +68,19 @@ export function ProposalTracker({ onNavigate }) {
           <small className="table-row-meta">
             Proposal for: {item.posting?.title || "Untitled opportunity"}
           </small>
+          <span className="status-badges">
+            <StatusBadge status={item.workflowStatus} />
+            <EvaluationBadges counts={recommendationCounts(item.recommendations ?? [])} />
+            {review && <StatusBadge status={review.status} prefix="Owner · " />}
+          </span>
           <small className="table-row-meta">
-            Status: {MATCHING_LABELS[item.matchingStatus] || sentenceCase(item.status)} · Submitted {formatInstant(item.createdAt)}
+            Submitted {formatInstant(item.createdAt)} · {commentCountLabel(item)}{review?.note ? ` · ${review.note}` : ""}
           </small>
-          <small className="table-row-meta">
-            {feedbackLabel(item)} · {commentCountLabel(item)}
-          </small>
-          {ownerReviewTrackerLabel(item.ownerReview) && <small className="table-row-meta">{ownerReviewTrackerLabel(item.ownerReview)}</small>}
         </div>
         <div className="table-row-actions">
           <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
           <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
         </div>
-      </div>)}
+      </div>; })}
   </div>;
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
+import { WORKFLOW_STATUS } from "./workflowStatus.js";
 
 export const REPORT_REASONS = ["off_topic", "abusive", "misleading", "duplicate", "other"];
 export const MODERATION_REASONS = [...REPORT_REASONS, "spam", "policy_violation", "no_violation", "appeal_accepted"];
@@ -45,7 +46,7 @@ export function memberNoticeFields({ recipientId, now, createdAt, ...fields }) {
   const navigationTarget = notificationNavigationTarget(fields);
   return {
     recipientId: String(recipientId).toLowerCase(), kind: fields.kind || null, contentType: fields.contentType || null, contentId: fields.contentId || null,
-    title: String(fields.title || "").slice(0, 160), message: fields.message,
+    title: String(fields.title || "").slice(0, 160), message: fields.message, workflowStatus: fields.workflowStatus || null,
     problemId: fields.problemId || null, proposalId: fields.proposalId || null,
     navigationTarget, link: navigationTarget ? `#/${navigationTarget}` : null,
     createdAt: createdAt || now, deliveredAt: now, readAt: null,
@@ -68,7 +69,7 @@ export async function notifyProposalReceived({ db, proposalId, before, after, no
   const title = String(after.title || "Proposal").slice(0, 160);
   return writeMemberNotice({
     db, now, createdAt: after.createdAt || now, id: `received_${proposalId}`, recipientId,
-    kind: "proposal_received", contentType: "proposal", contentId: proposalId, proposalId,
+    kind: "proposal_received", workflowStatus: WORKFLOW_STATUS.SUBMITTED, contentType: "proposal", contentId: proposalId, proposalId,
     problemId: after.problemId || null, title,
     message: `A new proposal “${title}” was submitted on your posting.`,
   });

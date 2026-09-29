@@ -1,6 +1,7 @@
 import { CATEGORY_VALUES } from "../config/postingCategories.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { toDate } from "./datetime.js";
+import { opportunityWorkflowStatus } from "../config/workflowStatus.js";
 
 export const DISCOVERY_PAGE_SIZE = 6;
 
@@ -161,7 +162,7 @@ export function filterOpportunities(items, filters, now = new Date()) {
     return (!query || searchableText(item).includes(query))
       && (!filters.type || opportunityTypeValue(item) === filters.type)
       && (!filters.category || categories.includes(filters.category))
-      && (!filters.status || clean(item.status).toLowerCase() === filters.status)
+      && (!filters.status || opportunityWorkflowStatus(item, now) === filters.status)
       && (minimum === null || (amount !== null && amount >= minimum))
       && (maximum === null || (amount !== null && amount <= maximum))
       && (!filters.organisation || clean(item.organisation ?? item.owner) === filters.organisation)

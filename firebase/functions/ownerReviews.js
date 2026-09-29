@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
 import { ROLE_ADMIN } from "./comments.js";
 import { memberNoticeFields } from "./moderation.js";
+import { ownerReviewWorkflowStatus } from "./workflowStatus.js";
 
 export const OWNER_REVIEW_OUTCOMES = new Set(["feedback", "revision_requested", "not_progressing"]);
 const OPEN_PROPOSAL = new Set(["submitted", "under_review"]);
@@ -39,7 +40,7 @@ export function correctionPathOpen(proposal = {}, problem = {}) {
     && !["awaiting_confirmation", "confirmed", "invalidated"].includes(problemMatching.status || "");
 }
 
-function reviewStillOpen(proposal, problem) {
+export function reviewStillOpen(proposal, problem) {
   if (!OPEN_PROPOSAL.has(proposal.status)) return false;
   if (proposal.moderated || BLOCKED.has(proposal.moderationStatus)) return false;
   if (problem.moderated || BLOCKED.has(problem.moderationStatus)) return false;
@@ -148,7 +149,7 @@ export async function recordOwnerReview({ db, uid, proposalId, outcome, rational
     if (noticeRef) {
       const title = String(data.title || "Proposal").slice(0, 160);
       tx.create(noticeRef, memberNoticeFields({
-        recipientId: researcherId, now, createdAt: now, kind: "owner_review",
+        recipientId: researcherId, now, createdAt: now, kind: "owner_review", workflowStatus: ownerReviewWorkflowStatus(outcome),
         contentType: "proposal", contentId: proposalId, proposalId, problemId: data.problemId, title,
         message: NOTICE[outcome](title),
       }));

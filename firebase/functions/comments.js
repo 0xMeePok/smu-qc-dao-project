@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
+import { recommendationEntries, workflowStatusLabel } from "./workflowStatus.js";
 
 export const ROLE_EVALUATOR = 2;
 export const ROLE_ADMIN = 1;
@@ -44,11 +45,15 @@ function ownSolution(proposal, uid) {
   return proposal?.data?.().researcherId === uid;
 }
 
-/** One recommendation per solution, and never from its own author. */
+function heldBy(proposal, uid) {
+  return recommendationEntries(proposal?.data?.())[uid] ?? null;
+}
+
+/** One recommendation per evaluator per solution, and never from its own author. */
 function canRecommend({ proposal, uid, role, isReply, commentId = null }) {
   if (role !== ROLE_EVALUATOR || isReply || ownSolution(proposal, uid)) return false;
-  const held = recommendationHolder(proposal?.data?.());
-  return !held || held.commentId === commentId;
+  const mine = heldBy(proposal, uid);
+  return !mine || mine.commentId === commentId;
 }
 
 function assertRecommendationAllowed({ proposal, uid, recommendation, isReply, commentId = null }) {
@@ -56,9 +61,9 @@ function assertRecommendationAllowed({ proposal, uid, recommendation, isReply, c
   if (ownSolution(proposal, uid)) {
     fail("permission-denied", "You cannot recommend your own solution.");
   }
-  const held = recommendationHolder(proposal?.data?.());
-  if (held && held.commentId !== commentId) {
-    fail("failed-precondition", "Another evaluator has already recommended this solution.");
+  const mine = heldBy(proposal, uid);
+  if (mine && mine.commentId !== commentId) {
+    fail("failed-precondition", "You have already recommended this solution. Edit or delete that comment to change it.");
   }
 }
 
@@ -178,22 +183,32 @@ function isMockEvaluation(matching = {}) {
   return matching.evaluationMockComplete === true || Boolean(matching.evaluationCompletedBy);
 }
 
-async function evaluationGateReads(tx, db, { proposalId, commentId, qualifying, holder }) {
-  if (!proposalId) return { proposal: null, complete: qualifying, holder: holder ?? null };
-  const proposalRef = db.collection("proposals").doc(proposalId);
-  if (qualifying) return { proposal: await tx.get(proposalRef), complete: true, holder: holder ?? null };
+const RECOMMENDER_CAP = 200;
+
+// Rebuilt from the qualifying comments, so records from before QCDAO-91 converge too.
+async function evaluationGateReads(tx, db, { proposalId, commentId, entry = null }) {
+  if (!proposalId) return { proposal: null, complete: Boolean(entry), recommendations: {} };
   const [proposal, rows] = await Promise.all([
-    tx.get(proposalRef),
-    tx.get(db.collection("comments").where("proposalId", "==", proposalId).where("qualifying", "==", true).limit(5)),
+    tx.get(db.collection("proposals").doc(proposalId)),
+    tx.get(db.collection("comments").where("proposalId", "==", proposalId).where("qualifying", "==", true)
+      .limit(RECOMMENDER_CAP)),
   ]);
-  // Whichever qualifying comment is left owns the recommendation now.
-  const remaining = rows.docs.filter((doc) => doc.id !== commentId);
-  const survivor = remaining[0];
-  return { proposal: proposal.exists ? proposal : null,
-    complete: remaining.length > 0,
-    holder: survivor
-      ? { by: survivor.data().authorId, commentId: survivor.id, recommendation: survivor.data().recommendation ?? null }
-      : null };
+  const recommendations = {};
+  for (const doc of rows.docs) {
+    if (doc.id === commentId) continue;
+    const data = doc.data();
+    recommendations[data.authorId] = { commentId: doc.id, recommendation: data.recommendation ?? null,
+      at: data.updatedAt ?? data.createdAt ?? null };
+  }
+  if (entry) recommendations[entry.by] = { commentId: entry.commentId, recommendation: entry.recommendation, at: entry.at };
+  return { proposal: proposal.exists ? proposal : null, complete: Object.keys(recommendations).length > 0, recommendations };
+}
+
+function sameRecommendations(left = {}, right = {}) {
+  const a = Object.keys(left).sort();
+  const b = Object.keys(right).sort();
+  return a.length === b.length && a.every((id, index) => id === b[index]
+    && left[id]?.commentId === right[id]?.commentId && left[id]?.recommendation === right[id]?.recommendation);
 }
 
 function nextEvaluationComplete(proposal, complete) {
@@ -204,42 +219,20 @@ function nextEvaluationComplete(proposal, complete) {
   return evaluationComplete;
 }
 
-/** The recommendation a solution currently carries, or null. */
-export function recommendationHolder(proposalData) {
-  const matching = proposalData?.matching || {};
-  return matching.recommendedBy
-    ? { by: matching.recommendedBy, commentId: matching.recommendationCommentId ?? null,
-      recommendation: matching.recommendation ?? null }
-    : null;
-}
-
-// Writing the holder onto the solution is also what serialises two evaluators
-// recommending at once: both transactions read this document, so the loser
-// retries, sees the winner, and is refused instead of filing a second opinion.
-function applyEvaluationComplete(tx, proposal, { complete, now, holder }) {
+// Every recommendation rewrites this map on the solution, so two filings at once
+// conflict on one document: the retry sees the first and refuses a duplicate.
+function applyEvaluationComplete(tx, proposal, { complete, now, recommendations }) {
   if (!proposal?.exists) return;
-  const current = proposal.data().matching || {};
+  const { recommendedBy, recommendationCommentId, recommendation, ...current } = proposal.data().matching || {};
   const evaluationComplete = complete || isMockEvaluation(current);
-  const keep = holder === undefined;
-  const nextBy = keep ? (current.recommendedBy ?? null) : (holder?.by ?? null);
-  const nextCommentId = keep ? (current.recommendationCommentId ?? null) : (holder?.commentId ?? null);
-  const nextValue = keep ? (current.recommendation ?? null) : (holder?.recommendation ?? null);
-  if (evaluationComplete === (current.evaluationComplete === true)
-    && nextBy === (current.recommendedBy ?? null)
-    && nextCommentId === (current.recommendationCommentId ?? null)
-    && nextValue === (current.recommendation ?? null)) return;
-  const matching = { ...current, evaluationComplete, recommendedBy: nextBy,
-    recommendationCommentId: nextCommentId, recommendation: nextValue,
+  const legacy = recommendedBy !== undefined || recommendationCommentId !== undefined || recommendation !== undefined;
+  if (!legacy && evaluationComplete === (current.evaluationComplete === true)
+    && sameRecommendations(current.recommendations, recommendations)) return;
+  const matching = { ...current, evaluationComplete, recommendations,
     evaluationCompletedAt: evaluationComplete ? (current.evaluationCompletedAt || now) : null,
     updatedAt: now };
   tx.update(proposal.ref, { matching });
 }
-
-const RECOMMENDATION_LABEL = {
-  recommend: "Recommend",
-  recommend_with_revisions: "Recommend with revisions",
-  do_not_recommend: "Do not recommend",
-};
 
 async function workflowNoticeRecipients(tx, db, proposal, { exclude } = {}) {
   if (!proposal?.exists) return [];
@@ -253,7 +246,7 @@ async function workflowNoticeRecipients(tx, db, proposal, { exclude } = {}) {
   return [...new Set([ownerId, data.researcherId].filter(Boolean).map((id) => String(id).toLowerCase()).filter((id) => id !== skip))];
 }
 
-async function queueCommentNotices(tx, db, { id, recipients, record, proposal, now, kind, message }) {
+async function queueCommentNotices(tx, db, { id, recipients, record, proposal, now, kind, message, workflowStatus = null }) {
   if (!recipients.length || !proposal?.exists) return [];
   const data = proposal.data();
   const existing = await Promise.all(recipients.map((uid) => tx.get(db.collection("moderationNotifications").doc(`${id}_${uid}`))));
@@ -261,7 +254,7 @@ async function queueCommentNotices(tx, db, { id, recipients, record, proposal, n
   return existing.map((snap, i) => ({
     snap,
     payload: memberNoticeFields({
-      recipientId: recipients[i], now, createdAt: record?.createdAt || now, kind,
+      recipientId: recipients[i], now, createdAt: record?.createdAt || now, kind, workflowStatus,
       contentType: "comment", contentId: record?.id || record?.commentId, proposalId: data.problemId ? proposal.id : record?.proposalId,
       problemId: record?.problemId || data.problemId, title, message: message(title),
     }),
@@ -271,10 +264,10 @@ async function queueCommentNotices(tx, db, { id, recipients, record, proposal, n
 async function queueQualifyingNotices(tx, db, { commentId, record, proposal, now }) {
   if (!record.qualifying) return [];
   const recipients = await workflowNoticeRecipients(tx, db, proposal, { exclude: record.authorId });
-  const outcome = RECOMMENDATION_LABEL[record.recommendation] || "a recommendation";
+  const outcome = workflowStatusLabel(record.recommendation) || "a recommendation";
   return queueCommentNotices(tx, db, {
     id: `qualifying_${commentId}`, recipients, record: { ...record, commentId }, proposal, now,
-    kind: "qualifying_recommendation",
+    kind: "qualifying_recommendation", workflowStatus: record.recommendation,
     message: (title) => `An evaluator submitted a qualifying recommendation on “${title}”: ${outcome}.`,
   });
 }
@@ -369,8 +362,8 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     await assertReplyAllowance(tx, db, parent, uid);
     const role = accessLevel(profile);
     assertRecommendationAllowed({ proposal, uid, recommendation, isReply: Boolean(replyTo) });
-    // An evaluator may still discuss their own solution - they just cannot judge it,
-    // and a solution carries one recommendation, so a second evaluator is refused.
+    // An evaluator may still discuss their own solution - they just cannot judge it -
+    // and each evaluator files at most one recommendation per solution.
     const recommends = canRecommend({ proposal, uid, role, isReply: Boolean(replyTo) });
     const shown = presentation(role);
     const record = {
@@ -390,14 +383,14 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
       updatedAt: now,
     };
     record.qualifying = commentIsQualifying(record, role);
-    const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id, qualifying: record.qualifying,
-      holder: record.qualifying ? { by: uid, commentId: ref.id, recommendation: record.recommendation } : undefined });
+    const gate = await evaluationGateReads(tx, db, { proposalId, commentId: ref.id,
+      entry: record.qualifying ? { by: uid, commentId: ref.id, recommendation: record.recommendation, at: now } : null });
     const notices = await queueQualifyingNotices(tx, db, { commentId: ref.id, record, proposal, now });
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     const summaryDocs = await feedbackSummaryReads(tx, db, proposalId);
     tx.set(ref, record);
     if (parent) tx.update(parent.ref, { replyCount: (parent.data().replyCount || 0) + 1 });
-    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, recommendations: gate.recommendations });
     applyQueuedNotices(tx, notices);
     applyQueuedNotices(tx, gateNotices);
     applyFeedbackSummary(tx, db, summaryDocs, {
@@ -435,15 +428,15 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
       revisions: [...(data.revisions || []), revision("edit", data, now)],
     };
     next.qualifying = commentIsQualifying(next, role);
-    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: next.qualifying,
-      holder: next.qualifying ? { by: uid, commentId: ref.id, recommendation: next.recommendation } : undefined });
+    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id,
+      entry: next.qualifying ? { by: uid, commentId: ref.id, recommendation: next.recommendation, at: now } : null });
     const notices = next.qualifying && !data.qualifying
       ? await queueQualifyingNotices(tx, db, { commentId: ref.id, record: next, proposal: gate.proposal, now })
       : [];
     const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
     const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
     tx.set(ref, next);
-    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, recommendations: gate.recommendations });
     applyQueuedNotices(tx, notices);
     applyQueuedNotices(tx, gateNotices);
     applyFeedbackSummary(tx, db, summaryDocs, {
@@ -460,17 +453,17 @@ export async function prepareCommentEvaluationGate({ tx, db, contentId, data, ac
     : data.moderationStatus;
   const author = data.authorId ? await tx.get(db.collection("users").doc(data.authorId)) : null;
   const qualifying = commentIsQualifying({ ...data, moderationStatus }, accessLevel(author?.data()));
-  const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId, qualifying,
-    holder: qualifying
-      ? { by: data.authorId, commentId: contentId, recommendation: data.recommendation ?? null }
-      : undefined });
+  const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: contentId,
+    entry: qualifying
+      ? { by: data.authorId, commentId: contentId, recommendation: data.recommendation ?? null, at: data.updatedAt ?? now }
+      : null });
   const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
   const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
   const next = { ...data, moderationStatus, qualifying };
   return {
     qualifying,
     apply() {
-      applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
+      applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, recommendations: gate.recommendations });
       applyQueuedNotices(tx, gateNotices);
       applyFeedbackSummary(tx, db, summaryDocs, {
         commentId: contentId, next, proposalId: data.proposalId, problemId: data.problemId, now,
@@ -493,7 +486,7 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
       updatedAt: now,
       revisions: [...(data.revisions || []), revision("delete", data, now)],
     };
-    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id, qualifying: false });
+    const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id });
     const removedNotices = await queueQualifyingRemovedNotices(tx, db, {
       commentId: ref.id, record: data, proposal: gate.proposal, now,
     });
@@ -503,7 +496,7 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
     if (parent?.exists) {
       tx.update(parent.ref, { replyCount: Math.max(0, (parent.data().replyCount || 0) - 1) });
     }
-    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, holder: gate.holder });
+    applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, recommendations: gate.recommendations });
     applyQueuedNotices(tx, removedNotices);
     applyQueuedNotices(tx, gateNotices);
     applyFeedbackSummary(tx, db, summaryDocs, {

@@ -6,6 +6,8 @@ import { formatInstant } from "../lib/datetime.js";
 import { Modal } from "./Modal.jsx";
 import { FundingMeta } from "./FundingMeta.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
+import { StatusBadge } from "./StatusBadge.jsx";
+import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
 function Row({ item, onNavigate, onDelete }) {
   const isDraft = item.status === PROPOSAL_STATUS_DRAFT;
@@ -19,7 +21,7 @@ function Row({ item, onNavigate, onDelete }) {
       </small>
     </div>
     <div className="table-row-actions">
-      {isDraft && <span className="draft-badge">Draft</span>}
+      {isDraft && <StatusBadge status={WORKFLOW_STATUS.DRAFT} />}
       <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
       <button className="text-button" type="button" onClick={() => onNavigate(isDraft ? `edit-proposal/${item.id}` : `proposal/${item.id}`)}>
         {isDraft ? "Resume editing" : "View proposal"}

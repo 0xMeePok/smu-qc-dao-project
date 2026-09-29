@@ -50,6 +50,14 @@ export const ROUTES_CONFIG = [
     showInNav: true,
   },
   {
+    key: "actions",
+    path: "actions",
+    label: "Action Needed",
+    allowedRoles: [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR],
+    authRequired: true,
+    showInNav: true,
+  },
+  {
     key: "my-problems",
     path: "my-problems",
     label: "My Problems",

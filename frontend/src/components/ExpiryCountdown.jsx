@@ -6,7 +6,7 @@ import {
   formatCountdown,
   formatInstant,
 } from "../lib/datetime.js";
-import { closedStatusLabel, opportunityStatusLabel } from "../config/workflowStatus.js";
+import { WORKFLOW_STATUS, closedStatusLabel, opportunityStatusLabel, workflowStatusLabel } from "../config/workflowStatus.js";
 
 /**
  * QCDAO-55 - time remaining on a posting, beside its exact UTC deadline.
@@ -25,7 +25,7 @@ export function ExpiryCountdown({ expiresAt, status, matching, showInstant = tru
   const parts = countdownParts(deadline, now);
   const expired = Boolean(closedLabel) || (parts?.expired ?? false);
   const urgency = closedLabel ? "expired" : expiryUrgency(deadline, now);
-  const urgencyLabel = pendingMatch ? "Awaiting creator acceptance" : expiryUrgencyLabel(urgency);
+  const urgencyLabel = pendingMatch ? workflowStatusLabel(WORKFLOW_STATUS.PENDING_APPROVAL) : expiryUrgencyLabel(urgency);
   const deadlineVerb = pendingMatch ? "Creator response ends" : "Closes";
   const confirmedAt = matchingStatus === "confirmed" ? matching.confirmedAt : null;
 
@@ -40,7 +40,7 @@ export function ExpiryCountdown({ expiresAt, status, matching, showInstant = tru
       <span
         className={`expiry-countdown ${matchingStatus === "confirmed" ? "expiry-confirmed" : "expiry-expired"}`}
         aria-label={matchingStatus === "confirmed"
-          ? `Match confirmed${confirmedAt ? ` at ${formatInstant(confirmedAt)}` : ""}.`
+          ? `${closedLabel}${confirmedAt ? ` at ${formatInstant(confirmedAt)}` : ""}.`
           : `${closedLabel}. Deadline ${formatInstant(expiresAt)}.`}
       >
         <strong aria-live="off" title={matchingStatus === "confirmed"
@@ -58,14 +58,14 @@ export function ExpiryCountdown({ expiresAt, status, matching, showInstant = tru
     <span
       className={`expiry-countdown expiry-${urgency}`}
       aria-label={expired
-        ? `Expired. ${deadlineVerb} ${formatInstant(deadline)}.`
+        ? `${workflowStatusLabel(WORKFLOW_STATUS.EXPIRED)}. ${deadlineVerb} ${formatInstant(deadline)}.`
         : `${urgencyLabel}. ${formatCountdown(deadline, now)}. ${deadlineVerb} ${formatInstant(deadline)}.`}
     >
       <strong
         aria-live="off"
         title={formatInstant(deadline)}
       >
-        {expired ? "Expired" : formatCountdown(deadline, now)}
+        {expired ? workflowStatusLabel(WORKFLOW_STATUS.EXPIRED) : formatCountdown(deadline, now)}
       </strong>
       {!expired && <span className="expiry-urgency" aria-hidden="true">{urgencyLabel}</span>}
       {showInstant && <small>{formatInstant(deadline)}</small>}

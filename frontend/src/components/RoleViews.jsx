@@ -1,7 +1,10 @@
 import { ProposalList } from "./ProposalList.jsx";
 import { ProposalTracker } from "./ProposalTracker.jsx";
-import { QUEUE_FILTERS, listEvaluatorQueue, queueError, sortProposalRows } from "../lib/proposalQueues.js";
-import { recommendationLabel } from "../lib/comments.js";
+import { ACTION_ITEMS_KEY, QUEUE_FILTERS, listActionItems, listEvaluatorQueue, queueError, sortProposalRows } from "../lib/proposalQueues.js";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { SelectProposalDialog } from "./ProposalComparison.jsx";
+import { SelectionResponseDialog } from "./MatchingPanel.jsx";
+import { OwnerReviewForm } from "./OwnerReviewPanel.jsx";
 import { MockFundingPortfolio } from "./MockFundingPortfolio.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
@@ -13,7 +16,8 @@ import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditRecei
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
-import { expiryReasonLabel, opportunityStatusLabel } from "../config/workflowStatus.js";
+import { eventWorkflowStatus, expiryReasonLabel, opportunityWorkflowStatus } from "../config/workflowStatus.js";
+import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { problemMatchingLocked } from "../lib/matching.js";
 import { ROLE_LABELS } from "../config/roles.js";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
@@ -103,19 +107,12 @@ export function MyProblems({ onNavigate }) {
             {isDraft ? "Last saved " : "Submitted "}
             {formatInstant(item.updatedAt)}
           </small>
-          {live && (
-            <span className={`status-dot${item.matching?.status === "awaiting_confirmation" ? " is-awaiting" : ""}`}>
-              {opportunityStatusLabel(item.status, { expiresAt: item.expiresAt, matching: item.matching })}
-            </span>
-          )}
+          <StatusBadge status={opportunityWorkflowStatus(item)} />
           {live && (
             <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} />
           )}
         </div>
         <div className="table-row-actions">
-          {isDraft && <span className="draft-badge">Draft</span>}
-          {item.status === "cancelled" && <span className="draft-badge">Withdrawn</span>}
-          {item.status === "expired" && <span className="draft-badge">Expired</span>}
           <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
           <button
             className="text-button"
@@ -230,6 +227,121 @@ export function MyProblems({ onNavigate }) {
   );
 }
 
+/** QCDAO-91. The member's open actions; shared by the tab count and the page. */
+export function useActionItems() {
+  const { user } = useAuth();
+  return useQuery({ queryKey: [...ACTION_ITEMS_KEY, user?.id], queryFn: listActionItems,
+    enabled: Boolean(user?.id), staleTime: 30_000 });
+}
+
+const money = (currency, amount) => `${currency || ""} ${Number(amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`.trim();
+
+const NOTICES = {
+  select: "Selection recorded. The proposal's creator now has until the acceptance deadline to respond.",
+  confirm: "Your acceptance is recorded. Funds are locked only once both parties have accepted.",
+  decline: "Selection rejected. Its funders are refunded and the other proposals reopen.",
+  review: "Review recorded. The developer can see it on their proposal.",
+};
+
+function ActionRow({ item, meta, children, onNavigate }) {
+  return <div className="table-row">
+    <div>
+      <strong>{item.title || "Untitled proposal"}</strong>
+      <small className="table-row-meta">Proposal for: {item.posting?.title || "Untitled opportunity"}</small>
+      <span className="status-badges">
+        <StatusBadge status={item.workflowStatus} />
+        {item.recommendations && <EvaluationBadges counts={item.recommendations} />}
+      </span>
+      {meta && <small className="table-row-meta">{meta}</small>}
+    </div>
+    <div className="table-row-actions">
+      {children}
+      <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
+    </div>
+  </div>;
+}
+
+function ActionGroup({ title, hint, items, render }) {
+  if (!items?.length) return null;
+  return <div className="card-table">
+    <div className="table-header"><h3>{title} <span className="count-pill">{items.length}</span></h3></div>
+    {hint && <p className="field-hint action-group-hint">{hint}</p>}
+    {items.map(render)}
+  </div>;
+}
+
+/** QCDAO-91 - everything waiting on this member, acted on in place. */
+export function ActionNeeded({ onNavigate }) {
+  const queryClient = useQueryClient();
+  const { data, error, isPending, isFetching, refetch } = useActionItems();
+  const [dialog, setDialog] = useState(null);
+  const [notice, setNotice] = useState("");
+  const open = (kind, item) => { setNotice(""); setDialog({ kind, item }); };
+  const done = async (kind) => {
+    setDialog(null);
+    setNotice(NOTICES[kind]);
+    await queryClient.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
+  };
+  const owner = data?.owner ?? {};
+  const evaluator = data?.evaluator;
+
+  return <section className="page dashboard-page">
+    <div className="page-heading">
+      <h1>Action Needed</h1>
+      <p>Everything waiting on you, across every role you hold. Act here, or open the proposal for the full context.</p>
+    </div>
+    {notice && <p className="proposal-success" role="status">{notice}</p>}
+    {isPending ? <p className="table-empty" role="status">Loading your actions…</p>
+      : error ? <div className="card-table"><p className="error-banner" role="alert">{queueError(error)}</p>
+        <button className="secondary" type="button" onClick={() => refetch()}>Retry</button></div>
+      : !data?.total ? <div className="card-table"><p className="table-empty">Nothing needs your attention right now.</p></div>
+      : <>
+        <ActionGroup title="Ready to select" items={owner.readyToSelect}
+          hint="Fully funded proposals on your problems. Selecting records your acceptance and starts the creator's acceptance window."
+          render={(item) => <ActionRow key={`select-${item.id}`} item={item} onNavigate={onNavigate}
+            meta={`Submitted ${formatInstant(item.submittedAt)} · Funded ${money(item.currency, item.fundedAmount)} of ${money(item.currency, item.amount)}`}>
+            <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>
+          </ActionRow>} />
+        <ActionGroup title="Awaiting my review" items={owner.awaitingReview}
+          hint="Submitted proposals on your problems with no owner review yet. A review is feedback only; it does not select a winner."
+          render={(item) => <ActionRow key={`review-${item.id}`} item={item} onNavigate={onNavigate}
+            meta={`Submitted ${formatInstant(item.submittedAt)}${item.canSelect ? " · Fully funded, ready to select" : ""}`}>
+            <button className="secondary" type="button" disabled={isFetching} onClick={() => open("review", item)}>Record review…</button>
+            {item.canSelect && <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>}
+          </ActionRow>} />
+        <ActionGroup title="Selection to accept" items={data.researcher?.selectionToAccept}
+          hint="An owner selected your proposal. Accept or reject it before the deadline, or the posting is invalidated."
+          render={(item) => <ActionRow key={`accept-${item.id}`} item={item} onNavigate={onNavigate}
+            meta={<>Submitted {formatInstant(item.submittedAt)} · Respond by <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} /></>}>
+            <button className="primary" type="button" disabled={isFetching} onClick={() => open("confirm", item)}>Accept…</button>
+            <button className="secondary" type="button" disabled={isFetching} onClick={() => open("decline", item)}>Reject…</button>
+          </ActionRow>} />
+        <ActionGroup title="Awaiting my recommendation" items={evaluator?.awaitingRecommendation}
+          hint="Proposals you have not recommended yet. Each evaluator files their own recommendation on the proposal page."
+          render={(item) => <ActionRow key={`recommend-${item.id}`} item={item} onNavigate={onNavigate}
+            meta={`Submitted ${formatInstant(item.submittedAt)}`}>
+            <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>Recommend</button>
+          </ActionRow>} />
+        {evaluator?.more && <p className="field-hint">More proposals are waiting. <button className="text-button" type="button" onClick={() => onNavigate("evaluations")}>Open the evaluation queue</button></p>}
+        {data.truncated && <p className="field-hint">Showing the first 200 records. Open a problem from My Problems for the rest.</p>}
+      </>}
+
+    {dialog?.kind === "select" && <SelectProposalDialog problemId={dialog.item.problemId} proposal={dialog.item}
+      onCancel={() => setDialog(null)} onSelected={() => done("select")} />}
+    {(dialog?.kind === "confirm" || dialog?.kind === "decline") && <SelectionResponseDialog kind={dialog.kind}
+      problemId={dialog.item.problemId} proposal={dialog.item} onCancel={() => setDialog(null)} onDone={done} />}
+    {dialog?.kind === "review" && <Modal labelledBy="action-review-title" onDismiss={() => setDialog(null)}>
+      <div className="modal-head"><h2 id="action-review-title">Record owner review</h2></div>
+      <div className="modal-body">
+        <strong>{dialog.item.title}</strong>
+        <p className="field-hint">Written feedback from the designated problem owner. It does not select or reject a winner.</p>
+        <OwnerReviewForm proposalId={dialog.item.id} revisionPathOpen={dialog.item.revisionPathOpen} onSaved={() => done("review")} />
+      </div>
+      <div className="modal-actions"><button type="button" className="secondary" onClick={() => setDialog(null)}>Cancel</button></div>
+    </Modal>}
+  </section>;
+}
+
 export function ResearcherProposals({ onNavigate }) {
   return <section className="page dashboard-page">
     <div className="page-heading">
@@ -279,7 +391,7 @@ export function EvaluatorQueue({ onNavigate }) {
           <span>Assigned by a DAO administrator</span>
         </div>
         <h1>Evaluation queue</h1>
-        <p>Open a solution with its posting for context, then leave the one recommendation it carries.</p>
+        <p>Open a solution with its posting for context, then leave your recommendation. Each evaluator files their own.</p>
       </div>
 
       <div className="admin-tabs-nav" role="tablist" aria-label="Recommendation status">
@@ -302,12 +414,13 @@ export function EvaluatorQueue({ onNavigate }) {
           : visible.map((item) => <div className="table-row" key={item.id}>
             <div>
               <strong>{item.title || "Untitled proposal"}</strong>
-              <small className="table-row-meta">{item.posting?.title || "Untitled posting"} · Submitted {formatInstant(item.submittedAt)}</small>
-              <small className="table-row-meta">
+              <small className="table-row-meta">Proposal for: {item.posting?.title || "Untitled posting"} · Submitted {formatInstant(item.submittedAt)}</small>
+              <span className="status-badges">
+                <StatusBadge status={item.workflowStatus} />
                 {item.recommendationStatus === "submitted"
-                  ? `My recommendation: ${recommendationLabel(item.recommendation)}`
-                  : "No recommendation yet"}
-              </small>
+                  ? <StatusBadge status={item.recommendation} prefix="My recommendation · " />
+                  : <EvaluationBadges counts={item.recommendations ?? {}} />}
+              </span>
             </div>
             <div className="table-row-actions">
               <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
@@ -551,7 +664,10 @@ export function AdminAudit() {
 
                   return (
                     <tr className="audit-nav-row" key={item.id}>
-                      <td><span className={`audit-type-badge ${badgeClass}`}>{eventLabel}</span></td>
+                      <td>
+                        <span className={`audit-type-badge ${badgeClass}`}>{eventLabel}</span>
+                        {eventWorkflowStatus(item.type) && <StatusBadge status={eventWorkflowStatus(item.type)} />}
+                      </td>
                       <td>
                         {summary}
                         {isExpiry ? (

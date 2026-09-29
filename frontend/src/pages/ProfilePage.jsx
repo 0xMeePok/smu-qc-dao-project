@@ -7,7 +7,8 @@ import { fieldForFirebaseError, messageForFirebaseError } from "../lib/errors.js
 import { validateProfile } from "../lib/validation.js";
 import { ModerationNotifications } from "../components/ModerationNotifications.jsx";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
-import { opportunityStatusLabel } from "../config/workflowStatus.js";
+import { opportunityWorkflowStatus, proposalWorkflowStatus } from "../config/workflowStatus.js";
+import { StatusBadge } from "../components/StatusBadge.jsx";
 import { POSTING_STATUS_DRAFT, listOwnPostings } from "../lib/postings.js";
 import { PROPOSAL_STATUS_DRAFT, listProposals } from "../lib/proposals.js";
 import { opportunityTypeLabel } from "../lib/opportunityPresentation.js";
@@ -42,11 +43,6 @@ const PROFILE_TABS = [
   ["proposals", "Proposals"],
 ];
 
-function statusText(value) {
-  const text = String(value || "").replace(/_/g, " ");
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
-}
-
 // The owner's briefs and proposals, fetched once each, the first time their tab
 // opens. A request finishes even if the tab changes meanwhile, so coming back never
 // finds a placeholder that nothing will fill; only a new wallet discards results.
@@ -75,7 +71,7 @@ function useProfileList(tab, address) {
         id: posting.id,
         title: posting.title || "Untitled brief",
         sub: [opportunityTypeLabel(posting), `${Number(posting.proposalCount || 0)} ${Number(posting.proposalCount) === 1 ? "proposal" : "proposals"}`].join(" · "),
-        status: opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching }),
+        status: opportunityWorkflowStatus(posting),
         route: posting.status === POSTING_STATUS_DRAFT
           ? (posting.opportunityType === OPEN_FUNDING_TYPE ? `create-funding/${posting.id}` : `create/${posting.id}`)
           : `posting/${posting.id}`,
@@ -84,7 +80,7 @@ function useProfileList(tab, address) {
         id: proposal.id,
         title: proposal.title || "Untitled proposal",
         sub: [proposal.currency && proposal.amount ? `${proposal.currency} ${Number(proposal.amount).toLocaleString()}` : "", formatDate(proposal.createdAt)].filter(Boolean).join(" · "),
-        status: statusText(proposal.status),
+        status: proposalWorkflowStatus(proposal),
         // Drafts open in the editor, as they do from My Proposals.
         route: proposal.status === PROPOSAL_STATUS_DRAFT ? `edit-proposal/${proposal.id}` : `proposal/${proposal.id}`,
       })));
@@ -241,7 +237,7 @@ export default function ProfilePage({ onNavigate = navigateTo }) {
               <strong>{item.title}</strong>
               {item.sub && <small>{item.sub}</small>}
             </span>
-            <span className="settings-row-value">{item.status}</span>
+            <span className="settings-row-value"><StatusBadge status={item.status} interactive={false} /></span>
             <Chevron />
           </button>
         ))}

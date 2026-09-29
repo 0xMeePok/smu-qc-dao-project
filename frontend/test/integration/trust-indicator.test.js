@@ -79,8 +79,9 @@ describe("Integration Tests: Trust indicator treatment (QCDAO-80)", () => {
     assert.equal(leftover.verification, VERIFIED_STATES.NOT_ANCHORED);
     assert.equal(leftover.chip.label, "Not anchored");
 
+    // QCDAO-91 folds the stored "open" into the shared Submitted status.
     const unpublished = listTrustView({ ...LIVE, status: "open", audit: null });
-    assert.equal(unpublished.workflow, "Open");
+    assert.equal(unpublished.workflow, "Submitted");
     assert.equal(unpublished.verification, VERIFIED_STATES.NOT_ANCHORED);
   });
 

@@ -41,6 +41,8 @@ import { canEditOpportunity, isExpiredOpportunity, materialFieldsLocked } from "
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import { BriefPreview, ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
+import { validatePosting } from "../lib/validation.js";
+import { opportunityStatusLabel } from "../config/workflowStatus.js";
 
 // The four wizard steps and the validated fields each one holds.
 const PROBLEM_STEPS = [
@@ -243,7 +245,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               ? "This posting has expired and can no longer be edited."
               : posting.status === "draft"
               ? "Resume this posting from My Problems — drafts are not edited here."
-              : `This posting can no longer be edited. Its status is ${posting.status}.`);
+              : `This posting can no longer be edited. Its status is ${opportunityStatusLabel(posting.status, posting)}.`);
             return;
           }
           setExisting(posting);
@@ -360,9 +362,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
       return;
     }
 
-    // Imported lazily so the validator and the rules stay the single source of
-    // truth for the shape, rather than this component re-deriving it.
-    const { validatePosting } = await import("../lib/validation.js");
+    // The validator and the rules stay the single source of truth for the shape.
     const found = validatePosting(form);
     if (Object.keys(found).length > 0) {
       setErrors(found);
@@ -632,7 +632,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
       />
       )}
 
-      <WizardSteps steps={PROBLEM_STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)} lockForward={pendingCount > 0} />
+      <WizardSteps steps={PROBLEM_STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
+        completeSteps={wizard.completeSteps(validatePosting(form))} visitedSteps={wizard.visited} lockForward={pendingCount > 0} />
 
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>
