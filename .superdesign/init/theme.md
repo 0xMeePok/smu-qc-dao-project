@@ -1,3 +1,163 @@
+# Theme
+
+One stylesheet: `frontend/src/styles.css`. No Tailwind. System font. Light and dark tokens on `:root` and `:root[data-theme="dark"]`.
+
+## Compact tokens
+
+Light page `#eef1f8`, ink `#1d1d1f`, muted `#68686d`, brand `#0071e3`, control fill `#0071e3`, control hover `#0062c4`, link `#0066cc`, danger fill `#d70015`.
+
+Dark page `#05070d`, ink `#f5f5f7`, brand `#0a84ff`, control fill `#0068d6` (white label contrast), control hover `#005ec4`.
+
+Radii: 10 / 18 / 22 / pill 980. Container 1120px. Gutter 24px. Header 70px.
+
+Landing sections use `.lg-*` classes and large blurred `.lg-blob` circles. Those blobs sit behind type and glass cards and are the clarity problem on the home walkthrough.
+
+## :root
+
+```css
+:root {
+  /* QC DAO redesign — a calm, system-font interface: white surfaces on a soft
+     grey page, one blue accent, pill-shaped actions. Every component reads these
+     tokens, so the dark theme below only has to redefine them. */
+  --ink: #1d1d1f;
+  --ink-soft: #424245;
+  --muted: #68686d;
+  --subtle: #66666b;
+  --faint: #636366;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: #d2d2d7;
+  /* Liquid Glass: content sits on translucent panes over a soft, blurred colour
+     field. --surface is the pane; --surface-solid is for anything that overlays
+     other content (dialogs, dropdowns, tooltips) and must stay opaque. */
+  --surface: rgba(255, 255, 255, 0.6);
+  --surface-solid: #ffffff;
+  --surface-muted: rgba(118, 118, 128, 0.1);
+  --surface-hover: rgba(118, 118, 128, 0.18);
+  --page-bg: #eef1f8;
+  --row-hover: rgba(255, 255, 255, 0.45);
+  --nav-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.42));
+  --menu-bg: rgba(255, 255, 255, 0.8);
+  --glass-edge: rgba(255, 255, 255, 0.85);
+  --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 14px 40px rgba(30, 60, 120, 0.1);
+  --glass-blur: blur(28px) saturate(180%);
+  --blob-1: #b8d6ff;
+  --blob-2: #d9d4ff;
+  --blob-3: #c4f0ff;
+  --blob-opacity: 0.9;
+  --segmented-bg: rgba(118, 118, 128, 0.12);
+  --segmented-on: #ffffff;
+  --chevron: #c7c7cc;
+  --track: #e8e8ed;
+  --brand: #0071e3;
+  --brand-hover: #0077ed;
+  --brand-strong: #0062c4;
+  /* Fills behind white labels. Darker than --brand where the accent itself
+     is too light to clear WCAG AA (4.5:1) for button and badge text. */
+  --control: #0071e3;
+  --control-hover: #0062c4;
+  --danger-fill: #d70015;
+  --brand-soft: #f0f5fd;
+  --brand-soft-hover: #e3edfb;
+  --brand-line: #c4d9f6;
+  --link: #0066cc;
+  --success: #248a3d;
+  --success-dot: #34c759;
+  --success-soft: #eaf8ee;
+  --success-line: #b8e6c4;
+  --warning: #b25000;
+  --warning-dot: #ff9f0a;
+  --warning-soft: #fff5e6;
+  --warning-line: #ffd79a;
+  --danger: #d70015;
+  --danger-dot: #ff3b30;
+  --danger-soft: #fff1f0;
+  --danger-line: #ffc7c2;
+  --radius-sm: 10px;
+  --radius-md: 18px;
+  --radius-lg: 22px;
+  --radius-pill: 980px;
+  --shadow-xs: none;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.25);
+  --ring: 0 0 0 3px rgba(0, 113, 227, 0.3);
+  --container: 1120px;
+  --gutter: 24px;
+  --header-height: 70px;
+  color-scheme: light;
+  color: var(--ink);
+  background: var(--page-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-synthesis: none;
+  letter-spacing: -0.01em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+```
+
+## Dark
+
+```css
+:root[data-theme="dark"] {
+  --ink: #f5f5f7;
+  --ink-soft: #d1d1d6;
+  --muted: #a1a1a6;
+  --subtle: #8e8e93;
+  --faint: #8e8e93;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: #48484a;
+  --surface: rgba(255, 255, 255, 0.08);
+  --surface-solid: #1c1c1e;
+  --surface-muted: rgba(255, 255, 255, 0.07);
+  --surface-hover: rgba(255, 255, 255, 0.14);
+  --page-bg: #05070d;
+  --row-hover: rgba(255, 255, 255, 0.06);
+  --nav-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+  --menu-bg: rgba(40, 40, 46, 0.82);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 20px 50px rgba(0, 0, 0, 0.45);
+  --blob-1: #0a84ff;
+  --blob-2: #5e5ce6;
+  --blob-3: #0040dd;
+  --blob-opacity: 0.42;
+  --segmented-bg: rgba(118, 118, 128, 0.24);
+  --segmented-on: #636366;
+  --chevron: #48484a;
+  --track: #3a3a3c;
+  --brand: #0a84ff;
+  --brand-hover: #409cff;
+  --brand-strong: #64b0ff;
+  --control: #0068d6;
+  --control-hover: #005ec4;
+  --danger-fill: #d70015;
+  --brand-soft: rgba(10, 132, 255, 0.16);
+  --brand-soft-hover: rgba(10, 132, 255, 0.26);
+  --brand-line: rgba(10, 132, 255, 0.45);
+  --link: #2997ff;
+  --success: #30d158;
+  --success-dot: #30d158;
+  --success-soft: rgba(48, 209, 88, 0.14);
+  --success-line: rgba(48, 209, 88, 0.4);
+  --warning: #ffb340;
+  --warning-dot: #ff9f0a;
+  --warning-soft: rgba(255, 159, 10, 0.14);
+  --warning-line: rgba(255, 159, 10, 0.4);
+  --danger: #ff6961;
+  --danger-dot: #ff453a;
+  --danger-soft: rgba(255, 69, 58, 0.14);
+  --danger-line: rgba(255, 69, 58, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --ring: 0 0 0 3px rgba(10, 132, 255, 0.4);
+  color-scheme: dark;
+}
+```
+
+## Full stylesheet
+
+```css
 :root {
   /* QC DAO redesign — a calm, system-font interface: white surfaces on a soft
      grey page, one blue accent, pill-shaped actions. Every component reads these
@@ -4510,3 +4670,4 @@ footer.footer { background: transparent; }
 .wizard-step-pill.is-partial > .wizard-step-number { background: var(--warning-soft); color: var(--warning); box-shadow: inset 0 0 0 1px var(--warning-line); }
 .wizard-step-number svg { width: 14px; height: 14px; }
 .wizard-step-pill.is-done > .wizard-step-number { background: var(--success-dot); color: #fff; }
+```

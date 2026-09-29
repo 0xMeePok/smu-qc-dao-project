@@ -77,7 +77,7 @@ jobs:
           npm ci
           npm ci --prefix ../firebase/functions --omit=dev
 
-      - name: Run test suite
+      - name: Run unit, integration, and accessibility tests
         run: npm test
 
       - name: Run build smoke test

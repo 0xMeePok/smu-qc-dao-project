@@ -9,7 +9,8 @@
     "build": "vite build",
     "sync:audit-registry": "node scripts/sync-audit-registry.mjs",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test --test-reporter=../scripts/test-reporter.mjs test/*.test.js test/unit/*.test.js test/integration/*.test.js && vitest run",
+    "test": "node --test --test-reporter=../scripts/test-reporter.mjs test/*.test.js test/unit/*.test.js test/integration/*.test.js test/a11y/*.test.js && vitest run",
+    "test:a11y": "node --test --test-reporter=../scripts/test-reporter.mjs test/a11y/*.test.js && vitest run test/a11y/primitives.test.jsx",
     "test:unit": "node --test --test-reporter=../scripts/test-reporter.mjs test/unit/*.test.js",
     "test:integration": "node --test --test-reporter=../scripts/test-reporter.mjs test/integration/*.test.js"
   },
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@testing-library/react": "16.3.0",
+    "axe-core": "^4.10.3",
     "jsdom": "26.1.0",
     "vitest": "3.2.4"
   },
