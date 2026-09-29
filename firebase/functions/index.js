@@ -29,7 +29,8 @@ import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
-import { PUBLISH_VALIDATION, isPublishableProblem, requireProposalPublicationFundingPolicy } from "./publicationValidation.js";
+import { PUBLISH_VALIDATION, isPublishableProblem } from "./publicationValidation.js";
+import { requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
   selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
   getMockFundingPortfolio as readMockFundingPortfolio, sweepExpiredMockMatches,

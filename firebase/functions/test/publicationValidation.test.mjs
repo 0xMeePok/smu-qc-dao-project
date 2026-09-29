@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
-import { isPublishableProblem, requireProposalPublicationFundingPolicy } from "../publicationValidation.js";
+import { isPublishableProblem } from "../publicationValidation.js";
+import { requireProposalPublicationFundingPolicy } from "../proposalPublicationPolicy.js";
 
 // Mirrors the firestore.rules checks attestPublication now runs for a publish.
 // Each rejection case names the rule it stands in for.
