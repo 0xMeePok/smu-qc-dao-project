@@ -29,7 +29,7 @@ describe("Escrow-linked proposal verification", () => {
     const record = escrowRecord(), client = escrowClient(record);
     const result = await verifyMinedProposal(record, client, options);
     assert.equal(result.status, "confirmed");
-    assert.equal(client.calls.filter(call => call.functionName === "milestoneAt").length, 3);
+    assert.equal(client.calls.filter(call => call.functionName === "milestoneAt").length, 2);
     assert.equal(client.calls.find(call => call.functionName === "fundingTarget").address, escrowAddress);
   });
 
@@ -53,7 +53,7 @@ describe("Escrow-linked proposal verification", () => {
   });
 
   for (const [field, value] of [
-    ["funderVoting", false], ["trancheBps", [2500, 2500, 5000]], ["reviewWindows", [86400, 86400, 86400]],
+    ["funderVoting", false], ["reviewWindows", [86400, 86400]],
   ]) it(`rejects a transaction whose ${field} differs from the stored funding terms`, async () => {
     const record = escrowRecord();
     await assert.rejects(verifyMinedProposal({ ...record, fundingTerms: { ...record.fundingTerms, [field]: value } }, escrowClient(record), options), /Mismatch/);
@@ -123,27 +123,33 @@ describe("Escrow form amounts and plans", () => {
   it("preserves small high-precision token amounts across draft and submitted form restoration", () => {
     const config = { ...escrowConfig, escrow: { ...escrowConfig.escrow,
       tokens: [{ ...escrowConfig.escrow.tokens[0], decimals: 18 }] } };
-    const form = { amount: "0.000000000000000001", milestones: "Delivery" };
+    const form = { amount: "0.000000000000000002", milestones: "Delivery" };
     const terms = proposalFundingTerms({ form, currency: "USDC", config });
     const restored = { ...form, amount: fundingAmountText(Number(form.amount)), immutableFundingTerms: terms };
     assert.equal(restored.amount, form.amount);
     assert.deepEqual(proposalFundingTerms({ form: restored, currency: "USDC", config }), terms);
-    assert.equal(terms.target, "1");
+    assert.equal(terms.target, "2");
+    assert.throws(() => proposalFundingTerms({ form: { ...form, amount: "0.000000000000000001" }, currency: "USDC", config }), /at least one token base unit/);
   });
   for (const decimals of [0, 6, 18, 77]) it(`uses exact base units for a token with ${decimals} decimals`, () => {
     assert.equal(fundingAmountUnits("1", decimals), 10n ** BigInt(decimals));
     if (decimals) assert.equal(fundingAmountUnits(`0.${"0".repeat(decimals - 1)}1`, decimals), 1n);
     assert.throws(() => fundingAmountUnits(`0.${"0".repeat(decimals)}1`, decimals), /decimal places/);
   });
-  it("supports a lump sum or five uneven tranches and rejects lossy or malformed input", () => {
-    const form = { amount: "1000.123456", milestones: "Five delivery stages", tranchePercentages: "10, 15, 20, 25, 30",
-      reviewDays: "7, 14, 21, 28, 35", funderVoting: true };
+  it("requires half upfront and half final, with exact amounts and one or two review windows", () => {
+    const form = { amount: "1000.123456", milestones: "Delivery evidence", tranchePercentages: "50, 50",
+      reviewDays: "7, 90", funderVoting: true };
     const terms = proposalFundingTerms({ form, currency: "USDC", config: escrowConfig });
-    assert.deepEqual(terms.trancheBps, [1000, 1500, 2000, 2500, 3000]);
+    assert.deepEqual(terms.trancheBps, [5000, 5000]);
+    assert.deepEqual(terms.reviewWindows, [7 * 86400, 90 * 86400]);
+    assert.equal(terms.funderVoting, true);
     assert.equal(terms.target, "1000123456");
-    assert.equal(proposalFundingTerms({ form: { amount: "1", milestones: "Delivery" }, currency: "USDC", config: escrowConfig }).trancheBps[0], 10000);
+    const defaults = proposalFundingTerms({ form: { amount: "1", milestones: "Delivery" }, currency: "USDC", config: escrowConfig });
+    assert.deepEqual(defaults.trancheBps, [5000, 5000]);
+    assert.deepEqual(defaults.reviewWindows, [604800, 604800]);
+    assert.equal(defaults.funderVoting, false);
     for (const patch of [{ amount: "0.0000001" }, { tranchePercentages: "30, 30" }, { tranchePercentages: "0, 100" },
-      { reviewDays: "366" }, { reviewDays: "7,14" }, { funderVoting: "true" }]) {
+      { reviewDays: "366" }, { reviewDays: "7,14,30" }, { funderVoting: "true" }]) {
       assert.throws(() => proposalFundingTerms({ form: { ...form, ...patch }, currency: "USDC", config: escrowConfig }));
     }
     assert.throws(() => normalizeFundingTerms({ ...terms, target: 100 }), /integer string/);
@@ -152,5 +158,31 @@ describe("Escrow form amounts and plans", () => {
     const highPrecision = { ...escrowConfig, escrow: { ...escrowConfig.escrow,
       tokens: [{ ...escrowConfig.escrow.tokens[0], decimals: 18 }] } };
     assert.throws(() => proposalFundingTerms({ form: { ...form, amount: "123456789.123456789" }, currency: "USDC", config: highPrecision }), /numeric precision/);
+  });
+
+  it("rejects custom splits on creation, immutable form restoration and stored verification", () => {
+    for (const tranchePercentages of ["100", "40,60", "20,30,50", "10,15,20,25,30"]) {
+      assert.throws(() => proposalFundingTerms({ form: { amount: "100", milestones: "Delivery", tranchePercentages },
+        currency: "USDC", config: escrowConfig }), /50% upfront and 50% on completion/);
+    }
+    const record = escrowRecord();
+    const form = { ...record, amount: "1200.25", immutableFundingTerms: record.fundingTerms };
+    assert.deepEqual(proposalFundingTerms({ form, currency: "USDC", config: escrowConfig }), record.fundingTerms);
+    const custom = { ...record.fundingTerms, trancheBps: [4000, 6000] };
+    assert.throws(() => proposalFundingTerms({ form: { ...form, immutableFundingTerms: custom },
+      currency: "USDC", config: escrowConfig }), /50% upfront and 50% on completion/);
+    assert.throws(() => prepareStoredProposal({ ...record, fundingTerms: custom }, options), /50% upfront and 50% on completion/);
+    assert.throws(() => proposalFundingTerms({ form: { ...form, milestones: "Changed delivery" },
+      currency: "USDC", config: escrowConfig }), /cannot change/);
+  });
+
+  it("verifies new half-upfront proposals in both completion approval variants", async () => {
+    for (const funderVoting of [false, true]) {
+      const record = escrowRecord();
+      record.fundingTerms = proposalFundingTerms({ form: { ...record, funderVoting }, currency: "USDC", config: escrowConfig });
+      const client = escrowClient(record);
+      assert.equal((await verifyMinedProposal(record, client, options)).status, "confirmed");
+      assert.equal(client.calls.filter(call => call.functionName === "milestoneAt").length, 2);
+    }
   });
 });

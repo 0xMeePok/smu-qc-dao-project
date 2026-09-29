@@ -1,6 +1,15 @@
 import { keccak256, stringToHex } from "viem";
 import { normalizeFundingTerms, requireAddress } from "./escrowAudit.js";
 
+export const HALF_UPFRONT_PERCENTAGES = "50, 50";
+
+export function requireHalfUpfrontFundingTerms(terms) {
+  if (terms.trancheBps.length !== 2 || terms.trancheBps.some(bps => bps !== 5000)) {
+    throw new TypeError("Proposals require 50% upfront and 50% on completion.");
+  }
+  return terms;
+}
+
 export function configuredFundingToken(config, currency) {
   const matches = (config.escrow?.tokens ?? []).filter(token => token.symbol === currency);
   if (matches.length !== 1) throw new Error(`Configure exactly one escrow token for ${currency}.`);
@@ -60,24 +69,25 @@ export function proposalFundingTerms({ form, currency, config }) {
     throw new TypeError("This amount exceeds the proposal form's numeric precision. Use fewer significant digits.");
   }
   if (form.immutableFundingTerms) {
-    const saved = normalizeFundingTerms(form.immutableFundingTerms);
+    const saved = requireHalfUpfrontFundingTerms(normalizeFundingTerms(form.immutableFundingTerms));
     if (saved.target !== target || saved.token !== token.address.toLowerCase()) throw new Error("The escrow funding amount and token cannot change after proposal creation.");
     if (milestoneHashesFor(form.milestones, saved.trancheBps.length).some((hash, index) => hash !== saved.milestoneHashes[index])) {
       throw new Error("The escrow milestones cannot change after proposal creation.");
     }
     return serializeFundingTerms(saved);
   }
-  const ratios = String(form.tranchePercentages ?? "100").split(",").map(value => value.trim());
+  const ratios = String(form.tranchePercentages ?? HALF_UPFRONT_PERCENTAGES).split(",").map(value => value.trim());
   if (ratios.length < 1 || ratios.length > 5 || ratios.some(value => !/^\d{1,3}(\.\d{1,2})?$/.test(value))) {
-    throw new TypeError("Enter one to five percentages, separated by commas, with at most two decimal places.");
+    throw new TypeError("Proposals require the fixed payment split 50, 50.");
   }
   const trancheBps = ratios.map(value => {
     const [whole, fraction = ""] = value.split(".");
     return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
   });
+  requireHalfUpfrontFundingTerms({ trancheBps });
   const windows = String(form.reviewDays ?? "7").split(",").map(value => value.trim());
   if (windows.some(value => !/^\d{1,3}$/.test(value)) || (windows.length !== 1 && windows.length !== ratios.length)) {
-    throw new TypeError("Enter one review window for all payments, or one per payment, in whole days.");
+    throw new TypeError("Enter one review window for both payments, or two windows (upfront, final), in whole days.");
   }
   const reviewWindows = (windows.length === 1 ? ratios.map(() => windows[0]) : windows).map(value => Number(value) * 86400);
   const milestoneHashes = milestoneHashesFor(form.milestones, ratios.length);
@@ -86,7 +96,7 @@ export function proposalFundingTerms({ form, currency, config }) {
 }
 
 export function validateStoredFundingTerms(record, config) {
-  const terms = normalizeFundingTerms(record.fundingTerms);
+  const terms = requireHalfUpfrontFundingTerms(normalizeFundingTerms(record.fundingTerms));
   const token = configuredFundingToken(config, record.currency);
   if (terms.token !== token.address.toLowerCase() || terms.target !== fundingAmountUnits(record.amount, token.decimals)) {
     throw new Error("Mismatch detected: the escrow token or target differs from the proposal's currency and amount.");

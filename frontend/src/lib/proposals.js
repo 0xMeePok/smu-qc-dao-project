@@ -10,7 +10,7 @@ import { proposalBlockReason, validateProposal } from "./proposalValidation.js";
 import { toDate } from "./datetime.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
-import { proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
+import { HALF_UPFRONT_PERCENTAGES, proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
 
 export const PROPOSAL_STATUS_DRAFT = "draft";
 export const PROPOSAL_STATUS_SUBMITTED = "submitted";
@@ -80,7 +80,7 @@ export function buildProposalDocument({ researcherId, posting, form, attachments
   if (status !== PROPOSAL_STATUS_DRAFT) record.postingOwnerId = posting.ownerId;
   if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG)) {
     if (status === PROPOSAL_STATUS_DRAFT) record.fundingPlan = {
-      tranchePercentages: String(form.tranchePercentages ?? "100"), reviewDays: String(form.reviewDays ?? "7"),
+      tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "7"),
       funderVoting: form.funderVoting ?? false,
     };
     else record.fundingTerms = proposalFundingTerms({ form, currency: posting.currency, config: AUDIT_REGISTRY_CONFIG });

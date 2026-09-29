@@ -20,12 +20,32 @@ and its adjacent `.deployment.json` file. No historical records were migrated or
 
 ## Proposal creation and verification
 
-With an `EscrowAuditRegistry` manifest selected, the proposal form provides one to
-five payment percentages, review windows in whole days, and the optional funder
-majority requirement for later payments. Percentages accept up to two decimal
-places and must total 100. The default is one 100% payment with a seven-day window
-and funder voting disabled. The first approval window is still capped by the
-contract at seven days and the posting deadline.
+With an `EscrowAuditRegistry` manifest selected, every application proposal uses
+**50% upfront and 50% on completion** (`trancheBps: [5000, 5000]`). The split is
+read-only in the form and enforced by shared term validation, server publication
+attestation and Firestore submission/correction rules. There is no exception for
+previous custom splits; the existing proposal dataset is to be cleared separately.
+These code changes do not delete records or redeploy contracts.
+
+The full funding target must be deposited into escrow before the upfront half
+can be released, after both the problem owner and proposal owner approve selection.
+The proposal owner submits delivery evidence and confirms completion for the final
+half. The problem owner must accept that evidence as delivered. The proposal chooses
+one of two immutable completion approval variants before funding:
+
+- **Both owners:** evidence plus approval from the proposal owner and problem owner.
+- **Both owners and funders:** the same requirements, plus yes votes representing
+  strictly more than 50% of all contributed funds. Each wallet's cumulative funding
+  is its voting weight. Exactly 50% fails, and abstentions do not lower the threshold.
+
+The default variant is both owners. Replacing evidence resets owner approvals and
+funder votes. Each payment is subject to the configured platform fee, with any token
+rounding remainder in the final payment. Review windows accept one whole-day value
+for both payments or two values (upfront, final), each 1–365 days; the default is seven
+days. The first window is capped by the contract at seven days and the posting
+deadline. The final window starts with the upfront payout, so it must allow time
+for delivery and acceptance. A missed approval deadline opens refunds of the unpaid
+balance.
 
 Drafts retain unfinished inputs in `fundingPlan`. Submission resolves the configured
 token address and decimals, produces exact integer base units, and stores the six
@@ -34,8 +54,8 @@ safe to persist in Firestore. The existing proposal amount field remains a numbe
 with its existing 1,000,000,000 limit; the form rejects conversions that would lose
 precision. This UI limit does not reduce the contract's uint256 accounting range.
 Small amounts are restored to plain decimal input when a draft or submitted
-proposal is reopened, preserving values as small as one base unit of an 18-decimal
-token without scientific notation.
+proposal is reopened without scientific notation. Two token base units are the
+minimum total needed to fund both halves; each payment must be nonzero.
 
 Each milestone description hash binds the proposal's complete milestones text and
 its tranche index under `qcdao.escrow.milestone.v1`. The amount, token, milestone

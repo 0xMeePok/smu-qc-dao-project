@@ -63,6 +63,14 @@ linked registry's `proposalEscrow`, not contracts claiming similar IDs or names.
 
 ## Atomic proposal creation
 
+The application standard is **50% upfront and 50% on completion**, with either
+both-owner approval or both-owner approval plus a funding-weighted funder majority
+for completion. Application validation and publication rules require `[5000, 5000]`
+for every proposal; custom application plans are no longer accepted. The generic
+contract still supports the immutable tranche mechanics described below. This
+policy change does not redeploy the contracts. The whole target is deposited before
+the upfront payment; both halves are gross amounts before configured fees.
+
 The new registry rejects the legacy `commitProposal` entry point. Use the proposal
 owner's wallet and actor-scoped IDs, as required by the original registry:
 
@@ -71,9 +79,9 @@ const terms = {
   token: tokenAddress,
   target: parseTokenAmount("1000", Number(await factory.tokenDecimals(tokenAddress))),
   funderVoting: true,
-  trancheBps: [2000, 3000, 5000],        // 20%, 30%, 50%
-  reviewWindows: [604800, 1209600, 1209600], // seconds, one per tranche
-  milestoneHashes: [hash1, hash2, hash3],   // immutable milestone descriptions
+  trancheBps: [5000, 5000],             // 50% upfront, 50% on completion
+  reviewWindows: [604800, 7776000],     // 7 days upfront; 90 days to deliver and approve
+  milestoneHashes: [hash1, hash2],      // immutable milestone descriptions
 };
 await registry.connect(proposalOwner).commitProposalWithEscrow(
   proposalId, postingId, proposalHash, solutionHash, expectedPostingRevision, terms,

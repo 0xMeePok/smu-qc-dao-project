@@ -32,7 +32,7 @@ import { formatInstant } from "../lib/datetime.js";
 import ProposalDetailPage from "./ProposalDetailPage.jsx";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
-import { fundingAmountText } from "../../../firebase/functions/escrowProposalTerms.js";
+import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/functions/escrowProposalTerms.js";
 import { EscrowPaymentPlanFields } from "../components/EscrowPaymentPlanFields.jsx";
 
 const ALL_FIELDS = [...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS];
@@ -50,7 +50,7 @@ function snapshotOf(form, attachments) {
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, String(form[key] ?? "")])),
     category: form.category ?? "",
     amount: String(form.amount ?? ""),
-    tranchePercentages: form.tranchePercentages ?? "100",
+    tranchePercentages: form.tranchePercentages ?? HALF_UPFRONT_PERCENTAGES,
     reviewDays: form.reviewDays ?? "7",
     funderVoting: form.funderVoting ?? false,
     attachments: attachments.map((item) => item.id).sort(),
@@ -59,13 +59,13 @@ function snapshotOf(form, attachments) {
 
 /** Seeds the form from a stored record, so a resumed draft or an edit starts where it left off. */
 export function formFromProposal(record) {
-  const terms = record?.fundingTerms;
+  const terms = record?.status !== "draft" ? record?.fundingTerms : null;
   return {
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, record?.[key] ?? ""])),
     category: record?.category ?? "",
     amount: record?.amount ? (ESCROW_LINKED ? fundingAmountText(record.amount) : String(record.amount)) : "",
     ...(ESCROW_LINKED ? {
-      tranchePercentages: terms ? terms.trancheBps.map(bps => bps / 100).join(", ") : record?.fundingPlan?.tranchePercentages ?? "100",
+      tranchePercentages: terms ? terms.trancheBps.map(bps => bps / 100).join(", ") : HALF_UPFRONT_PERCENTAGES,
       reviewDays: terms ? terms.reviewWindows.map(seconds => seconds / 86400).join(", ") : record?.fundingPlan?.reviewDays ?? "7",
       funderVoting: terms?.funderVoting ?? record?.fundingPlan?.funderVoting ?? false,
       ...(terms && record.status !== "draft" ? { immutableFundingTerms: terms } : {}),
@@ -119,7 +119,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       return ALL_FIELDS.some(([key]) => String(form[key] ?? "").trim().length > 0)
         || String(form.category ?? "").length > 0
         || String(form.amount ?? "").trim().length > 0
-        || (ESCROW_LINKED && ((form.tranchePercentages ?? "100") !== "100" || (form.reviewDays ?? "7") !== "7" || form.funderVoting === true))
+        || (ESCROW_LINKED && ((form.reviewDays ?? "7") !== "7" || form.funderVoting === true))
         || attachments.length > 0;
     }
     return snapshotOf(form, attachments) !== baseline;

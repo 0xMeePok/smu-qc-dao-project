@@ -42,12 +42,57 @@ async function submit(db, id, data, withSlot = true) {
   return batch.commit();
 }
 describe("QCDAO-59/60 submitted proposals", () => {
+  it("refuses custom escrow splits on creates and draft promotions even with an existing exact publication proof", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    for (const trancheBps of [[10000], [4000, 6000], [2000, 3000, 5000]]) {
+      for (const promoteDraft of [false, true]) {
+        const problemId = await parent();
+        const proposalId = `old-split-proof-${serial}`;
+        const ref = doc(db, "proposals", proposalId);
+        if (promoteDraft) {
+          await assertSucceeds(setDoc(ref, {
+            researcherId: AUTHOR, problemId, status: "draft",
+            createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          }));
+        }
+        const data = record(problemId, { fundingTerms: {
+          token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: true, trancheBps,
+          reviewWindows: trancheBps.map(() => 604800),
+          milestoneHashes: trancheBps.map(() => ATTACHMENT_DIGEST),
+        } });
+        const { createdAt, ...correction } = data;
+        const patch = promoteDraft ? correction : data;
+        // Represents an attestation issued before the fixed-split policy. The
+        // delayed client write cannot rely on that proof to keep custom terms.
+        await seedPublicationFixture(env, ref, patch, promoteDraft);
+        const batch = writeBatch(db);
+        if (promoteDraft) batch.update(ref, patch);
+        else batch.set(ref, patch);
+        batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+        await assertFails(batch.commit());
+      }
+    }
+  });
+
+  it("requires fixed escrow terms for corrections even when an older custom-split record and proof exist", async () => {
+    const problemId = await parent();
+    const proposalId = "old-split-correction";
+    await env.withSecurityRulesDisabled((ctx) => rawSetDoc(doc(ctx.firestore(), "proposals", proposalId), record(problemId, {
+      fundingTerms: { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: false,
+        trancheBps: [10000], reviewWindows: [604800], milestoneHashes: [ATTACHMENT_DIGEST] },
+    })));
+    const ref = doc(env.authenticatedContext(AUTHOR).firestore(), "proposals", proposalId);
+    const patch = { title: "Corrected proposal title", updatedAt: serverTimestamp() };
+    await seedPublicationFixture(env, ref, patch, true);
+    await assertFails(rawUpdateDoc(ref, patch));
+  });
+
   it("stores attested escrow terms with a full proposal and keeps those terms immutable", async () => {
     const id = await parent();
     const db = env.authenticatedContext(AUTHOR).firestore();
     const fundingTerms = { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: true,
-      trancheBps: [2000, 3000, 5000], reviewWindows: [604800, 1209600, 2592000],
-      milestoneHashes: [1, 2, 3].map(value => `0x${String(value).repeat(64)}`) };
+      trancheBps: [5000, 5000], reviewWindows: [604800, 2592000],
+      milestoneHashes: [1, 2].map(value => `0x${String(value).repeat(64)}`) };
     const data = record(id, { fundingTerms, attachments: ["escrow01", "escrow02"].map(fid => ({ id: fid,
       name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })),
       audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
@@ -74,7 +119,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
       fundingPlan: { ...draft.fundingPlan, tranchePercentages: "x".repeat(81) }, updatedAt: serverTimestamp(),
     }));
     const fundingTerms = { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: false,
-      trancheBps: [10000], reviewWindows: [604800], milestoneHashes: [ATTACHMENT_DIGEST] };
+      trancheBps: [5000, 5000], reviewWindows: [604800, 604800], milestoneHashes: [ATTACHMENT_DIGEST, ATTACHMENT_DIGEST] };
     const patch = { status: "submitted", postingOwnerId: SPONSOR, fundingPlan: deleteField(), fundingTerms, updatedAt: serverTimestamp() };
     await seedPublicationFixture(env, doc(db, "proposals", "escrow-plan-draft"), patch, true);
     const batch = writeBatch(db);
@@ -395,8 +440,8 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
         const data = record(problemId, {
           opportunityType, ...framing,
           ...(escrowLinked ? { fundingTerms: { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: true,
-            trancheBps: [2000, 3000, 5000], reviewWindows: [604800, 1209600, 2592000],
-            milestoneHashes: [1, 2, 3].map(value => `0x${String(value).repeat(64)}`) } } : {}),
+            trancheBps: [5000, 5000], reviewWindows: [604800, 2592000],
+            milestoneHashes: [1, 2].map(value => `0x${String(value).repeat(64)}`) } } : {}),
           attachments: ["fileaaa1", "fileaaa2"].map((id) => ({
             id, name: "proposal.pdf", contentType: "application/pdf", size: 10 * 1024 * 1024, sha256: ATTACHMENT_DIGEST,
           })),

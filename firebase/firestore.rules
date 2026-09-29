@@ -361,7 +361,7 @@ service cloud.firestore {
       // An already-stored receipt may stay as-is, including a legacy
       // `confirmed` value. A changed audit must pass validAuditRecord, which
       // rejects new client `confirmed` writes.
-      return !data.keys().hasAny(['audit'])
+      return !('audit' in data)
         || (resource != null && resource.data.get('audit', {}) == data.audit)
         || validAuditRecord(data.audit);
     }
@@ -384,8 +384,9 @@ service cloud.firestore {
           // queued/submitted/pending/failed stay writable so a known hash is
           // never rebroadcast. The Admin SDK may still store `confirmed`.
           && audit.status in ['queued', 'submitted', 'pending', 'failed']
-          && audit.transactionHash is string
-          && (audit.transactionHash == '' || audit.transactionHash.matches('^0x[0-9a-f]{64}$'))
+          // matches also rejects nonstrings; one check covers empty or bytes32
+          // without re-reading the hash for the heaviest draft publication.
+          && audit.transactionHash.matches('^(0x[0-9a-f]{64})?$')
           && audit.blockNumber is int && audit.blockNumber >= 0
           && audit.attemptCount is int
           && audit.attemptCount >= 0 && audit.attemptCount <= 3
@@ -475,12 +476,6 @@ service cloud.firestore {
         && count <= 2
         && (count < 1 || attachmentEntry(items[0], requireDigest))
         && (count < 2 || attachmentEntry(items[1], requireDigest));
-    }
-
-    function preservesKnownAuditTransactionHash(data) {
-      let storedHash = resource.data.get('audit', {}).get('transactionHash', '');
-      return storedHash == ''
-        || data.get('audit', {}).get('transactionHash', '') == storedHash;
     }
 
     // QCDAO-48 - the technology areas a posting can ask for help in.
@@ -926,6 +921,9 @@ service cloud.firestore {
       // Avoiding helper/type checks keeps receipt + two PDFs below 1000 expressions.
       return hasProposalSchema(data)
         && hasValidAudit(data)
+        // Fixed escrow halves also apply to a delayed write using an old proof.
+        // Historical registry records without escrow terms retain their schema.
+        && (!('fundingTerms' in data) || data.fundingTerms.trancheBps == [5000, 5000])
         && (data.problemId.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.problemId.size() <= 128)
         && (data.title.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.title.size() <= 160)
         && (data.summary.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.summary.size() <= 4000)
@@ -1021,13 +1019,15 @@ service cloud.firestore {
 
     // The receipt guards that apply to every write EXCEPT a correction, which
     // necessarily invalidates the content hash the receipt describes.
-    // preservesKnownAuditTransactionHash stops a known hash being rebroadcast;
-    // the second clause stops a confirmed receipt being edited at all, since
-    // `confirmed` is a server attestation the client cannot re-earn.
+    // A known hash cannot be rebroadcast; a confirmed receipt cannot be edited,
+    // since `confirmed` is a server attestation the client cannot re-earn.
+    // Read the stored receipt once so fixed-split draft promotions carrying two
+    // PDFs stay within the expression budget without repeating these lookups.
     function preservesProposalReceipt(before, after) {
-      return preservesKnownAuditTransactionHash(after)
-        && (before.get('audit', {}).get('status', '') != 'confirmed'
-          || after.get('audit', {}) == before.audit);
+      let storedAudit = before.get('audit', {});
+      let storedHash = storedAudit.get('transactionHash', '');
+      return (storedHash == '' || after.get('audit', {}).get('transactionHash', '') == storedHash)
+        && (storedAudit.get('status', '') != 'confirmed' || after.get('audit', {}) == storedAudit);
     }
 
     // The fields a correction may touch. Deliberately checked as a DIFF rather
@@ -1052,6 +1052,7 @@ service cloud.firestore {
       return before.status == 'submitted'
         && after.status == 'submitted'
         && correctionTouchesOnlyContent(before, after)
+        && (!('fundingTerms' in after) || after.fundingTerms.trancheBps == [5000, 5000])
         // The content hash has moved, so the receipt that was stored no longer
         // describes this record and may not survive the write. Anything still in
         // flight is fine - including `pending` carrying the hash of the

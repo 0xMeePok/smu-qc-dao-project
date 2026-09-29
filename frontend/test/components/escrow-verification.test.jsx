@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EscrowPaymentPlanFields } from "../../src/components/EscrowPaymentPlanFields.jsx";
+import { EscrowPaymentPlanSummary } from "../../src/components/EscrowPaymentPlanSummary.jsx";
 
 vi.mock("../../../firebase/functions/auditRegistry.contract.json", async () => {
   const { escrowConfig } = await import("../../../firebase/functions/test/fixtures/escrowConfigFixture.js");
@@ -50,9 +51,9 @@ describe("Escrow registry frontend compatibility", () => {
   it("keeps draft plan inputs and writes finalized terms when a proposal is submitted", () => {
     const original = escrowRecord();
     const posting = { id: original.problemId, ownerId: original.postingOwnerId, currency: "USDC" };
-    const form = { ...original, amount: "1200.25", tranchePercentages: "20, 30, 50", reviewDays: "7, 14, 30", funderVoting: true };
+    const form = { ...original, amount: "1200.25", reviewDays: "7, 30", funderVoting: true };
     const draft = buildProposalDocument({ researcherId: original.researcherId, posting, form, status: "draft" });
-    expect(draft.fundingPlan.tranchePercentages).toBe("20, 30, 50");
+    expect(draft.fundingPlan.tranchePercentages).toBe("50, 50");
     expect(draft.fundingTerms).toBeUndefined();
     const submitted = buildProposalDocument({ researcherId: original.researcherId, posting, form });
     expect(submitted.fundingTerms).toEqual(original.fundingTerms);
@@ -63,18 +64,47 @@ describe("Escrow registry frontend compatibility", () => {
       form: { ...editing, amount: "1" } })).toThrow(/cannot change/);
   });
 
-  it("shows payment inputs, voting, inline validation and immutable-plan state", () => {
+  it("shows the fixed split, both completion variants, inline validation and immutable-plan state", () => {
     const onChange = vi.fn();
-    const { rerender } = render(<EscrowPaymentPlanFields form={{}} onChange={onChange} error="Percentages must total 100." />);
-    expect(screen.getByLabelText("Payment percentages").value).toBe("100");
+    const { rerender } = render(<EscrowPaymentPlanFields form={{}} onChange={onChange} error="Invalid approval window." />);
+    expect(screen.getByLabelText("Payment percentages").value).toBe("50, 50");
+    expect(screen.getByLabelText("Payment percentages").readOnly).toBe(true);
     expect(screen.getByLabelText("Approval window in days").value).toBe("7");
-    fireEvent.change(screen.getByLabelText("Payment percentages"), { target: { value: "20,30,50" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    expect(onChange).toHaveBeenCalledWith("tranchePercentages", "20,30,50");
+    expect(screen.getByRole("radio", { name: "Both owners" }).checked).toBe(true);
+    fireEvent.click(screen.getByRole("radio", { name: "Both owners and a funding-weighted majority of funders" }));
     expect(onChange).toHaveBeenCalledWith("funderVoting", true);
-    expect(screen.getByRole("alert").textContent).toMatch(/total 100/);
-    rerender(<EscrowPaymentPlanFields form={{ tranchePercentages: "20,30,50", funderVoting: true }} disabled onChange={onChange} />);
+    expect(screen.getByRole("alert").textContent).toMatch(/Invalid approval window/);
+    rerender(<EscrowPaymentPlanFields form={{ funderVoting: true }} onChange={onChange} />);
+    expect(screen.getByText(/Completion requires agreement from all three parties/)).toBeTruthy();
+    expect(screen.getByText("more than 50% of all contributed funds")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Both owners" }));
+    expect(onChange).toHaveBeenCalledWith("funderVoting", false);
+    rerender(<EscrowPaymentPlanFields form={{ immutableFundingTerms: escrowRecord().fundingTerms }} disabled onChange={onChange} />);
     expect(screen.getByLabelText("Payment percentages").closest("fieldset").disabled).toBe(true);
+  });
+
+  it("normalizes old draft splits to 50/50 and preserves the selected approval variant", () => {
+    const original = escrowRecord();
+    const restored = formFromProposal({ ...original, status: "draft", fundingTerms: undefined,
+      fundingPlan: { tranchePercentages: "100", reviewDays: "90", funderVoting: true } });
+    expect(restored.tranchePercentages).toBe("50, 50");
+    expect(restored.immutableFundingTerms).toBeUndefined();
+    expect(restored.funderVoting).toBe(true);
+    const submitted = buildProposalDocument({ researcherId: original.researcherId,
+      posting: { id: original.problemId, ownerId: original.postingOwnerId, currency: "USDC" }, form: restored });
+    expect(submitted.fundingTerms.trancheBps).toEqual([5000, 5000]);
+    expect(submitted.fundingTerms.reviewWindows).toEqual([90 * 86400, 90 * 86400]);
+    expect(submitted.fundingTerms.funderVoting).toBe(true);
+  });
+
+  it.each([false, true])("explains evidence and owner acceptance before the final half (voting=%s)", funderVoting => {
+    render(<EscrowPaymentPlanSummary funderVoting={funderVoting} />);
+    expect(screen.getByText("50% upfront").parentElement.textContent).toMatch(/full funding target is in escrow/);
+    const completion = screen.getByText("50% on completion").parentElement.textContent;
+    expect(completion).toMatch(/proposal owner submits delivery evidence and confirms completion/);
+    expect(completion).toMatch(/problem owner must review that evidence and accept the work as delivered/);
+    expect(completion.includes("more than 50% of all contributed funds")).toBe(funderVoting);
+    if (funderVoting) expect(completion).toMatch(/Exactly 50% is insufficient; abstentions do not reduce the threshold/);
   });
 
   it("restores tiny stored amounts as plain decimals when resuming a draft", () => {

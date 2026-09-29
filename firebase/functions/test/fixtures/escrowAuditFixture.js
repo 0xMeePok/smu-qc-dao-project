@@ -14,8 +14,8 @@ export function escrowRecord() {
     amount: 1200.25, currency: "USDC", milestones: "Baseline, prototype, validation", status: "submitted",
     audit: { schemaVersion: 1, chainId: 421614, status: "pending", transactionHash: txHash,
       attemptCount: 1, blockNumber: 0, lastError: "" } };
-  record.fundingTerms = proposalFundingTerms({ form: { ...record, amount: "1200.25", tranchePercentages: "20, 30, 50",
-    reviewDays: "7, 14, 30", funderVoting: true }, currency: record.currency, config: escrowConfig });
+  record.fundingTerms = proposalFundingTerms({ form: { ...record, amount: "1200.25",
+    reviewDays: "7, 30", funderVoting: true }, currency: record.currency, config: escrowConfig });
   return record;
 }
 
