@@ -1,27 +1,36 @@
 # Escrow-linked registry verification
 
-This branch implements **QCDAO-110, QCDAO-113 and QCDAO-117**. The accepted-proposal
-binding and reversible moderation pause require a fresh linked registry/factory
-deployment. The addresses below remain the last confirmed deployment until that
-replacement is verified and its manifest is synchronized. Backend/Hosting rollout
-also requires the platform signing secret and the matching generated configuration.
+This branch implements **QCDAO-110, QCDAO-113 and QCDAO-117**. The replacement linked
+registry/factory provides accepted-proposal binding and reversible moderation pauses.
+Both contracts are confirmed on Arbitrum Sepolia (chain 421614), with compiled
+runtime-bytecode and reciprocal-wiring verification complete. The active stable
+manifest and generated frontend/Firebase configurations select this replacement.
 
-The contracts are deployed on Arbitrum Sepolia (chain 421614). The **local**
-frontend and Firebase manifests select this deployment, and the local frontend now
-includes wallet-backed funding, owner approvals, optional funder voting, payments
-and refunds. This application work has not deployed Hosting, Cloud Functions or
-rules, changed live records, or run a new signed live transaction flow.
+Rollout completed on 2026-09-29. Firebase deployment updated or created all 66
+Functions, including eight active new escrow services. All five escrow indexes are
+ready. The settlement scheduler is enabled and its 15:02:02 UTC attempt reported
+status 0. The rebuilt [hosted application](https://qcdao-a0c7a.web.app) was released
+after the backend. The signed live one-mock-USDC 50%/50% smoke test passed; the full
+authenticated browser workflow has not been exercised. The owner, platform signer,
+existing mock tokens and 10 BPS fee are unchanged. Explorer source publication was
+not requested for the replacement; compiled runtime-bytecode verification passed.
 
 | Setting | Deployed value |
 | --- | --- |
-| EscrowAuditRegistry | `0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD` |
-| FundingEscrowFactory | `0xe5d212491E544694d21c51EF9777F71B32fc5D41` |
+| EscrowAuditRegistry | `0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0` |
+| FundingEscrowFactory | `0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66` |
 | Owner, fee recipient and platform signer | `0x1c608C148F64Fb9657bA4e5fB8992345277371C0` |
 | Initial fee | 10 BPS = 0.1%, charged only on payouts |
 
 The confirmed deployment record is
 [`contracts/audit-registry/manifests/arbitrumSepolia.json`](../contracts/audit-registry/manifests/arbitrumSepolia.json).
-The previous scheme-2 deployment and ABI are preserved under
+The previous linked registry `0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD` and factory
+`0xe5d212491E544694d21c51EF9777F71B32fc5D41` are archived in
+[`pre-qcdao-110-arbitrumSepolia.deployment.json`](../contracts/audit-registry/legacy/pre-qcdao-110-arbitrumSepolia.deployment.json).
+Their historical ABI configuration remains in
+[`auditRegistry.history.json`](../firebase/functions/auditRegistry.history.json),
+alongside the earlier `0x47dA28cAEf8021dD88fe18B80e367746e0036964` registry.
+That earlier scheme-2 deployment and ABI are also preserved under
 [`contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json`](../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json)
 and its adjacent `.deployment.json` file. No historical records were migrated or retired.
 
@@ -189,10 +198,11 @@ The existing command in `contracts/audit-registry` also accepts `--deployment` a
 dispatches linked records to the new verifier. Its default now checks the active
 escrow deployment recorded in `manifests/arbitrumSepolia.json`.
 
-## Prepare the application switch
+## Application switch
 
-The local switch has been applied. From the repository root, regenerate a preview
-from the confirmed active deployment if needed:
+The active manifest and frontend/Firebase configurations have been synchronized
+to the replacement. From the repository root, regenerate a preview from that
+confirmed deployment if needed:
 
 ```sh
 node frontend/scripts/sync-audit-registry.mjs \
@@ -207,15 +217,16 @@ chain/address, ambiguous token symbols, and unsupported token precision. Removin
 `VITE_AUDIT_REGISTRY_ADDRESS` / `AUDIT_REGISTRY_ADDRESS` overrides when switching;
 the linked deployment requires its configured address to agree everywhere.
 
-For testing before publication, use the Firebase emulators with
+For local testing, use the Firebase emulators with
 `VITE_FIREBASE_USE_EMULATORS=true` and the updated local Functions. The wallet and
-verification RPC still use real Arbitrum Sepolia. A local frontend connected to the
-unchanged live Functions cannot publish escrow-linked proposals: that server still
-uses its prior registry configuration. Follow the existing Firebase setup in the
-root README; keep the deployer key out of all `VITE_*` variables and browser code.
+verification RPC still use real Arbitrum Sepolia. A frontend connected to Functions
+that still use the prior manifest cannot publish proposals for the replacement
+registry. The matching backend and Hosting rollout completed on 2026-09-29.
+Follow the existing Firebase setup in the root README; keep the deployer key out of
+all `VITE_*` variables and browser code.
 
-Deploy the matching Functions, Firestore rules and rebuilt frontend together as
-part of the planned registry cutover. This includes the mock-action guards and
+Deploy matching Functions and Firestore rules before the rebuilt frontend as
+part of this registry cutover. This includes the mock-action guards and
 the `deliveryEvidence` rules, not only the registry manifests. An updated frontend
 against old rules cannot persist delivery evidence, and old Functions do not
 provide the escrow routing markers or server-side mock-action guards. Existing records remain in their original
@@ -233,6 +244,7 @@ blocks new funding while preserving exits from existing escrows.
 The current scope is QCDAO-110, QCDAO-113 and QCDAO-117. A global deposit/refund
 portfolio and the separate QCDAO-111/112/114/115/116 stories are not part of this
 rollout. Existing contract refund functions remain available.
+No Jira records were changed during implementation or deployment.
 
 ## Automatic settlement and funding audit
 
@@ -262,6 +274,9 @@ platform signer. Keep `ARBITRUM_SEPOLIA_RPC_URL` in the Functions runtime enviro
 Only the browser's public RPC setting may use the `VITE_` prefix; never prefix a
 signing key with it. Preserve historical deployment configs before changing the
 active manifest, and deploy backend/rules before the frontend that calls them.
+The frontend build writes directly to `firebase/public`; no separate copy from a
+`frontend/dist` directory is required. Keep production emulator mode disabled when
+building the Hosting bundle.
 
 ## Validation
 
@@ -276,12 +291,23 @@ QCDAO-110/113/117 checks on 2026-09-29 passed:
 - Desktop (1365×1000) and mobile (390×844) rendered checks for the deposit form,
   amount entry, funding action and event filter, without application errors or
   page overflow. These used actual components with local deterministic fixtures.
+- 95 focused tests after replacement-manifest synchronization and nine cleanup
+  regression tests.
 
-The replacement testnet deployment and signed live smoke run are pending. The
-smoke script now exercises both 50% payments, verifies the accepted-proposal
-binding, and reconciles its real receipts against the funding audit anchors.
+The replacement testnet deployment is confirmed and has passed runtime-bytecode
+and wiring verification. The signed live one-mock-USDC smoke test passed, including
+cleanup-only recovery, with
+[committed transaction evidence](../contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json).
+It confirmed 20 transactions: 19 business transactions and one gas return. Each
+50% payout was 500,000 base units gross; fees totalled 1,000 base units (0.001 USDC).
+The test verified the accepted-proposal binding and matched 13 escrow events to
+their registry audit anchors using the production reconciler. Both frontend and
+Firebase verification modules accepted the real proposal/escrow records. All mock
+tokens were returned, with 0.0000221284796 test ETH reserved in the recoverable
+derived test wallet. These signed contract/module checks do not establish that a
+full authenticated browser workflow passed; that flow has not been exercised.
 
-Wallet UI integration checks on 2026-09-29 passed:
+Earlier wallet UI integration checks on 2026-09-29 passed:
 
 - 294 frontend Node tests and 422 component tests (`npm test -- --maxWorkers 2`),
   including 20 ABI-checked escrow adapter tests.
@@ -296,9 +322,9 @@ Wallet UI integration checks on 2026-09-29 passed:
 
 These checks cover immutable evidence, visibility, hash mismatches, transaction
 recovery and rejection of mock actions for escrow proposals. Wallet interactions
-used mocked RPC interfaces or a local UI fixture; no new live signed transaction
-was sent through the wallet panel. Frontend, Functions and rules deployment remains
-a separate step.
+used mocked RPC interfaces or a local UI fixture; no signed transaction was sent
+through the wallet panel in those checks. The replacement's completed signed smoke
+test and application rollout are recorded separately above.
 
 Earlier verification baseline, validated locally on 2026-09-27:
 
@@ -318,7 +344,7 @@ Firestore publication/immutability. Contract tests additionally compare the stag
 application ABI bundle against compiled interfaces. The previously canceled deep
 security scan remains incomplete and was not restarted.
 
-The deployed contracts passed read-only runtime-bytecode, wiring, owner, signer
+The previous deployment passed read-only runtime-bytecode, wiring, owner, signer
 and fee checks; see the [verification evidence](../contracts/funding-escrow/manifests/arbitrumSepolia-verification.json).
 An earlier 23-transaction smoke test created a labelled proposal and its escrow,
 confirmed it through the real frontend and Firebase verifier code, and exercised
@@ -340,17 +366,18 @@ contains the escrow address, hashes and confirmed block numbers. These are label
 on-chain test records only; no Firestore records were created.
 
 Explorer source publication is separate from successful bytecode verification.
-The registry source was submitted by the deployment script and was still pending
-when polling stopped. Automatic approval review blocked factory source publication
-pending explicit permission to publish repository code to public Arbiscan. No
-factory source submission was made. After approval, the source-only retry script
-can use the confirmed record without deploying again:
+It was not requested for the replacement contracts during this rollout.
+For the previous deployment, registry source publication was pending when polling
+stopped, and automatic approval review blocked factory source publication. Those
+historical results do not establish the replacement contracts' source-publication
+status. The source-only retry script can use the active confirmed record without
+deploying again:
 
 ```sh
 ESCROW_DEPLOYMENT_RECORD=../audit-registry/manifests/arbitrumSepolia.json \
 ESCROW_VERIFY_CONTRACT=factory npm run verify:source
 ```
 
-Use the same command with `ESCROW_VERIFY_CONTRACT=registry` if its queued request
-does not complete. The script bounds the explorer wait at two minutes and records
+Use the same command with `ESCROW_VERIFY_CONTRACT=registry` to verify the registry
+source. The script bounds the explorer wait at two minutes and records
 its result locally.

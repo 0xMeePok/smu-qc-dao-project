@@ -42,7 +42,7 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
     queueEscrowPostingPause: onDocumentWritten({ document: "problems/{problemId}", region, retry: true, maxInstances: 5 },
       event => event.data?.after?.exists ? queuePostingFundingPause({ db, config,
         problemId: event.params.problemId, record: event.data.after.data() }) : undefined),
-    reconcileEscrowFunding: onSchedule({ schedule: "every 1 minutes", region, maxInstances: 1,
+    reconcileEscrowFunding: onSchedule({ schedule: "every 1 minutes", region, maxInstances: 1, concurrency: 1,
       timeoutSeconds: 540, secrets: [escrowPlatformKey] }, async () => {
       try { return await sweepEscrowFunding(shared); }
       catch { throw new Error("Escrow background reconciliation is unavailable; the persisted jobs will retry."); }

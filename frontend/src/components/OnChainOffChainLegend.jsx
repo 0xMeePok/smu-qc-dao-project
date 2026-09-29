@@ -4,13 +4,15 @@ const ON_CHAIN = [
   "Content and attachment hashes",
   "Anchor timestamp",
   "Submitting wallet",
+  "Escrow deposits, approvals and payouts",
+  "Funding audit events",
 ];
 
 const OFF_CHAIN = [
   "Record body",
   "File attachments",
   "Evaluations",
-  "Workflow status",
+  "Workflow views and notifications",
 ];
 
 /**
