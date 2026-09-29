@@ -172,13 +172,16 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   };
   const locked = proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status);
   const funding = proposalFundingStatus(proposal);
-  return <section className="page detail-page">
+  return <section className="page detail-page blotter-posting">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
     {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. <button type="button" className="text-button" onClick={openRecord}>Check its on-chain verification</button> under Record.</p>}
     {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
     <div className="detail-layout"><article className="detail-main">
-      <div className="card-top">
-        <span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
+      <div className="blotter-title">
+        <div>
+          <span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
+          <h1>{proposal.title}</h1>
+        </div>
         <div className="trust-status-row">
           <StatusBadge status={funding.status} />
           {funding.detail && <span className="funding-note">{funding.detail}</span>}
@@ -186,14 +189,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
           <VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending />
         </div>
       </div>
-      <h1>{proposal.title}</h1>
       <p className="lead">{proposal.summary}</p>
       <ContentModerationNotice record={proposal} />
 
       {/* One job per tab, as on the posting page. Every panel stays mounted so
           the match state MatchingPanel reports keeps the sidebar current. */}
       <div className="posting-tabs">
-        <div className="segmented" role="tablist" aria-label="Proposal sections">
+        <div className="desk-tabs" role="tablist" aria-label="Proposal sections">
           {tabs.map(([value, label]) => (
             <button key={value} type="button" role="tab" id={`proposal-tab-${value}`}
               aria-selected={activeTab === value} aria-controls={`proposal-panel-${value}`}

@@ -2,12 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 export function BrandMark({ size = 28 }) {
   return <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-    <defs><linearGradient id="qc-brand-gradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3b9bff" /><stop offset="1" stopColor="#0060df" /></linearGradient></defs>
-    <rect width="32" height="32" rx="8" fill="url(#qc-brand-gradient)" />
-    <circle cx="14.5" cy="14.5" r="7" fill="none" stroke="#fff" strokeWidth="2.4" />
-    <circle cx="14.5" cy="14.5" r="2.1" fill="#fff" />
-    <path d="M19.6 19.6 23 23" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" />
-    <circle cx="23.6" cy="23.6" r="2" fill="#fff" />
+    <rect width="32" height="32" rx="8" fill="#d23a16" />
+    <circle cx="14.5" cy="14.5" r="7" fill="none" stroke="#e7dcc8" strokeWidth="2.4" />
+    <circle cx="14.5" cy="14.5" r="2.1" fill="#e7dcc8" />
+    <path d="M19.6 19.6 23 23" stroke="#e7dcc8" strokeWidth="2.4" strokeLinecap="round" />
+    <circle cx="23.6" cy="23.6" r="2" fill="#e7dcc8" />
   </svg>;
 }
 

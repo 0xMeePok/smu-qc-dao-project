@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "/home": {
+      "targetKind": "existing-ui",
+      "projectId": "f80543aa-8789-448b-b957-772bc86ccafa",
+      "baselineDraftId": "d3db4707-241c-4aeb-9cec-28e87154ead8",
+      "activeDraftId": "6054c3a4-a7af-4708-a421-1b61c129b71c",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "2faad53d-f382-435b-863e-29c003ba2969",
+        "frontend-src-components-ResponsiveHeader.jsx-BrandMark"
+      ],
+      "brandAssets": {
+        "logo": {
+          "assetKey": "frontend-src-components-ResponsiveHeader.jsx-BrandMark",
+          "url": "https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg",
+          "sourcePath": ".superdesign/brand/qc-dao-mark.svg"
+        }
+      },
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "frontend/src/pages/HomePage.jsx",
+        "frontend/src/components/ResponsiveHeader.jsx",
+        "frontend/src/styles.css:1:125",
+        "frontend/src/styles.css:4148:4512"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "9d56c7a4bf056a122e439456c0b481a1c212d1cfac22679bfa6090c80637dcb4",
+        "frontend/src/pages/HomePage.jsx": "d97e4635f830039eb079b9d9a09ae745d7d23de7efbabc472f450e38163c52f2",
+        "frontend/src/components/ResponsiveHeader.jsx": "288fa02722380fdf97eb501002edb2c35a4f93ccab512aeaeeb070ef79ad9885",
+        "frontend/src/styles.css": "8c71d755ade3f60564890e00c96ed6f5b6a581c82502d6cc4d3926ffba95d1e8"
+      },
+      "components": [],
+      "drafts": {
+        "d3db4707-241c-4aeb-9cec-28e87154ead8": {
+          "title": "Current home",
+          "visualDirection": "pixel reproduction of the current landing page",
+          "currentVersion": 1
+        },
+        "6054c3a4-a7af-4708-a421-1b61c129b71c": {
+          "title": "QC DAO - Laboratory Blotter Restored",
+          "visualDirection": "laboratory blotter: newsprint, Newsreader, cadmium signal, square stamp badges",
+          "parentDraftId": "d3db4707-241c-4aeb-9cec-28e87154ead8",
+          "currentVersion": 7
+        },
+        "507b6743-abfb-4aa3-8b5f-22e266bd8ffe": {
+          "title": "QC DAO Home Page - Clarity & Motion Refinement",
+          "visualDirection": "solid surfaces and a drawing path",
+          "parentDraftId": "d3db4707-241c-4aeb-9cec-28e87154ead8",
+          "currentVersion": 1
+        }
+      },
+      "updatedAt": "2026-09-29T09:22:00Z"
+    },
+    "/discover": {
+      "projectId": "f80543aa-8789-448b-b957-772bc86ccafa",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "frontend-src-components-ResponsiveHeader.jsx-BrandMark"
+      ],
+      "brandAssets": {
+        "logo": {
+          "assetKey": "frontend-src-components-ResponsiveHeader.jsx-BrandMark",
+          "url": "https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg",
+          "sourcePath": ".superdesign/brand/qc-dao-mark.svg"
+        }
+      },
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "frontend/src/styles.css:4449:4476"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "9d56c7a4bf056a122e439456c0b481a1c212d1cfac22679bfa6090c80637dcb4",
+        "frontend/src/styles.css": "8c71d755ade3f60564890e00c96ed6f5b6a581c82502d6cc4d3926ffba95d1e8"
+      },
+      "components": [],
+      "sourceTarget": "/home",
+      "sourceDraftId": "6054c3a4-a7af-4708-a421-1b61c129b71c",
+      "updatedAt": "2026-09-29T09:22:00Z",
+      "targetKind": "new-ui",
+      "activeDraftId": "107d8fab-d9d0-414c-a59f-3db1001b9d60",
+      "drafts": {
+        "107d8fab-d9d0-414c-a59f-3db1001b9d60": {
+          "title": "QC DAO Discover Ledger - Laboratory Blotter Restored",
+          "visualDirection": "opportunity ledger on newsprint with square stamp badges",
+          "parentDraftId": "6054c3a4-a7af-4708-a421-1b61c129b71c",
+          "currentVersion": 4
+        }
+      }
+    },
+    "/posting": {
+      "projectId": "f80543aa-8789-448b-b957-772bc86ccafa",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "frontend-src-components-ResponsiveHeader.jsx-BrandMark"
+      ],
+      "brandAssets": {
+        "logo": {
+          "assetKey": "frontend-src-components-ResponsiveHeader.jsx-BrandMark",
+          "url": "https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg",
+          "sourcePath": ".superdesign/brand/qc-dao-mark.svg"
+        }
+      },
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "frontend/src/styles.css:4449:4476"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "9d56c7a4bf056a122e439456c0b481a1c212d1cfac22679bfa6090c80637dcb4",
+        "frontend/src/styles.css": "8c71d755ade3f60564890e00c96ed6f5b6a581c82502d6cc4d3926ffba95d1e8"
+      },
+      "components": [],
+      "sourceTarget": "/home",
+      "sourceDraftId": "6054c3a4-a7af-4708-a421-1b61c129b71c",
+      "updatedAt": "2026-09-29T09:22:00Z",
+      "targetKind": "new-ui",
+      "activeDraftId": "a36685c2-ca62-40e9-8334-91cd7d1f1dab",
+      "drafts": {
+        "a36685c2-ca62-40e9-8334-91cd7d1f1dab": {
+          "title": "QC DAO | Posting Detail - Blotter Aesthetic Restored",
+          "visualDirection": "reading page on newsprint with square stamp badges",
+          "parentDraftId": "6054c3a4-a7af-4708-a421-1b61c129b71c",
+          "currentVersion": 4
+        }
+      }
+    }
+  }
+}
