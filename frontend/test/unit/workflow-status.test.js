@@ -37,6 +37,8 @@ function sources(dir = SRC) {
 const OWNERS = new Set(["config/workflowStatus.js", "components/StatusBadge.jsx"]);
 // Moderation queue states are an admin-only family with their own filter, outside the workflow lifecycle.
 const MODERATION_FAMILY = new Set(["components/ModerationQueue.jsx"]);
+// Contract states have a separate lifecycle from the legacy selection workflow.
+const ESCROW_FAMILY = new Set(["components/EscrowFundingPanel.jsx"]);
 
 describe("[QCDAO-91] shared workflow status mapping", () => {
   it("gives every status a label, tone, icon, meaning and next step", () => {
@@ -98,6 +100,15 @@ describe("[QCDAO-91] shared workflow status mapping", () => {
     assert.equal(noticeWorkflowStatus({ kind: "moderation" }), null);
   });
 
+  it("does not infer an escrow's lifecycle from a legacy match on it or its sibling", () => {
+    for (const status of ["awaiting_confirmation", "confirmed", "invalidated", "voided", "cancelled", "declined"]) {
+      const proposal = { status: "submitted", fundingTerms: {}, matching: { status } };
+      assert.equal(proposalWorkflowStatus(proposal, { status }), S.SUBMITTED);
+    }
+    assert.equal(proposalWorkflowStatus({ status: "draft", fundingTerms: {} }), S.DRAFT);
+    assert.equal(proposalWorkflowStatus({ status: "withdrawn", fundingTerms: {} }), S.DECLINED);
+  });
+
   it("counts one recommendation per evaluator, reading legacy single-holder proposals too", () => {
     const multi = { matching: { recommendations: {
       e1: { commentId: "c1", recommendation: "recommend" },
@@ -149,7 +160,7 @@ describe("[QCDAO-91] automated check: no status string rendered outside the shar
 
   it("never hard-codes a status label as a string literal", () => {
     const pattern = new RegExp(`["'\`](${labels.join("|")})["'\`]`);
-    assert.deepEqual(offending(pattern), []);
+    assert.deepEqual(offending(pattern, ESCROW_FAMILY), []);
   });
 
   it("never humanises or prints a stored status field directly", () => {

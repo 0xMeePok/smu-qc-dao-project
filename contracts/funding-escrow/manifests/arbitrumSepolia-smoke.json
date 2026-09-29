@@ -1,0 +1,229 @@
+{
+  "chainId": 421614,
+  "registry": "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD",
+  "factory": "0xe5d212491E544694d21c51EF9777F71B32fc5D41",
+  "owner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "testWallet": "0x6bb4a4F733c8386f46CC573bCA5eE7FebE5763af",
+  "testWalletDerivation": "BIP32 seed = supplied deployer key bytes; m/44'/60'/0'/0/109",
+  "token": "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd",
+  "amountBaseUnits": "1000000",
+  "status": "passed",
+  "transactions": [
+    {
+      "step": "Fund test wallet gas",
+      "hash": "0xf2fbdc79ba8fa6d3574c65c3357756179a3bded15fae99625a6a2800801801d3",
+      "status": "confirmed",
+      "blockNumber": 313127319,
+      "gasUsed": "23258"
+    },
+    {
+      "step": "Create labelled test posting",
+      "hash": "0x1fb14592659f3ff842a85b99a3364b9302d0931f694888c200dc449f10034a3d",
+      "status": "confirmed",
+      "blockNumber": 313127324,
+      "gasUsed": "262070"
+    },
+    {
+      "step": "Create proposal and escrow atomically",
+      "hash": "0x7b5dce9d648a3237e9d21e55392a2cc5448525d819beb18c65399c4074f20cf4",
+      "status": "confirmed",
+      "blockNumber": 313127344,
+      "gasUsed": "3858396"
+    },
+    {
+      "step": "Approve owner deposit",
+      "hash": "0x8d23b8403fb462a7a13f2f8c28e905fea3ce9b0f4a28aff4d83785365191cf1f",
+      "status": "confirmed",
+      "blockNumber": 313128151,
+      "gasUsed": "49271"
+    },
+    {
+      "step": "Initial owner deposit",
+      "hash": "0x5bd7feb2d8e18c3bbf2a3133c680b50c913e0a74ab69ab6c6350f76aaf3a0320",
+      "status": "confirmed",
+      "blockNumber": 313128172,
+      "gasUsed": "374101"
+    },
+    {
+      "step": "Owner deposit top-up",
+      "hash": "0x2a76ca4976e5e7bc353e7980e44a5c67b402d9a9d41433e957b063ad27c9b76d",
+      "status": "confirmed",
+      "blockNumber": 313128193,
+      "gasUsed": "206477"
+    },
+    {
+      "step": "Fund second depositor with mock USDC",
+      "hash": "0x5dcff90c1c0eaeb95a0dbfae8627375976ca4bb043d1814f3a19ca84396cf797",
+      "status": "confirmed",
+      "blockNumber": 313128198,
+      "gasUsed": "54468"
+    },
+    {
+      "step": "Approve second deposit",
+      "hash": "0xaddc52205268c82ef1fce267fb96b5ed78674ac52f6a792c8ff10c250dbe8519",
+      "status": "confirmed",
+      "blockNumber": 313128219,
+      "gasUsed": "49239"
+    },
+    {
+      "step": "Second depositor completes funding",
+      "hash": "0x09444974c2e2aa0422a29c6b598b37bd8e8d5cb9b56dbf2906637d177fff1e66",
+      "status": "confirmed",
+      "blockNumber": 313128240,
+      "gasUsed": "276187"
+    },
+    {
+      "step": "Lock funded selection",
+      "hash": "0xf1dc1efd3bd2a642956d2e4012240a0cc0d3af10b0ca12098ed5e7055017a645",
+      "status": "confirmed",
+      "blockNumber": 313128245,
+      "gasUsed": "234955"
+    },
+    {
+      "step": "Problem owner approves first payment",
+      "hash": "0xd5148a241975fcebdd2d57b64e16f244c6c9c6ebb2f4b268b462d2b12549aeea",
+      "status": "confirmed",
+      "blockNumber": 313128249,
+      "gasUsed": "147651"
+    },
+    {
+      "step": "Proposal owner approves first payment",
+      "hash": "0x2e2ad14e36459f536c8a2c5b500aa7899124412c4544c725f3aeb40b7f5820ac",
+      "status": "confirmed",
+      "blockNumber": 313128270,
+      "gasUsed": "147682"
+    },
+    {
+      "step": "Release first tranche",
+      "hash": "0xa115047b7bf56e83fea4fa1aefb181fe0d9dbdf8a52b09f6c2cb587e715d111f",
+      "status": "confirmed",
+      "blockNumber": 313128290,
+      "gasUsed": "330177"
+    },
+    {
+      "step": "Submit milestone evidence",
+      "hash": "0x0066c9edc35e4b660cb6b65ca9e167ea07924a67b864d8fb3d3d971080d42943",
+      "status": "confirmed",
+      "blockNumber": 313128312,
+      "gasUsed": "194276"
+    },
+    {
+      "step": "Problem owner approves milestone",
+      "hash": "0x95d59872d1a4551b9813e200d6d777cb7b6e61da2c61cfacb54c5c814af30701",
+      "status": "confirmed",
+      "blockNumber": 313128333,
+      "gasUsed": "154169"
+    },
+    {
+      "step": "Proposal owner approves milestone",
+      "hash": "0x38231d5bf30a6a7d88e05bc1420eb820d98f3628d7f2038ad1c6454313822aaa",
+      "status": "confirmed",
+      "blockNumber": 313128354,
+      "gasUsed": "154097"
+    },
+    {
+      "step": "60 percent funder majority vote",
+      "hash": "0x20fddba721a56aaec1697168f85e4b73275dcfc18f8d22d107dfa59e194b8592",
+      "status": "confirmed",
+      "blockNumber": 313128375,
+      "gasUsed": "198316"
+    },
+    {
+      "step": "Release voted second tranche",
+      "hash": "0x3e432afa0dcad7ca0bf85b85520551bd761630ccd519ed8a42acc34dde86a49d",
+      "status": "confirmed",
+      "blockNumber": 313128396,
+      "gasUsed": "263273"
+    },
+    {
+      "step": "Admin voids unpaid final tranche",
+      "hash": "0x4f4dac8eaba24f3ae93b28de240b39f959a1ca135a9c187497473ea8e355caba",
+      "status": "confirmed",
+      "blockNumber": 313128417,
+      "gasUsed": "194381"
+    },
+    {
+      "step": "Second funder pulls partial refund",
+      "hash": "0xaaee66f63be5bdf108e59590d02a0ac654739e6ea306f17f2850c90486dfb4db",
+      "status": "confirmed",
+      "blockNumber": 313128439,
+      "gasUsed": "191908"
+    },
+    {
+      "step": "Owner pulls partial refund",
+      "hash": "0xf7f121d44dd07a96f6d93f03714848eb0f0f504ca46e4b97fa2b8d551c9576e8",
+      "status": "confirmed",
+      "blockNumber": 313128459,
+      "gasUsed": "174682"
+    },
+    {
+      "step": "Return all test-wallet mock tokens",
+      "hash": "0x2d53ea85306cd63c150e20a7cb7c2d7ab486311dca380acbb5305e53c77a3442",
+      "status": "confirmed",
+      "blockNumber": 313128482,
+      "gasUsed": "32582"
+    },
+    {
+      "step": "Return unused test-wallet gas",
+      "hash": "0xdb50d613276fb176f7dae1aaac4655dc2e4f3f17ad987d4c3e5294d47a54a77f",
+      "status": "confirmed",
+      "blockNumber": 313128488,
+      "gasUsed": "22807"
+    }
+  ],
+  "postingId": "0x1c608c148f64fb9657ba4e5fb8992345277371c0274b078d4de3360db96b000f",
+  "proposalId": "0x6bb4a4f733c8386f46cc573bca5ee7febe5763afcfc49ceab77b83b30c2b16f8",
+  "escrow": "0x6979970B077Ad9125bc78438186588667F638F31",
+  "proposalRecord": {
+    "id": "escrow-smoke-proposal-1790477619665",
+    "problemId": "escrow-smoke-posting-1790477619665",
+    "postingOwnerId": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "researcherId": "0x6bb4a4F733c8386f46CC573bCA5eE7FebE5763af",
+    "opportunityType": "business-problem",
+    "status": "submitted",
+    "title": "Escrow deployment smoke test",
+    "summary": "One mock USDC; top-ups, dual approval, voting, fees and partial refunds.",
+    "amount": 1,
+    "currency": "USDC",
+    "milestones": "40% first payment, 30% voted milestone, 30% refunded after administrative void.",
+    "attachments": [],
+    "audit": {
+      "schemaVersion": 1,
+      "chainId": 421614,
+      "status": "pending",
+      "attemptCount": 1,
+      "blockNumber": 0,
+      "lastError": "",
+      "transactionHash": "0x7b5dce9d648a3237e9d21e55392a2cc5448525d819beb18c65399c4074f20cf4"
+    },
+    "fundingTerms": {
+      "token": "0x4cbf2c15243678206df8f248d01a0e117c8ce0cd",
+      "target": "1000000",
+      "funderVoting": true,
+      "trancheBps": [
+        4000,
+        3000,
+        3000
+      ],
+      "reviewWindows": [
+        604800,
+        604800,
+        604800
+      ],
+      "milestoneHashes": [
+        "0xc5027fb7e9011882e51a010d8a86b32e81bf2353d7d46ec801b03424dbbae430",
+        "0x43fc07ea1ed5451e1183976ebb9b2a2c702d29f130d9e56d1048a4950aa2ff44",
+        "0x3f9c9202fdf476ba0bc284015d6abd436f08d5b8bce2c4790448ab5704646394"
+      ]
+    }
+  },
+  "firebaseVerification": true,
+  "frontendMismatches": [],
+  "frontendVerification": true,
+  "grossReleasedBaseUnits": "700000",
+  "feeBaseUnits": "700",
+  "refundedBaseUnits": "300000",
+  "escrowBalanceBaseUnits": "0",
+  "mockTokensReturned": true,
+  "remainingTestWalletGasWei": "422078928000"
+}

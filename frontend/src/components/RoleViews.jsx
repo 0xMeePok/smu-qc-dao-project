@@ -6,6 +6,8 @@ import { SelectProposalDialog } from "./ProposalComparison.jsx";
 import { SelectionResponseDialog } from "./MatchingPanel.jsx";
 import { OwnerReviewForm } from "./OwnerReviewPanel.jsx";
 import { MockFundingPortfolio } from "./MockFundingPortfolio.jsx";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
@@ -196,7 +198,9 @@ export function MyProblems({ onNavigate }) {
       </button>}
       <ProposalList received onNavigate={onNavigate} />
 
-      <MockFundingPortfolio onNavigate={onNavigate} />
+      {isEscrowRegistry(AUDIT_REGISTRY_CONFIG)
+        ? <p className="field-hint">Open a proposal’s escrow to view your wallet contribution, vote on delivery, or claim an available refund.</p>
+        : <MockFundingPortfolio onNavigate={onNavigate} />}
 
       {pendingDelete && (
         <Modal
@@ -306,7 +310,9 @@ export function ActionNeeded({ onNavigate }) {
           hint="Submitted proposals on your problems with no owner review yet. A review is feedback only; it does not select a winner."
           render={(item) => <ActionRow key={`review-${item.id}`} item={item} onNavigate={onNavigate}
             meta={`Submitted ${formatInstant(item.submittedAt)}${item.canSelect ? " · Fully funded, ready to select" : ""}`}>
-            <button className="secondary" type="button" disabled={isFetching} onClick={() => open("review", item)}>Record review…</button>
+            {Object.hasOwn(item, "fundingTerms")
+              ? <button className="secondary" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>Review proposal</button>
+              : <button className="secondary" type="button" disabled={isFetching} onClick={() => open("review", item)}>Record review…</button>}
             {item.canSelect && <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>}
           </ActionRow>} />
         <ActionGroup title="Selection to accept" items={data.researcher?.selectionToAccept}

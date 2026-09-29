@@ -41,6 +41,7 @@ the account. Ensure you have MetaMask or Rabby installed.
 smu-qc-dao-project/
 ├── contracts/
 │   ├── audit-registry/      # Workflow hash registry, Hardhat project, Arbitrum Sepolia
+│   ├── funding-escrow/      # Registry-linked escrow, milestones, voting and refunds
 │   ├── qft-tokens/          # QFT ERC-20 (fixed supply), Hardhat project, Arbitrum Sepolia
 │   └── stable-faucet/       # Test token faucet deployment
 ├── frontend/                # Vite + React app — wallet sign-in, marketplace pages, RBAC
@@ -234,12 +235,22 @@ need to redeploy, or want more detail on local emulators, see
 
 - [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions and opportunity creation rules.
 - [Audit Registry Integration](docs/AUDIT_REGISTRY_INTEGRATION.md): Hash format, transaction states, frontend configuration, and contract replacement workflow.
+- [Escrow Registry Integration](docs/ESCROW_REGISTRY_INTEGRATION.md): Proposal payment plans, frontend/Firebase escrow verification, and preparation for a verified deployment switch.
 
 ## Smart Contracts
 
+See [Funding Escrow](contracts/funding-escrow/README.md) for the new escrow
+contracts, tests, 1–5 milestone tranches, optional funder voting plus dual approval,
+admin partial refunds, token listing, owner fees, and depositor dashboard API.
+The linked registry and factory are deployed on Arbitrum Sepolia and selected by
+the local frontend/Firebase manifests. Hosting and the live Firebase backend are
+unchanged. Wallet deposit/refund controls remain separate from the existing mock ledger.
+
 | Contract | Address (Arbitrum Sepolia) | Purpose |
 |---|---|---|
-| [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x47dA28cAEf8021dD88fe18B80e367746e0036964`](https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code) | Anchors opportunity and proposal hashes. Checked-in scheme-2 registry, deployed in block `308652359`; the site transition follows the [cutover notes](docs/registry-cutover.md). |
+| [`EscrowAuditRegistry.sol`](contracts/funding-escrow/contracts/EscrowAuditRegistry.sol) | [`0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD`](https://sepolia.arbiscan.io/address/0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD) | Local active registry; creates an escrow atomically for each proposal. |
+| [`FundingEscrowFactory.sol`](contracts/funding-escrow/contracts/FundingEscrowFactory.sol) | [`0xe5d212491E544694d21c51EF9777F71B32fc5D41`](https://sepolia.arbiscan.io/address/0xe5d212491E544694d21c51EF9777F71B32fc5D41) | Canonical escrows, listed tokens, admin roles and 10 BPS initial fee. |
+| Previous [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x47dA28cAEf8021dD88fe18B80e367746e0036964`](https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code) | Previous scheme-2 deployment retained for historical verification. |
 | [`QFT.sol`](contracts/qft-tokens/contracts/QFT.sol) | Not yet deployed | Fixed-supply ERC-20 distributed for platform activity |
 
 ## Testing

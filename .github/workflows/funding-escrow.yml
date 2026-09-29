@@ -1,0 +1,39 @@
+name: Funding Escrow Contracts
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/funding-escrow/**'
+      - 'contracts/audit-registry/contracts/**'
+      - 'contracts/audit-registry/package.json'
+      - 'firebase/functions/escrowRegistry.abis.json'
+      - '.github/workflows/funding-escrow.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'contracts/funding-escrow/**'
+      - 'contracts/audit-registry/contracts/**'
+      - 'contracts/audit-registry/package.json'
+      - 'firebase/functions/escrowRegistry.abis.json'
+      - '.github/workflows/funding-escrow.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  escrow-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/funding-escrow
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: contracts/funding-escrow/package-lock.json
+      - run: npm ci
+      - run: npm run coverage
+      - run: npx hardhat compile --build-profile production
+      - run: npm run test:verifier

@@ -1,4 +1,5 @@
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
+import { fundingTermsHash, normalizeFundingTerms } from "./escrowAudit.js";
 export const AUDIT_HASH_SCHEME = 1;
 const OPPORTUNITY_KIND = { BUSINESS_PROBLEM: 0, OPEN_FUNDING: 1, FUNDING_REQUEST: 2 };
 
@@ -264,6 +265,13 @@ export function asProposalUpdate(operation) {
   });
 }
 
+export function asEscrowProposal(operation, input) {
+  if (operation.functionName !== "commitProposal") throw new TypeError("Expected a prepared proposal commit.");
+  const fundingTerms = normalizeFundingTerms(input);
+  return prepared({ ...operation, fundingTerms, fundingTermsHash: fundingTermsHash(fundingTerms),
+    functionName: "commitProposalWithEscrow", args: [...operation.args, fundingTerms] });
+}
+
 export function prepareProposalUpdate(input) {
   return asProposalUpdate(prepareProposalCommit(input));
 }
@@ -280,16 +288,19 @@ export function prepareOpportunityUpdate(input) {
   return asOpportunityUpdate(prepareOpportunityCommit(input));
 }
 
-/** Last argument of commitProposal / updateHashes is the viewed opportunity revision. */
+/** The escrow commit appends funding terms after the viewed opportunity revision. */
 export function withOpportunityRevisionIndex(operation, revisionIndex) {
   const index = Number(revisionIndex);
   if (!Number.isInteger(index) || index < 0 || index > 4_294_967_295) {
     throw new TypeError("Expected opportunity revision index must fit uint32.");
   }
+  const args = [...operation.args];
+  const revisionArgument = operation.functionName === "commitProposalWithEscrow" ? 4 : args.length - 1;
+  args[revisionArgument] = index;
   return prepared({
     ...operation,
     expectedOpportunityRevisionIndex: index,
-    args: [...operation.args.slice(0, -1), index],
+    args,
   });
 }
 

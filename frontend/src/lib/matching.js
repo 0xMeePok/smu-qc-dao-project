@@ -31,6 +31,8 @@ export function mergeMatchingState(previous, current) {
  * that explains it ("Fully funded · ready for owner selection").
  */
 export function proposalFundingStatus(proposal, problemMatching = proposal.problemMatching) {
+  if (Object.hasOwn(proposal, "fundingTerms")) return { label: "On-chain escrow",
+    detail: "Open the proposal for wallet funding and delivery status.", tone: "neutral" };
   const status = proposalWorkflowStatus(proposal, problemMatching);
   const own = proposal.matching?.status;
   const parent = problemMatching?.status;

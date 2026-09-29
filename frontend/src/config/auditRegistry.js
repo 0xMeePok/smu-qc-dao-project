@@ -16,6 +16,7 @@ export const OPPORTUNITY_KIND = Object.freeze({
 });
 
 export const AUDIT_REGISTRY_ABI = contractConfig.abi;
+export const AUDIT_REGISTRY_CONFIG = contractConfig;
 
 const envAddress = import.meta.env?.VITE_AUDIT_REGISTRY_ADDRESS?.trim() ?? "";
 

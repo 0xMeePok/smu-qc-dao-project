@@ -3,10 +3,17 @@ import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { encodeFunctionData } from "viem";
 import { Timestamp } from "firebase-admin/firestore";
-import { prepareStoredProposal } from "../proposalAuditPayload.js";
-import { enqueueProposalAudit, recoverProposalAudit, recoveryError, retryDelay, verifyMinedProposal } from "../proposalAuditRecovery.js";
-import registry from "../auditRegistry.contract.json" with { type: "json" };
+import { prepareStoredProposal as prepareProposal } from "../proposalAuditPayload.js";
+import { enqueueProposalAudit, recoverProposalAudit as recover, recoveryError, retryDelay, verifyMinedProposal as verifyMined } from "../proposalAuditRecovery.js";
+import registry from "../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json" with { type: "json" };
+import activeRegistry from "../auditRegistry.contract.json" with { type: "json" };
 import frontendRegistry from "../../../frontend/src/config/auditRegistry.contract.json" with { type: "json" };
+
+// Historical hash/receipt regressions retain their original registry semantics.
+// escrow-audit.test.mjs covers the linked deployment independently.
+const prepareStoredProposal = record => prepareProposal(record, { registryConfig: registry });
+const verifyMinedProposal = (record, client, options = {}) => verifyMined(record, client, { ...options, registryConfig: registry });
+const recoverProposalAudit = options => recover({ ...options, registryConfig: registry });
 
 const hash = `0x${"3".repeat(64)}`;
 const blockHash = `0x${"4".repeat(64)}`;
@@ -55,7 +62,7 @@ function store(record) {
 }
 
 describe("QCDAO-75 proposal golden vectors", () => {
-  it("keeps frontend and server deployment manifests in sync", () => assert.deepEqual(registry, frontendRegistry));
+  it("keeps frontend and server deployment manifests in sync", () => assert.deepEqual(activeRegistry, frontendRegistry));
   // solutionHash and anchorHash were re-pinned when the solution payload widened
   // from {methodology, attachments} to the whole record. proposalHash is unchanged.
   // Proposals anchored before that change no longer reproduce their solutionHash.

@@ -891,3 +891,24 @@ test("[QCDAO-91] accepted, refunded, invalidated and declined proposals leave th
   const history = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "submitted" })).items.map((item) => item.id);
   assert.deepEqual(history, ["won"]);
 });
+
+test("escrow action items retain their funding mode and never offer legacy selection or revisions", async () => {
+  const terms = { token: "0x123", target: "100000000" };
+  const db = queueFixture({
+    "problems/escrow-picked": { ownerId: "owner", title: "Escrow posting", status: "open", expiresAt: later(9 * DAY), createdAt: now,
+      matching: { status: "awaiting_confirmation", proposalId: "escrow-picked", deadlineAt: later(3 * DAY) } },
+    "proposals/escrow-picked": { researcherId: "alice", problemId: "escrow-picked", status: "submitted", createdAt: now, fundingTerms: terms,
+      matching: { status: "awaiting_confirmation", deadlineAt: later(3 * DAY), creatorApprovedBy: null } },
+  });
+  Object.assign(db.records.get("proposals/soon-a"), { fundingTerms: terms,
+    matching: { status: "funding", fundedMinor: 10_000 } });
+  const owner = await listActionItems({ db, uid: "owner", now });
+  const review = owner.owner.awaitingReview.find((item) => item.id === "soon-a");
+  assert.deepEqual(review.fundingTerms, terms);
+  assert.equal(review.canSelect, false);
+  assert.equal(review.revisionPathOpen, false);
+  assert.equal(review.fundedAmount, 0);
+  assert.equal(owner.owner.readyToSelect.some((item) => item.id === "soon-a"), false);
+  const author = await listActionItems({ db, uid: "alice", now });
+  assert.equal(author.researcher.selectionToAccept.some((item) => item.id === "escrow-picked"), false);
+});

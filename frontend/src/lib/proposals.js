@@ -8,6 +8,9 @@ import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { proposalBlockReason, validateProposal } from "./proposalValidation.js";
 import { toDate } from "./datetime.js";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
+import { HALF_UPFRONT_PERCENTAGES, proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
 
 export const PROPOSAL_STATUS_DRAFT = "draft";
 export const PROPOSAL_STATUS_SUBMITTED = "submitted";
@@ -36,7 +39,7 @@ const revisionsRef = (id) => collection(db, "proposals", id, "revisions");
 // Unfunded siblings inherit cancellation from their parent's confirmed match.
 // This avoids an unbounded server transaction while keeping every list truthful.
 async function withMatchingState(rows, { fromServer = false } = {}) {
-  const ids = [...new Set(rows.filter((row) => row.status !== "draft").map((row) => row.problemId).filter(Boolean))];
+  const ids = [...new Set(rows.filter((row) => row.status !== "draft" && !row.fundingTerms).map((row) => row.problemId).filter(Boolean))];
   const parents = new Map();
   await Promise.all(ids.map(async (id) => {
     try {
@@ -45,6 +48,7 @@ async function withMatchingState(rows, { fromServer = false } = {}) {
     } catch { /* Existing proposal content remains readable if its parent is unavailable. */ }
   }));
   return rows.map((row) => {
+    if (row.fundingTerms) return row;
     const problemMatching = parents.get(row.problemId);
     if (!problemMatching) return row;
     const cancelled = ["confirmed", "invalidated"].includes(problemMatching.status) && problemMatching.proposalId !== row.id
@@ -75,6 +79,13 @@ export function buildProposalDocument({ researcherId, posting, form, attachments
     updatedAt: serverTimestamp(),
   };
   if (status !== PROPOSAL_STATUS_DRAFT) record.postingOwnerId = posting.ownerId;
+  if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG)) {
+    if (status === PROPOSAL_STATUS_DRAFT) record.fundingPlan = {
+      tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "7"),
+      funderVoting: form.funderVoting ?? false,
+    };
+    else record.fundingTerms = proposalFundingTerms({ form, currency: posting.currency, config: AUDIT_REGISTRY_CONFIG });
+  }
   return record;
 }
 
@@ -156,6 +167,7 @@ export async function submitProposal({ proposalId, researcherId, posting, form, 
     const record = audit ? { ...built, audit: { ...audit } } : built;
     if (fromDraft) {
       const { createdAt, ...rest } = record;
+      if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG)) rest.fundingPlan = deleteField();
       transaction.update(proposalRef(proposalId), rest);
     } else {
       transaction.set(proposalRef(proposalId), record);

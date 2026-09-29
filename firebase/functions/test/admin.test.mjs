@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import registry from "../auditRegistry.contract.json" with { type: "json" };
 
 process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
 process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:9099";
@@ -541,8 +542,8 @@ describe("platform status access", () => {
       assert.equal(status.anchoring.windowDays, 7);
       assert.equal(status.firebase.functions.status, "ok");
       assert.equal(status.firebase.firestore.status, "ok");
-      assert.equal(status.contracts[0].name, "AuditRegistry");
-      assert.equal(status.contracts[0].deployment?.blockNumber, "308652359");
+      assert.equal(status.contracts[0].name, registry.contractName);
+      assert.equal(status.contracts[0].deployment?.blockNumber, String(registry.deployment.blockNumber));
       for (const key of ["serverRpc", "alchemy"]) {
         assert.ok(["ok", "degraded", "down", "unknown"].includes(status[key].status), key);
       }

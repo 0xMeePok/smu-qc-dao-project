@@ -24,6 +24,7 @@ const IN_CHUNK = 30;
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const iso = (value) => value?.toDate?.().toISOString?.() ?? null;
 const millis = (value) => value?.toMillis?.() ?? 0;
+const usesEscrow = (proposal) => Object.hasOwn(proposal || {}, "fundingTerms");
 const chunks = (values, size = IN_CHUNK) => Array.from(
   { length: Math.ceil(values.length / size) }, (ignored, index) => values.slice(index * size, index * size + size));
 
@@ -179,7 +180,8 @@ const newestFirst = (items) => items.sort((a, b) => (Date.parse(b.submittedAt) |
 function actionView(doc, data, problemId, problem, extra = {}) {
   return {
     id: doc.id, title: data.title ?? "", problemId, posting: postingView(problemId, problem),
-    amount: data.amount ?? 0, currency: data.currency ?? "", fundedAmount: (data.matching?.fundedMinor || 0) / 100,
+    ...(usesEscrow(data) ? { fundingTerms: data.fundingTerms } : {}),
+    amount: data.amount ?? 0, currency: data.currency ?? "", fundedAmount: usesEscrow(data) ? 0 : (data.matching?.fundedMinor || 0) / 100,
     workflowStatus: proposalWorkflowStatus(data, problem?.matching), recommendations: recommendationCounts(data),
     submittedAt: iso(data.createdAt), ...extra,
   };
@@ -221,12 +223,12 @@ export async function listActionItems({ db, uid, now = Timestamp.now() }) {
   // A proposal shows once: an unreviewed one sits under review, offering Select there too.
   const awaitingReview = newestFirst(candidates.filter((ignored, index) => !latest[index].exists)
     .map(({ doc, data, problem }) => actionView(doc, data, problem.id, problem.data(),
-      { revisionPathOpen: correctionPathOpen(data, problem.data()), canSelect: selectableIds.has(doc.id) })));
+      { revisionPathOpen: !usesEscrow(data) && correctionPathOpen(data, problem.data()), canSelect: selectableIds.has(doc.id) })));
   const reviewIds = new Set(awaitingReview.map((item) => item.id));
   const readyToSelect = newestFirst(selectable.filter((item) => !reviewIds.has(item.id)));
 
   // A selection waits on its creator until they answer or the window closes.
-  const selected = mine.docs.filter((doc) => doc.data().matching?.status === "awaiting_confirmation"
+  const selected = mine.docs.filter((doc) => !usesEscrow(doc.data()) && doc.data().matching?.status === "awaiting_confirmation"
     && !doc.data().matching?.creatorApprovedBy && millis(doc.data().matching?.deadlineAt) > now.toMillis());
   const parents = await problemsById(db, [...new Set(selected.map((doc) => doc.data().problemId).filter(Boolean))]);
   const selectionToAccept = newestFirst(selected

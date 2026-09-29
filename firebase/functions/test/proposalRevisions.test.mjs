@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import registry from "../auditRegistry.contract.json" with { type: "json" };
+import { isEscrowRegistry } from "../escrowAudit.js";
+import { proposalFundingTerms } from "../escrowProposalTerms.js";
 import {
   TRACKED_PROPOSAL_FIELDS,
   changedProposalFields,
@@ -12,7 +15,7 @@ const SPONSOR = `0x${"91".repeat(20)}`;
 const at = new Date("2026-09-08T10:00:00Z");
 
 function proposal(overrides = {}) {
-  return {
+  const record = {
     researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId: "problem1",
     opportunityType: "business-problem", title: "Annealing routing",
     summary: "A measurable routing study", category: "quantum-annealing",
@@ -23,6 +26,10 @@ function proposal(overrides = {}) {
     amount: 1500, currency: "USDC", status: "submitted", attachments: [],
     ...overrides,
   };
+  if (isEscrowRegistry(registry)) record.fundingTerms = proposalFundingTerms({
+    form: record, currency: record.currency, config: registry,
+  });
+  return record;
 }
 
 /** Collects what a trigger run would have written, without an emulator. */

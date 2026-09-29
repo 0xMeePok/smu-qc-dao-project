@@ -33,7 +33,7 @@ export function SelectionResponseDialog({ kind, problemId, proposal, onCancel, o
   const [error, setError] = useState("");
   const submit = async (event) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || Object.hasOwn(proposal, "fundingTerms")) return;
     if (kind === "decline" && rationale.trim().length < 10) {
       setError("Enter a reason of at least 10 characters for the decision record.");
       return;
@@ -121,7 +121,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
 
   const act = async (event) => {
     event.preventDefault();
-    if (!pending || actionInFlight.current) return;
+    if (!pending || actionInFlight.current || Object.hasOwn(pending.item, "fundingTerms")) return;
     if (pending.kind === "decline" && rationale.trim().length < 10) {
       setError("Enter a reason of at least 10 characters for the decision record.");
       return;
@@ -159,6 +159,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
   const reopened = state?.matching?.status === "open" && state?.matching?.reopenedAt;
   const shorterWindow = state?.matching?.deadlineLimitedByPosting;
   const items = (state?.proposals ?? []).filter((item) => !proposalId || item.id === proposalId);
+  const onlyEscrow = items.length > 0 && items.every((item) => Object.hasOwn(item, "fundingTerms"));
   const contributions = (state?.contributions ?? []).filter((item) => !proposalId || item.proposalId === proposalId);
   const receiptFor = (type, id) => state?.history?.find((entry) => entry.type === type && (!id || entry.proposalId === id));
   const ownerReceipt = receiptFor("owner_confirmed", state?.matching?.proposalId) || receiptFor("owner_selected", state?.matching?.proposalId);
@@ -200,11 +201,24 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
     }
   };
   const openAction = (kind, item) => {
+    if (Object.hasOwn(item, "fundingTerms")) return;
     setError(""); setRationale("");
     const remaining = Math.max(0, Math.round((item.amount - item.fundedAmount) * 100) / 100);
     setAmount(String(remaining));
     setPending({ kind, item, remaining, requestId: kind === "fund" ? crypto.randomUUID() : null });
   };
+
+  if (onlyEscrow) return <section id="proposal-funding" className="detail-section matching-panel" aria-label="Proposal funding">
+    <div className="matching-heading"><h2>Proposal funding</h2><span className="draft-badge">On-chain escrow</span></div>
+    <p className="field-hint">Open a proposal, then choose Open escrow to view live funding and delivery approvals.</p>
+    {error && <p className="error-banner" role="alert">{error}</p>}
+    <div className="matching-candidates">{items.map((item) => <EscrowProposalLink key={item.id} item={item} onNavigate={onNavigate} />)}</div>
+    {!proposalId && <div className="matching-actions">
+      {cursor && <button type="button" className="secondary" disabled={loading} onClick={() => setPage(null)}>First proposals</button>}
+      {state.nextCursor && <button type="button" className="secondary" disabled={loading} onClick={() => setPage({ problemId, cursor: state.nextCursor })}>Next proposals</button>}
+    </div>}
+    <button className="text-button" type="button" disabled={loading} onClick={refresh}>{loading ? "Refreshing…" : "Refresh proposals"}</button>
+  </section>;
 
   return <section id="proposal-funding" className="detail-section matching-panel" aria-label="Proposal funding and matching">
     <div className="matching-heading"><h2>Proposal funding & selection</h2><span className="draft-badge">Mock funds</span></div>
@@ -232,7 +246,9 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
     {error && !pending && <p className="error-banner" role="alert">{error}</p>}
     {loading && !state ? <p role="status">Loading funding status…</p> : null}
     {state && items.length === 0 && <p>No proposals available for funding yet.</p>}
-    <div className="matching-candidates">{items.map((item) => <article className="matching-candidate" key={item.id}>
+    <div className="matching-candidates">{items.map((item) => Object.hasOwn(item, "fundingTerms")
+      ? <EscrowProposalLink key={item.id} item={item} onNavigate={onNavigate} />
+      : <article className="matching-candidate" key={item.id}>
       <h3>{item.title}</h3><StatusBadge status={proposalFundingStatus(item, state.matching).status} />{proposalFundingStatus(item, state.matching).detail && <span className="funding-note">{proposalFundingStatus(item, state.matching).detail}</span>}
       <p><strong>{money(item.currency, item.fundedAmount)}</strong> of {money(item.currency, item.amount)}</p>
       <p className="field-hint">{["voided", "declined", "cancelled"].includes(item.matching?.status) || invalidated ? "Funding shown is historical. Contributions have been refunded; this proposal is closed." : <>Proposal funding target: {item.fundedAmount >= item.amount ? "Met" : "Not yet met"}. {waiting ? "Funding is paused during the shared acceptance window." : confirmed ? "Matching is complete for this problem." : "The problem owner can select this proposal from the comparison once it is fully funded. Expert evaluation is optional."}</>}</p>
@@ -269,4 +285,13 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
     </Modal>}
     {relatedAudit && <RelatedAuditReceiptPane kind={relatedAudit.kind} record={relatedAudit.record} loading={relatedAudit.loading} error={relatedAudit.error} onClose={() => { relatedAuditRequest.current += 1; setRelatedAudit(null); }} />}
   </section>;
+}
+
+function EscrowProposalLink({ item, onNavigate }) {
+  return <article className="matching-candidate">
+    <h3>{item.title}</h3><span className="draft-badge">On-chain escrow</span>
+    <p>Requested: <strong>{money(item.currency, item.amount)}</strong></p>
+    <p className="field-hint">50% upfront and 50% on completion. View the proposal for live funding and delivery approvals.</p>
+    {onNavigate && <button type="button" className="text-button" onClick={() => onNavigate(`proposal/${item.id}`)}>View escrow proposal</button>}
+  </article>;
 }

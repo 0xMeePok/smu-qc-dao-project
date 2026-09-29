@@ -118,3 +118,19 @@ test("a fully funded proposal with no evaluator comment can be selected by its o
   assert.equal(alpha.canSelect, true);
   assert.equal(alpha.selectionHint, null);
 });
+
+test('escrow comparison retains evaluator context but cannot select through the mock workflow', async () => {
+  const db = fixture();
+  await comment(db);
+  const proposal = db.records.get('proposals/alpha');
+  proposal.fundingTerms = { trancheBps: [5000, 5000] };
+  proposal.matching = { fundedMinor: 10000, evaluationComplete: true };
+  const result = await getProposalComparison({ db, uid: 'owner', problemId: 'problem', now });
+  const row = result.rows.find(item => item.id === 'alpha');
+  assert.deepEqual(row.fundingTerms, proposal.fundingTerms);
+  assert.equal(row.canSelect, false);
+  assert.equal(row.fundedAmount, 0);
+  assert.equal(row.matching.status, 'escrow');
+  assert.equal(row.recommendations.recommend, 1);
+  assert.match(row.selectionHint, /wallet funding/);
+});
