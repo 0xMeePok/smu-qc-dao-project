@@ -14,11 +14,12 @@ import { ModerationQueue } from "../components/ModerationQueue.jsx";
 import { listModerationQueue } from "../lib/moderation.js";
 import { ExpiryAdminUtility } from "../components/ExpiryAdminUtility.jsx";
 import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
+import { PlatformStatusPanel } from "../components/PlatformStatusPanel.jsx";
 
 export default function AdminPage({ onNavigate }) {
   const { isSignedIn, isChecking, profile, address } = useSession();
 
-  const [activeTab, setActiveTab] = useState("users"); // "users" | "proposals" | "postings" | "funding" | "audits"
+  const [activeTab, setActiveTab] = useState("users"); // "moderation" | "users" | "proposals" | "postings" | "funding" | "audits" | "status"
   const [users, setUsers] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -209,6 +210,17 @@ export default function AdminPage({ onNavigate }) {
         >
           Governance Audit Trail
         </button>
+        <button
+          type="button"
+          id="admin-tab-status"
+          role="tab"
+          aria-selected={activeTab === "status"}
+          aria-controls="admin-panel-status"
+          className={`admin-tab-btn ${activeTab === "status" ? "active" : ""}`}
+          onClick={() => chooseTab("status")}
+        >
+          Platform Status
+        </button>
       </div>
 
       <div className="admin-tab-content">
@@ -283,6 +295,15 @@ export default function AdminPage({ onNavigate }) {
             <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
             <ExpiryAdminUtility />
             <AdminAudit />
+          </div>
+        )}
+        {activeTab === "status" && (
+          <div
+            id="admin-panel-status"
+            role="tabpanel"
+            aria-labelledby="admin-tab-status"
+          >
+            <PlatformStatusPanel onOpenAuditTrail={() => chooseTab("proposals")} />
           </div>
         )}
       </div>
