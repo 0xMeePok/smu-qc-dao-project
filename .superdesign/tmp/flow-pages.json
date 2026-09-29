@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Discover",
+    "prompt": "Design the Discover page in the same laboratory blotter as the source home draft. Newsprint #e7dcc8, carbon #1c140c, signal #d23a16. Newsreader for titles, IBM Plex Mono for meta. Radius 0. No card grid, no rounded search box, no purple gradient, no Inter/Roboto/Arial/Space Grotesk. Header is only the exact logo, QC DAO, Home, Discover, and the words Sign in. The page is a ledger: one baseline search line, then hairline rows with columns Title, Organisation, Status, Funding, Proposals, Closes. Every status is the official Submitted pill (background #f0f5fd, border #c4d9f6, text #0062c4, label Submitted) plus an outline icon. Example rows: Route optimisation for cold-chain delivery, LogiChain Labs, 60000 USDT, 3 proposals, 50 days. Tight 8px inside a row, 128px before the ledger. Do not put a border around the whole table. Use ONLY the design system. Keep the exact logo URL in the header. Do not replace it with initials, emoji, a generic mark, or an invented SVG."
+  },
+  {
+    "title": "Posting",
+    "prompt": "Design a posting detail page in the same laboratory blotter. Newsprint #e7dcc8, carbon #1c140c, signal #d23a16. Newsreader for the title and running text, IBM Plex Mono for meta. Radius 0 except the status pill. No cards around each section, no segmented tab bar, no icon row, no purple gradient, no Inter/Roboto/Arial/Space Grotesk. Header matches the home page: exact logo, QC DAO, Home, Discover, Sign in. Body: a text back link 'Back to opportunities', then the kicker 'Problem statement' in mono, then the official Submitted badge (background #f0f5fd, border #c4d9f6, text #0062c4), then the title 'Route optimisation for cold-chain delivery under demand spikes'. Sections are running text with 128px breaks: The problem, Current approach, What success looks like. Change section with inline words Overview, Proposals, Match, not a tab control. A narrow right column lists Budget 60000 USDT, Closes in 50 days, and 3 proposals as stacked figures, not a card. Use ONLY the design system. Keep the exact logo URL. Do not replace it with initials, emoji, a generic mark, or an invented SVG."
+  }
+]
