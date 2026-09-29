@@ -56,7 +56,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-it("shows a checking state, then every card and a ready banner", async () => {
+it("[FIT-SXFPP-059] shows a checking state, then every card and a ready banner", async () => {
   render(<PlatformStatusPanel />);
   expect(screen.getByRole("status").textContent).toMatch(/Checking/);
   expect(screen.getByRole("button", { name: "Checking…" }).disabled).toBe(true);
@@ -84,7 +84,7 @@ it("shows a checking state, then every card and a ready banner", async () => {
   expect(screen.getByText(/Last checked/)).toBeTruthy();
 });
 
-it("re-runs every check on Re-check", async () => {
+it("[FIT-SXFPP-060] re-runs every check on Re-check", async () => {
   render(<PlatformStatusPanel />);
   await screen.findByText("Ready", { selector: ".status-banner strong" });
   mocks.fetchPlatformStatus.mockResolvedValueOnce(server({
@@ -99,7 +99,7 @@ it("re-runs every check on Re-check", async () => {
   expect(screen.getAllByText(/2 anchoring jobs failed/).length).toBeGreaterThan(0);
 });
 
-it("links failed anchoring jobs to the proposal audit trail", async () => {
+it("[FIT-SXFPP-061] links failed anchoring jobs to the proposal audit trail", async () => {
   mocks.fetchPlatformStatus.mockResolvedValue(server({
     anchoring: { status: "degraded", windowDays: 7, counts: { pending: 0, confirmed: 1, failed: 1, "waiting-wallet": 0 },
       issues: ["1 anchoring job failed in the last 7 days."] },
@@ -110,7 +110,7 @@ it("links failed anchoring jobs to the proposal audit trail", async () => {
   expect(onOpenAuditTrail).toHaveBeenCalled();
 });
 
-it("keeps browser checks visible when the status function fails", async () => {
+it("[FIT-SXFPP-062] keeps browser checks visible when the status function fails", async () => {
   mocks.fetchPlatformStatus.mockRejectedValue(Object.assign(new Error("Administrator privilege required."), { code: "functions/permission-denied" }));
   render(<PlatformStatusPanel />);
   expect(await screen.findByText("Not ready")).toBeTruthy();
@@ -121,7 +121,7 @@ it("keeps browser checks visible when the status function fails", async () => {
   expect(within(card("Firebase")).getByText("Down", { selector: "dd" })).toBeTruthy();
 });
 
-it("is not ready when only the browser RPC fails, and shows the emulator badge", async () => {
+it("[FIT-SXFPP-063] is not ready when only the browser RPC fails, and shows the emulator badge", async () => {
   mocks.probeBrowserRpc.mockResolvedValue(rpc({ status: "down", blockNumber: undefined, latencyMs: 5000,
     issues: ["RPC unreachable from this browser: Failed to fetch"] }));
   mocks.probeFirebaseFromBrowser.mockResolvedValue(firebaseClient({
@@ -135,7 +135,7 @@ it("is not ready when only the browser RPC fails, and shows the emulator badge",
   expect(within(card("Firebase")).getByText("Emulator mode")).toBeTruthy();
 });
 
-it("never renders an RPC key", async () => {
+it("[FIT-SXFPP-064] never renders an RPC key", async () => {
   mocks.probeBrowserRpc.mockResolvedValue(rpc({ status: "down", issues: ["RPC unreachable from this browser: HTTP request failed."] }));
   const { container } = render(<PlatformStatusPanel />);
   await screen.findByText("Not ready");

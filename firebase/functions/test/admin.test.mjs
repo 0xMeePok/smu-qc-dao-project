@@ -514,7 +514,7 @@ describe("proposal audit recovery access", () => {
 });
 
 describe("platform status access", () => {
-  it("requires an authenticated administrator", async () => {
+  it("[BIT-SXFPP-179] requires an authenticated administrator", async () => {
     const anonymous = await call("adminGetPlatformStatus", {});
     assert.equal(anonymous.error?.status, "UNAUTHENTICATED");
     const token = await getIdTokenForAccount(user1Account);
@@ -522,7 +522,7 @@ describe("platform status access", () => {
     assert.equal(member.error?.status, "PERMISSION_DENIED");
   });
 
-  it("returns every check and counts anchoring jobs inside the 7-day window only", async () => {
+  it("[BIT-SXFPP-180] returns every check and counts anchoring jobs inside the 7-day window only", async () => {
     const before = await call("adminGetPlatformStatus", {}, { token: adminToken });
     assert.ok(before.result, JSON.stringify(before));
     const baseline = before.result.anchoring.counts;

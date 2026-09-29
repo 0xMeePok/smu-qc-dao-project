@@ -43,7 +43,7 @@ function httpError(url = ALCHEMY_URL) {
 }
 
 describe("Platform status: endpoint description and scrubbing", () => {
-  it("classifies Alchemy, custom, public-default and invalid RPC URLs by host only", () => {
+  it("[BUT-SXFPP-43] classifies Alchemy, custom, public-default and invalid RPC URLs by host only", () => {
     assert.deepEqual(describeRpcEndpoint(ALCHEMY_URL), { provider: "alchemy", host: "arb-sepolia.g.alchemy.com", configured: true });
     assert.deepEqual(describeRpcEndpoint("https://rpc.example.org/path?key=abc"), { provider: "custom", host: "rpc.example.org", configured: true });
     assert.deepEqual(describeRpcEndpoint(""), { provider: "public-default", host: "sepolia-rollup.arbitrum.io", configured: false });
@@ -54,7 +54,7 @@ describe("Platform status: endpoint description and scrubbing", () => {
     assert.equal(describeRpcEndpoint("https://evil-alchemy.com.attacker.io/v2/x").provider, "custom");
   });
 
-  it("never returns an RPC key from a viem error that embeds the full URL", () => {
+  it("[BUT-SXFPP-44] never returns an RPC key from a viem error that embeds the full URL", () => {
     const error = httpError();
     assert.ok(error.message.includes(KEY), "fixture must contain the key to be meaningful");
     for (const text of [scrubError(error, ALCHEMY_URL), scrubError(error), scrubError(new Error(`failed at ${ALCHEMY_URL} now`))]) {
@@ -64,7 +64,7 @@ describe("Platform status: endpoint description and scrubbing", () => {
     assert.ok(scrubError(new Error("x".repeat(500))).length <= 200);
   });
 
-  it("ranks statuses with unknown between ok and degraded", () => {
+  it("[BUT-SXFPP-45] ranks statuses with unknown between ok and degraded", () => {
     assert.equal(worstStatus(), STATUS.OK);
     assert.equal(worstStatus(STATUS.OK, STATUS.UNKNOWN), STATUS.UNKNOWN);
     assert.equal(worstStatus([STATUS.UNKNOWN, STATUS.DEGRADED]), STATUS.DEGRADED);
@@ -73,7 +73,7 @@ describe("Platform status: endpoint description and scrubbing", () => {
 });
 
 describe("Platform status: RPC probe", () => {
-  it("reports a healthy RPC with block, age and latency", async () => {
+  it("[BUT-SXFPP-46] reports a healthy RPC with block, age and latency", async () => {
     const result = await probeRpc({ client: rpcClient(), url: ALCHEMY_URL, now: clock(NOW - 120, NOW) });
     assert.equal(result.status, STATUS.OK);
     assert.equal(result.chainId, 421614);
@@ -86,7 +86,7 @@ describe("Platform status: RPC probe", () => {
     assert.ok(!JSON.stringify(result).includes(KEY));
   });
 
-  it("is degraded for a stale block or a slow response", async () => {
+  it("[BUT-SXFPP-47] is degraded for a stale block or a slow response", async () => {
     const stale = await probeRpc({ client: rpcClient({ blockAge: 61 }), url: ALCHEMY_URL, now: clock(NOW, NOW) });
     assert.equal(stale.status, STATUS.DEGRADED);
     assert.match(stale.issues[0], /61s old/);
@@ -95,7 +95,7 @@ describe("Platform status: RPC probe", () => {
     assert.match(slow.issues[0], /2500 ms/);
   });
 
-  it("is down on the wrong chain, a transport error or a timeout, without leaking the key", async () => {
+  it("[BUT-SXFPP-48] is down on the wrong chain, a transport error or a timeout, without leaking the key", async () => {
     const wrong = await probeRpc({ client: rpcClient({ chainId: 1 }), url: ALCHEMY_URL, now: clock(NOW, NOW) });
     assert.equal(wrong.status, STATUS.DOWN);
     assert.match(wrong.issues[0], /chain 1/);
@@ -107,7 +107,7 @@ describe("Platform status: RPC probe", () => {
     assert.match(timeout.issues[0], /timed out/);
   });
 
-  it("notes the public default and rejects an invalid URL without calling the client", async () => {
+  it("[BUT-SXFPP-49] notes the public default and rejects an invalid URL without calling the client", async () => {
     const fallback = await probeRpc({ client: rpcClient(), url: "", now: clock(NOW, NOW) });
     assert.equal(fallback.status, STATUS.OK);
     assert.match(fallback.notes[0], /public Arbitrum endpoint/);
@@ -121,7 +121,7 @@ describe("Platform status: contract probe", () => {
     deployedAt: "2026-09-14T02:09:29.344Z", verificationUrl: `https://sepolia.arbiscan.io/address/${ADDRESS}#code` };
   const client = (overrides) => ({ getCode: async () => "0x6080", readContract: async () => { throw revert("InvalidInput"); }, ...overrides });
 
-  it("is ok when bytecode exists and the empty-id read reverts with InvalidInput", async () => {
+  it("[BUT-SXFPP-50] is ok when bytecode exists and the empty-id read reverts with InvalidInput", async () => {
     const result = await probeContract({ client: client(), address: ADDRESS, abi: registry.abi, deployment });
     assert.equal(result.status, STATUS.OK);
     assert.equal(result.bytecodePresent, true);
@@ -130,20 +130,20 @@ describe("Platform status: contract probe", () => {
     assert.equal(result.explorerUrl, `https://sepolia.arbiscan.io/address/${ADDRESS}#code`);
   });
 
-  it("detects the InvalidInput revert through viem's real error chain", async () => {
+  it("[BUT-SXFPP-51] detects the InvalidInput revert through viem's real error chain", async () => {
     const error = revert("InvalidInput");
     assert.ok(error instanceof BaseError);
     const result = await probeContract({ client: client({ readContract: async () => { throw error; } }), address: ADDRESS, abi: registry.abi });
     assert.equal(result.abiResponds, true);
   });
 
-  it("is down when no bytecode is deployed", async () => {
+  it("[BUT-SXFPP-52] is down when no bytecode is deployed", async () => {
     const result = await probeContract({ client: client({ getCode: async () => undefined }), address: ADDRESS, abi: registry.abi });
     assert.equal(result.status, STATUS.DOWN);
     assert.equal(result.bytecodePresent, false);
   });
 
-  it("is degraded for an unexpected revert or a successful read", async () => {
+  it("[BUT-SXFPP-53] is degraded for an unexpected revert or a successful read", async () => {
     const other = await probeContract({ client: client({ readContract: async () => { throw revert("AccessDenied"); } }), address: ADDRESS, abi: registry.abi });
     assert.equal(other.status, STATUS.DEGRADED);
     assert.match(other.issues[0], /AccessDenied/);
@@ -153,7 +153,7 @@ describe("Platform status: contract probe", () => {
     assert.equal(returned.status, STATUS.DEGRADED);
   });
 
-  it("is unknown on a network error and down on invalid address configuration", async () => {
+  it("[BUT-SXFPP-54] is unknown on a network error and down on invalid address configuration", async () => {
     const network = await probeContract({ client: client({ getCode: async () => { throw httpError(); } }), address: ADDRESS, abi: registry.abi, secrets: [ALCHEMY_URL] });
     assert.equal(network.status, STATUS.UNKNOWN);
     assert.ok(!JSON.stringify(network).includes(KEY));
@@ -162,7 +162,7 @@ describe("Platform status: contract probe", () => {
     assert.match(invalid.issues[0], /configuration is invalid/);
   });
 
-  it("omits deployment metadata that describes a different address", async () => {
+  it("[BUT-SXFPP-55] omits deployment metadata that describes a different address", async () => {
     const result = await probeContract({ client: client(), address: `0x${"1".repeat(40)}`, abi: registry.abi, deployment });
     assert.equal(result.deployment, null);
   });
@@ -204,7 +204,7 @@ describe("Platform status: anchoring queue", () => {
     { status: "waiting-wallet", updatedAt: NOW },
   ];
 
-  it("counts each status inside the 7-day window only", async () => {
+  it("[BUT-SXFPP-56] counts each status inside the 7-day window only", async () => {
     const db = countDb(jobs);
     const result = await probeAnchoringQueue({ db, collection: "proposalAuditJobs", toTimestamp: (ms) => ms, now: () => NOW });
     assert.equal(result.status, STATUS.OK);
@@ -214,14 +214,14 @@ describe("Platform status: anchoring queue", () => {
     assert.ok(db.calls.every((call) => call.name === "proposalAuditJobs"));
   });
 
-  it("is degraded when any job failed in the window", async () => {
+  it("[BUT-SXFPP-57] is degraded when any job failed in the window", async () => {
     const result = await probeAnchoringQueue({ db: countDb([...jobs, { status: "failed", updatedAt: NOW }]),
       collection: "proposalAuditJobs", toTimestamp: (ms) => ms, now: () => NOW });
     assert.equal(result.status, STATUS.DEGRADED);
     assert.match(result.issues[0], /1 anchoring job failed/);
   });
 
-  it("is down when the count query fails", async () => {
+  it("[BUT-SXFPP-58] is down when the count query fails", async () => {
     const result = await probeAnchoringQueue({ db: countDb([], { fail: new Error("FAILED_PRECONDITION: index") }),
       collection: "proposalAuditJobs", toTimestamp: (ms) => ms, now: () => NOW });
     assert.equal(result.status, STATUS.DOWN);
@@ -252,7 +252,7 @@ function statusFetch({ indicator = "none", arbitrum = "operational", apse = "ope
 }
 
 describe("Platform status: Alchemy service status", () => {
-  it("is ok when the relevant components are operational, ignoring unrelated chains", async () => {
+  it("[BUT-SXFPP-59] is ok when the relevant components are operational, ignoring unrelated chains", async () => {
     const { fetchImpl, requested } = statusFetch();
     const result = await probeAlchemyStatus({ fetch: fetchImpl });
     assert.equal(result.status, STATUS.OK);
@@ -264,7 +264,7 @@ describe("Platform status: Alchemy service status", () => {
     assert.ok(requested.every((item) => item.init.signal instanceof AbortSignal));
   });
 
-  it("maps component outages and falls back to matching by name", async () => {
+  it("[BUT-SXFPP-60] maps component outages and falls back to matching by name", async () => {
     const partial = await probeAlchemyStatus({ fetch: statusFetch({ arbitrum: "partial_outage", byName: true }).fetchImpl });
     assert.equal(partial.status, STATUS.DEGRADED);
     assert.match(partial.issues[0], /Arbitrum: partial outage/);
@@ -272,13 +272,13 @@ describe("Platform status: Alchemy service status", () => {
     assert.equal(major.status, STATUS.DOWN);
   });
 
-  it("uses the overall indicator when components are unavailable", async () => {
+  it("[BUT-SXFPP-61] uses the overall indicator when components are unavailable", async () => {
     const result = await probeAlchemyStatus({ fetch: statusFetch({ indicator: "minor", failComponents: new Error("boom") }).fetchImpl });
     assert.equal(result.status, STATUS.DEGRADED);
     assert.equal(result.components.every((item) => item.status === STATUS.UNKNOWN), true);
   });
 
-  it("is unknown when the status page is unreachable, returns non-JSON or times out", async () => {
+  it("[BUT-SXFPP-62] is unknown when the status page is unreachable, returns non-JSON or times out", async () => {
     const down = await probeAlchemyStatus({ fetch: statusFetch({ failSummary: new Error("ENOTFOUND"), failComponents: new Error("ENOTFOUND") }).fetchImpl });
     assert.equal(down.status, STATUS.UNKNOWN);
     assert.match(down.issues[0], /unavailable/);
@@ -307,25 +307,25 @@ function docDb({ data, fail, delay = 0 } = {}) {
 }
 
 describe("Platform status: Firestore probe", () => {
-  it("is ok with latency when maintenance is off", async () => {
+  it("[BUT-SXFPP-63] is ok with latency when maintenance is off", async () => {
     const result = await probeFirestore({ db: docDb(), now: clock(NOW - 40, NOW) });
     assert.deepEqual(result, { status: STATUS.OK, latencyMs: 40, maintenanceActive: false, issues: [] });
   });
 
-  it("is degraded while registry maintenance is active", async () => {
+  it("[BUT-SXFPP-64] is degraded while registry maintenance is active", async () => {
     const result = await probeFirestore({ db: docDb({ data: { active: true } }), now: clock(NOW, NOW) });
     assert.equal(result.status, STATUS.DEGRADED);
     assert.equal(result.maintenanceActive, true);
   });
 
-  it("is down on error or timeout", async () => {
+  it("[BUT-SXFPP-65] is down on error or timeout", async () => {
     assert.equal((await probeFirestore({ db: docDb({ fail: new Error("UNAVAILABLE") }), now: clock(NOW, NOW) })).status, STATUS.DOWN);
     assert.equal((await probeFirestore({ db: docDb({ delay: 100 }), now: clock(NOW, NOW), timeoutMs: 10 })).status, STATUS.DOWN);
   });
 });
 
 describe("Platform status: collected snapshot", () => {
-  it("returns every check even when some probes fail, as JSON-safe data without the key", async () => {
+  it("[BUT-SXFPP-66] returns every check even when some probes fail, as JSON-safe data without the key", async () => {
     const db = {
       collection(name) {
         if (name === "maintenanceState") return docDb().collection(name);

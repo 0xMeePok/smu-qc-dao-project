@@ -25,20 +25,20 @@ const healthyServer = {
 };
 
 describe("Platform status rules: browser RPC", () => {
-  it("describes the endpoint by host only", () => {
+  it("[FUT-SXFPP-170] describes the endpoint by host only", () => {
     assert.deepEqual(describeRpcEndpoint(ALCHEMY_URL), { provider: "alchemy", host: "arb-sepolia.g.alchemy.com", configured: true });
     assert.equal(describeRpcEndpoint("").provider, "public-default");
     assert.equal(describeRpcEndpoint("https://rpc.example.org/x").provider, "custom");
     assert.equal(describeRpcEndpoint("javascript:alert(1)").provider, "invalid");
   });
 
-  it("scrubs keys from error text", () => {
+  it("[FUT-SXFPP-171] scrubs keys from error text", () => {
     const text = scrubError(new Error(`HTTP request failed.\nURL: ${ALCHEMY_URL}`), ALCHEMY_URL);
     assert.ok(!text.includes(KEY));
     assert.ok(!scrubError({ message: `fetch ${ALCHEMY_URL} failed` }).includes(KEY));
   });
 
-  it("reports a healthy, stale and wrong-chain browser RPC", async () => {
+  it("[FUT-SXFPP-172] reports a healthy, stale and wrong-chain browser RPC", async () => {
     const times = [NOW - 80, NOW];
     const healthy = await probeRpc({ client: client(), url: ALCHEMY_URL, now: () => times.shift() ?? NOW });
     assert.equal(healthy.status, STATUS.OK);
@@ -48,13 +48,13 @@ describe("Platform status rules: browser RPC", () => {
     assert.equal((await probeRpc({ client: client({ chainId: 1 }), url: ALCHEMY_URL, now: () => NOW })).status, STATUS.DOWN);
   });
 
-  it("is down without leaking the key when the RPC is unreachable", async () => {
+  it("[FUT-SXFPP-173] is down without leaking the key when the RPC is unreachable", async () => {
     const result = await probeRpc({ client: client({ fail: new Error(`Failed to fetch ${ALCHEMY_URL}`) }), url: ALCHEMY_URL, now: () => NOW });
     assert.equal(result.status, STATUS.DOWN);
     assert.ok(!JSON.stringify(result).includes(KEY));
   });
 
-  it("warns that the production CSP blocks any RPC host but Alchemy", async () => {
+  it("[FUT-SXFPP-174] warns that the production CSP blocks any RPC host but Alchemy", async () => {
     const fallback = await probeRpc({ client: client({ fail: new Error("Failed to fetch") }), url: "", now: () => NOW, production: true });
     assert.equal(fallback.status, STATUS.DOWN);
     assert.ok(fallback.notes.some((note) => /VITE_ARBITRUM_SEPOLIA_RPC_URL is not set/.test(note)));
@@ -70,7 +70,7 @@ describe("Platform status rules: Firebase client", () => {
   const user = (getIdToken) => ({ currentUser: { getIdToken } });
   const flags = { appCheckConfigured: true, storageConfigured: true, usingEmulators: false };
 
-  it("forces a token refresh to prove Auth is reachable", async () => {
+  it("[FUT-SXFPP-175] forces a token refresh to prove Auth is reachable", async () => {
     let forced;
     const result = await probeFirebaseClient({ auth: user(async (force) => { forced = force; return "token"; }), ...flags, now: () => NOW });
     assert.equal(forced, true);
@@ -78,7 +78,7 @@ describe("Platform status rules: Firebase client", () => {
     assert.deepEqual(result.config, flags);
   });
 
-  it("is down without a session, config or a reachable Auth service", async () => {
+  it("[FUT-SXFPP-176] is down without a session, config or a reachable Auth service", async () => {
     assert.equal((await probeFirebaseClient({ auth: { currentUser: null }, ...flags })).status, STATUS.DOWN);
     const missing = await probeFirebaseClient({ auth: null, configured: false, missingConfig: ["VITE_FIREBASE_API_KEY"], ...flags });
     assert.equal(missing.status, STATUS.DOWN);
@@ -87,7 +87,7 @@ describe("Platform status rules: Firebase client", () => {
     assert.equal(failing.status, STATUS.DOWN);
   });
 
-  it("flags missing App Check in production and missing Storage, and notes emulator mode", async () => {
+  it("[FUT-SXFPP-177] flags missing App Check in production and missing Storage, and notes emulator mode", async () => {
     const auth = user(async () => "token");
     const noAppCheck = await probeFirebaseClient({ auth, ...flags, appCheckConfigured: false, production: true });
     assert.equal(noAppCheck.status, STATUS.DEGRADED);
@@ -99,11 +99,11 @@ describe("Platform status rules: Firebase client", () => {
 });
 
 describe("Platform status rules: overall readiness", () => {
-  it("is ready when every check passes", () => {
+  it("[FUT-SXFPP-178] is ready when every check passes", () => {
     assert.deepEqual(summarizeStatus({ server: healthyServer, browserRpc: ok, firebaseClient: ok }), { overall: "ready", reasons: [] });
   });
 
-  it("is not ready when a critical check is down, listing blocking reasons first", () => {
+  it("[FUT-SXFPP-179] is not ready when a critical check is down, listing blocking reasons first", () => {
     const summary = summarizeStatus({
       server: { ...healthyServer, anchoring: { status: "degraded", issues: ["1 anchoring job failed in the last 7 days."] } },
       browserRpc: { status: "down", issues: ["RPC unreachable from this browser: Failed to fetch"] },
@@ -114,13 +114,13 @@ describe("Platform status rules: overall readiness", () => {
     assert.match(summary.reasons[1], /^Anchoring queue: 1 anchoring job failed/);
   });
 
-  it("is not ready when the status function fails", () => {
+  it("[FUT-SXFPP-180] is not ready when the status function fails", () => {
     const summary = summarizeStatus({ serverError: "Administrator privilege required.", browserRpc: ok, firebaseClient: ok });
     assert.equal(summary.overall, "not-ready");
     assert.equal(summary.reasons[0], "Cloud Functions: Administrator privilege required.");
   });
 
-  it("treats contract, Firestore and Auth outages as blocking", () => {
+  it("[FUT-SXFPP-181] treats contract, Firestore and Auth outages as blocking", () => {
     for (const server of [
       { ...healthyServer, contracts: [{ name: "AuditRegistry", status: "down", issues: ["No contract bytecode"] }] },
       { ...healthyServer, firebase: { functions: ok, firestore: { status: "down", issues: [] } } },
@@ -130,7 +130,7 @@ describe("Platform status rules: overall readiness", () => {
     assert.equal(summarizeStatus({ server: healthyServer, browserRpc: ok, firebaseClient: { status: "down", issues: [] } }).overall, "not-ready");
   });
 
-  it("is degraded for maintenance, unknown critical checks or Alchemy trouble, but ignores an unreachable Alchemy page", () => {
+  it("[FUT-SXFPP-182] is degraded for maintenance, unknown critical checks or Alchemy trouble, but ignores an unreachable Alchemy page", () => {
     const maintenance = { ...healthyServer, firebase: { functions: ok, firestore: { status: "degraded", issues: ["Registry maintenance is active; member actions are paused."] } } };
     assert.equal(summarizeStatus({ server: maintenance, browserRpc: ok, firebaseClient: ok }).overall, "degraded");
     const unknownContract = { ...healthyServer, contracts: [{ name: "AuditRegistry", status: "unknown", issues: [] }] };
