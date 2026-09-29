@@ -47,6 +47,20 @@
       ]
     },
     {
+      "collectionGroup": "proposalAuditJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "audits",
       "queryScope": "COLLECTION",
       "fields": [

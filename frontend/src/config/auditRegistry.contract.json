@@ -3,6 +3,12 @@
   "chainId": 421614,
   "address": "0x47dA28cAEf8021dD88fe18B80e367746e0036964",
   "entityIdScheme": 2,
+  "deployment": {
+    "blockNumber": 308652359,
+    "transactionHash": "0x02f73510e1b9e1753c14f6c2c2a0ca7ce213c94f31fee101fa7b436f59a2d36a",
+    "deployedAt": "2026-09-14T02:09:29.344Z",
+    "verificationUrl": "https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code"
+  },
   "abi": [
     {
       "inputs": [],

@@ -4502,3 +4502,49 @@ footer.footer { background: transparent; }
 .wizard-step-pill.is-partial > .wizard-step-number { background: var(--warning-soft); color: var(--warning); box-shadow: inset 0 0 0 1px var(--warning-line); }
 .wizard-step-number svg { width: 14px; height: 14px; }
 .wizard-step-pill.is-done > .wizard-step-number { background: var(--success-dot); color: #fff; }
+
+/* Admin Platform Status tab. Status is always spelled out in text; colour only reinforces it. */
+.platform-status { display: grid; gap: 18px; }
+.status-banner { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.status-banner strong { display: block; font-size: 17px; }
+.status-banner p, .status-banner ul { margin: 6px 0 0; color: var(--ink-soft); font-size: 13.5px; line-height: 1.5; }
+.status-banner ul { padding-left: 18px; }
+.status-banner-ready { background: var(--success-soft); box-shadow: 0 0 0 1px var(--success-line); }
+.status-banner-ready strong { color: var(--success); }
+.status-banner-degraded { background: var(--warning-soft); box-shadow: 0 0 0 1px var(--warning-line); }
+.status-banner-degraded strong { color: var(--warning); }
+.status-banner-not-ready { background: var(--danger-soft); box-shadow: 0 0 0 1px var(--danger-line); }
+.status-banner-not-ready strong { color: var(--danger); }
+.status-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.status-section-heading { margin: 8px 0 0; font-size: 15px; font-weight: 600; color: var(--ink-soft); }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.status-card { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: 22px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.status-card .card-top { margin-bottom: 0; }
+.status-card h4 { margin: 0; font-size: 16px; font-weight: 600; }
+.status-card-lead { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.status-card-links { margin: 0; font-size: 13.5px; }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap; background: var(--surface-muted); color: var(--ink-soft); }
+.status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.status-pill-ok { background: var(--success-soft); color: var(--success); }
+.status-pill-ok::before { background: var(--success-dot); }
+.status-pill-degraded { background: var(--warning-soft); color: var(--warning); }
+.status-pill-degraded::before { background: var(--warning-dot); }
+.status-pill-down { background: var(--danger-soft); color: var(--danger); }
+.status-pill-down::before { background: var(--danger-dot); }
+.status-facts { display: grid; gap: 6px; margin: 0; font-size: 13.5px; }
+.status-facts > div { display: flex; justify-content: space-between; gap: 12px; }
+.status-facts dt { color: var(--muted); }
+.status-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.status-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.status-counts > div { padding: 10px 12px; border-radius: 14px; background: var(--surface-muted); }
+.status-counts dt { color: var(--muted); font-size: 12.5px; }
+.status-counts dd { margin: 2px 0 0; font-size: 22px; font-weight: 600; }
+.status-counts .status-count-alert { background: var(--danger-soft); }
+.status-counts .status-count-alert dd { color: var(--danger); }
+.status-messages { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+.status-issue { color: var(--ink); }
+.status-note { color: var(--muted); }
+.status-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.status-chips li { padding: 3px 10px; border-radius: 999px; background: var(--surface-muted); color: var(--ink-soft); }
+.status-chips li.off { background: var(--warning-soft); color: var(--warning); }
+.status-chips li.emulator { background: var(--brand-soft, var(--surface-muted)); color: var(--link); }

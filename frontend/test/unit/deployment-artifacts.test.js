@@ -42,6 +42,31 @@ it("the default registry sync preserves the active manifest's address and entity
     assert.equal(actual.address, active.address);
     assert.equal(actual.chainId, active.chainId);
     assert.equal(actual.entityIdScheme, active.entityIdScheme);
+    // Platform Status shows these deployment facts for the active registry.
+    assert.deepEqual(actual.deployment, {
+      blockNumber: active.blockNumber,
+      transactionHash: active.transactionHash,
+      deployedAt: active.deployedAt,
+      verificationUrl: active.verification.url,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("the registry sync omits deployment facts when --address selects a different contract", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "qc-registry-sync-"));
+  try {
+    const output = path.join(directory, "registry.json");
+    execFileSync(process.execPath, [
+      path.join(frontendDirectory, "scripts/sync-audit-registry.mjs"),
+      "--artifact", path.join(frontendDirectory, "src/config/auditRegistry.contract.json"),
+      "--address", `0x${"1".repeat(40)}`,
+      "--output", output,
+    ], { cwd: directory, encoding: "utf8", maxBuffer: 4000 });
+    const actual = JSON.parse(await readFile(output, "utf8"));
+    assert.equal(actual.address, `0x${"1".repeat(40)}`);
+    assert.equal(actual.deployment, undefined);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
