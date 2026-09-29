@@ -1,8 +1,10 @@
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { ROLE_EVALUATOR } from "./comments.js";
-import { ownerReviewSummary } from "./ownerReviews.js";
+import { correctionPathOpen, ownerReviewSummary, reviewStillOpen } from "./ownerReviews.js";
+import { mockSelectionState } from "./matching.js";
 import { problemIsMemberBrowsable } from "./moderation.js";
+import { WORKFLOW_STATUS, proposalWorkflowStatus, recommendationCounts, recommendationEntries } from "./workflowStatus.js";
 
 // QCDAO-62/63 read the queues out of the records that already exist: proposals,
 // their parent problems and the comments collection. Nothing new is stored.
@@ -10,14 +12,19 @@ const LIVE_PROBLEM = ["submitted", "open"];
 // A recommendation belongs on a solution still under consideration.
 const OPEN_PROPOSAL = ["submitted", "under_review"];
 const BLOCKED = new Set(["hidden", "removed"]);
+const CLOSED_WORKFLOW = new Set([WORKFLOW_STATUS.ACCEPTED, WORKFLOW_STATUS.REFUNDED,
+  WORKFLOW_STATUS.INVALIDATED, WORKFLOW_STATUS.DECLINED]);
 const MINE_CAP = 200;
 const PROBLEM_PAGE = 20;
 const QUEUE_CAP = 100;
+const OWNED_CAP = 200;
+const REVIEW_CAP = 200;
 const IN_CHUNK = 30;
 
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const iso = (value) => value?.toDate?.().toISOString?.() ?? null;
 const millis = (value) => value?.toMillis?.() ?? 0;
+const usesEscrow = (proposal) => Object.hasOwn(proposal || {}, "fundingTerms");
 const chunks = (values, size = IN_CHUNK) => Array.from(
   { length: Math.ceil(values.length / size) }, (ignored, index) => values.slice(index * size, index * size + size));
 
@@ -106,6 +113,7 @@ export async function listMyProposals({ db, uid }) {
       posting: postingView(data.problemId, problems.get(data.problemId)),
       evaluationComplete: data.matching?.evaluationComplete === true,
       matchingStatus: data.matching?.status ?? null,
+      workflowStatus: proposalWorkflowStatus(data, problems.get(data.problemId)?.matching),
       ownerReview: ownerReviewSummary(latestByProposal.get(doc.id)),
       ...counts,
     };
@@ -137,24 +145,25 @@ export async function listEvaluatorQueue({ db, uid, cursor = null, filter = "pen
       const data = doc.data();
       // An evaluator may also author solutions; they cannot recommend their own.
       if (BLOCKED.has(data.moderationStatus) || data.researcherId === uid) continue;
-      const matching = data.matching || {};
-      const mine = Boolean(matching.recommendedBy) && matching.recommendedBy === uid;
-      // A solution carries one recommendation. Once another evaluator has filed it -
-      // or an administrator closed evaluation - it is not waiting for anyone.
-      if (!mine && (matching.recommendedBy || matching.evaluationComplete === true)) continue;
-      candidates.push({ doc, data, problem, mine, matching });
+      // Each evaluator files their own recommendation, whatever others have filed.
+      const mine = recommendationEntries(data)[uid] ?? null;
+      candidates.push({ doc, data, problem, mine });
     }
   });
-  const items = candidates.map(({ doc, data, problem, mine, matching }) => ({
+  const items = candidates.map(({ doc, data, problem, mine }) => ({
     id: doc.id,
     title: data.title ?? "",
     status: data.status ?? "",
+    workflowStatus: proposalWorkflowStatus(data, problem.data().matching),
     submittedAt: iso(data.createdAt),
     posting: postingView(problem.id, problem.data()),
     recommendationStatus: mine ? "submitted" : "pending",
-    recommendation: mine ? matching.recommendation ?? null : null,
-    recommendedAt: mine ? iso(matching.evaluationCompletedAt) : null,
-  })).filter((item) => item.recommendationStatus === wanted);
+    recommendation: mine?.recommendation ?? null,
+    recommendedAt: mine ? iso(mine.at) : null,
+    recommendations: recommendationCounts(data),
+  })).filter((item) => item.recommendationStatus === wanted
+    // A decided or closed proposal is no longer waiting on anyone's view; my history keeps it.
+    && (wanted === "submitted" || !CLOSED_WORKFLOW.has(item.workflowStatus)));
   const last = problems.docs.at(-1);
   return {
     items,
@@ -163,4 +172,77 @@ export async function listEvaluatorQueue({ db, uid, cursor = null, filter = "pen
       ? { expiresAt: millis(last.data().expiresAt), id: last.id }
       : null,
   };
+}
+
+// Every Action Needed group lists the latest submission first.
+const newestFirst = (items) => items.sort((a, b) => (Date.parse(b.submittedAt) || 0) - (Date.parse(a.submittedAt) || 0));
+
+function actionView(doc, data, problemId, problem, extra = {}) {
+  return {
+    id: doc.id, title: data.title ?? "", problemId, posting: postingView(problemId, problem),
+    ...(usesEscrow(data) ? { fundingTerms: data.fundingTerms } : {}),
+    amount: data.amount ?? 0, currency: data.currency ?? "", fundedAmount: usesEscrow(data) ? 0 : (data.matching?.fundedMinor || 0) / 100,
+    workflowStatus: proposalWorkflowStatus(data, problem?.matching), recommendations: recommendationCounts(data),
+    submittedAt: iso(data.createdAt), ...extra,
+  };
+}
+
+/**
+ * QCDAO-91. What this member can act on now, across every role they hold:
+ * owners select or review, researchers answer a selection, evaluators recommend.
+ */
+export async function listActionItems({ db, uid, now = Timestamp.now() }) {
+  const profile = await activeProfile(db, uid);
+  const [owned, mine] = await Promise.all([
+    db.collection("problems").where("ownerId", "==", uid).limit(OWNED_CAP).get(),
+    db.collection("proposals").where("researcherId", "==", uid).limit(MINE_CAP).get(),
+  ]);
+  // Only postings still taking decisions; the rest have nothing left to act on.
+  const live = owned.docs.filter((doc) => LIVE_PROBLEM.includes(doc.data().status)
+    && (doc.data().matching?.status || "open") === "open" && problemIsMemberBrowsable(doc.data())
+    && (!millis(doc.data().expiresAt) || millis(doc.data().expiresAt) > now.toMillis()));
+  const pages = await Promise.all(live.map((doc) => db.collection("proposals")
+    .where("problemId", "==", doc.id).where("status", "in", OPEN_PROPOSAL).limit(QUEUE_CAP).get()));
+  const selectable = [];
+  const reviewable = [];
+  live.forEach((problem, index) => {
+    for (const doc of pages[index].docs) {
+      const data = doc.data();
+      if (BLOCKED.has(data.moderationStatus) || data.moderated) continue;
+      if (mockSelectionState({ problem: problem.data(), proposal: { id: doc.id, ...data }, uid, at: now }).canSelect) {
+        selectable.push(actionView(doc, data, problem.id, problem.data()));
+      }
+      if (data.researcherId !== uid && reviewStillOpen(data, problem.data())) reviewable.push({ doc, data, problem });
+    }
+  });
+  const candidates = reviewable.slice(0, REVIEW_CAP);
+  const latest = candidates.length
+    ? await db.getAll(...candidates.map(({ doc }) => db.collection(`proposals/${doc.id}/ownerReviewLatest`).doc("current")))
+    : [];
+  const selectableIds = new Set(selectable.map((item) => item.id));
+  // A proposal shows once: an unreviewed one sits under review, offering Select there too.
+  const awaitingReview = newestFirst(candidates.filter((ignored, index) => !latest[index].exists)
+    .map(({ doc, data, problem }) => actionView(doc, data, problem.id, problem.data(),
+      { revisionPathOpen: !usesEscrow(data) && correctionPathOpen(data, problem.data()), canSelect: selectableIds.has(doc.id) })));
+  const reviewIds = new Set(awaitingReview.map((item) => item.id));
+  const readyToSelect = newestFirst(selectable.filter((item) => !reviewIds.has(item.id)));
+
+  // A selection waits on its creator until they answer or the window closes.
+  const selected = mine.docs.filter((doc) => !usesEscrow(doc.data()) && doc.data().matching?.status === "awaiting_confirmation"
+    && !doc.data().matching?.creatorApprovedBy && millis(doc.data().matching?.deadlineAt) > now.toMillis());
+  const parents = await problemsById(db, [...new Set(selected.map((doc) => doc.data().problemId).filter(Boolean))]);
+  const selectionToAccept = newestFirst(selected
+    .filter((doc) => parents.get(doc.data().problemId)?.matching?.proposalId === doc.id)
+    .map((doc) => actionView(doc, doc.data(), doc.data().problemId, parents.get(doc.data().problemId),
+      { deadlineAt: iso(doc.data().matching.deadlineAt) })));
+
+  let evaluator = null;
+  if (profile.role === ROLE_EVALUATOR) {
+    const queue = await listEvaluatorQueue({ db, uid, filter: "pending" });
+    evaluator = { awaitingRecommendation: newestFirst(queue.items), more: Boolean(queue.nextCursor) };
+  }
+  const total = readyToSelect.length + awaitingReview.length + selectionToAccept.length
+    + (evaluator?.awaitingRecommendation.length ?? 0);
+  return { owner: { readyToSelect, awaitingReview }, researcher: { selectionToAccept }, evaluator, total,
+    truncated: owned.size === OWNED_CAP || reviewable.length > REVIEW_CAP };
 }

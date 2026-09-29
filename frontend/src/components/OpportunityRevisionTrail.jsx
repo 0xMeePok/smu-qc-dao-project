@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { listOpportunityRevisions } from "../lib/postings.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { formatInstant } from "../lib/datetime.js";
-import { expiryReasonLabel } from "../config/workflowStatus.js";
+import { expiryReasonLabel, opportunityWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
+import { StatusBadge } from "./StatusBadge.jsx";
 
 const FIELD_LABELS = {
   title: "Title",
@@ -34,7 +35,9 @@ function summary(entry) {
     return `Lapsed: ${expiryReasonLabel(entry.expiryReason)}`;
   }
   if (entry.expiryWindow) return "Response window extended";
-  if (entry.status !== entry.previousStatus) return `Status changed from ${entry.previousStatus} to ${entry.status}`;
+  if (entry.status !== entry.previousStatus) {
+    return `Status changed from ${workflowStatusLabel(opportunityWorkflowStatus({ status: entry.previousStatus }))} to ${workflowStatusLabel(opportunityWorkflowStatus({ status: entry.status }))}`;
+  }
   return "Edited after submission";
 }
 
@@ -64,7 +67,7 @@ export function OpportunityRevisionTrail({ postingId, uid, isOwner = false }) {
       <ol className="revision-trail">
         {entries.map((entry) => (
           <li key={entry.id}>
-            <p><strong>{summary(entry)}</strong> · <time>{formatInstant(entry.at)}</time></p>
+            <p><strong>{summary(entry)}</strong>{entry.status !== entry.previousStatus && <> <StatusBadge status={opportunityWorkflowStatus({ status: entry.status })} /></>} · <time>{formatInstant(entry.at)}</time></p>
             <p className="table-row-meta">By {shortWallet(entry.actor)}</p>
             {entry.changedFields?.length > 0 && (
               <p className="table-row-meta">

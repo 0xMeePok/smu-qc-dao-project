@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
+import { WORKFLOW_STATUS, proposalWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
 
 async function call(name, payload = {}) {
   requireFirebase();
@@ -19,72 +20,35 @@ export const declineMockProposal = (payload) => call("declineMockProposal", payl
 export const completeMockEvaluation = (payload) => call("completeMockEvaluation", payload);
 export const forceExpireMockMatch = (payload) => call("forceExpireMockMatch", payload);
 
-export const MATCHING_LABELS = {
-  funding: "Open for funding",
-  awaiting_confirmation: "Awaiting creator acceptance",
-  confirmed: "Match confirmed · funding locked",
-  voided: "Voided · funders refunded",
-  invalidated: "Invalidated · funders refunded",
-  cancelled: "Cancelled · funders refunded",
-  declined: "Rejected · funders refunded",
-  pledged: "Pledged",
-  locked: "Locked",
-  refunded: "Refunded",
-};
-
 export function mergeMatchingState(previous, current) {
   if (!current) return previous;
   if (!previous) return current;
   return { ...previous, ...current };
 }
 
-export function proposalFundingLabel(proposal, problemMatching = proposal.problemMatching) {
-  if (Object.hasOwn(proposal, "fundingTerms")) return "On-chain escrow";
-  const status = proposal.matching?.status;
-  if (status && status !== "funding") return MATCHING_LABELS[status] || status;
-  if (proposal.status && !["submitted", "under_review"].includes(proposal.status)) return proposal.status;
-  if (problemMatching?.status === "invalidated") return MATCHING_LABELS.invalidated;
-  if (problemMatching?.status === "confirmed") return "Not selected · funders refunded";
-  if (problemMatching?.status === "awaiting_confirmation") {
-    return proposal.id === problemMatching.proposalId
-      ? MATCHING_LABELS.awaiting_confirmation
-      : "Funding paused · another proposal selected";
-  }
-  const target = Number(proposal.amount);
-  const funded = Number(proposal.fundedAmount ?? proposal.matching?.fundedAmount ?? 0);
-  return target > 0 && funded >= target
-    ? "Fully funded · awaiting owner selection"
-    : "Open for funding";
-}
-
-// Headline wording for display. The stored labels stay as they are because
-// sorting and older views read them; only the short status is reworded.
-const STATUS_WORDING = {
-  "Rejected": "Declined",
-  "Match confirmed": "Matched",
-  "Funding paused": "Paused",
-};
-
-const sentenceCase = (text) => text.charAt(0).toUpperCase() + text.slice(1);
-
 /**
- * The funding status as a short headline, an optional explanatory note and a
- * tone, so it can be shown as a status pill rather than one run-on sentence:
- * "Rejected · funders refunded" -> Declined / "Funders refunded" / neutral.
- * Tones: success (funded or matched), warning (in progress or waiting),
- * neutral (closed or refunded).
+ * A proposal row's status from the shared QCDAO-91 mapping, plus a funding note
+ * that explains it ("Fully funded · ready for owner selection").
  */
 export function proposalFundingStatus(proposal, problemMatching = proposal.problemMatching) {
   if (Object.hasOwn(proposal, "fundingTerms")) return { label: "On-chain escrow",
     detail: "Open the proposal for wallet funding and delivery status.", tone: "neutral" };
-  const full = String(proposalFundingLabel(proposal, problemMatching) ?? "").replace(/_/g, " ");
-  const [head, ...rest] = full.split(" · ");
-  const label = STATUS_WORDING[head] ?? sentenceCase(head);
-  const detail = rest.length ? sentenceCase(rest.join(" · ")) : "";
-  const tone = /^(fully funded|matched)/i.test(label) ? "success"
-    : /^(open for funding|awaiting|paused)/i.test(label) ? "warning"
-    : "neutral";
-  return { label, detail, tone };
+  const status = proposalWorkflowStatus(proposal, problemMatching);
+  const own = proposal.matching?.status;
+  const parent = problemMatching?.status;
+  const target = Number(proposal.amount);
+  const funded = Number(proposal.fundedAmount ?? proposal.matching?.fundedAmount ?? 0);
+  let detail = "";
+  if ([WORKFLOW_STATUS.INVALIDATED, WORKFLOW_STATUS.DECLINED, WORKFLOW_STATUS.REFUNDED].includes(status)) {
+    detail = proposal.status === "withdrawn" ? "" : "Funders refunded";
+  } else if (own === "awaiting_confirmation") detail = "Waiting for the creator to accept";
+  else if (status === WORKFLOW_STATUS.ACCEPTED) detail = "Funding locked";
+  else if (status === WORKFLOW_STATUS.SUBMITTED && parent === "awaiting_confirmation" && proposal.id !== problemMatching?.proposalId) {
+    detail = "Funding paused while another proposal is pending approval";
+  } else if (status === WORKFLOW_STATUS.SUBMITTED) {
+    detail = target > 0 && funded >= target ? "Fully funded · ready for owner selection" : "Open for funding";
+  }
+  return { status, label: workflowStatusLabel(status), detail };
 }
 
 export function matchingError(error) {

@@ -106,7 +106,7 @@ describe("proposal comparison", () => {
     const fields = [...document.querySelectorAll(".comparison-metrics dt")].map((term) => term.textContent);
     expect(fields.some((field) => /score|grade|reward/i.test(field))).toBe(false);
     expect(screen.getAllByRole("button", { name: "Go to proposal" })).toHaveLength(2);
-    expect(screen.getByText("1 Recommend with revisions")).toBeTruthy();
+    expect(screen.getByText("Evaluator · Recommend with revisions")).toBeTruthy();
     expect(screen.queryByText(/0 Recommend/)).toBeNull();
   });
 
@@ -125,7 +125,8 @@ describe("proposal comparison", () => {
     expect(mocks.select).not.toHaveBeenCalled();
     fireEvent.change(within(dialog).getByLabelText("Selection rationale"), { target: { value: "This approach meets the posted constraints." } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Select and accept" }));
-    await screen.findByText("Awaiting creator acceptance");
+    // QCDAO-91: the chosen proposal now reads as the shared Selected status.
+    await screen.findByText("Selected");
     expect(mocks.select).toHaveBeenCalledWith({
       problemId: "problem", proposalId: "alpha", rationale: "This approach meets the posted constraints.",
     });
@@ -140,7 +141,7 @@ describe("proposal comparison", () => {
     }));
     render(<ProposalComparison problemId="problem" />);
     expect((await screen.findByRole("radio", { name: "Select Alpha annealing" })).disabled).toBe(false);
-    expect(screen.getByText("No qualifying recommendation")).toBeTruthy();
+    expect(screen.getByText("Awaiting evaluator feedback")).toBeTruthy();
     expect(screen.getByText(/recommendations are optional and advisory/)).toBeTruthy();
     expect(screen.queryByText(/Needs a qualifying evaluator recommendation/)).toBeNull();
   });
@@ -178,7 +179,7 @@ describe("proposal comparison", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Show details for Alpha annealing" }));
     const detail = (await screen.findByText("Compare with a classical baseline.")).closest(".comparison-detail");
     expect(within(detail).getByText("Tighten the benchmark.")).toBeTruthy();
-    expect(within(detail).getByText("Recommend with revisions")).toBeTruthy();
+    expect(within(detail).getByText("Evaluator · Recommend with revisions")).toBeTruthy();
     expect(within(detail).getByText("Evaluator")).toBeTruthy();
     expect(mocks.comments).toHaveBeenCalledWith({ proposalId: "alpha" });
   });
@@ -189,9 +190,9 @@ describe("proposal comparison", () => {
     }));
     const { container } = render(<ProposalComparison problemId="problem" />);
     await screen.findByRole("button", { name: "Show details for Alpha annealing" });
-    const pill = container.querySelector(".funding-pill");
+    const pill = container.querySelector(".funding-status .workflow-badge");
     expect(pill.textContent).toBe("Declined");
-    expect(pill.className).toContain("tone-neutral");
+    expect(pill.className).toContain("tone-danger");
     expect(container.querySelector(".funding-status small").textContent).toBe("Funders refunded");
     expect(container.textContent).not.toContain("Rejected");
   });
@@ -199,16 +200,17 @@ describe("proposal comparison", () => {
 
 describe("proposalFundingStatus", () => {
   const status = (proposal, problemMatching) => proposalFundingStatus({ id: "p", amount: 100, ...proposal }, problemMatching);
-  it("splits every label into a headline, a note and a tone", () => {
-    expect(status({ matching: { status: "declined" } })).toEqual({ label: "Declined", detail: "Funders refunded", tone: "neutral" });
-    expect(status({ matching: { status: "cancelled" } })).toEqual({ label: "Cancelled", detail: "Funders refunded", tone: "neutral" });
-    expect(status({ matching: { status: "confirmed" } })).toEqual({ label: "Matched", detail: "Funding locked", tone: "success" });
-    expect(status({ matching: { status: "awaiting_confirmation" } })).toEqual({ label: "Awaiting creator acceptance", detail: "", tone: "warning" });
-    expect(status({ fundedAmount: 100 })).toEqual({ label: "Fully funded", detail: "Awaiting owner selection", tone: "success" });
-    expect(status({ fundedAmount: 10 })).toEqual({ label: "Open for funding", detail: "", tone: "warning" });
-    expect(status({}, { status: "confirmed" })).toEqual({ label: "Not selected", detail: "Funders refunded", tone: "neutral" });
-    expect(status({}, { status: "awaiting_confirmation", proposalId: "other" })).toEqual({ label: "Paused", detail: "Another proposal selected", tone: "warning" });
-    expect(status({ status: "withdrawn" })).toEqual({ label: "Withdrawn", detail: "", tone: "neutral" });
+  // QCDAO-91: a shared status plus a funding note; tone comes from the mapping.
+  it("splits every state into a shared status and a funding note", () => {
+    expect(status({ matching: { status: "declined" } })).toEqual({ status: "declined", label: "Declined", detail: "Funders refunded" });
+    expect(status({ matching: { status: "cancelled" } })).toEqual({ status: "refunded", label: "Refunded", detail: "Funders refunded" });
+    expect(status({ matching: { status: "confirmed" } })).toEqual({ status: "accepted", label: "Accepted", detail: "Funding locked" });
+    expect(status({ matching: { status: "awaiting_confirmation" } })).toEqual({ status: "selected", label: "Selected", detail: "Waiting for the creator to accept" });
+    expect(status({ fundedAmount: 100 })).toEqual({ status: "submitted", label: "Submitted", detail: "Fully funded · ready for owner selection" });
+    expect(status({ fundedAmount: 10 })).toEqual({ status: "submitted", label: "Submitted", detail: "Open for funding" });
+    expect(status({}, { status: "confirmed" })).toEqual({ status: "refunded", label: "Refunded", detail: "Funders refunded" });
+    expect(status({}, { status: "awaiting_confirmation", proposalId: "other" })).toEqual({ status: "submitted", label: "Submitted", detail: "Funding paused while another proposal is pending approval" });
+    expect(status({ status: "withdrawn" })).toEqual({ status: "declined", label: "Declined", detail: "" });
   });
 });
 
@@ -221,6 +223,6 @@ it('keeps escrow evaluator comparison and links to detail without offering mock 
   expect(screen.queryByRole('radio')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Confirm match' })).toBeNull();
   expect(screen.getByText('On-chain escrow')).toBeTruthy();
-  expect(screen.getByText('1 Recommend with revisions')).toBeTruthy();
+  expect(screen.getByText('Evaluator · Recommend with revisions')).toBeTruthy();
   expect(mocks.select).not.toHaveBeenCalled();
 });

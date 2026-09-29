@@ -155,7 +155,7 @@ describe("proposal funding on a problem detail page", () => {
     mocks.posting = publishedPosting({ expiresAt, matching: { status: "awaiting_confirmation", deadlineAt } });
     const { unmount } = render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
     await screen.findByText("Creator response window");
-    expect(screen.getAllByText("Awaiting creator acceptance").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Pending approval").length).toBeGreaterThan(0);
     expect(screen.getByText("2026-11-01 00:00:00 UTC")).toBeTruthy();
     unmount();
 
@@ -169,7 +169,7 @@ describe("proposal funding on a problem detail page", () => {
     mocks.posting = publishedPosting({ expiresAt, matching: { status: "confirmed", confirmedAt: new Date("2026-11-02T00:00:00Z") } });
     render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
     await screen.findByText("Closed");
-    expect(screen.getByLabelText("Match confirmed at 2026-11-02 00:00:00 UTC.")).toBeTruthy();
+    expect(screen.getByLabelText("Decision recorded at 2026-11-02 00:00:00 UTC.")).toBeTruthy();
     expect(screen.queryByText("Time remaining")).toBeNull();
   });
 

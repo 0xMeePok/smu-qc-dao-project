@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import registry from "../auditRegistry.contract.json" with { type: "json" };
 
 process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
 process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:9099";
@@ -510,5 +511,46 @@ describe("proposal audit recovery access", () => {
     assert.equal(saved.audit.transactionHash, "");
     const forbidden = await call("confirmProposalAudit", { proposalId: id }, { token: adminToken });
     assert.equal(forbidden.error?.status, "PERMISSION_DENIED");
+  });
+});
+
+describe("platform status access", () => {
+  it("[BIT-SXFPP-179] requires an authenticated administrator", async () => {
+    const anonymous = await call("adminGetPlatformStatus", {});
+    assert.equal(anonymous.error?.status, "UNAUTHENTICATED");
+    const token = await getIdTokenForAccount(user1Account);
+    const member = await call("adminGetPlatformStatus", {}, { token });
+    assert.equal(member.error?.status, "PERMISSION_DENIED");
+  });
+
+  it("[BIT-SXFPP-180] returns every check and counts anchoring jobs inside the 7-day window only", async () => {
+    const before = await call("adminGetPlatformStatus", {}, { token: adminToken });
+    assert.ok(before.result, JSON.stringify(before));
+    const baseline = before.result.anchoring.counts;
+    assert.equal(typeof baseline.failed, "number");
+    const job = { title: "Status fixture", researcherId: user1Address, attemptCount: 3, transactionHash: "", lastError: "fixture" };
+    const eightDaysAgo = Timestamp.fromMillis(Date.now() - 8 * 86_400_000);
+    await db.collection("proposalAuditJobs").doc("status-fixture-recent").set({ ...job, proposalId: "status-fixture-recent",
+      status: "failed", updatedAt: Timestamp.now(), nextAttemptAt: Timestamp.now() });
+    await db.collection("proposalAuditJobs").doc("status-fixture-old").set({ ...job, proposalId: "status-fixture-old",
+      status: "failed", updatedAt: eightDaysAgo, nextAttemptAt: eightDaysAgo });
+    try {
+      const after = await call("adminGetPlatformStatus", {}, { token: adminToken });
+      const status = after.result;
+      assert.equal(status.anchoring.counts.failed, baseline.failed + 1);
+      assert.equal(status.anchoring.status, "degraded");
+      assert.equal(status.anchoring.windowDays, 7);
+      assert.equal(status.firebase.functions.status, "ok");
+      assert.equal(status.firebase.firestore.status, "ok");
+      assert.equal(status.contracts[0].name, registry.contractName);
+      assert.equal(status.contracts[0].deployment?.blockNumber, String(registry.deployment.blockNumber));
+      for (const key of ["serverRpc", "alchemy"]) {
+        assert.ok(["ok", "degraded", "down", "unknown"].includes(status[key].status), key);
+      }
+      assert.ok(!JSON.stringify(status).includes("/v2/"), "an RPC path must never be returned");
+    } finally {
+      await db.collection("proposalAuditJobs").doc("status-fixture-recent").delete();
+      await db.collection("proposalAuditJobs").doc("status-fixture-old").delete();
+    }
   });
 });

@@ -7,6 +7,7 @@ import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import { BriefPreview, ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
+import { validateFundingOpportunity } from "../lib/validation.js";
 import {
   CURRENCIES,
   DEFAULT_EXPIRY_DAYS,
@@ -18,6 +19,7 @@ import {
   expiryDateFrom,
 } from "../config/postingCategories.js";
 import { fundingTagsFromCategories } from "../config/fundingOpportunity.js";
+import { opportunityStatusLabel } from "../config/workflowStatus.js";
 import { useSession } from "../context/SessionContext.jsx";
 import { formatInstant, toDate } from "../lib/datetime.js";
 import {
@@ -192,7 +194,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
               ? "This funding opportunity has expired and can no longer be edited."
               : opportunity.status === "draft"
               ? "Resume this funding call from My Problems — drafts are not edited here."
-              : `This funding opportunity can no longer be edited. Its status is ${opportunity.status}.`);
+              : `This funding opportunity can no longer be edited. Its status is ${opportunityStatusLabel(opportunity.status, opportunity)}.`);
             return;
           }
           setExisting(opportunity);
@@ -331,7 +333,6 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
   const submit = async (event) => {
     event.preventDefault();
     setSubmitError(null);
-    const { validateFundingOpportunity } = await import("../lib/validation.js");
     const found = validateFundingOpportunity(form);
     if (Object.keys(found).length > 0) {
       setErrors(found);
@@ -535,7 +536,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
       />
       )}
 
-      <WizardSteps steps={FUNDING_STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)} lockForward={pendingCount > 0} />
+      <WizardSteps steps={FUNDING_STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
+        completeSteps={wizard.completeSteps(validateFundingOpportunity(form))} visitedSteps={wizard.visited} lockForward={pendingCount > 0} />
 
       <div className="form-layout">
         <form className="brief-form" onSubmit={submit} noValidate>

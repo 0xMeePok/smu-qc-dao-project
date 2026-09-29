@@ -43,6 +43,7 @@ export const isFirebaseConfigured = missingFirebaseConfig.length === 0;
 
 const app = isFirebaseConfigured ? (getApps()[0] ?? initializeApp(config)) : null;
 const usingEmulators = viteEnv.VITE_FIREBASE_USE_EMULATORS === "true";
+export const isUsingEmulators = usingEmulators;
 
 const appCheckSiteKey = viteEnv.VITE_FIREBASE_APP_CHECK_SITE_KEY;
 export const isAppCheckConfigured = Boolean(appCheckSiteKey);

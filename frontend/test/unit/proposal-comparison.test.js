@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { filterComparisonRows, recommendationSummary, sortComparisonRows } from "../../src/lib/proposalComparison.js";
+import { filterComparisonRows, sortComparisonRows } from "../../src/lib/proposalComparison.js";
 
 const problemMatching = { status: "open", proposalId: null };
-// A solution carries at most one recommendation, so a count never exceeds 1.
+// Counts per outcome; since QCDAO-91 several evaluators may recommend one proposal.
 const rows = [
   { id: "bravo", title: "Bravo routes", developerName: "Bob", organisation: "Lab", category: "hybrid", amount: 40, currency: "SGD", status: "submitted", qualifyingCount: 0, commentCount: 3, recommendations: { recommend: 0, recommend_with_revisions: 0, do_not_recommend: 0 }, matching: { status: "funding" } },
   { id: "alpha", title: "Alpha annealing", developerName: "Alice", organisation: "SMU", category: "quantum-annealing", amount: 100, currency: "SGD", status: "submitted", qualifyingCount: 1, commentCount: 1, recommendations: { recommend: 0, recommend_with_revisions: 0, do_not_recommend: 1 }, matching: { status: "funding" } },
@@ -19,13 +19,11 @@ describe("proposal comparison presentation", () => {
     assert.deepEqual(sortComparisonRows(rows, "qualifyingCount:asc", problemMatching).map((row) => row.id), ["bravo", "alpha"]);
   });
 
-  it("[FUT-SPE-159] filters by outcome and summarises only recommendations that were given", () => {
+  // The per-outcome badges are covered by test/components/proposal-comparison.test.jsx.
+  it("[FUT-SPE-159] filters by outcome", () => {
     assert.deepEqual(filterComparisonRows(rows, "do_not_recommend").map((row) => row.id), ["alpha"]);
     assert.deepEqual(filterComparisonRows(rows, "").map((row) => row.id), ["bravo", "alpha"]);
-    assert.equal(recommendationSummary(rows[1]), "1 Do not recommend");
-    assert.equal(recommendationSummary(rows[0]), "No qualifying recommendation");
-    assert.equal(recommendationSummary({ qualifyingCount: 1, recommendations: { recommend: 1 } }), "1 Recommend");
-    assert.equal(recommendationSummary({ qualifyingCount: 0, recommendations: {} }), "No qualifying recommendation");
-    assert.equal(recommendationSummary(rows[1]).includes("grade"), false);
+    assert.deepEqual(filterComparisonRows([...rows, { ...rows[1], id: "charlie", recommendations: { do_not_recommend: 2 } }], "do_not_recommend")
+      .map((row) => row.id), ["alpha", "charlie"]);
   });
 });

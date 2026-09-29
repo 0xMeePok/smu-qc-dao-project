@@ -22,10 +22,12 @@ import ProfilePage from "./pages/ProfilePage.jsx";
 import PublicProfilePage from "./pages/PublicProfilePage.jsx";
 import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import {
+  ActionNeeded,
   MyProblems,
   ResearcherProposals,
   EvaluatorQueue,
   FundingPortfolio,
+  useActionItems,
 } from "./components/RoleViews.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import HomePage from "./pages/HomePage.jsx";
@@ -39,7 +41,8 @@ import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
 import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
 import { ExpiryCountdown } from "./components/ExpiryCountdown.jsx";
 import { VerifiedBadge } from "./components/VerifiedBadge.jsx";
-import { opportunityStatusLabel } from "./config/workflowStatus.js";
+import { opportunityWorkflowStatus, workflowStatusLabel } from "./config/workflowStatus.js";
+import { StatusBadge } from "./components/StatusBadge.jsx";
 import {
   DEFAULT_DISCOVERY_FILTERS,
   DISCOVERY_SORT_OPTIONS,
@@ -250,11 +253,18 @@ function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
 }
 
 const WORKSPACE_ICONS = {
+  actions: "actions",
   "my-problems": "owner",
   proposals: "researcher",
   evaluations: "evaluator",
   funding: "funder",
 };
+
+// How many items wait in the Action Needed tab; hidden until known.
+function ActionCount() {
+  const { data } = useActionItems();
+  return data?.total ? <span className="count-pill" aria-label={`${data.total} waiting`}>{data.total}</span> : null;
+}
 
 function WorkspaceTabs({ route, workspaceRoutes }) {
   if (workspaceRoutes.length < 2) return null;
@@ -270,6 +280,7 @@ function WorkspaceTabs({ route, workspaceRoutes }) {
         >
           <span className="ws-icon"><StakeholderIcon type={WORKSPACE_ICONS[key]} /></span>
           <span>{label}</span>
+          {key === "actions" && <ActionCount />}
         </button>
       ))}
     </nav>
@@ -283,7 +294,7 @@ function Shell({ route, children }) {
 
   // Primary navigation stays short: Profile lives in the account menu and
   // Create is the "New brief" button, so neither repeats as a nav link.
-  const workspaceKeys = new Set(["my-problems", "proposals", "evaluations", "funding"]);
+  const workspaceKeys = new Set(["actions", "my-problems", "proposals", "evaluations", "funding"]);
   const accountKeys = new Set(["profile", "create"]);
   const primaryRoutes = navRoutes.filter((r) => !workspaceKeys.has(r.key) && !accountKeys.has(r.key));
   const workspaceRoutes = navRoutes.filter((r) => workspaceKeys.has(r.key));
@@ -316,6 +327,7 @@ function Shell({ route, children }) {
         <span className="footer-brand">QC DAO</span>
         <div className="footer-links">
           <button type="button" onClick={() => go("architecture")}>On-chain vs off-chain</button>
+          <button type="button" onClick={() => go("architecture")}>Status reference</button>
           <span>Arbitrum Sepolia (421614)</span>
           <span>Proof of concept</span>
         </div>
@@ -352,6 +364,15 @@ function OpportunityIcon({ type }) {
 }
 
 function StakeholderIcon({ type }) {
+  if (type === "actions") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 6.5h2M5 12h2M5 17.5h2M10 6.5h9M10 12h9M10 17.5h9" />
+        <path d="M4.25 5.75l.75.75 1.5-1.5" />
+      </svg>
+    );
+  }
+
   if (type === "owner") {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -401,10 +422,9 @@ function openOpportunity(item) {
 }
 
 function OpportunityTrust({ item }) {
-  const statusLabel = opportunityStatusLabel(item.status, { expiresAt: item.expiresAt, matching: item.matching });
   return (
     <span className="trust-status-row">
-      <span className={`status-dot${item.matching?.status === "awaiting_confirmation" ? " is-awaiting" : ""}`}>{statusLabel}</span>
+      <StatusBadge status={opportunityWorkflowStatus(item)} />
       <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
     </span>
   );
@@ -513,7 +533,7 @@ function Home() {
   const { postings, loading, isAuthenticated } = usePublishedPostings();
   const { roles } = useAuth();
   const workspaceRoutes = getPermittedNavRoutes(roles)
-    .filter((r) => ["my-problems", "proposals", "evaluations", "funding"].includes(r.key));
+    .filter((r) => ["actions", "my-problems", "proposals", "evaluations", "funding"].includes(r.key));
   return (
     <HomePage
       postings={postings}
@@ -626,8 +646,7 @@ function Discover({ params }) {
       .sort((left, right) => left.localeCompare(right))
   ), [postings]);
   const statuses = useMemo(() => (
-    [...new Set(postings.map((item) => String(item.status ?? "").toLowerCase()).filter(Boolean))]
-      .sort()
+    [...new Set(postings.map((item) => opportunityWorkflowStatus(item)))].sort()
   ), [postings]);
   const results = useMemo(
     () => discoverOpportunities(postings, filters),
@@ -715,7 +734,7 @@ function Discover({ params }) {
             <select value={filters.status} onChange={(event) => updateFilters({ status: event.target.value })}>
               <option value="">All statuses</option>
               {statuses.map((status) => (
-                <option value={status} key={status}>{opportunityStatusLabel(status)}</option>
+                <option value={status} key={status}>{workflowStatusLabel(status)}</option>
               ))}
             </select>
           </label>
@@ -967,6 +986,17 @@ function AppContent() {
         {id === OPEN_FUNDING_TYPE
           ? <CreateFundingOpportunityPage onNavigate={go} />
           : <CreatePostingPage key={id ?? "new"} postingId={id} onNavigate={go} />}
+      </RouteGuard>
+    );
+  } else if (section === "actions") {
+    pageComponent = (
+      <RouteGuard
+        targetRoute={section}
+        allowedRoles={routeConfig?.allowedRoles}
+        authRequired={routeConfig?.authRequired}
+        onNavigate={go}
+      >
+        <ActionNeeded onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "my-problems") {

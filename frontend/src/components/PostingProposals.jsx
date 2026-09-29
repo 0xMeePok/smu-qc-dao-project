@@ -4,6 +4,8 @@ import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { FundingMeta } from "./FundingMeta.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
+import { StatusBadge } from "./StatusBadge.jsx";
+import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
 function Row({ item, onNavigate, problemMatching }) {
   const isDraft = item.status === PROPOSAL_STATUS_DRAFT;
@@ -18,7 +20,7 @@ function Row({ item, onNavigate, problemMatching }) {
         </small>
       </div>
       <div className="table-row-actions">
-        {isDraft ? <span className="draft-badge">Draft</span> : null}
+        {isDraft && <StatusBadge status={WORKFLOW_STATUS.DRAFT} />}
         <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
         <button
           className="text-button"

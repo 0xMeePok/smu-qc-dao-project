@@ -386,3 +386,24 @@ describe("wizard navigation while an attachment is uploading", () => {
     expect(screen.getByRole("button", { name: /Review/ }).disabled).toBe(false);
   });
 });
+
+describe("[QCDAO-91] wizard step indicator", () => {
+  it("ticks a step only when its fields are complete, and marks a visited unfinished step as incomplete", async () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    const step = (name) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
+    fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "Cold-chain routing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    // Moving on no longer implies done: the rest of step one is still empty.
+    expect(step("The problem").textContent).toContain("(incomplete)");
+    expect(step("The problem").className).toContain("is-partial");
+    expect(step("Funding & timeline").textContent).not.toContain("(incomplete)");
+
+    fireEvent.click(step("The problem"));
+    for (const label of ["Business context", "Problem description", "Current approach", "Limitations of that approach"]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: `${label} in detail` } });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(step("The problem").textContent).toContain("(complete)");
+    expect(step("The problem").className).toContain("is-done");
+  });
+});

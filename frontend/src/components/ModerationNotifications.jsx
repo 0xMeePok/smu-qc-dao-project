@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { listModerationNotifications, markAllModerationNotificationsRead, markModerationNotificationRead, moderationError } from "../lib/moderation.js";
 import { formatInstant } from "../lib/datetime.js";
 import { go } from "../lib/router.js";
+import { noticeWorkflowStatus } from "../config/workflowStatus.js";
+import { StatusBadge } from "./StatusBadge.jsx";
 
 function useModerationNotifications(userId) {
   const [items, setItems] = useState([]);
@@ -55,6 +57,7 @@ function NotificationFeed({ items, error, busy, onMarkRead, onNavigate }) {
     {items.length ? items.map((item) => {
       const target = recordTarget(item);
       const body = <>
+        {noticeWorkflowStatus(item) && <StatusBadge status={noticeWorkflowStatus(item)} interactive={false} />}
         <strong>{item.message || "A moderation decision was recorded on your content."}</strong>
         <p>{item.reason?.replaceAll("_", " ")}</p>
         {item.details && <p>{item.details}</p>}

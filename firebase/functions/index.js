@@ -22,7 +22,9 @@ import {
 } from "./adminActions.js";
 import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
-import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, verifyMinedProposal } from "./proposalAuditRecovery.js";
+import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js";
+import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
+import auditRegistryConfig from "./auditRegistry.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { recordProposalRevision } from "./proposalRevisions.js";
 import { recordOpportunityRevision } from "./opportunityRevisions.js";
@@ -39,7 +41,7 @@ import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
-import { listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
+import { listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
@@ -206,6 +208,12 @@ export const listMyProposalQueue = onCall(MEMBER_CALL_OPTIONS, async (request) =
 export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return evaluatorQueue({ db, uid, cursor: request.data?.cursor ?? null, filter: request.data?.filter ?? "pending" });
+});
+
+// QCDAO-91 shared "Action Needed" workspace tab.
+export const listActionItems = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return actionItems({ db, uid });
 });
 
 export const recordOwnerReview = onCall(MEMBER_CALL_OPTIONS, async (request) => {
@@ -967,6 +975,30 @@ export const adminRetryProposalAudit = onCall({ region: REGION, maxInstances: 3 
   await enqueueProposalAudit({ db, record: { ...record, id }, now: Timestamp.now() });
   try { await recoverAudit(id, true); return { message: "Verification confirmed and receipt saved." }; }
   catch (error) { throw new HttpsError("unavailable", error.message); }
+});
+
+// Platform Status probes use their own client: no retries and a short timeout,
+// so latency reflects one real round trip and a dead RPC fails fast.
+const statusClient = createPublicClient({
+  chain: arbitrumSepolia,
+  transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL || undefined, {
+    timeout: STATUS_THRESHOLDS.rpcTimeoutMs,
+    retryCount: 0,
+  }),
+});
+
+/** Admin-only pre-demo health snapshot: RPC, AuditRegistry, anchoring queue, Alchemy and Firestore. */
+export const adminGetPlatformStatus = onCall({ region: REGION, maxInstances: 3, timeoutSeconds: 30 }, async (request) => {
+  await requireAdmin(request);
+  return collectPlatformStatus({
+    client: statusClient,
+    rpcUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+    db,
+    auditJobsCollection: AUDIT_JOBS,
+    toTimestamp: (millis) => Timestamp.fromMillis(millis),
+    registry: auditRegistryConfig,
+    resolveRegistryAddress: registryAddress,
+  });
 });
 
 /** Admin-only force expiry. */

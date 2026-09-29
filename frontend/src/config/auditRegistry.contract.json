@@ -3,6 +3,10 @@
   "chainId": 421614,
   "address": "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD",
   "entityIdScheme": 2,
+  "deployment": {
+    "blockNumber": 313125697,
+    "transactionHash": "0x81a127822e0021e8494204cf3b3ad81352e1d6cb69405fd73914cb6c3a0a6cda"
+  },
   "abi": [
     {
       "inputs": [

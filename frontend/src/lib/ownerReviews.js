@@ -1,14 +1,13 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
+import { WORKFLOW_STATUS, ownerReviewWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
 
 export const OWNER_REVIEW_OUTCOMES = [
   ["feedback", "Record feedback"],
   ["revision_requested", "Request revisions"],
-  ["not_progressing", "Not progressing"],
+  ["not_progressing", workflowStatusLabel(WORKFLOW_STATUS.NOT_PROGRESSING)],
 ];
-
-const LABELS = Object.fromEntries(OWNER_REVIEW_OUTCOMES);
 
 async function call(name, payload = {}) {
   requireFirebase();
@@ -18,20 +17,11 @@ async function call(name, payload = {}) {
 export const recordOwnerReview = (payload) => call("recordOwnerReview", payload);
 export const listOwnerReviews = (proposalId) => call("listOwnerReviews", { proposalId });
 
-export function ownerReviewLabel(outcome) {
-  return LABELS[outcome] || "";
-}
-
-/** Tracker line for the developer. Separate from evaluator recommendation progress. */
-export function ownerReviewTrackerLabel(review) {
-  if (!review?.outcome) return "";
-  if (review.outcome === "revision_requested") {
-    return review.correctionPathOpen
-      ? "Owner requested revisions · you can edit and resubmit"
-      : "Owner requested revisions";
-  }
-  if (review.outcome === "not_progressing") return "Owner recorded: not progressing";
-  return "Owner recorded feedback";
+/** The owner's latest review as a shared status, plus the developer's next step. */
+export function ownerReviewStatus(review) {
+  const status = ownerReviewWorkflowStatus(review?.outcome);
+  if (!status) return null;
+  return { status, note: review.outcome === "revision_requested" && review.correctionPathOpen ? "You can edit and resubmit" : "" };
 }
 
 export function ownerReviewError(error) {

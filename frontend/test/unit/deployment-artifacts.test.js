@@ -57,6 +57,36 @@ it("the default registry sync preserves the active manifest's address and entity
     assert.equal(actual.address, active.registry?.address ?? active.address);
     assert.equal(actual.chainId, active.chainId);
     assert.equal(actual.entityIdScheme, active.entityIdScheme);
+    // Platform Status shows these deployment facts for the active registry.
+    const registry = active.registry ?? active;
+    assert.deepEqual(actual.deployment, Object.fromEntries(Object.entries({
+      blockNumber: registry.blockNumber,
+      transactionHash: registry.transactionHash,
+      deployedAt: registry.deployedAt,
+      verificationUrl: registry.verification?.url,
+    }).filter(([, value]) => value !== undefined)));
+    assert.deepEqual(configured.deployment, actual.deployment);
+    const backend = JSON.parse(await readFile(path.join(repositoryDirectory, "firebase/functions/auditRegistry.contract.json"), "utf8"));
+    assert.deepEqual(backend, configured);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("the registry sync omits deployment facts when --address selects a different contract", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "qc-registry-sync-"));
+  try {
+    const output = path.join(directory, "registry.json");
+    execFileSync(process.execPath, [
+      path.join(frontendDirectory, "scripts/sync-audit-registry.mjs"),
+      "--artifact", path.join(repositoryDirectory, "contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json"),
+      "--deployment", path.join(repositoryDirectory, "contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.deployment.json"),
+      "--address", `0x${"1".repeat(40)}`,
+      "--output", output,
+    ], { cwd: directory, encoding: "utf8", maxBuffer: 4000 });
+    const actual = JSON.parse(await readFile(output, "utf8"));
+    assert.equal(actual.address, `0x${"1".repeat(40)}`);
+    assert.equal(actual.deployment, undefined);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -202,7 +202,7 @@
 
 /* QCDAO-80 — compact on-chain verification badge.
    Squared chip + unique icon per state so it is not a colour-only pill
-   and cannot be confused with workflow .status-dot, .draft-badge, or .role-chip. */
+   and cannot be confused with the workflow .workflow-badge, .draft-badge, or .role-chip. */
 .verified-badge {
   display: inline-flex;
   align-items: center;
@@ -2404,29 +2404,6 @@ footer > p { margin: 0 auto 0 0; }
   align-items: center;
   flex-wrap: wrap;
 }
-.submission-status-badge {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 3px 8px;
-  border-radius: 4px;
-  text-transform: uppercase;
-}
-.badge-submitted {
-  background: rgba(59, 130, 246, 0.2);
-  color: #93c5fd;
-  border: 1px solid rgba(59, 130, 246, 0.4);
-}
-.badge-open {
-  background: rgba(34, 197, 94, 0.2);
-  color: #86efac;
-  border: 1px solid rgba(34, 197, 94, 0.4);
-}
-.badge-cancelled {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.35);
-}
 .badge-none {
   background: rgba(255, 255, 255, 0.05);
   color: var(--muted);
@@ -3555,10 +3532,6 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 /* Workflow status: a quiet pill whose dot carries the state (green live,
    amber waiting, grey closed). The base rule had been lost, which left the
    label as bare text with no dot. */
-.status-dot { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border: 0; border-radius: var(--radius-pill); background: var(--surface-muted); color: var(--ink-soft); font-size: 13px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
-.status-dot::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--success-dot); }
-.status-dot.is-awaiting::before { background: var(--warning-dot); }
-.status-dot.is-closed::before { background: var(--subtle); }
 .verified-badge { border-radius: var(--radius-pill); padding: 2px 9px 2px 7px; font-weight: 500; }
 .opportunity-card-hit {
   position: absolute;
@@ -4412,26 +4385,9 @@ footer.footer { background: transparent; }
   .topbar-panel { background: var(--surface-solid); }
 }
 
-/* Funding status on a comparison row: a short status pill, with the
-   consequence ("Funders refunded") as a quiet note beneath - not one run-on
-   sentence beside a dot. Tone carries the meaning; nothing reads as an error. */
+/* Funding status on a comparison row: the shared status badge, with its
+   consequence ("Funders refunded") as a quiet note beneath. */
 .comparison-metrics dd.funding-status { flex-direction: column; align-items: flex-start; gap: 4px; }
-.funding-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px 3px 8px;
-  border-radius: var(--radius-pill);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-.funding-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.funding-pill.tone-success { background: var(--success-soft); color: var(--success); }
-.funding-pill.tone-warning { background: var(--warning-soft); color: var(--warning); }
-.funding-pill.tone-neutral { background: var(--surface-muted); color: var(--ink-soft); }
-.funding-pill.tone-neutral::before { background: var(--subtle); }
 .funding-status > small { color: var(--muted); font-size: 13px; }
 
 /* ---- Posting detail: tabs and grouped brief ---- */
@@ -4459,8 +4415,8 @@ footer.footer { background: transparent; }
 
 /* Detail pages: the status sits beside its eyebrow, not stranded at the far edge. */
 .detail-main > .card-top { justify-content: flex-start; flex-wrap: wrap; gap: 10px 14px; }
-/* A row's meta line holding a funding pill: lay the parts out inline. */
-.table-row-meta:has(.funding-pill) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-size: 13px; }
+/* A row's meta line holding a status badge: lay the parts out inline. */
+.table-row-meta:has(.workflow-badge) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-size: 13px; }
 .funding-note { color: var(--muted); }
 
 /* Sidebar countdown: "Open" beside the clock repeats the status pill, so the
@@ -4490,3 +4446,114 @@ footer.footer { background: transparent; }
   .escrow-funding .settings-row { align-items: flex-start; flex-direction: column; gap: 4px; }
   .escrow-funding .settings-row dd { text-align: left; }
 }
+
+/* ---- QCDAO-91 workflow status badge: every status renders through StatusBadge ---- */
+.workflow-badge-wrap { position: relative; display: inline-flex; max-width: 100%; vertical-align: middle; }
+.workflow-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 2px 9px 2px 7px;
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: help;
+}
+.workflow-badge svg { flex: none; width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* A combined evaluation badge groups its outcome icons together. */
+.workflow-badge svg + svg { margin-left: -3px; }
+.workflow-badge:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.workflow-badge.tone-neutral { background: var(--surface-muted); border-color: var(--line-strong); color: var(--ink-soft); }
+.workflow-badge.tone-info { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-strong); }
+.workflow-badge.tone-warning { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
+.workflow-badge.tone-success { background: var(--success-soft); border-color: var(--success-line); color: var(--success); }
+.workflow-badge.tone-danger { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.workflow-badge.tone-muted { background: var(--surface-muted); border-color: var(--line); color: var(--muted); }
+.workflow-badge-tooltip {
+  position: fixed;
+  z-index: 45;
+  width: max-content;
+  max-width: min(18.5rem, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--surface-solid);
+  box-shadow: var(--shadow-md);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: normal;
+  text-wrap: pretty;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.workflow-badge-tooltip.is-open { opacity: 1; visibility: visible; }
+.workflow-badge-tooltip em { font-style: normal; font-weight: 700; }
+.status-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.status-note { color: var(--muted); font-size: 13px; }
+.status-legend { display: grid; gap: 10px; margin: 0; }
+.status-legend > div { display: grid; grid-template-columns: minmax(0, 15rem) 1fr; gap: 12px; align-items: start; }
+.status-legend dd { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.status-legend em { font-style: normal; font-weight: 600; color: var(--ink-soft); }
+@media (max-width: 640px) { .status-legend > div { grid-template-columns: 1fr; gap: 4px; } }
+.workspace-tabs .count-pill { margin-left: auto; }
+.action-group-hint { margin: 0; padding: 12px 24px 0; }
+.dashboard-page > .card-table + .card-table { margin-top: 20px; }
+.wizard-step-pill.is-partial { color: var(--ink); }
+.wizard-step-pill.is-partial > .wizard-step-number { background: var(--warning-soft); color: var(--warning); box-shadow: inset 0 0 0 1px var(--warning-line); }
+.wizard-step-number svg { width: 14px; height: 14px; }
+.wizard-step-pill.is-done > .wizard-step-number { background: var(--success-dot); color: #fff; }
+
+/* Admin Platform Status tab. Status is always spelled out in text; colour only reinforces it. */
+.platform-status { display: grid; gap: 18px; }
+.status-banner { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.status-banner strong { display: block; font-size: 17px; }
+.status-banner p, .status-banner ul { margin: 6px 0 0; color: var(--ink-soft); font-size: 13.5px; line-height: 1.5; }
+.status-banner ul { padding-left: 18px; }
+.status-banner-ready { background: var(--success-soft); box-shadow: 0 0 0 1px var(--success-line); }
+.status-banner-ready strong { color: var(--success); }
+.status-banner-degraded { background: var(--warning-soft); box-shadow: 0 0 0 1px var(--warning-line); }
+.status-banner-degraded strong { color: var(--warning); }
+.status-banner-not-ready { background: var(--danger-soft); box-shadow: 0 0 0 1px var(--danger-line); }
+.status-banner-not-ready strong { color: var(--danger); }
+.status-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.status-section-heading { margin: 8px 0 0; font-size: 15px; font-weight: 600; color: var(--ink-soft); }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.status-card { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: 22px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.status-card .card-top { margin-bottom: 0; }
+.status-card h4 { margin: 0; font-size: 16px; font-weight: 600; }
+.status-card-lead { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.status-card-links { margin: 0; font-size: 13.5px; }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap; background: var(--surface-muted); color: var(--ink-soft); }
+.status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.status-pill-ok { background: var(--success-soft); color: var(--success); }
+.status-pill-ok::before { background: var(--success-dot); }
+.status-pill-degraded { background: var(--warning-soft); color: var(--warning); }
+.status-pill-degraded::before { background: var(--warning-dot); }
+.status-pill-down { background: var(--danger-soft); color: var(--danger); }
+.status-pill-down::before { background: var(--danger-dot); }
+.status-facts { display: grid; gap: 6px; margin: 0; font-size: 13.5px; }
+.status-facts > div { display: flex; justify-content: space-between; gap: 12px; }
+.status-facts dt { color: var(--muted); }
+.status-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.status-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.status-counts > div { padding: 10px 12px; border-radius: 14px; background: var(--surface-muted); }
+.status-counts dt { color: var(--muted); font-size: 12.5px; }
+.status-counts dd { margin: 2px 0 0; font-size: 22px; font-weight: 600; }
+.status-counts .status-count-alert { background: var(--danger-soft); }
+.status-counts .status-count-alert dd { color: var(--danger); }
+.status-messages { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+.status-issue { color: var(--ink); }
+.status-note { color: var(--muted); }
+.status-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.status-chips li { padding: 3px 10px; border-radius: 999px; background: var(--surface-muted); color: var(--ink-soft); }
+.status-chips li.off { background: var(--warning-soft); color: var(--warning); }
+.status-chips li.emulator { background: var(--brand-soft, var(--surface-muted)); color: var(--link); }

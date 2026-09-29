@@ -44,7 +44,7 @@ describe("Unit Tests: Audit receipt timestamp and related-event reachability", (
     assert.doesNotMatch(comments, /VerifiedBadge/);
     assert.doesNotMatch(comments, /AuditReceipt/);
     assert.match(comments, /role-chip-evaluator|Evaluator/);
-    assert.match(comments, /recommendationLabel/);
+    assert.match(comments, /<StatusBadge status=\{outcome\} prefix="Evaluator · " \/>/);
   });
 
   it("[FUT-BAV-148] should wire proposal and listing receipt fields", () => {

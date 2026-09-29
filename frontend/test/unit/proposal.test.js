@@ -4,10 +4,10 @@ import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "..
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../../src/lib/proposalValidation.js";
 import { buildProposalDocument } from "../../src/lib/proposals.js";
 import { attachmentPath } from "../../src/lib/attachments.js";
+import { recommendationCounts } from "../../src/config/workflowStatus.js";
 import {
   commentCountLabel,
-  feedbackLabel,
-  ownerReviewTrackerLabel,
+  ownerReviewStatus,
   filterProposalRows,
   queueError,
   sortProposalRows,
@@ -89,11 +89,11 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
 
 describe("QCDAO-62/63 proposal queues", () => {
   const rows = [
-    { id: "p1", status: "submitted", createdAt: "2026-09-01T00:00:00.000Z",
+    { id: "p1", status: "submitted", workflowStatus: "submitted", createdAt: "2026-09-01T00:00:00.000Z",
       posting: { expiresAt: "2026-10-01T00:00:00.000Z" }, comments: 2, qualifying: 1, recommendations: ["recommend"] },
-    { id: "p2", status: "withdrawn", createdAt: "2026-09-05T00:00:00.000Z",
+    { id: "p2", status: "withdrawn", workflowStatus: "declined", createdAt: "2026-09-05T00:00:00.000Z",
       posting: { expiresAt: "2026-09-20T00:00:00.000Z" }, comments: 0, qualifying: 0, recommendations: [] },
-    { id: "p3", status: "submitted", createdAt: "2026-09-03T00:00:00.000Z",
+    { id: "p3", status: "submitted", workflowStatus: "submitted", createdAt: "2026-09-03T00:00:00.000Z",
       posting: { expiresAt: null }, comments: 1, qualifying: 0, recommendations: [] },
   ];
 
@@ -108,21 +108,22 @@ describe("QCDAO-62/63 proposal queues", () => {
   it("filters by the shared workflow status and offers only the statuses present", () => {
     assert.deepEqual(filterProposalRows(rows, "submitted").map((row) => row.id), ["p1", "p3"]);
     assert.equal(filterProposalRows(rows, "all").length, 3);
-    assert.deepEqual(statusOptions(rows), ["submitted", "withdrawn"]);
+    assert.deepEqual(statusOptions(rows), ["declined", "submitted"]);
   });
 
   it("reports feedback progress as evaluator recommendations, never scores", () => {
-    assert.match(feedbackLabel(rows[0]), /1 evaluator recommendation: Recommend/);
-    assert.equal(feedbackLabel(rows[1]), "Awaiting evaluator recommendation");
+    assert.deepEqual(recommendationCounts(rows[0].recommendations), { recommend: 1, recommend_with_revisions: 0, do_not_recommend: 0 });
+    assert.deepEqual(recommendationCounts(rows[1].recommendations), { recommend: 0, recommend_with_revisions: 0, do_not_recommend: 0 });
     assert.equal(commentCountLabel(rows[2]), "1 comment");
     assert.equal(commentCountLabel(rows[1]), "0 comments");
   });
 
   it("[FUT-SPE-169] labels the latest owner review on the developer tracker", () => {
-    assert.equal(ownerReviewTrackerLabel({ outcome: "feedback" }), "Owner recorded feedback");
-    assert.equal(ownerReviewTrackerLabel({ outcome: "not_progressing" }), "Owner recorded: not progressing");
-    assert.equal(ownerReviewTrackerLabel({ outcome: "revision_requested", correctionPathOpen: true }), "Owner requested revisions · you can edit and resubmit");
-    assert.equal(ownerReviewTrackerLabel(null), "");
+    assert.deepEqual(ownerReviewStatus({ outcome: "feedback" }), { status: "feedback_recorded", note: "" });
+    assert.deepEqual(ownerReviewStatus({ outcome: "not_progressing" }), { status: "not_progressing", note: "" });
+    assert.deepEqual(ownerReviewStatus({ outcome: "revision_requested", correctionPathOpen: true }),
+      { status: "revision_requested", note: "You can edit and resubmit" });
+    assert.equal(ownerReviewStatus(null), null);
   });
 
   it("keeps the queue's own refusal and hides unexpected failures", () => {

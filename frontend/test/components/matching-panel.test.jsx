@@ -56,7 +56,7 @@ describe("server-backed mock funding and mutual matching", () => {
     render(<MatchingPanel problemId="problem-1" proposalId="proposal-1" />);
     await screen.findByRole("heading", { name: "Quantum routing" });
     expect(screen.queryByRole("button", { name: "Select proposal" })).toBeNull();
-    expect(screen.getByText("Fully funded · awaiting owner selection")).toBeTruthy();
+    expect(screen.getByText("Fully funded · ready for owner selection")).toBeTruthy();
     expect(screen.getByText(/can select this proposal from the comparison once it is fully funded. Expert evaluation is optional/)).toBeTruthy();
     expect(screen.queryByText(/Fund individual proposals for this problem/)).toBeNull();
     expect(screen.queryByText(/qualifying evaluator recommendation/)).toBeNull();
@@ -122,7 +122,9 @@ describe("server-backed mock funding and mutual matching", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expire and refund" }));
     await screen.findByText(/confirmation window was expired for this demonstration/);
     expect(mocks.expire).toHaveBeenCalledWith({ problemId: "problem-1" });
-    expect(screen.getByText("Voided · funders refunded")).toBeTruthy();
+    // QCDAO-91: the voided selection reads as Invalidated, with its refund as a note.
+    expect(screen.getAllByText("Invalidated").length).toBeGreaterThan(0);
+    expect(screen.getByText("Funders refunded")).toBeTruthy();
   });
 
   it("renders owner approval and the server decision record with actor, reason and reference", async () => {
@@ -133,7 +135,7 @@ describe("server-backed mock funding and mutual matching", () => {
     render(<MatchingPanel problemId="problem-1" />);
     await screen.findByRole("heading", { name: "Decision record" });
     expect(screen.getByText("Problem owner acceptance")).toBeTruthy();
-    expect(screen.getByText("Awaiting proposal creator acceptance")).toBeTruthy();
+    expect(screen.getByText("Proposal creator acceptance").nextElementSibling.textContent).toBe("Pending approval");
     const record = document.getElementById("matching-event-decision-123");
     expect(within(record).getByText("owner-123")).toBeTruthy();
     expect(within(record).getByText("The strongest technical fit.")).toBeTruthy();
@@ -170,7 +172,7 @@ describe("server-backed mock funding and mutual matching", () => {
       history: [{ id: "selection", type: "owner_selected", proposalId: "proposal-1", actorId: "owner", createdAt: "2099-09-15T00:00:00Z" }] }));
     render(<MatchingPanel problemId="problem-1" />);
     await screen.findByText("The problem owner accepted by selecting this proposal. The creator still needs to accept.");
-    expect(screen.getByText("Accepted 2099-09-15 00:00:00 UTC")).toBeTruthy();
+    expect(screen.getByText("Problem owner acceptance").nextElementSibling.textContent).toBe("Accepted 2099-09-15 00:00:00 UTC");
     expect(screen.getByText("2099-09-22 00:00:00 UTC")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Accept as problem owner" })).toBeNull();
     expect(screen.getByRole("button", { name: "Reject selection" })).toBeTruthy();
@@ -188,7 +190,7 @@ describe("server-backed mock funding and mutual matching", () => {
     expect(screen.getByText(/keeping their existing contributions/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Reason for rejecting"), { target: { value: "This match no longer meets our needs." } });
     fireEvent.click(screen.getByRole("button", { name: "Reject and refund funders" }));
-    await screen.findByText("Rejected · funders refunded");
+    await screen.findByText("Funders refunded");
     expect(mocks.decline).toHaveBeenCalledWith({ problemId: "problem-1", proposalId: "proposal-1", reason: "This match no longer meets our needs." });
     expect(screen.queryByText("Seven-day acceptance window")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Fund proposal" })).toHaveLength(1);
@@ -199,9 +201,9 @@ describe("server-backed mock funding and mutual matching", () => {
     mocks.read.mockResolvedValue(waiting({ proposals: [candidate({ canSelect: false, canDecline: true, matching: { status: "awaiting_confirmation" } }), candidate({ id: "proposal-2", title: "Alternative", amount: 100, fundedAmount: 40, canSelect: false, canFund: true })] }));
     render(<MatchingPanel problemId="problem-1" />);
     await screen.findByText("The problem owner accepted by selecting this proposal. The creator still needs to accept.");
-    expect(screen.queryByText("Awaiting problem owner acceptance")).toBeNull();
-    expect(screen.getByText("Awaiting proposal creator acceptance")).toBeTruthy();
-    expect(screen.getByText("Funding paused · another proposal selected")).toBeTruthy();
+    expect(screen.getByText("Problem owner acceptance").nextElementSibling.textContent).not.toContain("Pending approval");
+    expect(screen.getByText("Proposal creator acceptance").nextElementSibling.textContent).toBe("Pending approval");
+    expect(screen.getByText("Funding paused while another proposal is pending approval")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Fund proposal" })).toBeNull();
   });
 
@@ -214,10 +216,10 @@ describe("server-backed mock funding and mutual matching", () => {
     render(<MatchingPanel problemId="problem-1" />);
     await screen.findByText("Seven-day acceptance window");
     fireEvent.click(screen.getByRole("button", { name: "Refresh funding status" }));
-    await screen.findByText("Voided · funders refunded");
-    expect(screen.getByText("USD 100 · Refunded to you")).toBeTruthy();
+    await screen.findByText("Problem closed");
+    expect(screen.getAllByText("Funders refunded")).toHaveLength(2);
+    expect(screen.getByText("Returned to you")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Fund proposal" })).toBeNull();
-    expect(screen.getByText("Problem invalidated")).toBeTruthy();
     expect(screen.queryByText("Seven-day acceptance window")).toBeNull();
   });
 
@@ -282,9 +284,10 @@ describe("server-backed mock funding and mutual matching", () => {
       { id: "two", proposalId: "proposal-2", amount: 20, currency: "USD", status: "pledged" },
     ] }));
     render(<MatchingPanel problemId="problem-1" proposalId="proposal-1" />);
-    await screen.findByText("USD 10 · Pledged");
+    const mine = (await screen.findByRole("heading", { name: "Your mock contributions" })).parentElement;
+    expect(mine.textContent).toContain("USD 10 Pending approval");
     expect(mocks.read).toHaveBeenCalledWith("problem-1", { proposalId: "proposal-1", cursor: null });
-    expect(screen.queryByText("USD 20 · Pledged")).toBeNull();
+    expect(mine.textContent).not.toContain("USD 20");
     expect(screen.queryByRole("heading", { name: "Other approach" })).toBeNull();
   });
 
@@ -340,9 +343,8 @@ describe("mock funding portfolio", () => {
     const navigate = vi.fn();
     render(<MockFundingPortfolio onNavigate={navigate} />);
     await screen.findByText("refunded proposal");
-    expect(screen.getByText(/USD 25 · Pledged/)).toBeTruthy();
-    expect(screen.getByText(/USD 25 · Locked/)).toBeTruthy();
-    expect(screen.getByText(/USD 25 · Refunded/)).toBeTruthy();
+    expect(screen.getAllByText(/^USD 25 · /)).toHaveLength(3);
+    for (const label of ["Pending approval", "Accepted", "Refunded"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.getByText("Returned to you as mock funds · confirmation expired")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "View proposal" })[0]);
     expect(navigate).toHaveBeenCalledWith("proposal/proposal-pledged");
@@ -399,7 +401,7 @@ it('retains explicit reopening state and links both rejection and reopening rece
 it('shows an invalidation receipt and blocks stale funding or selection capabilities', async () => {
   mocks.read.mockResolvedValue(snapshot({ matching: { status: 'invalidated', invalidationReason: 'posting_expired' }, proposals: [candidate({ canSelect: true, canFund: true })], history: [{ id: 'closed', type: 'posting_invalidated', proposalId: null, createdAt: '2099-09-20T00:00:00Z' }] }));
   render(<MatchingPanel problemId="problem-1" />);
-  await screen.findByText('Problem invalidated');
+  await screen.findByText('Problem closed');
   expect(screen.getByText(/original posting deadline passed/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Select proposal' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Fund proposal' })).toBeNull();

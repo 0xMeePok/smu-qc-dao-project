@@ -3,8 +3,9 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { ROLES } from "../config/roles.js";
 import { listReportableComments, moderationError } from "../lib/moderation.js";
 import { COMMENT_BODY_MAX, canEditComment, commentError, createComment, deleteComment, editComment,
-  RECOMMENDATIONS, recommendationLabel } from "../lib/comments.js";
+  RECOMMENDATIONS } from "../lib/comments.js";
 import { ReportContentButton } from "./ReportContentButton.jsx";
+import { StatusBadge } from "./StatusBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
 
 function isEvaluator(user) {
@@ -28,17 +29,18 @@ function roleText(authorRole) {
   return "";
 }
 
-export function ReportableComments({ problemId, proposalId, authorId }) {
+export function ReportableComments({ problemId, proposalId, authorId, recommenders = [], onRecommendationChange }) {
   const { user } = useAuth();
   return <CommentsPage key={`${user?.id || "guest"}:${problemId}:${proposalId || ""}`}
-    problemId={problemId} proposalId={proposalId} authorId={authorId} />;
+    problemId={problemId} proposalId={proposalId} authorId={authorId}
+    recommenders={recommenders} onRecommendationChange={onRecommendationChange} />;
 }
 
 function replyCount(item) {
   return item?.replyCount ?? item?.replies?.length ?? 0;
 }
 
-function CommentsPage({ problemId, proposalId, authorId }) {
+function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecommendationChange }) {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
@@ -50,9 +52,10 @@ function CommentsPage({ problemId, proposalId, authorId }) {
   const request = useRef(0);
   const busy = useRef(false);
   const canCompose = Boolean(user?.id && proposalId);
-  // A solution carries one recommendation, and never from its own author.
+  // One recommendation per evaluator, and never from the solution's own author.
   const ownSolution = Boolean(authorId && user?.id && authorId.toLowerCase() === user.id.toLowerCase());
-  const recommended = items.some((item) => item.qualifying);
+  const recommended = recommenders.some((id) => id.toLowerCase() === user?.id?.toLowerCase())
+    || items.some((item) => item.qualifying && sameAuthor(user, item));
   async function load(nextCursor, direction = sort) {
     if (busy.current || !problemId) return;
     busy.current = true;
@@ -72,6 +75,10 @@ function CommentsPage({ problemId, proposalId, authorId }) {
   }
   function refresh() {
     setEditingId(null); setItems([]); setCursor(null); busy.current = false; load(null, sort);
+  }
+  function changed() {
+    refresh();
+    onRecommendationChange?.();
   }
   // QCDAO-70: replies arrive as a bounded preview; a thread pages on demand.
   async function loadThread(threadId, cursor) {
@@ -107,12 +114,12 @@ function CommentsPage({ problemId, proposalId, authorId }) {
       </label>}
     </div>
     {canCompose && !editingId && <CommentComposer proposalId={proposalId} evaluator={isEvaluator(user)}
-      ownSolution={ownSolution} recommended={recommended} onPosted={refresh} onRefresh={refresh} />}
+      ownSolution={ownSolution} recommended={recommended} onPosted={changed} onRefresh={changed} />}
     {error && <p role="alert" className="field-hint">{error}</p>}
     {items.map((item) => <CommentItem key={item.id} item={item} user={user} editing={editingId === item.id}
       editingId={editingId} canReply={canCompose} expanded={expandedIds.has(item.id)}
       onToggle={() => toggleThread(item.id)} onReply={() => toggleThread(item.id, true)}
-      onEdit={(id) => setEditingId(id || item.id)} onCancel={() => setEditingId(null)} onChanged={refresh}
+      onEdit={(id) => setEditingId(id || item.id)} onCancel={() => setEditingId(null)} onChanged={changed}
       onLoadReplies={loadThread} />)}
     {loading && <p role="status" className="field-hint">Loading comments…</p>}
     {(cursor || error) && <button className="secondary" type="button" disabled={loading} onClick={() => load(cursor, sort)}>{error ? "Retry comments" : "Load more comments"}</button>}
@@ -121,7 +128,7 @@ function CommentsPage({ problemId, proposalId, authorId }) {
 
 function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, parentId, ownSolution = false, recommended = false, onRefresh }) {
   const reply = Boolean(parentId) || Boolean(initial?.parentId);
-  // Editing my own recommendation still shows the picker; everyone else is blocked.
+  // Editing my own recommendation keeps the picker; a second one is refused.
   const blocked = evaluator && !reply && (ownSolution || (recommended && !initial?.qualifying));
   const recommend = evaluator && !reply && !blocked;
   const [body, setBody] = useState(initial?.body || "");
@@ -143,7 +150,7 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
       onPosted();
     } catch (err) {
       setError(commentError(err));
-      // Lost the race for the recommendation: show what is already on record.
+      // A duplicate from another tab: show the recommendation already on record.
       if (/already recommended/i.test(String(err?.message ?? ""))) onRefresh?.();
     } finally {
       setBusy(false);
@@ -156,7 +163,7 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
     {blocked && <p className="field-hint">
       {ownSolution
         ? "You cannot evaluate your own solution."
-        : "Another evaluator has already recommended this solution."}
+        : "You have already recommended this solution. Edit or delete that comment to change it."}
     </p>}
     {recommend && <fieldset className="comment-recommendations" disabled={busy}>
       <legend>Recommendation</legend>
@@ -210,11 +217,11 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
     catch (err) { setError(commentError(err)); setBusy(false); }
   };
   const role = roleText(item.authorRole);
-  const outcome = !removed && item.qualifying && recommendationLabel(item.recommendation);
+  const outcome = !removed && item.qualifying ? item.recommendation : null;
   return <article className={nested ? "matching-candidate comment-reply" : "matching-candidate"}>
     {editing && !removed ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
       onPosted={onChanged} onCancel={onCancel} /> : <>
-      {outcome && <p className="comment-recommendation">{outcome}</p>}
+      {outcome && <p className="comment-recommendation"><StatusBadge status={outcome} prefix="Evaluator · " /></p>}
       <p className={removed ? "proposal-text comment-removed" : "proposal-text"}>
         {removed ? "This comment was removed" : (item.body || item.text || item.content)}
       </p>

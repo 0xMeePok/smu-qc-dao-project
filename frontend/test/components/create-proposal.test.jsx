@@ -23,7 +23,11 @@ vi.mock("../../src/lib/proposalAudit.js", () => ({
   anchorProposalBeforeWrite: (...args) => mocks.anchor(...args),
   receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
 }));
-vi.mock("../../src/components/AttachmentUploader.jsx", () => ({ AttachmentUploader: ({ scope, onPendingChange }) => <button type="button" onClick={() => onPendingChange(true)}>Upload {scope} PDF</button> }));
+// Reports in-flight uploads as a count, as the real uploader does (0 on mount).
+vi.mock("../../src/components/AttachmentUploader.jsx", () => ({ AttachmentUploader: ({ scope, onPendingChange }) => {
+  React.useEffect(() => { onPendingChange(0); }, []);
+  return <button type="button" onClick={() => onPendingChange(1)}>Upload {scope} PDF</button>;
+} }));
 vi.mock("../../src/pages/ProposalDetailPage.jsx", () => ({ default: ({ proposalId }) => <h1>Saved {proposalId}</h1> }));
 import CreateProposalPage from "../../src/pages/CreateProposalPage.jsx";
 beforeEach(() => { window.scrollTo = vi.fn(); Element.prototype.scrollIntoView = vi.fn(); mocks.posting = { id: "problem1", title: "Routing challenge", status: "submitted", expiresAt: new Date("2099-01-01"), currency: "USDC", amount: 5000 }; mocks.active = null; mocks.draft = null; mocks.record = null;
@@ -35,11 +39,14 @@ beforeEach(() => { window.scrollTo = vi.fn(); Element.prototype.scrollIntoView =
   mocks.anchor.mockReset().mockResolvedValue({ status: "confirmed", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 88 }); });
 afterEach(cleanup);
 const renderForm = async () => { render(<CreateProposalPage postingId="problem1" onNavigate={vi.fn()} />); await screen.findByRole("heading", { name: "Submit a proposal" }); };
+// QCDAO-91: the form is a wizard; submitting happens from its Review step.
+const toReview = () => fireEvent.click(screen.getByRole("button", { name: "Review" }));
 const fill = (extra = []) => {
   for (const [, label] of [...PROPOSAL_FIELDS, ...extra]) fireEvent.change(screen.getByLabelText(label), { target: { value: `${label} content` } });
   fireEvent.click(screen.getByRole("combobox"));
   fireEvent.click(screen.getByRole("option", { name: "Quantum annealing" }));
   fireEvent.change(screen.getByLabelText("Requested funding amount (USDC)"), { target: { value: "1000" } });
+  toReview();
 };
 describe("proposal submission form", () => {
   it.each([false, true])("includes the mined receipt in the first submission (open funding=%s)", async (openFunding) => {
@@ -67,7 +74,10 @@ describe("proposal submission form", () => {
     expect(mocks.anchor.mock.calls[1][0].audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
   });
   it("submits a complete problem proposal and shows saved confirmation", async () => {
-    await renderForm(); fill(); fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    await renderForm();
+    // No stray upload count beside the wizard buttons.
+    expect(document.querySelector(".wizard-nav-end").textContent).toBe("Continue");
+    fill(); fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
     await screen.findByRole("heading", { name: "Saved proposal1" });
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, left: 0 });
@@ -128,7 +138,7 @@ describe("proposal submission form", () => {
     expect(screen.getByRole("button", { name: "Sign and submit proposal" }).disabled).toBe(false);
   });
   it("blocks expired opportunities, duplicates and pending uploads", async () => {
-    mocks.posting.status = "expired"; await renderForm();
+    mocks.posting.status = "expired"; await renderForm(); toReview();
     expect(screen.getByRole("button", { name: "Sign and submit proposal" }).disabled).toBe(true);
     cleanup(); mocks.posting.status = "submitted"; mocks.active = { id: "existing" }; await renderForm();
     expect(screen.getByRole("button", { name: "View my proposal" })).toBeTruthy();

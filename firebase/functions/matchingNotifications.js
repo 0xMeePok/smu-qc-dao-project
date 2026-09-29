@@ -3,6 +3,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { writeMemberNotice } from "./moderation.js";
+import { WORKFLOW_STATUS, eventWorkflowStatus } from "./workflowStatus.js";
 
 const PAGE_SIZE = 100;
 const JOBS = "matchingNotificationJobs";
@@ -104,6 +105,7 @@ export async function processMatchingNotificationPage({ db, eventId, now = Times
     for (let i = 0; i < refs.length; i++) {
       if (existing[i].exists) continue; // Preserve acknowledgements and dedupe cross-role recipients.
       tx.set(refs[i], { recipientId: recipients[i], kind: "matching", mode: "mock", eventId,
+        eventType: job.event.type, workflowStatus: eventWorkflowStatus(job.event.type),
         problemId: job.event.problemId, proposalId: job.event.proposalId, contentType: "problem", contentId: job.event.problemId,
         title: "Mock matching update", message: messageFor(job, recipients[i]),
         navigationTarget: `posting/${job.event.problemId}`, link: `#/posting/${job.event.problemId}`,
@@ -147,7 +149,7 @@ export async function remindNearingApprovalWindows({ db, now = Timestamp.now() }
     for (const uid of recipients) {
       const written = await writeMemberNotice({
         db, now, createdAt: now, id: idFor(`nearing:${selectionId}`, uid), recipientId: uid,
-        kind: "approval_nearing_expiry", contentType: "problem", contentId: doc.id,
+        kind: "approval_nearing_expiry", workflowStatus: WORKFLOW_STATUS.PENDING_APPROVAL, contentType: "problem", contentId: doc.id,
         problemId: doc.id, proposalId, title,
         message: `The acceptance window for “${title}” closes at ${when}. Confirm or reject before it expires.`,
       });

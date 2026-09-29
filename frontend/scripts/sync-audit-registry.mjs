@@ -56,11 +56,23 @@ if (!Number.isSafeInteger(chainId) || chainId <= 0) {
   throw new Error("The selected deployment does not contain a valid chain ID.");
 }
 
+// Deployment facts shown by the admin Platform Status tab. Omitted when --address
+// points somewhere else, because they would then describe a different contract.
+const registryDeployment = linked ? deployment.registry : deployment;
+const sameDeployment = String(registryDeployment?.address || "").toLowerCase() === address.toLowerCase();
+const deploymentMetadata = sameDeployment ? Object.fromEntries(Object.entries({
+  blockNumber: Number.isSafeInteger(registryDeployment.blockNumber) ? registryDeployment.blockNumber : undefined,
+  transactionHash: /^0x[0-9a-fA-F]{64}$/.test(registryDeployment.transactionHash ?? "") ? registryDeployment.transactionHash : undefined,
+  deployedAt: typeof registryDeployment.deployedAt === "string" ? registryDeployment.deployedAt : undefined,
+  verificationUrl: /^https:\/\//.test(registryDeployment.verification?.url ?? "") ? registryDeployment.verification.url : undefined,
+}).filter(([, value]) => value !== undefined)) : {};
+
 const config = {
   contractName: artifact.contractName || "AuditRegistry",
   chainId,
   address,
   ...(deployment.entityIdScheme ? { entityIdScheme: deployment.entityIdScheme } : {}),
+  ...(Object.keys(deploymentMetadata).length ? { deployment: deploymentMetadata } : {}),
   abi: artifact.abi,
 };
 

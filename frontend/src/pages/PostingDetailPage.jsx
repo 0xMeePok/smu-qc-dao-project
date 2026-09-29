@@ -44,8 +44,9 @@ import {
   expiryReasonLabel,
   isExpiredOpenOpportunity,
   isResponseWindowClosed,
-  opportunityStatusLabel,
+  opportunityWorkflowStatus,
 } from "../config/workflowStatus.js";
+import { StatusBadge } from "../components/StatusBadge.jsx";
 import { postingActions } from "../lib/postingActions.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
@@ -372,7 +373,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               {isOpenFunding ? "Open funding opportunity" : "Problem statement"}
             </span>
             <div className="trust-status-row">
-              <span className={`status-dot${matchingStatus === "awaiting_confirmation" ? " is-awaiting" : expired || matchClosed || posting.status === "cancelled" ? " is-closed" : ""}`}>{opportunityStatusLabel(posting.status, { expiresAt: posting.expiresAt, matching: posting.matching })}</span>
+              <StatusBadge status={opportunityWorkflowStatus(posting)} />
               <VerifiedBadge audit={posting.audit} recordStatus={posting.status} hidePending />
             </div>
           </div>
@@ -397,7 +398,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
           <div className={panel("overview")} role="tabpanel" id="posting-panel-overview" aria-labelledby="posting-tab-overview">
             {posting.status === "cancelled" && posting.withdrawalReason && (
-              <DetailGroup title="Withdrawn">
+              <DetailGroup title="Withdrawal">
                 <DetailItem heading="Withdrawal reason">{posting.withdrawalReason}</DetailItem>
               </DetailGroup>
             )}

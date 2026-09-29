@@ -127,9 +127,9 @@ describe("[QCDAO-70] reply to comments in a threaded discussion", () => {
     assert.match(ui, /Hide replies/);
     assert.match(ui, /Show \$\{count\} replies/);
     assert.match(ui, /const recommend = evaluator && !reply && !blocked;/);
-    // One recommendation per solution, and never from its author.
+    // One recommendation per evaluator (QCDAO-91), and never from its author.
     assert.match(ui, /You cannot evaluate your own solution\./);
-    assert.match(ui, /Another evaluator has already recommended this solution\./);
+    assert.match(ui, /You have already recommended this solution\. Edit or delete that comment to change it\./);
     assert.match(ui, /createComment\(\{ proposalId, \.\.\.payload, \.\.\.\(parentId \? \{ parentId \} : \{\}\) \}\)/);
     assert.match(ui, /Write a reply/);
     assert.match(ui, /Post reply/);
