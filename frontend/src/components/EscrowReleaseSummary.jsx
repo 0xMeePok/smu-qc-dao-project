@@ -1,0 +1,29 @@
+import { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext.jsx";
+import { escrowFundingAmount, getEscrowFundingSummary } from "../lib/escrowFunding.js";
+
+export function EscrowReleaseSummary({ onNavigate }) {
+  const { user } = useAuth();
+  const [data, setData] = useState(null), [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setData(null); setError("");
+    if (!user?.id) return undefined;
+    getEscrowFundingSummary().then(result => { if (active) setData(result); })
+      .catch(err => { if (active) setError(err.message || "Payment summaries could not be loaded."); });
+    return () => { active = false; };
+  }, [user?.id, revision]);
+  if (!user?.id) return null;
+  return <section className="card-table" aria-label="Escrow payment summary">
+    <div className="table-header"><div><h3>Proposal payments</h3><p className="field-hint">Confirmed upfront and completion payments for proposals you own or sponsor.</p></div>
+      <button className="secondary small" type="button" onClick={() => setRevision(value => value + 1)}>Refresh payments</button></div>
+    {error ? <p className="error-banner" role="alert">{error}</p> : !data ? <p className="table-empty">Loading payments…</p>
+      : !data.items?.length ? <p className="table-empty">No confirmed escrow payments yet. Open a proposal to view its live escrow.</p>
+        : data.items.map(item => <div className="table-row" key={item.proposalId}><div>
+          <strong>{item.title || "Proposal"}</strong><small className="table-row-meta">{item.postingTitle}</small>
+          <p>Upfront 50%: {item.upfrontReleased ? "paid" : "pending"} · Final 50%: {item.finalReleased ? "paid" : "pending"}</p>
+          <small>Released before fees: {escrowFundingAmount(item.totalReleased, item.tokenDecimals, item.tokenSymbol)} · Held: {escrowFundingAmount(item.outstandingBalance, item.tokenDecimals, item.tokenSymbol)}</small>
+        </div><button type="button" className="text-button" onClick={() => onNavigate(`proposal/${item.proposalId}`)}>Open escrow</button></div>)}
+  </section>;
+}

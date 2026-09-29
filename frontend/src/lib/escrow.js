@@ -9,6 +9,7 @@ import { isEscrowRegistry, requireAddress, verifyProposalEscrow } from "../../..
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
 import { fundingOpportunityAuditPayload, postingAuditPayload } from "../../../firebase/functions/opportunityAuditPayload.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
+import { assertActiveAuditDeployment, isActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
 export const ESCROW_STATE = Object.freeze({ Open: 0, Locked: 1, Released: 2, Refunded: 3, Cancelled: 4, Expired: 5, Active: 6, Voided: 7 });
 const ZERO_HASH = `0x${"0".repeat(64)}`;
@@ -68,7 +69,10 @@ function depositor(value) {
  * Amounts and timestamps are bigint; state/currentTranche/decimals/feeBps are numbers.
  */
 export async function readEscrow({ proposal, account, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+  const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
+  if (usingConfiguredDeployment) config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
   deployment(config);
+  const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
   const expected = prepareStoredProposal(proposal, { registryConfig: config });
   const walletAddress = account ? requireAddress(account, "Wallet address") : null;
   const block = await adapters.getBlock({ chainId: config.chainId, blockTag: "latest" });
@@ -84,12 +88,16 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
   const names = ["state", "platformSigner", "problemOwner", "proposalOwner", "fundingTarget", "tokenDecimals", "funderVoting",
     "totalDeposited", "totalReleased", "totalRefunded", "feePaid", "feeBps", "selectionId", "currentTranche", "expiresAt",
     "approvalDeadline", "ownerApproved", "solutionApproved", "yesWeight", "noWeight", "refundsEnabled", "refundAvailableAt", "outstandingBalance", "funderCount"];
-  const [values, active, registered, tokenDecimals, tokenListed] = await Promise.all([
+  const supportsInvalidation = config.abi.some(item => item.type === "function" && item.name === "isFundingInvalidated");
+  const supportsPause = config.abi.some(item => item.type === "function" && item.name === "postingFundingPaused");
+  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused] = await Promise.all([
     Promise.all(names.map(name => read(name))),
     readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
     readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName: "decimals" }),
     readContract({ address: canonical.factoryAddress, abi: config.escrow.factoryAbi, functionName: "allowedTokens", args: [expected.fundingTerms.token] }),
+    supportsInvalidation ? readContract({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, canonical.address] }) : null,
+    supportsPause ? readContract({ address: config.address, abi: config.abi, functionName: "postingFundingPaused", args: [expected.opportunityId] }) : false,
   ]);
   if (!same(field(registered, "proposalHash", 4), expected.proposalHash) || !same(field(registered, "solutionHash", 5), expected.solutionHash)) {
     throw new Error("Mismatch detected: this proposal differs from its current on-chain record. Refresh before continuing.");
@@ -137,12 +145,13 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     claimRefund: Boolean(walletAddress && wallet.depositor?.claimable > 0n),
     expire: Boolean(walletAddress && [ESCROW_STATE.Open, ESCROW_STATE.Locked, ESCROW_STATE.Active].includes(snapshot.state)
       && block.timestamp >= (final ? snapshot.approvalDeadline : snapshot.expiresAt)),
-    refundInvalidated: Boolean(walletAddress && !active && ![ESCROW_STATE.Released, ESCROW_STATE.Refunded, ESCROW_STATE.Voided].includes(snapshot.state)),
+    refundInvalidated: Boolean(walletAddress && (supportsInvalidation ? invalidated : !active) && ![ESCROW_STATE.Released, ESCROW_STATE.Refunded, ESCROW_STATE.Voided].includes(snapshot.state)),
   };
+  if (isHistorical) for (const action of ["deposit", "lockSelection", "approveSelection", "submitMilestone", "approveMilestone", "voteMilestone", "release", "releaseMilestone"]) can[action] = false;
   return { ...canonical, ...snapshot, chainId: config.chainId, token: expected.fundingTerms.token, decimals,
     symbol: config.escrow.tokens.find(token => same(token.address, expected.fundingTerms.token))?.symbol ?? proposal.currency,
-    entityId: expected.entityId, blockNumber: block.number, timestamp: block.timestamp, workflowActive: active, tokenListed, tokenPrecisionValid,
-    remaining, milestones, currentMilestone, wallet, roles, can };
+    entityId: expected.entityId, blockNumber: block.number, timestamp: block.timestamp, workflowActive: active, workflowPaused: paused, workflowInvalidated: supportsInvalidation ? invalidated : !active, tokenListed, tokenPrecisionValid,
+    remaining, milestones, currentMilestone, wallet, roles, can, isHistorical };
 }
 
 export async function readPostingFundingStarted(posting, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
@@ -164,7 +173,7 @@ const REVERT_MESSAGES = {
   NothingToRefund: "This wallet has no refund available.", TokenNotListed: "This token is no longer available for new deposits.",
   VotingDisabled: "This proposal uses approval from both owners without funder voting.", AlreadyVoted: "This wallet already voted on this evidence.",
   FunderMajorityRequired: "Yes votes must represent more than half of all contributed funds.",
-  WorkflowInactive: "The proposal or opportunity was withdrawn. The unpaid balance can be opened for refunds.",
+  WorkflowInactive: "Funding is paused or this proposal is no longer eligible. Refresh to check the current status and any available refunds.",
   UnsupportedTokenBehavior: "This token transfer is not supported by the escrow.",
 };
 
@@ -209,6 +218,10 @@ export async function confirmEscrowTransaction(transactionHash, { adapters = cre
 /** Called only from a user action. Never retries a write or signs with a server key. */
 export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve,
   onProgress, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+  if (config === AUDIT_REGISTRY_CONFIG) {
+    config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
+    if (!["claimRefund", "expire", "refundInvalidated"].includes(action)) assertActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
+  }
   const walletAddress = requireAddress(account, "Connected wallet");
   const snapshot = await readEscrow({ proposal, account: walletAddress, adapters, config });
   if (!Object.hasOwn(snapshot.can, action) || !snapshot.can[action]) throw new Error("This escrow action is not available to the connected wallet in the current state. Refresh and try again.");

@@ -54,6 +54,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("[QCDAO-56] admin audit trail", () => {
+  it("filters confirmed escrow events and displays exact token amounts with transaction receipts", async () => {
+    mocks.pages = [[], [record("escrow1", { type: "escrow", eventType: "TrancheReleased", title: "Quantum research",
+      amountBaseUnits: "123456789", tokenDecimals: 6, tokenSymbol: "USDC", actor: "0xactor", counterparty: "0xresearcher",
+      proposalId: "proposal1", problemId: "problem1", transactionHash: `0x${"a".repeat(64)}` })]];
+    render(<AdminAudit />);
+    await screen.findByText("No audit events found for the selected filter.");
+    fireEvent.change(screen.getByLabelText("Filter audit log entries"), { target: { value: "escrow" } });
+    await screen.findByText("Tranche Released");
+    expect(screen.getByText(/123.456789 USDC.*Actor: 0xactor.*Counterparty: 0xresearcher/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View verified transaction" }).getAttribute("href")).toContain("/tx/0x");
+    expect(mocks.calls[1].constraints[0]).toEqual({ kind: "where", field: "type", op: "in", value: ["escrow"] });
+  });
   it("shows each lapse with its posting and a readable reason, not the raw code", async () => {
     mocks.pages = [[
       expiryEvent("a1"),

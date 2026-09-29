@@ -1,5 +1,11 @@
 # Escrow-linked registry verification
 
+This branch implements **QCDAO-110, QCDAO-113 and QCDAO-117**. The accepted-proposal
+binding and reversible moderation pause require a fresh linked registry/factory
+deployment. The addresses below remain the last confirmed deployment until that
+replacement is verified and its manifest is synchronized. Backend/Hosting rollout
+also requires the platform signing secret and the matching generated configuration.
+
 The contracts are deployed on Arbitrum Sepolia (chain 421614). The **local**
 frontend and Firebase manifests select this deployment, and the local frontend now
 includes wallet-backed funding, owner approvals, optional funder voting, payments
@@ -24,9 +30,9 @@ and its adjacent `.deployment.json` file. No historical records were migrated or
 With an `EscrowAuditRegistry` manifest selected, every application proposal uses
 **50% upfront and 50% on completion** (`trancheBps: [5000, 5000]`). The split is
 read-only in the form and enforced by shared term validation, server publication
-attestation and Firestore submission/correction rules. There is no exception for
-previous custom splits; the existing proposal dataset is to be cleared separately.
-These code changes do not delete records or redeploy contracts.
+attestation and Firestore submission/correction rules. Historical records keep
+their original deployment and verification path. No existing proposal dataset
+is cleared or automatically migrated during rollout.
 
 The full funding target must be deposited into escrow before the upfront half
 can be released, after both the problem owner and proposal owner approve selection.
@@ -100,23 +106,25 @@ Connect the wallet for the signed-in account on Arbitrum Sepolia to act:
    clearing an insufficient nonzero allowance when needed, then deposits. Each
    transaction is confirmed before the next step. Repeated deposits add to the
    same wallet's contribution.
-2. At full funding, the **configured platform signer** starts upfront approval.
+2. At full funding, the **problem owner** requests selection. The backend verifies
+   ownership, posting eligibility and the canonical escrow, then the configured
+   platform signer starts upfront approval.
    The **problem owner and proposal owner** each approve from their own wallets.
-   The platform signer then executes the approved upfront 50% payment.
+   The platform relay then automatically executes the approved upfront 50% payment.
 3. The **proposal owner** saves and submits delivery evidence, then separately
    confirms completion. The **problem owner** reviews the same evidence and accepts
    it as delivered. When funder voting is enabled, contributing wallets also vote;
    yes votes must represent strictly more than half of all deposited units.
-4. The **platform signer** executes the final 50% payment only after those gates
+4. The **platform relay** executes the final 50% payment only after those gates
    pass. Funders can open eligible expiry/withdrawal refunds and claim their own
    unpaid share through the same panel.
 
 Roles come from on-chain wallet addresses and contributions. A Firebase
 administrator role alone does not authorize a platform payment. The platform
-signer connects its wallet and signs selection/payment transactions directly;
-there is no server relay or automatic release. Private keys stay in the wallet and
-must never be placed in frontend configuration. Contract-only moderation and
-selection-management operations remain outside this panel.
+signer's server key is bound to the settlement functions through Secret Manager as
+`ESCROW_PLATFORM_PRIVATE_KEY`. It must never appear in frontend configuration,
+deployment manifests or Git. The on-chain platform wallet can still execute an
+already-approved payment directly as an operational fallback.
 
 The service re-reads verified state before each requested action and binds final
 approvals, votes and payments to the reviewed evidence hash. A transaction with an
@@ -222,11 +230,56 @@ an existing currency symbol to a different address. The current form's currency
 choices remain the existing USDC/USDT/XSGD choices. On-chain token delisting still
 blocks new funding while preserving exits from existing escrows.
 
-The per-proposal wallet controls described above are implemented locally. A global
-deposit/refund portfolio and a server platform relay are not included. The connected
-platform signer wallet is the implemented payment execution path.
+The current scope is QCDAO-110, QCDAO-113 and QCDAO-117. A global deposit/refund
+portfolio and the separate QCDAO-111/112/114/115/116 stories are not part of this
+rollout. Existing contract refund functions remain available.
+
+## Automatic settlement and funding audit
+
+`prepareEscrowDeposit` checks the latest posting/proposal visibility and funding
+eligibility before the browser asks for a token transaction. The contract independently
+checks expiry, accepted proposal binding and the mirrored posting moderation pause.
+The token and its decimals come from the proposal's immutable contract terms.
+
+`startEscrowSettlement` accepts a proposal selection request only from its problem
+owner. `syncEscrowFunding` checks mined canonical receipts, updates funding history,
+and advances settlement when the required on-chain approvals are complete. The
+scheduled worker resumes queued work when the user closes the browser. A persisted
+transaction outbox serializes the platform signer's nonce and retains the signed
+transaction/hash before broadcast so retries can check or resend the same transaction.
+Neither a browser-supplied amount nor a requested recipient authorizes a payout.
+
+`getEscrowFundingHistory` returns reconciled funding events and their transaction
+references. Each event is tied to the configured registry and factory, the exact
+proposal escrow, a successful canonical receipt and a recomputed event digest.
+Deposit, lock, release, refund, cancellation and expiry events appear in the existing
+audit trail under its escrow filter. Evaluator comments and scores stay off-chain.
+Release projections notify both owners and populate their dashboard payment summaries.
+
+Configure `ESCROW_PLATFORM_PRIVATE_KEY` in the Firebase project's Secret Manager
+before deploying the relay functions. Its derived address must match the factory's
+platform signer. Keep `ARBITRUM_SEPOLIA_RPC_URL` in the Functions runtime environment.
+Only the browser's public RPC setting may use the `VITE_` prefix; never prefix a
+signing key with it. Preserve historical deployment configs before changing the
+active manifest, and deploy backend/rules before the frontend that calls them.
 
 ## Validation
+
+QCDAO-110/113/117 checks on 2026-09-29 passed:
+
+- 280 escrow contract tests, including three tests that reconcile actual local
+  contract receipts with the production funding-event reconciler.
+- Six deployment-verifier tests and three manifest-sync tests.
+- 320 frontend Node tests and 445 component tests, plus the production build.
+- 491 Functions tests and 354 Firestore/Storage emulator tests, followed by 34
+  focused funding-service/event tests after the final retry fixes.
+- Desktop (1365×1000) and mobile (390×844) rendered checks for the deposit form,
+  amount entry, funding action and event filter, without application errors or
+  page overflow. These used actual components with local deterministic fixtures.
+
+The replacement testnet deployment and signed live smoke run are pending. The
+smoke script now exercises both 50% payments, verifies the accepted-proposal
+binding, and reconciles its real receipts against the funding audit anchors.
 
 Wallet UI integration checks on 2026-09-29 passed:
 

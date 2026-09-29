@@ -46,6 +46,7 @@ function recordTarget(item) {
   return RECORD_TARGET.test(item?.navigationTarget || "") ? item.navigationTarget : null;
 }
 function recordLabel(item, target) {
+  if (item.kind === "escrow") return "View escrow payment";
   if (item.kind === "matching" || item.kind === "approval_nearing_expiry") return "View matching status";
   return target.startsWith("proposal/") ? "View proposal" : "View posting";
 }
@@ -79,7 +80,7 @@ export function ModerationNotifications({ userId }) {
   const unread = items.filter((item) => !item.read).length;
   return <section className="card-table moderation-notifications">
     <div className="table-header">
-      <h2>Content & matching notices</h2>
+      <h2>Content, matching & payment notices</h2>
       <MarkAllReadButton unread={unread} busy={busy} onMarkAllRead={markAllRead} />
     </div>
     <NotificationFeed items={items} error={error} busy={busy} onMarkRead={markRead} />

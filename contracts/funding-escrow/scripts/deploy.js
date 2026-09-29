@@ -55,7 +55,7 @@ if (process.env.ESCROW_NEW_REGISTRY_ACK !== "true") {
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../deployments");
 await fs.mkdir(directory, { recursive: true });
 const record = { contractName: "EscrowAuditRegistry", entityIdScheme: 2, chainId: 421614, owner, platformSigner: platform, feeBps, tokens,
-  status: "started", registry: null, factory: null, wiring: null };
+  status: "started", startedAt: new Date().toISOString(), registry: null, factory: null, wiring: null };
 const file = path.join(directory, `arbitrumSepolia-${Date.now()}.json`);
 const save = () => fs.writeFile(file, JSON.stringify(record, null, 2) + "\n");
 await save();
@@ -68,7 +68,9 @@ async function deploy(name, constructorArgs, key) {
   console.log(`${name} transaction: ${tx.hash}`);
   const receipt = await tx.wait(2, 180000);
   if (!receipt || receipt.status !== 1) throw new Error(`Unconfirmed ${name}; inspect ${file} before retrying.`);
-  Object.assign(record[key], { status: "confirmed", blockNumber: receipt.blockNumber });
+  const block = await ethers.provider.getBlock(receipt.blockNumber);
+  Object.assign(record[key], { status: "confirmed", blockNumber: receipt.blockNumber,
+    deployedAt: new Date(block.timestamp * 1000).toISOString() });
   await save();
   return instance;
 }

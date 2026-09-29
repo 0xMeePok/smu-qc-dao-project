@@ -23,6 +23,8 @@ import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { problemMatchingLocked } from "../lib/matching.js";
 import { ROLE_LABELS } from "../config/roles.js";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
+import { EscrowReleaseSummary } from "./EscrowReleaseSummary.jsx";
+import { escrowEventLabel, escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
 
 function RoleBadge({ role }) {
   return <span className="role-chip">{ROLE_LABELS[role] || role}</span>;
@@ -197,6 +199,7 @@ export function MyProblems({ onNavigate }) {
         {loading ? "Loading…" : "Load older opportunities"}
       </button>}
       <ProposalList received onNavigate={onNavigate} />
+      {isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && <EscrowReleaseSummary onNavigate={onNavigate} />}
 
       {isEscrowRegistry(AUDIT_REGISTRY_CONFIG)
         ? <p className="field-hint">Open a proposal’s escrow to view your wallet contribution, vote on delivery, or claim an available refund.</p>
@@ -356,6 +359,7 @@ export function ResearcherProposals({ onNavigate }) {
     </div>
     <ProposalTracker onNavigate={onNavigate} />
     <ProposalList draftsOnly onNavigate={onNavigate} />
+    {isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && <EscrowReleaseSummary onNavigate={onNavigate} />}
   </section>;
 }
 
@@ -515,9 +519,11 @@ const AUDIT_FILTERS = {
   role_change: { label: "Role Changes", types: ["role_change"] },
   suspension: { label: "Suspensions & Reinstatements", types: ["suspension_change"] },
   opportunity_expired: { label: "Opportunity Expiries", types: ["opportunity_expired"] },
+  escrow: { label: "Escrow & Funding", types: ["escrow"] },
 };
 
 function auditBadge(item) {
+  if (item.type === "escrow") return ["badge-system", escrowEventLabel(item.eventType || item.action)];
   if (item.type === "role_change" || item.action === "ROLE_CHANGE") return ["badge-role-change", "ROLE TRANSITION"];
   if (item.type === "suspension_change" || item.action?.includes("SUSPEND")) {
     return ["badge-suspension", item.newState ? "ACCOUNT SUSPENDED" : "ACCOUNT REINSTATED"];
@@ -609,7 +615,7 @@ export function AdminAudit() {
       <div className="table-header">
         <div>
           <h3>System Audit Trail & Governance Events</h3>
-          <p className="table-subtitle">Immutable log of role transitions, account suspensions, opportunity expiries, and platform state updates.</p>
+          <p className="table-subtitle">Role transitions, account suspensions, opportunity expiries, and confirmed escrow funding events.</p>
         </div>
         <div className="audit-header-actions">
           <select
@@ -655,12 +661,13 @@ export function AdminAudit() {
                   const isRoleChange = badgeClass === "badge-role-change";
                   const isSuspension = badgeClass === "badge-suspension";
                   const isExpiry = item.type === "opportunity_expired";
+                  const isEscrow = item.type === "escrow";
                   const dateStr = item.timestamp?.toDate
                     ? formatInstant(item.timestamp)
                     : item.createdAt?.toDate
                       ? formatInstant(item.createdAt)
                       : "Recent";
-                  const summary = isExpiry
+                  const summary = isEscrow ? item.title || item.proposalId || "Escrow activity" : isExpiry
                     ? item.targetName || item.targetId || item.title || "Opportunity"
                     : isRoleChange
                       ? `${item.actorName || item.actor} → ${item.targetName || item.targetAddress}`
@@ -676,6 +683,11 @@ export function AdminAudit() {
                       </td>
                       <td>
                         {summary}
+                        {isEscrow ? <>
+                          <div className="table-row-meta">{escrowFundingAmount(item.amountBaseUnits, item.tokenDecimals, item.tokenSymbol)} · Actor: {item.actor || "—"} · Counterparty: {item.counterparty || "—"}</div>
+                          <div className="table-row-meta">{item.proposalId && `Proposal: ${item.proposalId}`} {item.problemId && `· Posting: ${item.problemId}`}</div>
+                          {item.transactionHash && <a href={escrowExplorer("tx", item.transactionHash)} target="_blank" rel="noreferrer">View verified transaction</a>}
+                        </> : null}
                         {isExpiry ? (
                           <>
                             {item.reason && <div className="table-row-meta">Lapse reason: {expiryReasonLabel(item.reason)}.</div>}

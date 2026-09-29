@@ -2,7 +2,8 @@
 
 Implements the escrow work for [QCDAO-109](https://qc-dao-fyp.atlassian.net/browse/QCDAO-109),
 the deposit interface for [QCDAO-110](https://qc-dao-fyp.atlassian.net/browse/QCDAO-110),
-and settlement for [QCDAO-113](https://qc-dao-fyp.atlassian.net/browse/QCDAO-113), extended
+settlement for [QCDAO-113](https://qc-dao-fyp.atlassian.net/browse/QCDAO-113), and funding
+audit reconciliation for [QCDAO-117](https://qc-dao-fyp.atlassian.net/browse/QCDAO-117), extended
 with milestone tranches, admin voids, partial refunds and optional funder voting.
 
 **Deployed on Arbitrum Sepolia; local app integration selected.** The existing non-upgradeable `AuditRegistry`
@@ -53,10 +54,12 @@ and cannot be renounced. Only the factory owner can change fees/listings or dele
 admin. Revocation and ownership changes take effect for moderation immediately.
 The fee recipient remains the owner snapshotted when that escrow was created.
 
-The platform signer selects fully funded proposals and executes approved payments.
-In the implemented application flow it connects its own wallet and signs those
-transactions directly. No server relay or automatic payment executor is included;
-the private key is never sent to Firebase or placed in frontend configuration.
+The platform signer selects fully funded proposals after an authenticated request
+from the problem owner and executes approved payments. The backend relay uses
+the `ESCROW_PLATFORM_PRIVATE_KEY` Secret Manager secret; it is never placed in
+frontend configuration or committed to source control. Wallet approvals stay with
+the two owners. The relay persists the signed transaction and its hash before
+broadcast and resumes pending work without signing a duplicate payment.
 It cannot choose another proposal recipient, approve on anyone's behalf, bypass
 votes, or withdraw funds. The problem and proposal owners must be different wallets.
 Each owner signs its own on-chain approval. A lost platform key delays payments,
@@ -65,6 +68,13 @@ open refunds; it cannot redirect those refunds or claw back previous payments.
 
 Only trust addresses from the configured factory's `escrowForProposal` and the
 linked registry's `proposalEscrow`, not contracts claiming similar IDs or names.
+
+The first payout permanently binds the accepted proposal to its posting. Other
+proposals cannot accept deposits or be selected after this point. Their existing
+invalidated-proposal refund path remains available. The platform signer can also
+set a reversible posting funding pause when moderation hides a posting. A pause
+blocks funding and payments but does not itself permanently invalidate the escrow
+or open refunds; removing the pause restores the existing approval deadlines.
 
 ## Atomic proposal creation
 
@@ -354,7 +364,7 @@ when the application cutover is approved: publication verification, escrow routi
 markers, mock-action rejection and immutable delivery-evidence access must agree.
 The hosted site, deployed backend/rules and live records have not been changed by
 this wallet UI work. Contracts cannot wake themselves to execute a release; the
-configured platform signer executes approved payments through its connected wallet.
+current backend relay executes approved payments and resumes queued transactions.
 
 Old registry postings/proposals do not move automatically. Retain their original
 registry namespace and audit history; create new linked postings/proposals through

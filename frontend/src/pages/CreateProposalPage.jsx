@@ -17,6 +17,7 @@ import {
   updateProposal,
 } from "../lib/proposals.js";
 import { anchorProposalBeforeWrite, receiptForWrite } from "../lib/proposalAudit.js";
+import { assertCurrentAuditRecord } from "../lib/opportunityAuditFlow.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
@@ -276,6 +277,9 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     setSaveFailed(false);
     setConfirmedAudit(null);
     try {
+      const currentPosting = await findPosting(posting.id, { fromServer: true });
+      if (!currentPosting) throw new Error("This posting is no longer available. Refresh before submitting.");
+      await assertCurrentAuditRecord(currentPosting);
       if (editing) {
         if (form.immutableFundingTerms) {
           const current = await findProposal(proposalId, { fromServer: true });

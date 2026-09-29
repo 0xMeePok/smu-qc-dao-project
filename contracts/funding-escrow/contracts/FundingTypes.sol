@@ -33,6 +33,7 @@ enum FundingEvent {
 
 interface IFundingFactory {
     function auditRegistry() external view returns (address);
+    function platformSigner() external view returns (address);
     function allowedTokens(address token) external view returns (bool);
     function tokenDecimals(address token) external view returns (uint8);
     function isEscrowAdmin(address actor) external view returns (bool);
@@ -42,6 +43,7 @@ interface IFundingFactory {
 
 interface IEscrowAuditRegistry {
     function isFundingActive(bytes32 proposalId, address escrow) external view returns (bool);
+    function isFundingInvalidated(bytes32 proposalId, address escrow) external view returns (bool);
     function recordFundingEvent(bytes32 proposalId, FundingEvent eventType, bytes32 digest, address actor) external;
 }
 

@@ -341,7 +341,7 @@ contract FundingEscrow is ReentrancyGuard {
         approvalDeadline = 0;
         ownerApproved = false;
         solutionApproved = false;
-        if (block.timestamp >= expiresAt) _openRefunds(State.Expired, uint64(block.timestamp));
+        if (block.timestamp >= expiresAt) _expire();
         else _setState(State.Open);
         _audit(FundingEvent.SelectionInvalidated, keccak256(abi.encode(expectedSelectionId, reasonHash)));
         emit SelectionInvalidated(expectedSelectionId, reasonHash);
@@ -366,10 +366,10 @@ contract FundingEscrow is ReentrancyGuard {
         emit EscrowVoided(msg.sender, reasonHash, refundPool);
     }
 
-    /// @notice Anyone may synchronize a registry proposal/posting withdrawal into refunds.
+    /// @notice Anyone may synchronize withdrawal or another proposal's acceptance into refunds.
     function refundInvalidated() external nonReentrant {
         if (state == State.Released || state == State.Refunded || state == State.Voided) revert InvalidState();
-        if (auditRegistry.isFundingActive(proposalId, address(this))) revert InvalidState();
+        if (!auditRegistry.isFundingInvalidated(proposalId, address(this))) revert InvalidState();
         _openRefunds(State.Voided, uint64(block.timestamp));
         _audit(FundingEvent.Voided, keccak256("REGISTRY_WITHDRAWAL"));
         emit EscrowVoided(msg.sender, keccak256("REGISTRY_WITHDRAWAL"), refundPool);
