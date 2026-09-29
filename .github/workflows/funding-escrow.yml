@@ -34,6 +34,8 @@ jobs:
           cache: npm
           cache-dependency-path: contracts/funding-escrow/package-lock.json
       - run: npm ci
+      # The receipt integration tests execute the production Firebase reconciler.
+      - run: npm ci --prefix ../../firebase/functions --ignore-scripts
       - run: npm run coverage
       - run: npx hardhat compile --build-profile production
       - run: npm run test:verifier
