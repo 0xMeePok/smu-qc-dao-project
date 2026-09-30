@@ -50,7 +50,7 @@ export function validateProposal(form, posting) {
   return errors;
 }
 
-export function validateIndependentProposal(form) {
+export function validateIndependentProposal(form, { requireFundingPlan = true } = {}) {
   const errors = {};
   for (const [key, label, max] of INDEPENDENT_PROPOSAL_FIELDS) {
     const value = String(form[key] ?? "").trim();
@@ -70,7 +70,10 @@ export function validateIndependentProposal(form) {
   }
   if (!CURRENCIES.includes(form.currency)) errors.currency = "Choose a funding currency.";
   if (validateExpiry(form.expiryDays)) errors.expiryDays = validateExpiry(form.expiryDays);
-  if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && !errors.amount && !errors.currency) {
+  // Published listings freeze the escrow plan. Content edits must not rebuild
+  // those terms — the correction write does not touch fundingTerms, and stored
+  // maps are not always canonical enough to round-trip through normalizeFundingTerms.
+  if (requireFundingPlan && isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && !errors.amount && !errors.currency) {
     try {
       proposalFundingTerms({ form: { ...form, milestones: form.milestones ?? "" }, currency: form.currency, config: AUDIT_REGISTRY_CONFIG });
     } catch (error) { errors.fundingPlan = error.message; }

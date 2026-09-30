@@ -45,7 +45,7 @@ import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/functions/escrowProposalTerms.js";
 import { EscrowPaymentPlanFields } from "../components/EscrowPaymentPlanFields.jsx";
-import { readEscrow } from "../lib/escrow.js";
+import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
 import { ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
 
 const ESCROW_LINKED = isEscrowRegistry(AUDIT_REGISTRY_CONFIG);
@@ -106,7 +106,13 @@ function windowFromExpiry(expiresAt, createdAt) {
 }
 
 export function formFromIndependentProposal(record) {
-  const terms = record?.status !== "draft" ? record?.fundingTerms : null;
+  const terms = record?.status !== "draft" && record?.fundingTerms
+    && typeof record.fundingTerms === "object"
+    && !Array.isArray(record.fundingTerms)
+    ? record.fundingTerms
+    : null;
+  const trancheBps = Array.isArray(terms?.trancheBps) ? terms.trancheBps : null;
+  const reviewWindows = Array.isArray(terms?.reviewWindows) ? terms.reviewWindows : null;
   return {
     ...EMPTY_FORM,
     ...Object.fromEntries(INDEPENDENT_PROPOSAL_FIELDS.map(([key]) => [key, record?.[key] ?? ""])),
@@ -116,8 +122,8 @@ export function formFromIndependentProposal(record) {
     currency: record?.currency || CURRENCIES[0],
     expiryDays: windowFromExpiry(record?.expiresAt, record?.createdAt),
     ...(ESCROW_LINKED ? {
-      tranchePercentages: terms ? terms.trancheBps.map((bps) => bps / 100).join(", ") : HALF_UPFRONT_PERCENTAGES,
-      reviewDays: terms ? terms.reviewWindows.map((seconds) => seconds / 86400).join(", ") : record?.fundingPlan?.reviewDays ?? "7",
+      tranchePercentages: trancheBps ? trancheBps.map((bps) => bps / 100).join(", ") : HALF_UPFRONT_PERCENTAGES,
+      reviewDays: reviewWindows ? reviewWindows.map((seconds) => seconds / 86400).join(", ") : record?.fundingPlan?.reviewDays ?? "7",
       funderVoting: terms?.funderVoting ?? record?.fundingPlan?.funderVoting ?? false,
       ...(terms && record.status !== "draft" ? { immutableFundingTerms: terms } : {}),
     } : {}),
@@ -279,7 +285,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   const submit = async (event) => {
     event.preventDefault();
     if (submitting.current || pending) return;
-    const validation = validateIndependentProposal(form);
+    const validation = validateIndependentProposal(form, { requireFundingPlan: !editing });
     setErrors(validation);
     if (Object.keys(validation).length) {
       const invalidStep = wizard.stepWithError(validation);
@@ -302,23 +308,24 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         if (!independentListingWindowOpen(record) && record.status === PROPOSAL_STATUS_SUBMITTED) {
           throw new Error("The listing window has closed. This proposal can no longer be edited.");
         }
-        if (form.immutableFundingTerms) {
-          const current = await findProposal(proposalId, { fromServer: true });
-          if (!current || (await readEscrow({ proposal: current, account: address })).totalDeposited > 0n) {
-            throw new Error("Funding has started. This proposal can no longer be edited.");
-          }
-        } else {
-          const current = await findProposal(proposalId, { fromServer: true });
-          if (!current || proposalMatchingLocked(current)) {
-            throw new Error("Funding or matching has started. This proposal can no longer be edited.");
-          }
+        // Independent listings are opportunity-kind records, not commitProposalWithEscrow
+        // proposals. readEscrow → verifyProposalEscrow requires canonical fundingTerms on
+        // that payload and throws "Escrow funding terms are required" here.
+        const current = await findProposal(proposalId, { fromServer: true });
+        if (!current || proposalMatchingLocked(current)) {
+          throw new Error("Funding or matching has started. This proposal can no longer be edited.");
         }
       }
       const storedAttachments = editing ? (record.attachments ?? []) : attachments;
       const listingWindow = editing ? record.expiresAt : listingExpiry;
       const built = buildIndependentProposalDocument({
         researcherId: user.id,
-        form: editing ? { ...form, currency: record.currency } : form,
+        form: editing ? {
+          ...form,
+          currency: record.currency,
+          immutableFundingTerms: form.immutableFundingTerms || record.fundingTerms,
+          freezeFundingTerms: true,
+        } : form,
         attachments: storedAttachments,
         expiresAt: listingWindow,
       });
@@ -382,7 +389,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         : "Share a solution that is not attached to an existing problem statement. Clients and funders can discover it and approach you with funding. All fields are required to submit; you can save an unfinished draft at any point. Supporting PDFs are optional."}</p>
     </div>
     <WizardSteps steps={STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
-      completeSteps={wizard.completeSteps(validateIndependentProposal(form))} visitedSteps={wizard.visited} lockForward={pending} />
+      completeSteps={wizard.completeSteps(validateIndependentProposal(form, { requireFundingPlan: !editing }))} visitedSteps={wizard.visited} lockForward={pending} />
     <div className="form-layout">
       <form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
         <SubmissionError message={error} />
@@ -417,7 +424,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             <fieldset className="field-group" disabled={disabled}>
               <legend>Funding and supporting material</legend>
               <Field htmlFor="independent-amount" label="Indicative funding sought" error={errors.amount}>
-                {({ id, describedBy, invalid }) => <input id={id} type={ESCROW_LINKED ? "text" : "number"} inputMode="decimal"
+                {({ id, describedBy, invalid }) => <input id={id} type="number" inputMode="decimal"
                   min="0.000001" max="1000000000" step="any" disabled={ESCROW_LINKED && editing} required value={form.amount || ""}
                   aria-invalid={invalid} aria-describedby={describedBy}
                   onChange={(event) => update("amount", event.target.value)} />}
@@ -438,7 +445,16 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
                   </select>
                 )}
               </Field>
-              {ESCROW_LINKED && <EscrowPaymentPlanFields form={form} disabled={disabled || editing} error={errors.fundingPlan} onChange={update} />}
+              {ESCROW_LINKED && (editing
+                ? <fieldset className="field-group escrow-plan">
+                    <legend>Escrow payment plan</legend>
+                    <p className="field-hint">The payment split, approval window and completion rule were fixed when this listing was published. Edit the solution text above; this plan cannot change while the listing is live.</p>
+                    <EscrowPaymentPlanSummary
+                      trancheBps={form.immutableFundingTerms?.trancheBps}
+                      funderVoting={form.immutableFundingTerms?.funderVoting ?? form.funderVoting}
+                    />
+                  </fieldset>
+                : <EscrowPaymentPlanFields form={form} disabled={disabled} error={errors.fundingPlan} onChange={update} />)}
               {editing && <p className="field-hint">Supporting PDFs cannot be changed after publication. They stay as the files on the listing.</p>}
               <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments}
                 onChange={setAttachments} onPendingChange={(count) => setPending(count > 0)} disabled={disabled || editing} />

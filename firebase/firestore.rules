@@ -1307,6 +1307,22 @@ service cloud.firestore {
         && expiryInDocumentedRange(data.expiresAt);
     }
 
+    // Independent listings have no parent posting. The schema that used to live
+    // in validIndependentProposalSubmission crossed the 1000-expression cap once
+    // the audit receipt joined expiry, maturity and funding terms. attestPublication
+    // marks the proof; this only binds the write to that proof and the listing window.
+    function attestedIndependentPublish(proposalId, data) {
+      let proof = get(/databases/$(database)/documents/publicationProofs/$('proposals_' + proposalId)).data;
+      return isIndependentProposal(data)
+        && proof.uid == request.auth.uid
+        && proof.get('validation', '') == 'independent-proposal-publish-v1'
+        && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
+        && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit'])
+        && hasValidAudit(data)
+        && data.status == 'submitted'
+        && expiryInDocumentedRange(data.expiresAt);
+    }
+
     function publicationWriteAllowed(scope, recordId, data) {
       return data.status == 'draft'
         || (resource != null && resource.data.status != 'draft'
@@ -1462,7 +1478,10 @@ service cloud.firestore {
       // platform-wide. Per-posting lists go through listPostedProposals.
       // Independent listings have no parent: members get() a published record by
       // id, and the unexpired catalog is listIndependentListings.
-      allow get: if proposalOwnedByViewer(resource.data) || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers(resource.data));
+      allow get: if isActiveUser(request.auth.uid)
+        && (resource == null
+          || proposalOwnedByViewer(resource.data)
+          || submittedProposalVisibleToMembers(resource.data));
       allow list: if proposalOwnedByViewer(resource.data);
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
@@ -1488,7 +1507,7 @@ service cloud.firestore {
               || exists(/databases/$(database)/documents/problems/$(data.problemId))))
           : (data.status == 'submitted'
             && (isIndependentProposal(data)
-              ? validIndependentProposalSubmission(data)
+              ? attestedIndependentPublish(proposalId, data)
               : validProposalSubmission(data, proposalId))));
       }
       allow create: if proposalCreateIsAllowed();
@@ -1519,7 +1538,7 @@ service cloud.firestore {
           ? (preservesProposalReceipt(before, after)
             && (after.status == 'submitted'
               ? (isIndependentProposal(after)
-                ? validIndependentProposalSubmission(after)
+                ? attestedIndependentPublish(proposalId, after)
                 : validProposalSubmission(after, proposalId))
               : (after.status in ['draft', 'withdrawn']
                 && validProposal(after)

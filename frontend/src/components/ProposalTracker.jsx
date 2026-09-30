@@ -41,27 +41,27 @@ export function ProposalTracker({ onNavigate }) {
   const visible = useMemo(() => sortProposalRows(filterProposalRows(rows, status), sort), [rows, status, sort]);
   const statuses = useMemo(() => statusOptions(rows), [rows]);
 
-  return <div className="card-table">
+  return <div className="card-table proposal-tracker">
     <div className="table-header">
       <h3>My proposals {rows.length > 0 && <span className="count-pill">{rows.length}</span>}</h3>
-      <div className="table-header-controls">
-        {rows.length > 0 && <>
-        <label className="comment-sort">Status
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">All statuses</option>
-            {statuses.map((value) => <option key={value} value={value}>{workflowStatusLabel(value)}</option>)}
-          </select>
-        </label>
-        <label className="comment-sort">Sort by
-          <select value={sort} onChange={(event) => setSort(event.target.value)}>
-            {PROPOSAL_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </label>
-        </>}
+      <div className="table-header-actions">
         <button className="secondary small" type="button" onClick={() => onNavigate("discover")}>Browse opportunities</button>
         <button className="primary small" type="button" onClick={() => onNavigate("create-proposal")}>Publish independent proposal</button>
       </div>
     </div>
+    {rows.length > 0 && <div className="table-toolbar">
+      <label className="table-filter">Status
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="all">All statuses</option>
+          {statuses.map((value) => <option key={value} value={value}>{workflowStatusLabel(value)}</option>)}
+        </select>
+      </label>
+      <label className="table-filter">Sort
+        <select value={sort} onChange={(event) => setSort(event.target.value)}>
+          {PROPOSAL_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+    </div>}
     {loading ? <p className="table-empty" role="status">Loading proposals…</p>
       : error ? <p className="error-banner" role="alert">{error}</p>
       : !visible.length ? <p className="table-empty">No proposals yet. Respond to an open opportunity, or publish an independent listing.</p>
@@ -88,6 +88,7 @@ export function ProposalTracker({ onNavigate }) {
           ) : !independent ? (
             <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
           ) : null}
+          {independent && item.status === "submitted" && <button className="text-button" type="button" onClick={() => onNavigate(`create-proposal/${item.id}`)}>Edit</button>}
           <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
         </div>
       </div>; })}

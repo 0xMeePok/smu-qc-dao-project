@@ -23,7 +23,10 @@
 // The rules package also imports this validator without installing Functions
 // dependencies. Keep chain-specific imports in proposalPublicationPolicy.js.
 
+import { isIndependentProposal, INDEPENDENT_PROPOSAL_KIND, PROPOSAL_MATURITY_VALUES } from "./independentProposal.js";
+
 export const PUBLISH_VALIDATION = "problem-publish-v1";
+export const INDEPENDENT_PUBLISH_VALIDATION = "independent-proposal-publish-v1";
 
 const PROBLEM_KEYS = new Set([
   "ownerId", "organisation", "title", "summary", "amount", "status",
@@ -46,6 +49,14 @@ const ALLOWED_CATEGORIES = new Set([
 ]);
 
 const CURRENCIES = new Set(["USDT", "USDC", "XSGD"]);
+const PROPOSAL_CATEGORIES = new Set([
+  "gate-model", "quantum-inspired", "quantum-annealing", "hybrid", "quantum-adjacent",
+]);
+const INDEPENDENT_KEYS = new Set([
+  "researcherId", "title", "summary", "amount", "status", "category", "currency",
+  "attachments", "methodology", "team", "withdrawalReason", "fundingTerms",
+  "proposalKind", "expiresAt", "addressedProblems", "maturity",
+]);
 const ATTACHMENT_KEYS = new Set(["id", "name", "size", "contentType", "sha256"]);
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -149,4 +160,32 @@ export function isPublishableProblem(record, { uid, profileOrganisation }) {
   return has(record, "opportunityType") && record.opportunityType === "open-funding"
     ? validOpenFunding(record, profileOrganisation)
     : validBusinessProblem(record, profileOrganisation);
+}
+
+/**
+ * True when `record` (the proof's content: no id, createdAt, updatedAt or audit)
+ * is a complete independent listing owned by `uid`. `expiresAt` must already be
+ * a Firestore Timestamp. Mirrors validIndependentProposalSubmission.
+ */
+export function isPublishableIndependentProposal(record, { uid }) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  if (!isIndependentProposal(record) || record.proposalKind !== INDEPENDENT_PROPOSAL_KIND) return false;
+  if (!isString(uid) || !/^0x[0-9a-f]{40}$/.test(uid) || record.researcherId !== uid) return false;
+  if (record.status !== "submitted") return false;
+  if (has(record, "problemId") || has(record, "postingOwnerId") || has(record, "opportunityType") || has(record, "fundingPlan")) return false;
+  if (!Object.keys(record).every((key) => INDEPENDENT_KEYS.has(key))) return false;
+  if (!isTimestamp(record.expiresAt)) return false;
+  if (has(record, "withdrawalReason") && record.withdrawalReason !== "") return false;
+  if (!validAttachments(record)) return false;
+  if (!nonEmpty(record.title, 160) || !nonEmpty(record.summary, 4000)
+    || !nonEmpty(record.methodology, 4000) || !nonEmpty(record.addressedProblems, 4000)
+    || !nonEmpty(record.team, 4000)) return false;
+  if (!PROPOSAL_CATEGORIES.has(record.category) || !PROPOSAL_MATURITY_VALUES.includes(record.maturity)) return false;
+  if (!CURRENCIES.has(record.currency) || !validAmount(record.amount) || record.amount <= 0) return false;
+  if (has(record, "fundingTerms")) {
+    const terms = record.fundingTerms;
+    if (!terms || !Array.isArray(terms.trancheBps) || terms.trancheBps.length !== 2
+      || terms.trancheBps.some((bps) => bps !== 5000)) return false;
+  }
+  return true;
 }

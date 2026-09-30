@@ -32,7 +32,7 @@ import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
-import { PUBLISH_VALIDATION, isPublishableProblem } from "./publicationValidation.js";
+import { PUBLISH_VALIDATION, INDEPENDENT_PUBLISH_VALIDATION, isPublishableProblem, isPublishableIndependentProposal } from "./publicationValidation.js";
 import { requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
   selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
@@ -407,12 +407,16 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
     // publish against this proof without re-running those checks, because running
     // them there crossed Firestore's 1,000-expression cap. An unmarked proof still
     // serves the other paths (edits), which keep their own rules validation.
-    const publishable = scope === "problems" && isPublishableProblem(content, {
+    const publishableProblem = scope === "problems" && isPublishableProblem(content, {
       uid, profileOrganisation: profile?.data()?.organisation,
     });
+    const publishableIndependent = scope === "proposals" && isPublishableIndependentProposal(content, { uid });
+    const validation = publishableProblem ? PUBLISH_VALIDATION
+      : publishableIndependent ? INDEPENDENT_PUBLISH_VALIDATION
+      : null;
     tx.set(proofRef, {
       uid, record: content, transactionHash: audit.transactionHash, verifiedAt: Timestamp.now(),
-      ...(publishable ? { validation: PUBLISH_VALIDATION } : {}),
+      ...(validation ? { validation } : {}),
     });
   });
   return { verified: true };

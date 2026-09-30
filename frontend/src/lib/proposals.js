@@ -131,11 +131,15 @@ export function buildIndependentProposalDocument({
       tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "7"),
       funderVoting: form.funderVoting ?? false,
     };
-    else record.fundingTerms = proposalFundingTerms({
-      form: { ...form, milestones: form.milestones ?? "" },
-      currency,
-      config: AUDIT_REGISTRY_CONFIG,
-    });
+    else if (form.immutableFundingTerms && typeof form.immutableFundingTerms === "object" && !Array.isArray(form.immutableFundingTerms)) {
+      record.fundingTerms = form.immutableFundingTerms;
+    } else if (!form.freezeFundingTerms) {
+      record.fundingTerms = proposalFundingTerms({
+        form: { ...form, milestones: form.milestones ?? "" },
+        currency,
+        config: AUDIT_REGISTRY_CONFIG,
+      });
+    }
   }
   return record;
 }
@@ -294,12 +298,18 @@ export async function updateIndependentProposal({
   proposalId, researcherId, form, attachments = [], record: preparedRecord = null, audit = null, expiresAt = null,
 }) {
   requireFirebase();
-  if (Object.keys(validateIndependentProposal(form)).length) throw new Error("Complete all required proposal fields.");
+  if (Object.keys(validateIndependentProposal(form, { requireFundingPlan: false })).length) throw new Error("Complete all required proposal fields.");
   const built = preparedRecord ?? buildIndependentProposalDocument({
     researcherId, form, attachments, expiresAt, status: PROPOSAL_STATUS_SUBMITTED,
   });
   const { createdAt, ...record } = built;
-  await attestPublication("proposals", proposalId, { ...record, audit });
+  const current = await findProposal(proposalId);
+  await attestPublication("proposals", proposalId, {
+    ...(current ?? {}),
+    ...record,
+    fundingTerms: current?.fundingTerms ?? record.fundingTerms,
+    audit,
+  });
   await updateDoc(proposalRef(proposalId), {
     title: record.title,
     summary: record.summary,

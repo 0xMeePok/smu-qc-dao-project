@@ -1,4 +1,5 @@
 import CreateProposalPage from "./pages/CreateProposalPage.jsx";
+import CreateIndependentProposalPage from "./pages/CreateIndependentProposalPage.jsx";
 import IndependentListingsPage from "./pages/IndependentListingsPage.jsx";
 import ProposalDetailPage from "./pages/ProposalDetailPage.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";

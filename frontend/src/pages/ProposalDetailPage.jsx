@@ -124,8 +124,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     try {
       if (!anchored) {
         let fundingStarted;
-        if (proposal.fundingTerms) fundingStarted = (await readEscrow({ proposal, account: address })).totalDeposited > 0n;
-        else if (isIndependentProposal(proposal)) fundingStarted = proposalMatchingLocked(proposal);
+        if (isIndependentProposal(proposal)) fundingStarted = proposalMatchingLocked(proposal);
+        else if (proposal.fundingTerms) fundingStarted = (await readEscrow({ proposal, account: address })).totalDeposited > 0n;
         else {
           const current = await getMockMatching(proposal.problemId, { proposalId });
           const candidate = current.proposals.find((item) => item.id === proposalId);
@@ -187,8 +187,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     flushSync(() => setTab("record"));
     document.getElementById("proposal-panel-record")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
-  const locked = !listingOpen || (proposal.fundingTerms ? !escrowState || escrowState.totalDeposited > 0n
+  // Independent listings stay editable until a deposit is known. Attached
+  // escrow proposals stay locked while that state is still loading.
+  const locked = !listingOpen || (proposal.fundingTerms
+    ? (independent ? escrowState?.totalDeposited > 0n : !escrowState || escrowState.totalDeposited > 0n)
     : proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status));
+  const canEdit = owns && !locked && proposal.status === "submitted";
+  const canWithdraw = owns && !locked && ["submitted", "under_review"].includes(proposal.status);
   const funding = proposalFundingStatus(proposal);
   return <section className="page detail-page blotter-posting">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
@@ -202,7 +207,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         </div>
         <div className="trust-status-row">
           {proposal.fundingTerms ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}
-          {funding.detail && <span className="funding-note">{funding.detail}</span>}
+          {!independent && funding.detail && <span className="funding-note">{funding.detail}</span>}
           {proposal.status !== "draft" && !independent && <EvaluationBadges counts={recommendationCounts(proposal)} />}
           <VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending />
         </div>
@@ -297,16 +302,22 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
         {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       </div>
-    </article><aside className="context-panel"><span className="eyebrow">{independent ? "Indicative funding" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd>{independent && <><dt>Maturity</dt><dd>{PROPOSAL_MATURITY_LEVELS.find((item) => item.value === proposal.maturity)?.label || "—"}</dd></>}<dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl>
-      {independent && proposal.status !== "withdrawn" && <ExpiryCountdown expiresAt={proposal.expiresAt} status={proposal.status} />}
-      {!independent && <button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>}
-      {showEscrow && <button className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
+    </article><aside className="context-panel"><span className="eyebrow">{independent ? "Indicative funding" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl>
+      <div><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd></div>
+      {independent && <div><dt>Maturity</dt><dd>{PROPOSAL_MATURITY_LEVELS.find((item) => item.value === proposal.maturity)?.label || "—"}</dd></div>}
+      <div><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></div>
+      {independent && proposal.status !== "withdrawn" && <div><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={proposal.expiresAt} status={proposal.status} showInstant={false} /></dd></div>}
+    </dl>
+      <div className="context-panel-actions">
+      {!independent && <button type="button" className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>}
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
           that point on. Independent listings have no parent posting. */}
-      {owns && !locked && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(independent ? `create-proposal/${proposal.id}` : `edit-proposal/${proposal.id}`)}>Edit proposal</button>}
-      {owns && !locked && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
-      {owns && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
+      {canEdit && <button type="button" className="secondary" onClick={() => onNavigate(independent ? `create-proposal/${proposal.id}` : `edit-proposal/${proposal.id}`)}>Edit proposal</button>}
+      {canWithdraw && <button type="button" className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
+      {showEscrow && <button type="button" className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
+      {owns && proposal.status === "withdrawn" && <button type="button" className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
+      </div>
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
