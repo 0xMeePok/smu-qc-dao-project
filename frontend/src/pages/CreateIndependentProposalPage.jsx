@@ -8,6 +8,7 @@ import {
   INDEPENDENT_PROPOSAL_FIELDS,
   PROPOSAL_CATEGORIES,
   PROPOSAL_MATURITY_LEVELS,
+  independentListingWindowOpen,
   isIndependentProposal,
 } from "../config/proposal.js";
 import {
@@ -298,6 +299,9 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
     try {
       if (editing) {
         await assertCurrentAuditRecord(record);
+        if (!independentListingWindowOpen(record) && record.status === PROPOSAL_STATUS_SUBMITTED) {
+          throw new Error("The listing window has closed. This proposal can no longer be edited.");
+        }
         if (form.immutableFundingTerms) {
           const current = await findProposal(proposalId, { fromServer: true });
           if (!current || (await readEscrow({ proposal: current, account: address })).totalDeposited > 0n) {
@@ -351,8 +355,10 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
     return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p>
       <button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
   }
-  if (resumeId && record && (proposalMatchingLocked(record) || !["draft", "submitted"].includes(record.status))) {
-    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{proposalMatchingLocked(record) ? "Funding or matching has started. The listing is locked to preserve the funders’ commitment." : `Its status is ${workflowStatusLabel(proposalWorkflowStatus(record))}. A listing is locked once it leaves submitted.`}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View listing</button></section>;
+  if (resumeId && record && (proposalMatchingLocked(record)
+    || (!["draft", "submitted"].includes(record.status))
+    || (record.status === PROPOSAL_STATUS_SUBMITTED && !independentListingWindowOpen(record)))) {
+    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{proposalMatchingLocked(record) ? "Funding or matching has started. The listing is locked to preserve the funders’ commitment." : record.status === PROPOSAL_STATUS_SUBMITTED && !independentListingWindowOpen(record) ? "The listing window has closed. This proposal can no longer be edited." : `Its status is ${workflowStatusLabel(proposalWorkflowStatus(record))}. A listing is locked once it leaves submitted.`}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View listing</button></section>;
   }
 
   const disabled = busy || savingDraft;

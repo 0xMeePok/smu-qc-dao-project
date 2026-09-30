@@ -1250,9 +1250,13 @@ service cloud.firestore {
 
     function proposalAllowsTimeBoundActions(proposalId) {
       return exists(/databases/$(database)/documents/proposals/$(proposalId))
-        && problemAllowsTimeBoundActions(
-          get(/databases/$(database)/documents/proposals/$(proposalId)).data.problemId
-        );
+        && (isIndependentProposal(get(/databases/$(database)/documents/proposals/$(proposalId)).data)
+          ? (get(/databases/$(database)/documents/proposals/$(proposalId)).data.status in ['submitted', 'under_review']
+            && get(/databases/$(database)/documents/proposals/$(proposalId)).data.keys().hasAny(['expiresAt'])
+            && get(/databases/$(database)/documents/proposals/$(proposalId)).data.expiresAt > request.time)
+          : problemAllowsTimeBoundActions(
+            get(/databases/$(database)/documents/proposals/$(proposalId)).data.problemId
+          ));
     }
 
     function reservedRecord(scope, recordId) {

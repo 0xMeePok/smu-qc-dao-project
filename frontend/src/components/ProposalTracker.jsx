@@ -83,12 +83,11 @@ export function ProposalTracker({ onNavigate }) {
           </small>
         </div>
         <div className="table-row-actions">
-          <ExpiryCountdown
-            expiresAt={independent ? (item.expiresAt ?? item.posting?.expiresAt) : item.posting?.expiresAt}
-            status={independent ? "submitted" : item.posting?.status}
-            matching={independent ? undefined : item.posting?.matching}
-            showInstant={false}
-          />
+          {independent && item.status !== "withdrawn" ? (
+            <ExpiryCountdown expiresAt={item.expiresAt ?? item.posting?.expiresAt} status="submitted" showInstant={false} />
+          ) : !independent ? (
+            <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
+          ) : null}
           <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
         </div>
       </div>; })}

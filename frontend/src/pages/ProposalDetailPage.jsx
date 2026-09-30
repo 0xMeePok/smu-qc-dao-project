@@ -17,7 +17,7 @@ import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
 import { OwnerReviewPanel } from "../components/OwnerReviewPanel.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
-import { PROPOSAL_CATEGORIES, PROPOSAL_MATURITY_LEVELS, isIndependentProposal } from "../config/proposal.js";
+import { PROPOSAL_CATEGORIES, PROPOSAL_MATURITY_LEVELS, independentListingWindowOpen, isIndependentProposal } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
 import { getMockMatching, mergeMatchingState, proposalFundingStatus, proposalMatchingLocked } from "../lib/matching.js";
@@ -163,10 +163,12 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   if (!proposal) return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p><button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
   const isOpenFunding = proposal.opportunityType === OPEN_FUNDING_TYPE;
   const independent = isIndependentProposal(proposal);
+  const listingOpen = !independent || independentListingWindowOpen(proposal);
   const sponsors = Boolean(user?.id && proposal.postingOwnerId === user.id.toLowerCase());
   const backRoute = owns ? "proposals" : independent ? "solutions" : sponsors ? "my-problems" : `posting/${proposal.problemId}`;
   const backLabel = owns ? "Back to my proposals" : independent ? "Back to independent listings" : sponsors ? "Back to my problems" : "Back to opportunity";
   const showCollaboration = !independent && proposal.status !== "draft" && !isModerated(proposal);
+  const showDiscussion = proposal.status !== "draft" && !isModerated(proposal);
   const showEscrow = proposal.status !== "draft" && Boolean(proposal.fundingTerms);
   const showFunding = showEscrow || showCollaboration;
   const reviewers = owns || (!independent && sponsors);
@@ -185,8 +187,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     flushSync(() => setTab("record"));
     document.getElementById("proposal-panel-record")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
-  const locked = proposal.fundingTerms ? !escrowState || escrowState.totalDeposited > 0n
-    : proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status);
+  const locked = !listingOpen || (proposal.fundingTerms ? !escrowState || escrowState.totalDeposited > 0n
+    : proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status));
   const funding = proposalFundingStatus(proposal);
   return <section className="page detail-page blotter-posting">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
@@ -265,9 +267,16 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
             when there are none, so they follow the proposal instead of an
             usually empty tab. */}
         {owns && !independent && <OwnerReviewPanel proposalId={proposal.id} revisionPathOpen={proposal.status === "submitted" && !locked} />}
-        {showCollaboration && <>
-          <ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId}
-            recommenders={Object.keys(recommendationEntries(proposal))} onRecommendationChange={reloadProposal} />
+        {showDiscussion && <>
+          <ReportableComments
+            problemId={independent ? undefined : proposal.problemId}
+            proposalId={proposal.id}
+            authorId={proposal.researcherId}
+            recommenders={independent ? [] : Object.keys(recommendationEntries(proposal))}
+            onRecommendationChange={reloadProposal}
+            discussionOpen={independent ? listingOpen : true}
+            allowRecommendations={!independent}
+          />
           <div className="detail-report"><ReportContentButton contentType="proposal" contentId={proposal.id} /></div>
         </>}
       </div>
@@ -289,7 +298,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       </div>
     </article><aside className="context-panel"><span className="eyebrow">{independent ? "Indicative funding" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd>{independent && <><dt>Maturity</dt><dd>{PROPOSAL_MATURITY_LEVELS.find((item) => item.value === proposal.maturity)?.label || "—"}</dd></>}<dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl>
-      {independent && <ExpiryCountdown expiresAt={proposal.expiresAt} status={proposal.status} />}
+      {independent && proposal.status !== "withdrawn" && <ExpiryCountdown expiresAt={proposal.expiresAt} status={proposal.status} />}
       {!independent && <button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>}
       {showEscrow && <button className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
       {/* Editable only while `submitted`. `under_review` means an evaluator has

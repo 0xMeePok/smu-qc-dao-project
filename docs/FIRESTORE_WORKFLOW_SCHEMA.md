@@ -32,6 +32,12 @@ must not change those historical hashes.
 Onboarded members browse published, unexpired independent listings through the
 `listIndependentListings` callable. Client `list` on `proposals` stays
 author/sponsor-only; members `get` a published independent record by id.
+Members may comment on a published independent listing while its own
+`expiresAt` is still in the future; the catalog and countdown use that same
+deadline, not a parent posting. Evaluator recommendations are not used on
+independent listings. After the window closes the listing leaves the catalog,
+the countdown reads expired, and new comments are refused. Existing comments
+stay readable.
 
 A `problems` document in `submitted` or `open` must additionally carry every
 required published-content field for its type, with non-empty text, at least one

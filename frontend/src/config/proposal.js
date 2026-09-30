@@ -5,6 +5,7 @@ export {
   PROPOSAL_MATURITY_LEVELS,
   PROPOSAL_MATURITY_VALUES,
   isIndependentProposal,
+  independentListingWindowOpen,
 } from "../../../firebase/functions/independentProposal.js";
 
 export const PROPOSAL_CATEGORIES = [
