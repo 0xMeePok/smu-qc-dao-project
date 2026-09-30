@@ -5,7 +5,7 @@ import { PROPOSAL_FIELDS } from "../../src/config/proposal.js";
 
 const account = `0x${"a".repeat(40)}`;
 const mocks = vi.hoisted(() => ({
-  matching: vi.fn(),
+  matching: vi.fn(), escrow: vi.fn(), escrowState: { totalDeposited: 0n },
   posting: null, active: null, draft: null, record: null,
   submit: vi.fn(), saveDraft: vi.fn(), update: vi.fn(), withdraw: vi.fn(),
   find: vi.fn(), revisions: [], anchor: vi.fn(), anchorWithdrawal: vi.fn(),
@@ -15,7 +15,12 @@ vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
   ...await importOriginal(),
   getMockMatching: (...args) => mocks.matching(...args),
 }));
-vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, address: account }) }));
+vi.mock("../../src/lib/escrow.js", () => ({ readEscrow: (...args) => mocks.escrow(...args) }));
+vi.mock("../../src/components/EscrowFundingPanel.jsx", () => ({ EscrowFundingPanel: ({ onStateChange }) => {
+  React.useEffect(() => { onStateChange(mocks.escrowState); }, [onStateChange]);
+  return <p>Wallet escrow controls</p>;
+} }));
+vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: account }) }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
   RelatedAuditReceiptPane: () => null,
@@ -67,6 +72,8 @@ const submittedProposal = {
   ...Object.fromEntries(PROPOSAL_FIELDS.slice(2).map(([key]) => [key, `${key} content`])),
 };
 beforeEach(() => {
+  mocks.escrowState = { totalDeposited: 0n };
+  mocks.escrow.mockReset().mockResolvedValue({ totalDeposited: 0n });
   mocks.matching.mockReset().mockResolvedValue({
     matching: { status: "funding", totalFundedMinor: 0 },
     proposals: [{ id: "proposal1", status: "submitted", fundedAmount: 0, matching: { status: "funding" } }],
@@ -202,6 +209,25 @@ describe("correcting a proposal before it is evaluated", () => {
 });
 
 describe("withdrawing a proposal", () => {
+  it("checks escrow deposits before signing a linked proposal withdrawal", async () => {
+    mocks.find.mockResolvedValue({ ...submittedProposal, fundingTerms: { trancheBps: [5000, 5000], reviewWindows: [86400, 86400] } });
+    render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw proposal" }));
+    fireEvent.change(screen.getByLabelText("Why are you withdrawing?"), { target: { value: "The costing was wrong." } });
+    mocks.escrow.mockResolvedValue({ totalDeposited: 1n });
+    fireEvent.click(screen.getByRole("button", { name: "Sign and withdraw" }));
+    expect(await screen.findByText("Funding or matching has started. This proposal can no longer be withdrawn.")).toBeTruthy();
+    expect(mocks.escrow).toHaveBeenCalled();
+    expect(mocks.matching).not.toHaveBeenCalled();
+    expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
+  });
+  it("retains the escrow panel for accessible moderated proposals", async () => {
+    mocks.find.mockResolvedValue({ ...submittedProposal, moderationStatus: "hidden", fundingTerms: { trancheBps: [5000, 5000], reviewWindows: [86400, 86400] } });
+    render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Escrow & funding" }));
+    expect(screen.getByText("Wallet escrow controls")).toBeTruthy();
+    expect(mocks.matching).not.toHaveBeenCalled();
+  });
   it.each([
     { label: "funding arrives", fundedAmount: 10, status: "funding" },
     { label: "the problem is invalidated", fundedAmount: 0, status: "invalidated" },

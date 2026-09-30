@@ -3,10 +3,17 @@ import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { encodeFunctionData } from "viem";
 import { Timestamp } from "firebase-admin/firestore";
-import { prepareStoredProposal } from "../proposalAuditPayload.js";
-import { enqueueProposalAudit, recoverProposalAudit, recoveryError, retryDelay, verifyMinedProposal } from "../proposalAuditRecovery.js";
-import registry from "../auditRegistry.contract.json" with { type: "json" };
+import { prepareStoredProposal as prepareProposal } from "../proposalAuditPayload.js";
+import { enqueueProposalAudit, recoverProposalAudit as recover, recoveryError, retryDelay, verifyMinedProposal as verifyMined } from "../proposalAuditRecovery.js";
+import registry from "../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json" with { type: "json" };
+import activeRegistry from "../auditRegistry.contract.json" with { type: "json" };
 import frontendRegistry from "../../../frontend/src/config/auditRegistry.contract.json" with { type: "json" };
+
+// Historical hash/receipt regressions retain their original registry semantics.
+// escrow-audit.test.mjs covers the linked deployment independently.
+const prepareStoredProposal = record => prepareProposal(record, { registryConfig: registry });
+const verifyMinedProposal = (record, client, options = {}) => verifyMined(record, client, { ...options, registryConfig: registry });
+const recoverProposalAudit = options => recover({ ...options, registryConfig: registry });
 
 const hash = `0x${"3".repeat(64)}`;
 const blockHash = `0x${"4".repeat(64)}`;
@@ -55,7 +62,7 @@ function store(record) {
 }
 
 describe("QCDAO-75 proposal golden vectors", () => {
-  it("keeps frontend and server deployment manifests in sync", () => assert.deepEqual(registry, frontendRegistry));
+  it("keeps frontend and server deployment manifests in sync", () => assert.deepEqual(activeRegistry, frontendRegistry));
   // solutionHash and anchorHash were re-pinned when the solution payload widened
   // from {methodology, attachments} to the whole record. proposalHash is unchanged.
   // Proposals anchored before that change no longer reproduce their solutionHash.
@@ -101,6 +108,13 @@ describe("QCDAO-75 proposal golden vectors", () => {
 });
 
 describe("QCDAO-76/78 trusted proposal confirmation", () => {
+  it("resolves a pre-escrow receipt after the active deployment changes, without inventing funding terms", async () => {
+    const record = fixture();
+    const result = await verifyMined(record, clientFor(record));
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.entityId, prepareStoredProposal(record).entityId);
+    assert.equal(record.fundingTerms, undefined);
+  });
   for (const type of ["business-problem", "open-funding"]) it(`confirms a matching ${type} transaction`, async () => {
     const record = fixture(type);
     const result = await verifyMinedProposal(record, clientFor(record));
@@ -197,6 +211,14 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
 });
 
 describe("QCDAO-79 durable recovery", () => {
+  it("recovers an old deployment job using its original preparation rules after cutover", async () => {
+    const record = fixture(), { db, records } = store(record), now = Timestamp.fromMillis(1000);
+    await enqueueProposalAudit({ db, record, now });
+    await recover({ db, client: clientFor(record), proposalId: record.id, now, Timestamp });
+    assert.equal(records.get(`proposals/${record.id}`).audit.status, "confirmed");
+    assert.equal(records.get(`proposalAuditJobs/${record.id}`).status, "confirmed");
+    assert.equal(records.get(`proposals/${record.id}`).fundingTerms, undefined);
+  });
   it("persists confirmation and makes duplicate enqueue delivery idempotent", async () => {
     const record = fixture(), { db, records } = store(record), now = Timestamp.fromMillis(1000);
     await enqueueProposalAudit({ db, record, now });

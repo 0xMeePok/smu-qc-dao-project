@@ -30,7 +30,27 @@ jobs:
 
       # Community Edition rules only. Do not set SEMGREP_APP_TOKEN in this job.
       # Solidity rules live under p/smart-contracts; p/solidity is not a registry pack.
-      - name: Run Semgrep
+      # These six gas/style suggestions are advisory. In particular, making an
+      # ERC20-only escrow constructor payable changes its native-token behavior.
+      # Keep every other rule blocking, and still fail on scanner errors.
+      - name: Run Semgrep security checks
         env:
           SEMGREP_RULES: p/javascript p/typescript p/react p/nodejs p/smart-contracts p/owasp-top-ten
-        run: semgrep ci --metrics=off --no-suppress-errors
+        run: >-
+          semgrep ci --metrics=off --no-suppress-errors
+          --exclude-rule solidity.performance.array-length-outside-loop.array-length-outside-loop
+          --exclude-rule solidity.performance.inefficient-state-variable-increment.inefficient-state-variable-increment
+          --exclude-rule solidity.performance.non-payable-constructor.non-payable-constructor
+          --exclude-rule solidity.performance.state-variable-read-in-a-loop.state-variable-read-in-a-loop
+          --exclude-rule solidity.performance.unnecessary-checked-arithmetic-in-loop.unnecessary-checked-arithmetic-in-loop
+          --exclude-rule solidity.performance.use-nested-if.use-nested-if
+
+      # Audit mode reports findings without failing for them. The first scan
+      # already gates Solidity security rules; this keeps gas suggestions visible.
+      # --no-suppress-errors continues to fail on scanner/configuration errors.
+      - name: Report Solidity advisory findings
+        env:
+          SEMGREP_RULES: p/smart-contracts
+        run: >-
+          semgrep ci --metrics=off --no-suppress-errors
+          --audit-on=pull_request --audit-on=push

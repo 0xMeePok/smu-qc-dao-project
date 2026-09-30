@@ -2,7 +2,7 @@
 
 On-chain registry for opportunity and proposal hashes on Arbitrum Sepolia. Full records remain in Firestore; this contract stores hashes, timestamps, and an append-only revision trail.
 
-## Current deployment
+## Original deployment (historical)
 
 | Field | Value |
 |---|---|
@@ -14,6 +14,13 @@ On-chain registry for opportunity and proposal hashes on Arbitrum Sepolia. Full 
 | Source | Verified on Arbiscan |
 
 The frontend contract manifest is `frontend/src/config/auditRegistry.contract.json`.
+
+For the new escrow-linked replacement, see
+[Escrow registry integration](../../docs/ESCROW_REGISTRY_INTEGRATION.md). The
+read-only `verify:arbitrum-sepolia` command accepts `--deployment=PATH` for a
+confirmed linked registry/factory record. Its default now follows the local active
+manifest and verifies the deployed escrow-linked registry. The prior scheme-2
+manifest and ABI remain in `legacy/pre-escrow-arbitrumSepolia.*.json`.
 
 Writers call from their own wallet:
 

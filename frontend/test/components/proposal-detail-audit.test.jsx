@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ connected: false, anchor: vi.fn(), find: vi.fn(), verify: vi.fn() }));
 const account = `0x${"a".repeat(40)}`;
-vi.mock("wagmi", () => ({ useAccount: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
+vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
   RelatedAuditReceiptPane: () => null,

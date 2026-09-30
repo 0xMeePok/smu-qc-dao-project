@@ -1,17 +1,66 @@
 {
+  "contractName": "EscrowAuditRegistry",
   "entityIdScheme": 2,
-  "network": "arbitrumSepolia",
   "chainId": 421614,
-  "address": "0x47dA28cAEf8021dD88fe18B80e367746e0036964",
-  "transactionHash": "0x02f73510e1b9e1753c14f6c2c2a0ca7ce213c94f31fee101fa7b436f59a2d36a",
-  "blockNumber": 308652359,
-  "deployer": "0x8B23B3837565BD326153381d3CEAFCA14B7745Bc",
-  "deploymentStatus": "confirmed",
-  "deployedAt": "2026-09-14T02:09:29.344Z",
-  "verification": {
-    "provider": "etherscan",
-    "status": "verified",
-    "verifiedAt": "2026-09-14T02:09:37.470Z",
-    "url": "https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code"
-  }
+  "owner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "feeBps": 10,
+  "tokens": [
+    "0xC2FE292771719Ae948506bab3c156A622de9a415",
+    "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+    "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
+  ],
+  "status": "ready",
+  "startedAt": "2026-09-29T14:51:59.167Z",
+  "registry": {
+    "address": "0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0",
+    "constructorArgs": [
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0"
+    ],
+    "transactionHash": "0x2fb5a68e0272b3e170c37d95d6d4dcc2e54ffd7f50b6097d9fc76fef0106c721",
+    "blockNumber": 313983036,
+    "status": "confirmed",
+    "verification": "not_requested",
+    "deployedAt": "2026-09-29T14:52:00.000Z"
+  },
+  "factory": {
+    "address": "0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66",
+    "constructorArgs": [
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+      [
+        "0xC2FE292771719Ae948506bab3c156A622de9a415",
+        "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+        "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
+      ],
+      10,
+      "0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0"
+    ],
+    "transactionHash": "0xbbc8b6b405c7365429b67055f38dd0ffbf3eeb26fb412adf4f68a447b2eaa0ad",
+    "blockNumber": 313983043,
+    "status": "confirmed",
+    "verification": "not_requested",
+    "deployedAt": "2026-09-29T14:52:02.000Z"
+  },
+  "wiring": {
+    "transactionHash": "0xde2557c418aa5235e1d580fbcf9ed0b030c60c739f1f8e85df99372ca1920a07",
+    "status": "confirmed"
+  },
+  "tokenMetadata": [
+    {
+      "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
+      "symbol": "XSGD",
+      "decimals": 6
+    },
+    {
+      "address": "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+      "symbol": "USDT",
+      "decimals": 6
+    },
+    {
+      "address": "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd",
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  ]
 }

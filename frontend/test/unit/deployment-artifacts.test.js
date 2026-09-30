@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,23 +32,42 @@ it("the default registry sync preserves the active manifest's address and entity
   const directory = await mkdtemp(path.join(tmpdir(), "qc-registry-sync-"));
   try {
     const output = path.join(directory, "registry.json");
+    const configured = JSON.parse(await readFile(path.join(frontendDirectory, "src/config/auditRegistry.contract.json"), "utf8"));
+    const extra = [];
+    // Frontend CI does not compile Solidity. Supply the checked-in interfaces
+    // explicitly so this checks default deployment selection on a clean clone.
+    if (configured.escrow) {
+      for (const [flag, contractName, abi] of [
+        ["factory-artifact", "FundingEscrowFactory", configured.escrow.factoryAbi],
+        ["escrow-artifact", "FundingEscrow", configured.escrow.escrowAbi],
+      ]) {
+        const file = path.join(directory, `${contractName}.json`);
+        await writeFile(file, JSON.stringify({ contractName, abi }));
+        extra.push(`--${flag}`, file);
+      }
+    }
     execFileSync(process.execPath, [
       path.join(frontendDirectory, "scripts/sync-audit-registry.mjs"),
       "--artifact", path.join(frontendDirectory, "src/config/auditRegistry.contract.json"),
       "--output", output,
+      ...extra,
     ], { cwd: directory, encoding: "utf8", maxBuffer: 4000 });
     const actual = JSON.parse(await readFile(output, "utf8"));
     const active = JSON.parse(await readFile(path.join(repositoryDirectory, "contracts/audit-registry/manifests/arbitrumSepolia.json"), "utf8"));
-    assert.equal(actual.address, active.address);
+    assert.equal(actual.address, active.registry?.address ?? active.address);
     assert.equal(actual.chainId, active.chainId);
     assert.equal(actual.entityIdScheme, active.entityIdScheme);
     // Platform Status shows these deployment facts for the active registry.
-    assert.deepEqual(actual.deployment, {
-      blockNumber: active.blockNumber,
-      transactionHash: active.transactionHash,
-      deployedAt: active.deployedAt,
-      verificationUrl: active.verification.url,
-    });
+    const registry = active.registry ?? active;
+    assert.deepEqual(actual.deployment, Object.fromEntries(Object.entries({
+      blockNumber: registry.blockNumber,
+      transactionHash: registry.transactionHash,
+      deployedAt: registry.deployedAt,
+      verificationUrl: registry.verification?.url,
+    }).filter(([, value]) => value !== undefined)));
+    assert.deepEqual(configured.deployment, actual.deployment);
+    const backend = JSON.parse(await readFile(path.join(repositoryDirectory, "firebase/functions/auditRegistry.contract.json"), "utf8"));
+    assert.deepEqual(backend, configured);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -60,7 +79,8 @@ it("the registry sync omits deployment facts when --address selects a different 
     const output = path.join(directory, "registry.json");
     execFileSync(process.execPath, [
       path.join(frontendDirectory, "scripts/sync-audit-registry.mjs"),
-      "--artifact", path.join(frontendDirectory, "src/config/auditRegistry.contract.json"),
+      "--artifact", path.join(repositoryDirectory, "contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json"),
+      "--deployment", path.join(repositoryDirectory, "contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.deployment.json"),
       "--address", `0x${"1".repeat(40)}`,
       "--output", output,
     ], { cwd: directory, encoding: "utf8", maxBuffer: 4000 });

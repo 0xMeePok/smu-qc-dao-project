@@ -359,4 +359,13 @@ describe("[QCDAO-91] the shared Action Needed tab", () => {
     await screen.findByText(/Your acceptance is recorded/);
     expect(queues.confirmed).toEqual([{ problemId: "problem-1", proposalId: "a1" }]);
   });
+
+  it("opens escrow proposals for review where current on-chain edit eligibility can be checked", async () => {
+    queues.actions = { ...empty, total: 1, owner: { readyToSelect: [], awaitingReview: [item("escrow1", { fundingTerms: {} })] } };
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Review proposal" }));
+    expect(queues.navigated).toEqual(["proposal/escrow1"]);
+    expect(screen.queryByRole("button", { name: "Record review…" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });

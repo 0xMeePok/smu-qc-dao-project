@@ -12,6 +12,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { resolveDomain } from "./siweOrigin.js";
 import { registerModerationCallables } from "./moderationFunctions.js";
 import { registerMatchingNotificationFunctions } from "./matchingNotifications.js";
+import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
   applyRoleChangeTransaction,
@@ -32,6 +33,7 @@ import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
 import { PUBLISH_VALIDATION, isPublishableProblem } from "./publicationValidation.js";
+import { requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
   selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
   getMockFundingPortfolio as readMockFundingPortfolio, sweepExpiredMockMatches,
@@ -181,6 +183,11 @@ async function requireMember(request) {
 
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
+
+export const { prepareEscrowDeposit, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
+  startEscrowSettlement, queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
+  db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+});
 
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
   listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, listReportableComments,
@@ -371,6 +378,10 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
       scope === "problems" ? tx.get(db.collection("users").doc(uid)) : Promise.resolve(null),
     ]);
     if (maintenance.data()?.active || reservation.data()?.retired) throw new HttpsError("failed-precondition", "Registry maintenance or retirement prevents publication.");
+    if (scope === "proposals") {
+      try { requireProposalPublicationFundingPolicy(record); }
+      catch (error) { throw new HttpsError("failed-precondition", error.message); }
+    }
     const attachments = record.attachments ?? [];
     const reservations = await Promise.all(attachments.map((item) =>
       tx.get(db.collection("uploadReservations").doc(uploadReservationKey(scope, recordId, item.id)))));

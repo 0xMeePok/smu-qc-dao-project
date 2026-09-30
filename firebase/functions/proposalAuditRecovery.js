@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { getStorage } from "firebase-admin/storage";
 import { withOpportunityRevisionIndex } from "./auditCanonical.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
+import { fundingTermsHash, isEscrowRegistry, verifyProposalEscrow } from "./escrowAudit.js";
 import registry from "./auditRegistry.contract.json" with { type: "json" };
+import { isActiveAuditDeployment, resolveAuditDeployment } from "./auditDeployments.js";
 
 export const AUDIT_JOBS = "proposalAuditJobs";
 export const RETRY_LIMIT = 3;
@@ -30,26 +32,30 @@ async function verifyAttachmentBytes(record, reader = readAttachmentBytes) {
   }
 }
 
-export function registryAddress() {
-  const address = process.env.AUDIT_REGISTRY_ADDRESS || registry.address;
+export function registryAddress(config = registry) {
+  const address = isActiveAuditDeployment(config, registry)
+    ? process.env.AUDIT_REGISTRY_ADDRESS || config.address : config.address;
   if (!/^0x[0-9a-f]{40}$/i.test(address) || /^0x0{40}$/i.test(address)) throw new Error("AuditRegistry configuration is invalid.");
+  if (isEscrowRegistry(config) && !same(address, config.address)) throw new Error("AuditRegistry configuration differs from the escrow deployment manifest.");
   return address;
 }
 
 // Confirmation is a server attestation of a mined, successful commit for this
 // exact stored record and researcher, never a client-supplied status or hash.
-export async function verifyMinedProposal(record, client, { readAttachment = readAttachmentBytes } = {}) {
-  let expected = prepareStoredProposal(record);
+export async function verifyMinedProposal(record, client, { readAttachment = readAttachmentBytes, registryConfig = registry, onDeploymentResolved } = {}) {
   const hash = record.audit?.transactionHash;
   if (!/^0x[0-9a-f]{64}$/i.test(hash ?? "")) throw new Error("The researcher must submit the wallet transaction first.");
-  const address = registryAddress();
   const [receipt, transaction] = await Promise.all([
     client.getTransactionReceipt({ hash }), client.getTransaction({ hash }),
   ]);
   if (receipt.status !== "success") throw new Error("The verification transaction reverted. The proposal remains saved.");
+  registryConfig = await resolveAuditDeployment(record, { transaction, activeConfig: registryConfig });
+  onDeploymentResolved?.(registryConfig);
+  let expected = prepareStoredProposal(record, { registryConfig });
+  const address = registryAddress(registryConfig);
   if (!same(transaction.to, address) || !same(transaction.from, record.researcherId)
       || !same(receipt.transactionHash, hash) || !same(transaction.hash, hash)
-      || Number(transaction.chainId) !== registry.chainId) {
+      || Number(transaction.chainId) !== registryConfig.chainId) {
     throw new Error("The transaction does not belong to this researcher and AuditRegistry.");
   }
   if (typeof receipt.blockNumber !== "bigint" || typeof transaction.blockNumber !== "bigint"
@@ -65,25 +71,27 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
       || !same(confirmationBlock.parentHash, receipt.blockHash)) {
     throw new Error("The transaction is not final yet; confirmation will be checked again.");
   }
-  const decoded = decodeFunctionData({ abi: registry.abi, data: transaction.input });
+  const decoded = decodeFunctionData({ abi: registryConfig.abi, data: transaction.input });
   // The registry enforces the live parent revision at transaction time. Verify
   // that same revision in the current proposal instead of assuming revision zero.
-  if (["commitProposal", "updateHashes"].includes(decoded.functionName)) {
-    expected = withOpportunityRevisionIndex(expected, Number(decoded.args.at(-1)));
+  if ([expected.functionName, "updateHashes"].includes(decoded.functionName)) {
+    const revision = decoded.functionName === "commitProposalWithEscrow" ? decoded.args[4] : decoded.args.at(-1);
+    expected = withOpportunityRevisionIndex(expected, Number(revision));
   }
   const expectedArgs = {
-    commitProposal: expected.args,
+    [expected.functionName]: expected.args,
     updateHashes: [
       expected.entityId, expected.proposalHash, expected.solutionHash,
       expected.expectedOpportunityRevisionIndex,
     ],
   }[decoded.functionName];
   if (!expectedArgs || decoded.args.length !== expectedArgs.length
-      || decoded.args.some((arg, index) => !same(arg, expectedArgs[index]))) {
+      || decoded.args.some((arg, index) => decoded.functionName === "commitProposalWithEscrow" && index === 5
+        ? fundingTermsHash(arg) !== expected.fundingTermsHash : !same(arg, expectedArgs[index]))) {
     throw new Error("Mismatch detected: the stored proposal differs from the submitted transaction.");
   }
   await verifyAttachmentBytes(record, readAttachment);
-  const actual = await client.readContract({ address, abi: registry.abi, functionName: "getProposal", args: [expected.entityId] });
+  const actual = await client.readContract({ address, abi: registryConfig.abi, functionName: "getProposal", args: [expected.entityId] });
   const value = (key, index) => actual[key] ?? actual[index];
   if (!same(value("researcher", 0), record.researcherId)
       || !same(value("opportunityId", 1), expected.opportunityId)
@@ -91,6 +99,9 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
       || !same(value("proposalHash", 4), expected.proposalHash)
       || !same(value("solutionHash", 5), expected.solutionHash)) {
     throw new Error("Mismatch detected: the current proposal differs from AuditRegistry.");
+  }
+  if (isEscrowRegistry(registryConfig)) {
+    await verifyProposalEscrow({ expected, config: registryConfig, readContract: request => client.readContract(request) });
   }
   const blockNumber = Number(receipt.blockNumber);
   if (!Number.isSafeInteger(blockNumber) || blockNumber <= 0) throw new Error("Invalid confirmation block.");
@@ -124,7 +135,7 @@ export async function enqueueProposalAudit({ db, record, now }) {
   });
 }
 
-export async function recoverProposalAudit({ db, client, proposalId, now, Timestamp, manual = false }) {
+export async function recoverProposalAudit({ db, client, proposalId, now, Timestamp, manual = false, registryConfig = registry }) {
   const jobRef = db.collection(AUDIT_JOBS).doc(proposalId);
   const recordRef = db.collection("proposals").doc(proposalId);
   // Lease prevents callable, trigger and scheduler from racing each other.
@@ -141,12 +152,12 @@ export async function recoverProposalAudit({ db, client, proposalId, now, Timest
   });
   if (!job) return null;
   let audit, failure;
-  let record;
+  let record, checkedRegistry;
   try {
     const snapshot = await recordRef.get();
     record = snapshot.exists ? { ...snapshot.data(), id: snapshot.id } : null;
     if (!record || record.audit?.transactionHash !== job.transactionHash) throw new Error("The proposal or transaction has changed. Refresh verification.");
-    audit = await verifyMinedProposal(record, client);
+    audit = await verifyMinedProposal(record, client, { registryConfig, onDeploymentResolved: config => { checkedRegistry = config; } });
   } catch (error) { failure = recoveryError(error); }
   const saved = await db.runTransaction(async (tx) => {
     const [latest, latestJob] = await Promise.all([tx.get(recordRef), tx.get(jobRef)]);
@@ -154,9 +165,14 @@ export async function recoverProposalAudit({ db, client, proposalId, now, Timest
         || latestJob.data().leaseUntil?.toMillis() !== now.toMillis() + 90_000) return false;
     let unchanged = false;
     try {
+      const latestPrepared = latest.exists && checkedRegistry ? prepareStoredProposal({ ...latest.data(), id: proposalId }, { registryConfig: checkedRegistry }) : null;
+      const checkedPrepared = record && checkedRegistry ? prepareStoredProposal(record, { registryConfig: checkedRegistry }) : null;
       unchanged = latest.exists && record && latest.data().audit?.transactionHash === job.transactionHash
-        && prepareStoredProposal({ ...latest.data(), id: proposalId }).canonicalPayload === prepareStoredProposal(record).canonicalPayload
-        && prepareStoredProposal({ ...latest.data(), id: proposalId }).canonicalSolution === prepareStoredProposal(record).canonicalSolution;
+        && (checkedRegistry
+          ? latestPrepared.canonicalPayload === checkedPrepared.canonicalPayload
+            && latestPrepared.canonicalSolution === checkedPrepared.canonicalSolution
+            && latestPrepared.fundingTermsHash === checkedPrepared.fundingTermsHash
+          : JSON.stringify({ ...latest.data(), id: proposalId }) === JSON.stringify(record));
     } catch { /* Unsupported or changed data must never be confirmed. */ }
     if (!unchanged) {
       tx.update(jobRef, { status: "failed", lastError: "The record changed during verification. Refresh and retry.", leaseUntil: now });

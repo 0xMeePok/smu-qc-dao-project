@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
 import { isPublishableProblem } from "../publicationValidation.js";
+import { requireProposalPublicationFundingPolicy } from "../proposalPublicationPolicy.js";
 
 // Mirrors the firestore.rules checks attestPublication now runs for a publish.
 // Each rejection case names the rule it stands in for.
@@ -34,6 +35,42 @@ const funding = (overrides = {}) => ({
 });
 
 const without = (record, key) => { const copy = { ...record }; delete copy[key]; return copy; };
+
+const proposalTerms = (trancheBps, funderVoting = false) => ({
+  token: `0x${"c".repeat(40)}`, target: "1000000", funderVoting, trancheBps,
+  reviewWindows: trancheBps.map(() => 7 * 86400),
+  milestoneHashes: trancheBps.map((_, index) => `0x${String(index + 1).repeat(64)}`),
+});
+
+describe("proposal publication funding policy", () => {
+  it("preserves legacy registry submissions without escrow terms", () => {
+    const options = { registryConfig: { contractName: "AuditRegistry" } };
+    assert.doesNotThrow(() => requireProposalPublicationFundingPolicy({ status: "submitted" }, options));
+  });
+
+  it("accepts fixed half upfront and half final on new records and draft promotions in either voting mode", () => {
+    for (const funderVoting of [false, true]) {
+      const record = { status: "submitted", fundingTerms: proposalTerms([5000, 5000], funderVoting) };
+      assert.doesNotThrow(() => requireProposalPublicationFundingPolicy(record));
+    }
+  });
+
+  it("rejects custom splits on every escrow-linked publication or correction", () => {
+    for (const trancheBps of [[10000], [4000, 6000], [2000, 3000, 5000]]) {
+      const record = { status: "submitted", fundingTerms: proposalTerms(trancheBps) };
+      for (const status of ["draft", "submitted", "under_review", "accepted", "rejected", "withdrawn"]) {
+        assert.throws(() => requireProposalPublicationFundingPolicy({ ...record, status }),
+          /50% upfront and 50% on completion/);
+      }
+    }
+  });
+
+  it("validates complete funding terms for new proposals even when their ratios are 50/50", () => {
+    for (const fundingTerms of [undefined, { trancheBps: [5000, 5000] }, { ...proposalTerms([5000, 5000]), target: "1" }]) {
+      assert.throws(() => requireProposalPublicationFundingPolicy({ status: "submitted", fundingTerms }));
+    }
+  });
+});
 
 describe("isPublishableProblem - business problem", () => {
   it("accepts a complete posting with 0, 1 or 2 PDFs, with or without legacy 4-field entries", () => {

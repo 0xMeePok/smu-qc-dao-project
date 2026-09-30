@@ -2,6 +2,9 @@ import { PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "..
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { toDate } from "./datetime.js";
 import { isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE } from "./errors.js";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
+import { proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
 
 export function proposalBlockReason(posting, now = new Date()) {
   if (!posting) return "This opportunity is not available.";
@@ -32,6 +35,10 @@ export function validateProposal(form, posting) {
   if (!PROPOSAL_CATEGORIES.some(({ value }) => value === form.category)) errors.category = "Choose a quantum or quantum-adjacent category.";
   const amount = Number(form.amount);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) errors.amount = "Enter a funding amount greater than 0 and no more than 1,000,000,000.";
+  if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && !errors.amount) {
+    try { proposalFundingTerms({ form, currency: posting?.currency, config: AUDIT_REGISTRY_CONFIG }); }
+    catch (error) { errors.fundingPlan = error.message; }
+  }
   return errors;
 }
 

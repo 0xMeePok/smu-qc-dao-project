@@ -6,7 +6,7 @@ import { StatusBadge } from "./StatusBadge.jsx";
 export function FundingMeta({ item, problemMatching }) {
   const funding = proposalFundingStatus(item, problemMatching);
   return <>
-    <StatusBadge status={funding.status} />
+    {Object.hasOwn(item, "fundingTerms") ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}
     {funding.detail && <span className="funding-note">{funding.detail}</span>}
     <span>{item.currency} {Number(item.amount).toLocaleString()} · {formatInstant(item.createdAt)}</span>
   </>;

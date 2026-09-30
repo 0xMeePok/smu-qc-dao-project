@@ -41,6 +41,7 @@ the account. Ensure you have MetaMask or Rabby installed.
 smu-qc-dao-project/
 ├── contracts/
 │   ├── audit-registry/      # Workflow hash registry, Hardhat project, Arbitrum Sepolia
+│   ├── funding-escrow/      # Registry-linked escrow, milestones, voting and refunds
 │   ├── qft-tokens/          # QFT ERC-20 (fixed supply), Hardhat project, Arbitrum Sepolia
 │   └── stable-faucet/       # Test token faucet deployment
 ├── frontend/                # Vite + React app — wallet sign-in, marketplace pages, RBAC
@@ -234,12 +235,32 @@ need to redeploy, or want more detail on local emulators, see
 
 - [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions and opportunity creation rules.
 - [Audit Registry Integration](docs/AUDIT_REGISTRY_INTEGRATION.md): Hash format, transaction states, frontend configuration, and contract replacement workflow.
+- [Escrow Registry Integration](docs/ESCROW_REGISTRY_INTEGRATION.md): Proposal payment plans, frontend/Firebase escrow verification, and the replacement deployment rollout.
 
 ## Smart Contracts
 
+See [Funding Escrow](contracts/funding-escrow/README.md) for the new escrow
+contracts, tests, 1–5 milestone tranches, optional funder voting plus dual approval,
+admin partial refunds, token listing, owner fees, and depositor dashboard API.
+The replacement registry and factory were confirmed and verified against compiled
+runtime bytecode and reciprocal wiring on Arbitrum Sepolia on 2026-09-29. The active
+manifest and frontend/Firebase configurations select these addresses. The Firebase
+backend and [hosted application](https://qcdao-a0c7a.web.app) rollout completed;
+all 66 Functions were updated or created, the five escrow indexes are ready, and
+the settlement scheduler is enabled. The signed one-mock-USDC smoke test completed
+both 50% payments and reconciled 13 funding audit events; see the
+[transaction evidence](contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json).
+This tested contracts and verification modules; a full authenticated browser flow
+has not been exercised. Existing token contracts, the owner/platform signer and the
+10 BPS fee are unchanged. Historical records retain their original verification.
+Explorer source publication was not requested for the replacement deployment.
+
 | Contract | Address (Arbitrum Sepolia) | Purpose |
 |---|---|---|
-| [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x47dA28cAEf8021dD88fe18B80e367746e0036964`](https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code) | Anchors opportunity and proposal hashes. Checked-in scheme-2 registry, deployed in block `308652359`; the site transition follows the [cutover notes](docs/registry-cutover.md). |
+| [`EscrowAuditRegistry.sol`](contracts/funding-escrow/contracts/EscrowAuditRegistry.sol) | [`0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0`](https://sepolia.arbiscan.io/address/0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0) | Active manifest registry with canonical escrow creation, accepted-proposal binding and reversible posting pauses. |
+| [`FundingEscrowFactory.sol`](contracts/funding-escrow/contracts/FundingEscrowFactory.sol) | [`0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66`](https://sepolia.arbiscan.io/address/0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66) | Replacement factory, existing listed tokens, admin roles and 10 BPS initial fee. |
+| Previous linked registry | [`0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD`](https://sepolia.arbiscan.io/address/0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD) | Original deployment and ABI retained for historical verification and escrow reads. |
+| Previous [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x47dA28cAEf8021dD88fe18B80e367746e0036964`](https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code) | Previous scheme-2 deployment retained for historical verification. |
 | [`QFT.sol`](contracts/qft-tokens/contracts/QFT.sol) | Not yet deployed | Fixed-supply ERC-20 distributed for platform activity |
 
 ## Testing
@@ -287,11 +308,17 @@ Live site: **https://qcdao-a0c7a.web.app**
 To deploy by hand (same order the pipeline uses):
 
 ```bash
-cd firebase && npx firebase deploy --only firestore:rules,firestore:indexes,functions --project qcdao-a0c7a
+(cd firebase && npx firebase deploy --only firestore:rules,firestore:indexes,storage,functions --project qcdao-a0c7a)
 # The variable is required: it outranks .env, which is set for local emulators.
 VITE_FIREBASE_USE_EMULATORS=false npm run build --prefix frontend \
   && (cd firebase && npx firebase deploy --only hosting --project qcdao-a0c7a)
 ```
+
+For the escrow relay, configure the `ESCROW_PLATFORM_PRIVATE_KEY` Secret Manager
+secret and the Functions `ARBITRUM_SEPOLIA_RPC_URL` before deploying the backend.
+The signing address must match the selected factory. Vite builds directly into
+`firebase/public`; no additional frontend asset copy is needed. Preserve the
+historical deployment allowlist when synchronizing replacement manifests.
 
 To try a change on a real URL without touching the live site, deploy a preview
 channel. The script calls `gcloud` to keep Storage CORS in line with live

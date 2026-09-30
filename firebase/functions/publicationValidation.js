@@ -20,6 +20,9 @@
  * A proof without the marker is never trusted for a publish.
  */
 
+// The rules package also imports this validator without installing Functions
+// dependencies. Keep chain-specific imports in proposalPublicationPolicy.js.
+
 export const PUBLISH_VALIDATION = "problem-publish-v1";
 
 const PROBLEM_KEYS = new Set([

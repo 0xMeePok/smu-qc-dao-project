@@ -3,12 +3,14 @@ import { ROLES } from "../config/roles.js";
 import { OPPORTUNITY_STATUSES } from "../config/workflowStatus.js";
 import { proposalBlockReason } from "./proposalValidation.js";
 import { isExpired } from "./datetime.js";
+import { isModerated } from "./moderation.js";
 
 const FUND_CLOSED_STATUSES = new Set([
   OPPORTUNITY_STATUSES.DRAFT,
   OPPORTUNITY_STATUSES.CANCELLED,
   OPPORTUNITY_STATUSES.COMPLETED,
   OPPORTUNITY_STATUSES.EXPIRED,
+  "withdrawn", "accepted", "closed",
 ]);
 
 const EVALUABLE_STATUSES = new Set([
@@ -64,8 +66,10 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
 
   if (
     isAuthenticated
-    && roles.includes(ROLES.FUNDER)
-    && !owns
+    && roles.some(role => [ROLES.FUNDER, ROLES.OWNER].includes(role))
+    && !user?.isSuspended
+    && !posting.moderated && !isModerated(posting)
+    && !posting.acceptedProposalId && !posting.acceptedSolutionId && !posting.hasAcceptedSolution
     && !FUND_CLOSED_STATUSES.has(status)
     && !["awaiting_confirmation", "confirmed", "invalidated"].includes(posting.matching?.status)
     && !deadlinePassed

@@ -67,13 +67,14 @@ export async function getProposalComparison({ db, uid, problemId, now = Timestam
       amount: proposal.amount ?? null,
       currency: proposal.currency || "",
       status: proposal.status,
+      ...(Object.hasOwn(proposal, "fundingTerms") ? { fundingTerms: proposal.fundingTerms } : {}),
       fundedAmount: selection.fundedAmount,
       matching: { status: selection.state, evaluationComplete: selection.feedbackOpen },
       recommendations,
       qualifyingCount: whole(summary.qualifyingCount),
       commentCount: whole(summary.commentCount),
       canSelect: selection.canSelect,
-      selectionHint: selectionHint(viewerIsOwner, selection),
+      selectionHint: selection.state === "escrow" ? "Open the proposal to manage wallet funding." : selectionHint(viewerIsOwner, selection),
     };
   }).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
   return {

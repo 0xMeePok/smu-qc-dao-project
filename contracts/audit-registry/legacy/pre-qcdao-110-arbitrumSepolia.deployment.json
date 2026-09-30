@@ -1,0 +1,63 @@
+{
+  "contractName": "EscrowAuditRegistry",
+  "entityIdScheme": 2,
+  "chainId": 421614,
+  "owner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "feeBps": 10,
+  "tokens": [
+    "0xC2FE292771719Ae948506bab3c156A622de9a415",
+    "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+    "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
+  ],
+  "status": "ready",
+  "registry": {
+    "address": "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD",
+    "constructorArgs": [
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0"
+    ],
+    "transactionHash": "0x81a127822e0021e8494204cf3b3ad81352e1d6cb69405fd73914cb6c3a0a6cda",
+    "blockNumber": 313125697,
+    "status": "confirmed",
+    "verification": "submitted_pending"
+  },
+  "factory": {
+    "address": "0xe5d212491E544694d21c51EF9777F71B32fc5D41",
+    "constructorArgs": [
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+      [
+        "0xC2FE292771719Ae948506bab3c156A622de9a415",
+        "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+        "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
+      ],
+      10,
+      "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD"
+    ],
+    "transactionHash": "0xd7ee062b82c906403a8f8af8ff07034b15c18b53893f6e374235ffff22150fd1",
+    "blockNumber": 313125705,
+    "status": "confirmed",
+    "verification": "awaiting_source_publication_approval"
+  },
+  "wiring": {
+    "transactionHash": "0x3cc69444d0253e33c83f721f6e1200fb3c80a2f48f9759344306ab47e458ae85",
+    "status": "confirmed"
+  },
+  "tokenMetadata": [
+    {
+      "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
+      "symbol": "XSGD",
+      "decimals": 6
+    },
+    {
+      "address": "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+      "symbol": "USDT",
+      "decimals": 6
+    },
+    {
+      "address": "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd",
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  ]
+}

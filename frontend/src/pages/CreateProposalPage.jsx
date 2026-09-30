@@ -17,6 +17,7 @@ import {
   updateProposal,
 } from "../lib/proposals.js";
 import { anchorProposalBeforeWrite, receiptForWrite } from "../lib/proposalAudit.js";
+import { assertCurrentAuditRecord } from "../lib/opportunityAuditFlow.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
@@ -31,9 +32,15 @@ import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { proposalWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
 import ProposalDetailPage from "./ProposalDetailPage.jsx";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
+import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/functions/escrowProposalTerms.js";
+import { EscrowPaymentPlanFields } from "../components/EscrowPaymentPlanFields.jsx";
+import { readEscrow } from "../lib/escrow.js";
 import { ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
 
 const ALL_FIELDS = [...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS];
+const ESCROW_LINKED = isEscrowRegistry(AUDIT_REGISTRY_CONFIG);
 const keysOf = (fields) => fields.map(([key]) => key);
 
 // Mirrors the brief wizard; open-funding proposals add the framing step.
@@ -42,7 +49,7 @@ function proposalSteps(openFunding) {
     { key: "approach", label: "Your approach", fields: [...keysOf(PROPOSAL_FIELDS.slice(0, 2)), "category", ...keysOf(PROPOSAL_FIELDS.slice(2, 4))] },
     ...(openFunding ? [{ key: "framing", label: "Problem framing", fields: keysOf(PROBLEM_FRAMING_FIELDS) }] : []),
     { key: "outcomes", label: "Outcomes & delivery", fields: keysOf(PROPOSAL_FIELDS.slice(4)) },
-    { key: "funding", label: "Funding & documents", fields: ["amount"] },
+    { key: "funding", label: "Funding & documents", fields: ["amount", "fundingPlan"] },
     { key: "review", label: "Review", fields: [] },
   ];
 }
@@ -59,16 +66,26 @@ function snapshotOf(form, attachments) {
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, String(form[key] ?? "")])),
     category: form.category ?? "",
     amount: String(form.amount ?? ""),
+    tranchePercentages: form.tranchePercentages ?? HALF_UPFRONT_PERCENTAGES,
+    reviewDays: form.reviewDays ?? "7",
+    funderVoting: form.funderVoting ?? false,
     attachments: attachments.map((item) => item.id).sort(),
   });
 }
 
 /** Seeds the form from a stored record, so a resumed draft or an edit starts where it left off. */
 export function formFromProposal(record) {
+  const terms = record?.status !== "draft" ? record?.fundingTerms : null;
   return {
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, record?.[key] ?? ""])),
     category: record?.category ?? "",
-    amount: record?.amount ? String(record.amount) : "",
+    amount: record?.amount ? (ESCROW_LINKED ? fundingAmountText(record.amount) : String(record.amount)) : "",
+    ...(ESCROW_LINKED ? {
+      tranchePercentages: terms ? terms.trancheBps.map(bps => bps / 100).join(", ") : HALF_UPFRONT_PERCENTAGES,
+      reviewDays: terms ? terms.reviewWindows.map(seconds => seconds / 86400).join(", ") : record?.fundingPlan?.reviewDays ?? "7",
+      funderVoting: terms?.funderVoting ?? record?.fundingPlan?.funderVoting ?? false,
+      ...(terms && record.status !== "draft" ? { immutableFundingTerms: terms } : {}),
+    } : {}),
   };
 }
 
@@ -118,6 +135,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       return ALL_FIELDS.some(([key]) => String(form[key] ?? "").trim().length > 0)
         || String(form.category ?? "").length > 0
         || String(form.amount ?? "").trim().length > 0
+        || (ESCROW_LINKED && ((form.reviewDays ?? "7") !== "7" || form.funderVoting === true))
         || attachments.length > 0;
     }
     return snapshotOf(form, attachments) !== baseline;
@@ -259,12 +277,22 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     setSaveFailed(false);
     setConfirmedAudit(null);
     try {
+      const currentPosting = await findPosting(posting.id, { fromServer: true });
+      if (!currentPosting) throw new Error("This posting is no longer available. Refresh before submitting.");
+      await assertCurrentAuditRecord(currentPosting);
       if (editing) {
-        const current = await getMockMatching(posting.id, { proposalId });
-        const candidate = current.proposals.find((item) => item.id === proposalId);
-        if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
-          || ["awaiting_confirmation", "confirmed", "invalidated"].includes(current.matching.status)) {
-          throw new Error("Funding or matching has started. This proposal can no longer be edited.");
+        if (form.immutableFundingTerms) {
+          const current = await findProposal(proposalId, { fromServer: true });
+          if (!current || (await readEscrow({ proposal: current, account: address })).totalDeposited > 0n) {
+            throw new Error("Funding has started. This proposal can no longer be edited.");
+          }
+        } else {
+          const current = await getMockMatching(posting.id, { proposalId });
+          const candidate = current.proposals.find((item) => item.id === proposalId);
+          if (!candidate || proposalMatchingLocked({ matching: { ...candidate.matching, fundedAmount: candidate.fundedAmount } })
+            || ["awaiting_confirmation", "confirmed", "invalidated"].includes(current.matching.status)) {
+            throw new Error("Funding or matching has started. This proposal can no longer be edited.");
+          }
         }
       }
       const record = buildProposalDocument({
@@ -325,7 +353,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   const textField = ([key, label, max]) => <Field key={key} htmlFor={`proposal-${key}`} label={label} error={errors[key]}>
     {({ id, describedBy, invalid }) => {
       const Tag = key === "title" ? "input" : "textarea";
-      return <Tag id={id} rows={key === "title" ? undefined : 4} value={form[key] || ""} maxLength={max} aria-describedby={describedBy} aria-invalid={invalid} required onChange={(event) => update(key, event.target.value)} />;
+      return <Tag id={id} rows={key === "title" ? undefined : 4} value={form[key] || ""} maxLength={max} disabled={ESCROW_LINKED && editing && key === "milestones"} aria-describedby={describedBy} aria-invalid={invalid} required onChange={(event) => update(key, event.target.value)} />;
     }}
   </Field>;
   const text = (key) => String(form[key] ?? "").trim();
@@ -363,8 +391,9 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
             <WizardPanel index={stepIndex("funding")} current={wizard.current}>
               <fieldset className="field-group" disabled={disabled}><legend>Funding and supporting material</legend>
                 <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} error={errors.amount}>
-                  {({ id, describedBy, invalid }) => <input id={id} type="number" min="0.000001" max="1000000000" step="any" required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
+                  {({ id, describedBy, invalid }) => <input id={id} type={ESCROW_LINKED ? "text" : "number"} inputMode="decimal" min="0.000001" max="1000000000" step="any" disabled={ESCROW_LINKED && editing} required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
                 </Field>
+                {ESCROW_LINKED && <EscrowPaymentPlanFields form={form} disabled={disabled || editing} error={errors.fundingPlan} onChange={update} />}
                 {editing && <p className="field-hint">Supporting PDFs cannot be changed after submission. They stay as the files under review.</p>}
                 <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments} onChange={setAttachments} onPendingChange={(count) => setPending(count > 0)} disabled={disabled || editing} />
               </fieldset>
@@ -381,7 +410,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
                 ...(isOpenFunding ? [{ label: "Proposed problem", value: text("proposedProblem"), step: stepIndex("framing") }] : []),
                 { label: "Success criteria", value: text("successCriteria"), step: stepIndex("outcomes") },
                 { label: "Timeline", value: text("timeline"), step: stepIndex("outcomes") },
-                { label: "Requested funding", value: form.amount ? `${posting.currency} ${Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: stepIndex("funding") },
+                { label: "Requested funding", value: form.amount ? `${posting.currency} ${ESCROW_LINKED ? text("amount") : Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: stepIndex("funding") },
                 { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: stepIndex("funding") },
               ]} />
               <p className="field-hint">{editing

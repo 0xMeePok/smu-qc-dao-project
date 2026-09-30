@@ -1,6 +1,7 @@
 import {
   estimateFeesPerGas as wagmiEstimateFeesPerGas,
   getBlock as wagmiGetBlock,
+  getTransaction as wagmiGetTransaction,
   readContract as wagmiReadContract,
   simulateContract as wagmiSimulateContract,
   waitForTransactionReceipt as wagmiWaitForTransactionReceipt,
@@ -9,10 +10,13 @@ import {
 import {
   AUDIT_REGISTRY_ABI,
   AUDIT_REGISTRY_CHAIN_ID,
+  AUDIT_REGISTRY_CONFIG,
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
 import { wagmiConfig } from "./wagmi.js";
 import { isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
+import { isEscrowRegistry, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
+import { knownAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
 import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, asOpportunityUpdate, prepareOpportunityCommit, prepareOpportunityUpdate, prepareOpportunityWithdrawal, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
@@ -36,10 +40,14 @@ function revertErrorName(error) {
   if (/accessdenied/.test(text)) return "AccessDenied";
   if (/invalidstate/.test(text)) return "InvalidState";
   if (/invalidinput/.test(text)) return "InvalidInput";
+  if (/fundingtermsfrozen/.test(text)) return "FundingTermsFrozen";
+  if (/fundingtermsrequired/.test(text)) return "FundingTermsRequired";
   return "";
 }
 
 export function auditRevertMessage(functionName, errorName) {
+  if (errorName === "FundingTermsFrozen") return "Funding has started or these escrow terms are immutable. The registry cannot accept this change.";
+  if (errorName === "FundingTermsRequired") return "This registry requires a proposal with escrow funding terms. Refresh the app before submitting.";
   if (errorName === "AccessDenied") {
     return "Connect the wallet that owns this record on Arbitrum Sepolia.";
   }
@@ -68,7 +76,7 @@ export function auditRevertMessage(functionName, errorName) {
       InvalidState: "This proposal has already been withdrawn on-chain.",
     },
   };
-  return messages[functionName]?.[errorName]
+  return messages[functionName === "commitProposalWithEscrow" ? "commitProposal" : functionName]?.[errorName]
     ?? (errorName === "InvalidState"
       ? "The registry rejected this transaction because the record is not in a state that allows it."
       : errorName === "InvalidInput"
@@ -131,6 +139,7 @@ export function createWagmiAuditAdapters(config = wagmiConfig) {
     waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
     readContract: (request) => wagmiReadContract(config, request),
     getBlock: (request) => wagmiGetBlock(config, request),
+    getTransaction: (request) => wagmiGetTransaction(config, request),
   };
 }
 
@@ -151,6 +160,19 @@ function canonicalRegistryAddress(requestedAddress) {
     throw new Error("AuditRegistry address does not match the configured deployment.");
   }
   return configured;
+}
+
+function readRegistryConfig(options) {
+  if (!options.registryConfig) {
+    canonicalRegistryAddress(options.address);
+    return AUDIT_REGISTRY_CONFIG;
+  }
+  const config = knownAuditDeployment(options.registryConfig.address, options.registryConfig.chainId,
+    { activeConfig: AUDIT_REGISTRY_CONFIG });
+  if (options.address && String(options.address).toLowerCase() !== config.address.toLowerCase()) {
+    throw new Error("AuditRegistry read address differs from its known deployment.");
+  }
+  return config;
 }
 
 function cappedRetries(value) {
@@ -378,8 +400,10 @@ export function withdrawOpportunityAudit(input, options) {
 }
 
 export function commitProposalAudit(input, options) {
+  const prepared = asPrepared(input, prepareProposalCommit);
+  const name = isEscrowRegistry(AUDIT_REGISTRY_CONFIG) ? "commitProposalWithEscrow" : "commitProposal";
   return executePreparedAudit(
-    preparedFor(input, prepareProposalCommit, "commitProposal"),
+    preparedFor(prepared, prepareProposalCommit, name),
     options,
   );
 }
@@ -417,6 +441,7 @@ const VERIFICATION_DIFFERENCES = {
   opportunityId: ["Linked opportunity", "The proposal is linked to a different opportunity on Arbitrum Sepolia."],
   opportunityRevisionIndex: ["Linked opportunity revision", "The proposal is linked to a different opportunity revision on Arbitrum Sepolia."],
   anchor: ["Publication anchor", "No matching publication anchor was found in the checked Arbitrum Sepolia history."],
+  escrow: ["Proposal escrow", "The escrow link or funding terms differ from this proposal."],
 };
 
 function verificationDifference(field, expected, actual) {
@@ -434,14 +459,14 @@ function mismatch(mismatches, field, expected, actual, compare = Object.is) {
 
 async function readWithRetries(functionName, args, options) {
   const resolved = auditAdapters(options.adapters);
-  const address = canonicalRegistryAddress(options.address);
+  const config = readRegistryConfig(options);
   return retryRead(
     () => resolved.readContract({
-      address,
-      abi: AUDIT_REGISTRY_ABI,
+      address: config.address,
+      abi: config.abi,
       functionName,
       args,
-      chainId: AUDIT_REGISTRY_CHAIN_ID,
+      chainId: config.chainId,
     }),
     options.maxReadRetries ?? 2,
     options.onRetry,
@@ -540,6 +565,7 @@ export async function verifyOpportunityAudit(input, options = {}) {
 }
 
 export async function verifyProposalAudit(input, options = {}) {
+  const registryConfig = readRegistryConfig(options);
   let expected = asPrepared(input, prepareProposalCommit);
   const actual = await readWithRetries("getProposal", [expected.entityId], options);
   if (options.useRecordedOpportunityRevision === true) {
@@ -566,5 +592,17 @@ export async function verifyProposalAudit(input, options = {}) {
   const anchor = await findMatchingAnchor(
     expected.entityId, expected.anchorHash, options,
   );
-  return verification(expected, actual, anchor, mismatches);
+  let escrow;
+  // A known content mismatch is already conclusive. Extra RPC failures must not
+  // turn that result into an inconclusive network error while checking escrow.
+  if (isEscrowRegistry(registryConfig) && mismatches.length === 0) {
+    try {
+      escrow = await verifyProposalEscrow({ expected, config: registryConfig,
+        readContract: request => retryRead(() => auditAdapters(options.adapters).readContract(request), options.maxReadRetries ?? 2, options.onRetry) });
+    } catch (error) {
+      if (error.code !== "ESCROW_MISMATCH") throw error;
+      mismatches.push(verificationDifference("escrow", "Matching canonical escrow and funding terms", error.message));
+    }
+  }
+  return Object.freeze({ ...verification(expected, actual, anchor, mismatches), ...(escrow ? { escrow } : {}) });
 }

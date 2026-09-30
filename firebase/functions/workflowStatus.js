@@ -135,8 +135,10 @@ export function opportunityWorkflowStatus(problem = {}, now = new Date()) {
 /** Stored proposal state, read with its parent's matching state -> workflow status. */
 export function proposalWorkflowStatus(proposal = {}, problemMatching = proposal?.problemMatching) {
   const status = key(proposal?.status);
-  const own = key(proposal?.matching?.status);
-  const parent = key(problemMatching?.status);
+  // Escrow lifecycle comes from the contract, never a legacy mock match or sibling.
+  const escrow = Object.hasOwn(proposal || {}, "fundingTerms");
+  const own = escrow ? "" : key(proposal?.matching?.status);
+  const parent = escrow ? "" : key(problemMatching?.status);
   if (status === "draft") return S.DRAFT;
   if (["withdrawn", "rejected"].includes(status) || own === "declined") return S.DECLINED;
   if (own === "awaiting_confirmation") return S.SELECTED;

@@ -9,6 +9,10 @@ const ELIGIBLE = new Set(["submitted", "under_review"]);
 const TERMINAL = new Set(["confirmed", "voided", "declined", "cancelled", "invalidated"]);
 const FUNDING_EVENTS = new Set(["funding_contributed", "funding_target_reached"]);
 const fail = (code, message) => { throw new HttpsError(code, message); };
+const usesEscrow = (proposal) => Object.hasOwn(proposal || {}, "fundingTerms");
+function requireMockProposal(proposal) {
+  if (usesEscrow(proposal)) fail("failed-precondition", "This proposal uses wallet escrow. Open the proposal to manage its on-chain funding.");
+}
 const millis = (value) => value?.toMillis?.() ?? 0;
 const iso = (value) => value?.toDate?.().toISOString() ?? null;
 function validId(value, name) {
@@ -86,7 +90,7 @@ async function runContendedTransaction(db, body, attempts = 5) {
   }
 }
 
-async function readContext({ db, tx, problemId, uid, proposalId, cursor }) {
+async function readContext({ db, tx, problemId, uid, proposalId, cursor, mockAction = false }) {
   const ref = db.collection("problems").doc(problemId);
   let candidateQuery = db.collection("proposals").where("problemId", "==", problemId)
     .where("status", "in", ["submitted", "under_review", "accepted", "rejected", "withdrawn"]).orderBy("__name__");
@@ -111,12 +115,16 @@ async function readContext({ db, tx, problemId, uid, proposalId, cursor }) {
   const candidateIds = new Set(candidates.map((doc) => doc.id));
   const missingIds = [...new Set([...funding.docs.map((doc) => doc.data().proposalId), proposalId].filter(Boolean))].filter((id) => !candidateIds.has(id));
   const fundedProposals = await Promise.all(missingIds.map((id) => tx.get(db.collection("proposals").doc(id))));
-  return { ref, events: db.collection("matchingEvents"), isAdmin: profile?.data()?.role === 1, problem: problem.data(), proposals: [...candidates, ...fundedProposals.filter((doc) => doc.exists && doc.data().problemId === problemId)],
+  const allProposals = [...candidates, ...fundedProposals.filter((doc) => doc.exists && doc.data().problemId === problemId)];
+  if (mockAction) requireMockProposal(allProposals.find((doc) => doc.id === proposalId)?.data());
+  return { ref, events: db.collection("matchingEvents"), isAdmin: profile?.data()?.role === 1, problem: problem.data(), proposals: allProposals,
     funding: funding.docs, truncated: proposals.size > MAX_PROPOSALS,
     nextCursor: proposals.size > MAX_PROPOSALS ? candidates.at(-1).id : null };
 }
 function updateProposal(tx, doc, status, now, extra = {}) {
   const data = doc.data();
+  // Settling a legacy sibling must never manufacture escrow lifecycle state.
+  if (usesEscrow(data)) return data;
   const matching = { mode: "mock", fundedMinor: 0, fundedAmount: 0, ...data.matching, status, updatedAt: now, ...extra };
   tx.update(doc.ref, { matching });
   return { ...data, matching };
@@ -199,13 +207,15 @@ export async function sweepExpiredMockMatches({ db, now }) {
 
 // Expiry commits separately, before any action validation that may throw. A late
 // confirmation must not roll back the refunds when it is rejected.
-async function prepare({ db, problemId, uid, now }) {
+async function prepare({ db, problemId, proposalId, uid, now }) {
   validId(problemId, "problem");
   if (!uid) fail("unauthenticated", "Sign in with your wallet.");
-  await runContendedTransaction(db, async (tx) => expireContext(tx, await readContext({ db, tx, problemId, uid }), now || Timestamp.now()));
+  await runContendedTransaction(db, async (tx) => expireContext(tx, await readContext({ db, tx, problemId, proposalId, uid, mockAction: Boolean(proposalId) }), now || Timestamp.now()));
 }
 
 export function mockSelectionState({ problem, proposal, uid, at = Timestamp.now() }) {
+  if (usesEscrow(proposal)) return { state: "escrow", fundedAmount: 0, open: false, eligible: false,
+    fundingMet: false, feedbackOpen: false, canSelect: false };
   const parentStatus = problem.matching?.status || "open";
   const ownStatus = proposal.matching?.status || "funding";
   const state = ["confirmed", "invalidated"].includes(parentStatus) && problem.matching?.proposalId !== proposal.id && !TERMINAL.has(ownStatus)
@@ -234,7 +244,8 @@ export async function getMockMatching({ db, uid, problemId, proposalId, cursor, 
     const matching = publicMatch(ctx.problem.matching, ctx.problem);
     const open = isOpen(ctx.problem, at);
     return { problemId, mode: "mock", matching,
-      canForceExpire: ctx.isAdmin && matching.status === "awaiting_confirmation",
+      canForceExpire: ctx.isAdmin && matching.status === "awaiting_confirmation"
+        && !usesEscrow(ctx.proposals.find((doc) => doc.id === matching.proposalId)?.data()),
       history: history.docs.slice(0, 100).map(doc => historyView(doc, ctx.isAdmin)),
       historyTruncated: history.size > 100, truncated: ctx.truncated, nextCursor: ctx.nextCursor,
       proposals: ctx.proposals.filter((doc) => !moderated(doc.data()) && (ELIGIBLE.has(doc.data().status) || doc.data().matching)).map((doc) => {
@@ -242,20 +253,22 @@ export async function getMockMatching({ db, uid, problemId, proposalId, cursor, 
         const selection = mockSelectionState({ problem: ctx.problem, proposal: { id: doc.id, ...proposal }, uid, at });
         const state = selection.state;
         const target = Math.round(Number(proposal.amount) * 100);
-        const funded = proposal.matching?.fundedMinor || 0;
+        const escrow = usesEscrow(proposal);
+        const funded = escrow ? 0 : proposal.matching?.fundedMinor || 0;
         const eligible = selection.eligible;
         return { id: doc.id, title: proposal.title || "Untitled proposal", currency: proposal.currency,
-          amount: proposal.amount, fundedAmount: funded / 100, matching: { status: state, evaluationComplete: proposal.matching?.evaluationComplete === true,
+          ...(escrow ? { fundingTerms: proposal.fundingTerms } : {}),
+          amount: proposal.amount, fundedAmount: funded / 100, matching: { status: state, evaluationComplete: !escrow && proposal.matching?.evaluationComplete === true,
             evaluationCompletedAt: iso(proposal.matching?.evaluationCompletedAt) },
           canCompleteEvaluation: ctx.isAdmin && open && eligible && !proposal.matching?.evaluationComplete,
-          canDecline: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
+          canDecline: !escrow && matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
             && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && (proposal.researcherId === uid || ctx.problem.ownerId === uid),
           canFund: open && eligible && funded < target && proposal.researcherId !== uid && ctx.funding.length < MAX_CONTRIBUTIONS,
           canSelect: selection.canSelect,
-          canApproveOwner: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
+          canApproveOwner: !escrow && matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
             && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && ctx.problem.ownerId === uid
             && proposal.researcherId !== uid && !matching.ownerApprovedBy,
-          canConfirm: matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
+          canConfirm: !escrow && matching.status === "awaiting_confirmation" && matching.proposalId === doc.id
             && millis(ctx.problem.matching.deadlineAt) > at.toMillis() && proposal.researcherId === uid
             && ctx.problem.ownerId !== uid && !matching.creatorApprovedBy };
       }), contributions: ctx.funding.filter((doc) => doc.data().funderId === uid).map(contributionView) };
@@ -266,11 +279,11 @@ export async function fundMockProposal({ db, uid, problemId, proposalId, amount,
   validId(proposalId, "proposal");
   if (typeof requestId !== "string" || !/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) fail("invalid-argument", "A unique funding request ID is required.");
   const amountMinor = minorUnits(amount);
-  await prepare({ db, uid, problemId, now });
+  await prepare({ db, uid, problemId, proposalId, now });
   const id = createHash("sha256").update(`${uid}:${requestId}`).digest("hex");
   const result = await runContendedTransaction(db, async (tx) => {
     const ref = db.collection("mockFunding").doc(id);
-    const [ctx, previous] = await Promise.all([readContext({ db, tx, problemId, uid, proposalId }), tx.get(ref)]);
+    const [ctx, previous] = await Promise.all([readContext({ db, tx, problemId, uid, proposalId, mockAction: true }), tx.get(ref)]);
     const at = now || Timestamp.now();
     if (previous.exists) {
       const value = previous.data();
@@ -320,9 +333,9 @@ function assertOpen(problem, at) {
 export async function selectMockProposal({ db, uid, problemId, proposalId, rationale, now }) {
   rationale = explanation(rationale, "Selection rationale");
   validId(proposalId, "proposal");
-  await prepare({ db, uid, problemId, now });
+  await prepare({ db, uid, problemId, proposalId, now });
   const result = await runContendedTransaction(db, async (tx) => {
-    const ctx = await readContext({ db, tx, problemId, uid, proposalId });
+    const ctx = await readContext({ db, tx, problemId, uid, proposalId, mockAction: true });
     const at = now || Timestamp.now();
     if (ctx.problem.ownerId !== uid) fail("permission-denied", "Only the problem owner can select a proposal.");
     if (expireContext(tx, ctx, at)) return { expired: true };
@@ -358,9 +371,9 @@ export async function selectMockProposal({ db, uid, problemId, proposalId, ratio
 
 export async function confirmMockProposal({ db, uid, problemId, proposalId, now }) {
   validId(proposalId, "proposal");
-  await prepare({ db, uid, problemId, now });
+  await prepare({ db, uid, problemId, proposalId, now });
   const result = await runContendedTransaction(db, async (tx) => {
-    const ctx = await readContext({ db, tx, problemId, uid, proposalId });
+    const ctx = await readContext({ db, tx, problemId, uid, proposalId, mockAction: true });
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find((doc) => doc.id === proposalId);
     const owner = ctx.problem.ownerId === uid;
@@ -415,9 +428,9 @@ export async function getMockFundingPortfolio({ db, uid, now }) {
 export async function declineMockProposal({ db, uid, problemId, proposalId, reason, now }) {
   validId(proposalId, "proposal");
   reason = explanation(reason, "Decline reason");
-  await prepare({ db, uid, problemId, now });
+  await prepare({ db, uid, problemId, proposalId, now });
   const result = await runContendedTransaction(db, async (tx) => {
-    const ctx = await readContext({ db, tx, problemId, uid, proposalId });
+    const ctx = await readContext({ db, tx, problemId, uid, proposalId, mockAction: true });
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
     const owner = ctx.problem.ownerId === uid;
@@ -437,9 +450,9 @@ export async function declineMockProposal({ db, uid, problemId, proposalId, reas
 
 export async function completeMockEvaluation({ db, uid, problemId, proposalId, now }) {
   validId(proposalId, "proposal");
-  await prepare({ db, uid, problemId, now });
+  await prepare({ db, uid, problemId, proposalId, now });
   return runContendedTransaction(db, async tx => {
-    const ctx = await readContext({ db, tx, problemId, uid, proposalId });
+    const ctx = await readContext({ db, tx, problemId, uid, proposalId, mockAction: true });
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can complete a mock evaluation.");
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find(doc => doc.id === proposalId);
@@ -466,6 +479,7 @@ export async function forceExpireMockMatch({ db, uid, problemId, now }) {
     const ctx = await readContext({ db, tx, problemId, uid });
     if (!ctx.isAdmin) fail("permission-denied", "Only an administrator can force-expire a mock window.");
     if (ctx.problem.matching?.status !== "awaiting_confirmation") return { ok: true, expired: false };
+    requireMockProposal(ctx.proposals.find((doc) => doc.id === ctx.problem.matching.proposalId)?.data());
     invalidateContext(tx, ctx, now || Timestamp.now(), { actorId: uid, type: "admin_force_expired" });
     return { ok: true, expired: true };
   });

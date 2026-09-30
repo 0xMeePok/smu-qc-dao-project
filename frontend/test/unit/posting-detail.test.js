@@ -85,7 +85,11 @@ describe("[QCDAO-54] view posting detail page", () => {
 
   it("[FUT-OPD-125] shows fund, evaluate, moderate and edit only where role and workflow allow it", () => {
     assert.ok(actionIds(OPEN_POSTING, PARTICIPANT).includes("fund"));
-    assert.ok(!actionIds(OPEN_POSTING, { ...PARTICIPANT, id: OWNER }).includes("fund"));
+    assert.ok(actionIds(OPEN_POSTING, { ...PARTICIPANT, id: OWNER }).includes("fund"));
+    for (const blocked of [{ status: "withdrawn" }, { status: "accepted" }, { moderated: true },
+      { moderationStatus: "hidden" }, { acceptedProposalId: "accepted1" }]) {
+      assert.ok(!actionIds({ ...OPEN_POSTING, ...blocked }, PARTICIPANT).includes("fund"));
+    }
     assert.ok(!actionIds({ ...OPEN_POSTING, status: "completed" }, PARTICIPANT).includes("fund"));
     assert.ok(!actionIds({ ...OPEN_POSTING, status: "expired" }, PARTICIPANT).includes("fund"));
     assert.ok(!actionIds({ ...OPEN_POSTING, expiresAt: PAST }, PARTICIPANT).includes("fund"));

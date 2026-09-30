@@ -317,13 +317,13 @@ service cloud.firestore {
     }
 
     function hasProposalSchema(data) {
-      return data.keys().toSet().hasOnly([
+      return data.keys().hasOnly([
         'researcherId', 'problemId', 'title', 'summary', 'amount',
         'status', 'audit', 'createdAt', 'updatedAt',
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
         'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
         'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit',
-        'withdrawalReason'
+        'withdrawalReason', 'fundingPlan', 'fundingTerms'
       ]); // Required fields are checked by value below and in the write rules.
     }
 
@@ -361,7 +361,7 @@ service cloud.firestore {
       // An already-stored receipt may stay as-is, including a legacy
       // `confirmed` value. A changed audit must pass validAuditRecord, which
       // rejects new client `confirmed` writes.
-      return !data.keys().hasAny(['audit'])
+      return !('audit' in data)
         || (resource != null && resource.data.get('audit', {}) == data.audit)
         || validAuditRecord(data.audit);
     }
@@ -384,8 +384,9 @@ service cloud.firestore {
           // queued/submitted/pending/failed stay writable so a known hash is
           // never rebroadcast. The Admin SDK may still store `confirmed`.
           && audit.status in ['queued', 'submitted', 'pending', 'failed']
-          && audit.transactionHash is string
-          && (audit.transactionHash == '' || audit.transactionHash.matches('^0x[0-9a-f]{64}$'))
+          // matches also rejects nonstrings; one check covers empty or bytes32
+          // without re-reading the hash for the heaviest draft publication.
+          && audit.transactionHash.matches('^(0x[0-9a-f]{64})?$')
           && audit.blockNumber is int && audit.blockNumber >= 0
           && audit.attemptCount is int
           && audit.attemptCount >= 0 && audit.attemptCount <= 3
@@ -475,12 +476,6 @@ service cloud.firestore {
         && count <= 2
         && (count < 1 || attachmentEntry(items[0], requireDigest))
         && (count < 2 || attachmentEntry(items[1], requireDigest));
-    }
-
-    function preservesKnownAuditTransactionHash(data) {
-      let storedHash = resource.data.get('audit', {}).get('transactionHash', '');
-      return storedHash == ''
-        || data.get('audit', {}).get('transactionHash', '') == storedHash;
     }
 
     // QCDAO-48 - the technology areas a posting can ask for help in.
@@ -891,13 +886,24 @@ service cloud.firestore {
         && optionalString(data, 'category', 80);
     }
 
+    // Draft-only form fields. Published fundingTerms are validated against the
+    // mined canonical escrow by attestPublication and bound to its exact proof.
+    // correctionTouchesOnlyContent deliberately never permits changing them.
+    function draftFundingPlanIsBounded(data) {
+      let plan = data.get('fundingPlan', {});
+      return !data.keys().hasAny(['fundingTerms'])
+        && (plan == {} || (plan is map && plan.keys().hasOnly(['tranchePercentages', 'reviewDays', 'funderVoting'])
+          && boundedText(plan.tranchePercentages, 80) && boundedText(plan.reviewDays, 40)
+          && plan.funderVoting is bool));
+    }
+
     function validProposal(data) {
       return hasProposalSchema(data)
         && hasValidAudit(data)
         && isWalletAddress(data.researcherId)
         && isNonEmptyString(data.problemId, 128)
         && (data.status == 'draft'
-          ? draftProposalTextIsBounded(data)
+          ? (draftProposalTextIsBounded(data) && draftFundingPlanIsBounded(data))
           : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)))
         // A draft may not have reached the funding question yet. Absent falls
         // back to zero, which is bounded here and rejected by
@@ -915,10 +921,15 @@ service cloud.firestore {
       // Avoiding helper/type checks keeps receipt + two PDFs below 1000 expressions.
       return hasProposalSchema(data)
         && hasValidAudit(data)
+        // Fixed escrow halves also apply to a delayed write using an old proof.
+        // Historical registry records without escrow terms retain their schema.
+        && (!('fundingTerms' in data) || data.fundingTerms.trancheBps == [5000, 5000])
         && (data.problemId.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.problemId.size() <= 128)
         && (data.title.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.title.size() <= 160)
         && (data.summary.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.summary.size() <= 4000)
-        && validAmount(data.amount)
+        // validSubmittedProposal also requires amount > 0. Avoid re-evaluating
+        // that lower bound here on the draft + receipt + two-attachment path.
+        && data.amount is number && data.amount <= 1000000000
         && optionalString(data, 'withdrawalReason', 1000)
         && validAttachments(data, true)
         && validSubmittedProposal(data, proposalId);
@@ -1008,13 +1019,15 @@ service cloud.firestore {
 
     // The receipt guards that apply to every write EXCEPT a correction, which
     // necessarily invalidates the content hash the receipt describes.
-    // preservesKnownAuditTransactionHash stops a known hash being rebroadcast;
-    // the second clause stops a confirmed receipt being edited at all, since
-    // `confirmed` is a server attestation the client cannot re-earn.
+    // A known hash cannot be rebroadcast; a confirmed receipt cannot be edited,
+    // since `confirmed` is a server attestation the client cannot re-earn.
+    // Read the stored receipt once so fixed-split draft promotions carrying two
+    // PDFs stay within the expression budget without repeating these lookups.
     function preservesProposalReceipt(before, after) {
-      return preservesKnownAuditTransactionHash(after)
-        && (before.get('audit', {}).get('status', '') != 'confirmed'
-          || after.get('audit', {}) == before.audit);
+      let storedAudit = before.get('audit', {});
+      let storedHash = storedAudit.get('transactionHash', '');
+      return (storedHash == '' || after.get('audit', {}).get('transactionHash', '') == storedHash)
+        && (storedAudit.get('status', '') != 'confirmed' || after.get('audit', {}) == storedAudit);
     }
 
     // The fields a correction may touch. Deliberately checked as a DIFF rather
@@ -1039,6 +1052,7 @@ service cloud.firestore {
       return before.status == 'submitted'
         && after.status == 'submitted'
         && correctionTouchesOnlyContent(before, after)
+        && (!('fundingTerms' in after) || after.fundingTerms.trancheBps == [5000, 5000])
         // The content hash has moved, so the receipt that was stored no longer
         // describes this record and may not survive the write. Anything still in
         // flight is fine - including `pending` carrying the hash of the
@@ -1328,6 +1342,25 @@ service cloud.firestore {
         && validSlot();
     }
 
+    // Share the proposal ACL with its immutable delivery-evidence documents.
+    function submittedProposalVisibleToMembers(data) {
+      return hasCompletedProfile(request.auth.uid)
+        && data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
+        && !(data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
+        && data.keys().hasAny(['problemId'])
+        && exists(/databases/$(database)/documents/problems/$(data.problemId))
+        && (get(/databases/$(database)/documents/problems/$(data.problemId)).data.ownerId == request.auth.uid
+          || (get(/databases/$(database)/documents/problems/$(data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
+            && !(get(/databases/$(database)/documents/problems/$(data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])));
+    }
+
+    function proposalOwnedByViewer(data) {
+      return isActiveUser(request.auth.uid)
+        && (data.researcherId == request.auth.uid
+          || isModerationAdmin(request.auth.uid)
+          || data.get('postingOwnerId', '') == request.auth.uid);
+    }
+
     match /proposals/{proposalId} {
       // Author, sponsor and admins keep their existing get/list paths. Drafts stay
       // author-only. Submitted (and later) proposals follow the parent problem's
@@ -1340,28 +1373,8 @@ service cloud.firestore {
       // a problemId equality filter, so putting submittedProposalVisibleToMembers
       // on `read` would let any member query every submitted proposal
       // platform-wide. Per-posting lists go through listPostedProposals.
-      function submittedProposalVisibleToMembers() {
-        return hasCompletedProfile(request.auth.uid)
-          && resource.data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
-          && !(resource.data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
-          && resource.data.keys().hasAny(['problemId'])
-          && exists(/databases/$(database)/documents/problems/$(resource.data.problemId))
-          && (
-            get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.ownerId == request.auth.uid
-            || (
-              get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
-              && !(get(/databases/$(database)/documents/problems/$(resource.data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
-            )
-          );
-      }
-      function proposalOwnedByViewer() {
-        return isActiveUser(request.auth.uid)
-          && (resource.data.researcherId == request.auth.uid
-            || isModerationAdmin(request.auth.uid)
-            || resource.data.get('postingOwnerId', '') == request.auth.uid);
-      }
-      allow get: if proposalOwnedByViewer() || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers());
-      allow list: if proposalOwnedByViewer();
+      allow get: if proposalOwnedByViewer(resource.data) || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers(resource.data));
+      allow list: if proposalOwnedByViewer(resource.data);
       allow delete: if isActiveUser(request.auth.uid)
         && resource.data.researcherId == request.auth.uid
         && resource.data.status == 'draft'
@@ -1430,6 +1443,28 @@ service cloud.firestore {
             : validProposalCorrection(before, after))));
       }
       allow update: if proposalUpdateIsAllowed();
+    }
+
+    match /proposals/{proposalId}/deliveryEvidence/{evidenceHash} {
+      function parentProposal() {
+        return get(/databases/$(database)/documents/proposals/$(proposalId)).data;
+      }
+      allow read: if proposalOwnedByViewer(parentProposal())
+        || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers(parentProposal()));
+      allow create: if isActiveUser(request.auth.uid)
+        && hasCompletedProfile(request.auth.uid)
+        && parentProposal().researcherId == request.auth.uid
+        && parentProposal().status != 'draft'
+        && 'fundingTerms' in parentProposal()
+        && evidenceHash.matches('^0x[0-9a-f]{64}$')
+        && request.resource.data.keys().hasOnly(['summary', 'url', 'ownerId', 'createdAt'])
+        && request.resource.data.keys().hasAll(['summary', 'url', 'ownerId', 'createdAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && isNonEmptyString(request.resource.data.summary, 4000)
+        && request.resource.data.url is string && request.resource.data.url.size() <= 2048
+        && request.resource.data.url.matches('^https://[^\\s]+$')
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
     }
 
     match /proposals/{proposalId}/revisions/{revisionId} {

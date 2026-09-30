@@ -19,6 +19,9 @@ import { PostingProposals } from "../components/PostingProposals.jsx";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
 import { ProposalComparison } from "../components/ProposalComparison.jsx";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
+import { readPostingFundingStarted } from "../lib/escrow.js";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { isModerated } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
 import { ReportableComments } from "../components/ReportableComments.jsx";
@@ -248,9 +251,15 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     let anchored = anchoredWithdrawal;
     try {
       if (!anchored) {
-        const current = await getMockMatching(posting.id);
-        if (problemMatchingLocked({ matching: current.matching })) {
+        let fundingStarted;
+        if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && posting.audit?.transactionHash) {
+          fundingStarted = await readPostingFundingStarted(posting);
+        } else {
+          const current = await getMockMatching(posting.id);
+          fundingStarted = problemMatchingLocked({ matching: current.matching });
           setPosting((previous) => ({ ...previous, matching: current.matching }));
+        }
+        if (fundingStarted) {
           setConfirm(false);
           setError("Funding or matching has started. This opportunity can no longer be withdrawn.");
           return;

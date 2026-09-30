@@ -2,6 +2,11 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+// These frozen content fixtures predate escrow terms. Keep their legacy checks
+// while escrow-verification.test.jsx checks the additional immutable terms.
+vi.mock("../../src/config/auditRegistry.contract.json", async () => ({ default: (await import("../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json")).default }));
+vi.mock("../../../firebase/functions/auditRegistry.contract.json", async () => ({ default: (await import("../../../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json")).default }));
+
 const mocks = vi.hoisted(() => ({ server: null, getServer: vi.fn(), getCached: vi.fn() }));
 vi.mock("../../src/lib/firebase.js", () => ({ db: {}, functions: null }));
 vi.mock("../../src/lib/authFlow.js", () => ({ requireFirebase: vi.fn() }));
@@ -17,6 +22,7 @@ import { preparePostingAudit, postingAuditReceipt, readPostingAudit } from "../.
 import { prepareFundingOpportunityAudit, fundingOpportunityAuditReceipt, readFundingOpportunityAudit } from "../../src/lib/fundingOpportunityAudit.js";
 import { proposalAuditReceipt, readProposalAudit } from "../../src/lib/proposalAudit.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
+import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 
 const account = `0x${"a".repeat(40)}`;
 const base = {
@@ -44,7 +50,8 @@ function adaptersFor(prepared) {
     if (functionName === "anchorCount") return 1n;
     if (functionName === "anchorAt") return { contentHash: prepared.anchorHash };
     throw new Error(`Unexpected read: ${functionName}`);
-  }), writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() };
+  }), getTransaction: async ({ hash }) => ({ hash, to: AUDIT_REGISTRY_CONFIG.address, chainId: 421614 }),
+  writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() };
 }
 
 beforeEach(() => {
