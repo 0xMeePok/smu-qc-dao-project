@@ -1,4 +1,5 @@
 import CreateProposalPage from "./pages/CreateProposalPage.jsx";
+import CreateIndependentProposalPage from "./pages/CreateIndependentProposalPage.jsx";
 import ProposalDetailPage from "./pages/ProposalDetailPage.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunityTypes } from "./data.js";
@@ -816,6 +817,12 @@ function AppContent() {
         onNavigate={go}
       >
         <ProfilePage onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "create-proposal") {
+    pageComponent = (
+      <RouteGuard targetRoute={fullPath} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
+        <CreateIndependentProposalPage key={id ?? "new"} resumeId={id} onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "submit-proposal" || section === "edit-proposal" || section === "proposal") {

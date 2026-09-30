@@ -1,7 +1,12 @@
 import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
 import { assertCurrentAuditRecord, configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
-import { commitProposalAudit, prepareProposalWithdrawal, readOpportunityRevisionIndex, readProposalHashes, readProposalIsAnchored, updateProposalAudit, verifyProposalAudit, withdrawProposalAudit } from "./auditRegistry.js";
+import {
+  commitProposalAudit, prepareProposalWithdrawal, readOpportunityRevisionIndex, readProposalHashes,
+  readProposalIsAnchored, updateProposalAudit, verifyProposalAudit, withdrawProposalAudit,
+  writeOpportunityAudit,
+} from "./auditRegistry.js";
 import { findProposal, updateProposalReceipt } from "./proposals.js";
+import { isIndependentProposal } from "../../../firebase/functions/independentProposal.js";
 
 export { proposalAuditPayload } from "../../../firebase/functions/proposalAuditPayload.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
@@ -54,9 +59,21 @@ const flow = createOpportunityAuditFlow({
     useRecordedOpportunityRevision: true,
   }),
 });
+
+const independentFlow = createOpportunityAuditFlow({
+  entityLabel: "proposal",
+  persistAudit: updateProposalReceipt,
+  prepareCommit: prepareStoredProposal,
+  loadRecord: findProposal,
+  persistConfirmed: true,
+  enforceWalletRetryLimit: true,
+  commitAudit: writeOpportunityAudit,
+});
+
 export function proposalAuditReceipt(record) {
   try {
-    const receipt = flow.receipt(record);
+    const active = isIndependentProposal(record) ? independentFlow : flow;
+    const receipt = active.receipt(record);
     if (!receipt) return null;
     try {
       const prepared = prepareStoredProposal(record);
@@ -65,10 +82,13 @@ export function proposalAuditReceipt(record) {
     catch { return receipt; }
   } catch { return null; }
 }
-export const anchorProposalAudit = flow.anchor;
+export const anchorProposalAudit = (record, options) => (
+  isIndependentProposal(record) ? independentFlow.anchor(record, options) : flow.anchor(record, options)
+);
 
 export function anchorProposalBeforeWrite(record, options = {}) {
-  return flow.anchor(record, { ...options, persistReceipt: false });
+  const active = isIndependentProposal(record) ? independentFlow : flow;
+  return active.anchor(record, { ...options, persistReceipt: false });
 }
 
 /**
@@ -94,4 +114,6 @@ export async function anchorProposalWithdrawal(record, { account, adapters, reas
     { address, account, adapters, onStatus },
   );
 }
-export const readProposalAudit = flow.read;
+export const readProposalAudit = (record, options) => (
+  isIndependentProposal(record) ? independentFlow.read(record, options) : flow.read(record, options)
+);
