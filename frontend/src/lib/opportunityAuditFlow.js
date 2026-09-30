@@ -135,13 +135,14 @@ export function createOpportunityAuditFlow({
     // Edit forms prepare a new receipt and may omit the original transaction.
     // Check the stored document before a write so that cannot reanchor history.
     if (!persistReceipt && loadRecord) {
+      let stored = null;
       try {
-        const stored = await loadRecord(opportunity.id, { fromServer: true });
-        if (stored?.audit?.transactionHash) await assertCurrentAuditRecord(stored, { adapters });
+        stored = await loadRecord(opportunity.id, { fromServer: true });
       } catch {
         // Creates have no stored record yet. Firestore denies get() of a missing
         // proposals/{id}, which must not block the wallet step.
       }
+      if (stored?.audit?.transactionHash) await assertCurrentAuditRecord(stored, { adapters });
     }
     const registryConfig = await recordAuditDeployment(opportunity, { adapters });
     if (!persistReceipt) assertActiveAuditDeployment(registryConfig, AUDIT_REGISTRY_CONFIG);

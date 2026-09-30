@@ -11,8 +11,11 @@ it("loads the shared publication validator without Functions dependencies", asyn
   // inheriting this repository's package.json module settings.
   const directory = await mkdtemp(join(tmpdir(), "qcdao-publication-validator-"));
   try {
+    const functionsDir = new URL("../functions/", import.meta.url);
+    await copyFile(new URL("publicationValidation.js", functionsDir), join(directory, "publicationValidation.mjs"));
+    await copyFile(new URL("independentProposal.js", functionsDir), join(directory, "independentProposal.js"));
+    await copyFile(new URL("opportunityExpiry.js", functionsDir), join(directory, "opportunityExpiry.js"));
     const file = join(directory, "publicationValidation.mjs");
-    await copyFile(new URL("../functions/publicationValidation.js", import.meta.url), file);
     const { PUBLISH_VALIDATION, isPublishableProblem } = await import(pathToFileURL(file).href);
     assert.equal(PUBLISH_VALIDATION, "problem-publish-v1");
     assert.equal(isPublishableProblem({}, {}), false);

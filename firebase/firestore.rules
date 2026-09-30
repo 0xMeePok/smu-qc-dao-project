@@ -323,9 +323,18 @@ service cloud.firestore {
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
         'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
         'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit',
+        'withdrawalReason', 'fundingPlan', 'fundingTerms'
+      ]); // Required fields are checked by value below and in the write rules.
+    }
+
+    function hasIndependentProposalSchema(data) {
+      return data.keys().hasOnly([
+        'researcherId', 'title', 'summary', 'amount',
+        'status', 'audit', 'createdAt', 'updatedAt',
+        'category', 'currency', 'attachments', 'methodology', 'team',
         'withdrawalReason', 'fundingPlan', 'fundingTerms',
         'proposalKind', 'expiresAt', 'addressedProblems', 'maturity'
-      ]); // Required fields are checked by value below and in the write rules.
+      ]);
     }
 
     function hasEvaluationSchema(data) {
@@ -362,12 +371,40 @@ service cloud.firestore {
       // An already-stored receipt may stay as-is, including a legacy
       // `confirmed` value. A changed audit must pass validAuditRecord, which
       // rejects new client `confirmed` writes.
+      // Scheme 1 vs 2 is bound on the proposal write that already knows the
+      // listing kind. Putting that equality here made every 2-PDF publish pay
+      // for isIndependentProposal, including attached problem/proposal receipts
+      // that were already at Firestore's 1000-expression cap.
       return !('audit' in data)
         || (resource != null && resource.data.get('audit', {}) == data.audit)
-        || (validAuditRecord(data.audit)
-          && (isIndependentProposal(data)
-            ? data.audit.schemaVersion == 2
-            : data.audit.schemaVersion == 1));
+        || validAuditRecord(data.audit);
+    }
+
+    // Independent listings use AuditRegistry hash scheme 2. Kept off
+    // validAuditRecord so attached 2-PDF publishes still pay schemaVersion == 1.
+    function validIndependentAuditRecord(audit) {
+      return (audit is map
+          && audit.keys().size() == 9
+          && audit.schemaVersion == 2
+          && audit.chainId == 421614
+          && audit.entityId.matches('^0x[0-9a-f]{64}$')
+          && audit.contentHash.matches('^0x[0-9a-f]{64}$')
+          && audit.status in ['queued', 'submitted', 'pending', 'failed']
+          && audit.transactionHash.matches('^(0x[0-9a-f]{64})?$')
+          && audit.blockNumber is int && audit.blockNumber >= 0
+          && audit.attemptCount is int
+          && audit.attemptCount >= 0 && audit.attemptCount <= 3
+          && audit.lastError is string && audit.lastError.size() <= 500
+          && (audit.status != 'queued'
+            || (audit.transactionHash == '' && audit.blockNumber == 0))
+          && (!(audit.status in ['submitted', 'pending'])
+            || audit.transactionHash != ''));
+    }
+
+    function hasValidIndependentAudit(data) {
+      return !('audit' in data)
+        || (resource != null && resource.data.get('audit', {}) == data.audit)
+        || validIndependentAuditRecord(data.audit);
     }
 
     function validAuditRecord(audit) {
@@ -378,7 +415,7 @@ service cloud.firestore {
           // Equivalent: every one of the nine is checked by name below, so an
           // unknown key can only fit by displacing one, and that check then fails.
           && audit.keys().size() == 9
-          && audit.schemaVersion in [1, 2]
+          && audit.schemaVersion == 1
           && audit.chainId == 421614
           && audit.entityId.matches('^0x[0-9a-f]{64}$')
           && audit.contentHash.matches('^0x[0-9a-f]{64}$')
@@ -923,8 +960,8 @@ service cloud.firestore {
     }
 
     function validIndependentProposalSubmission(data) {
-      return hasProposalSchema(data)
-        && hasValidAudit(data)
+      return hasIndependentProposalSchema(data)
+        && hasValidIndependentAudit(data)
         && isIndependentProposal(data)
         && !data.keys().hasAny(['problemId', 'postingOwnerId', 'opportunityType'])
         && (!('fundingTerms' in data) || data.fundingTerms.trancheBps == [5000, 5000])
@@ -944,23 +981,26 @@ service cloud.firestore {
     }
 
     function validProposal(data) {
-      return hasProposalSchema(data)
-        && hasValidAudit(data)
-        && isWalletAddress(data.researcherId)
-        && (isIndependentProposal(data)
-          ? validIndependentProposal(data)
-          : (!data.keys().hasAny(['proposalKind'])
-            && isNonEmptyString(data.problemId, 128)
-            && (data.status == 'draft'
-              ? (draftProposalTextIsBounded(data) && draftFundingPlanIsBounded(data))
-              : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)))))
-        // A draft may not have reached the funding question yet. Absent falls
-        // back to zero, which is bounded here and rejected by
-        // validSubmittedProposal's `amount > 0` on every path that leaves draft.
-        && validAmount(data.get('amount', 0))
-        && validProposalStatus(data.status)
-        && trustedPostingOwner(data)
-        && optionalString(data, 'withdrawalReason', 1000);
+      return (hasProposalSchema(data)
+          && hasValidAudit(data)
+          && isWalletAddress(data.researcherId)
+          && isNonEmptyString(data.problemId, 128)
+          && (data.status == 'draft'
+            ? (draftProposalTextIsBounded(data) && draftFundingPlanIsBounded(data))
+            : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)))
+          && validAmount(data.get('amount', 0))
+          && validProposalStatus(data.status)
+          && trustedPostingOwner(data)
+          && optionalString(data, 'withdrawalReason', 1000))
+        || (isIndependentProposal(data)
+          && hasIndependentProposalSchema(data)
+          && hasValidIndependentAudit(data)
+          && validIndependentProposal(data)
+          && isWalletAddress(data.researcherId)
+          && validAmount(data.get('amount', 0))
+          && validProposalStatus(data.status)
+          && trustedPostingOwner(data)
+          && optionalString(data, 'withdrawalReason', 1000));
     }
 
     function validProposalSubmission(data, proposalId) {
@@ -1044,9 +1084,8 @@ service cloud.firestore {
       return (matching.get('fundedMinor', 0) == 0
           && !matching.get('evaluationComplete', false)
           && !(matching.get('status', '') in ['awaiting_confirmation', 'confirmed', 'voided', 'cancelled', 'declined'])
-          && (isIndependentProposal(before)
-            || get(/databases/$(database)/documents/problems/$(before.problemId)).data
-              .get('matching', {}).get('status', 'open') == 'open'))
+          && get(/databases/$(database)/documents/problems/$(before.problemId)).data
+            .get('matching', {}).get('status', 'open') == 'open')
         || after.diff(before).affectedKeys().hasOnly(['audit', 'updatedAt']);
     }
 
@@ -1115,7 +1154,7 @@ service cloud.firestore {
         && independentCorrectionTouchesOnlyContent(before, after)
         && (!('fundingTerms' in after) || after.fundingTerms.trancheBps == [5000, 5000])
         && after.get('audit', {}).get('status', 'queued') != 'confirmed'
-        && hasValidAudit(after)
+        && hasValidIndependentAudit(after)
         && (!before.keys().hasAny(['audit']) || after.keys().hasAny(['audit']))
         && isNonEmptyString(after.title, 160)
         && isNonEmptyString(after.summary, 4000)
@@ -1129,9 +1168,7 @@ service cloud.firestore {
     }
 
     function validProposalCorrection(before, after) {
-      return isIndependentProposal(after)
-        ? validIndependentProposalCorrection(before, after)
-        : (before.status == 'submitted'
+      return before.status == 'submitted'
         && after.status == 'submitted'
         && correctionTouchesOnlyContent(before, after)
         && (!('fundingTerms' in after) || after.fundingTerms.trancheBps == [5000, 5000])
@@ -1176,7 +1213,7 @@ service cloud.firestore {
         // Unchanged attachments were validated when they were attached. Every
         // proposal that reached `submitted` carried digests, so a replaced list
         // is held to that standard, not the four-field legacy shape.
-        && (after.attachments == before.attachments || validAttachments(after, true)));
+        && (after.attachments == before.attachments || validAttachments(after, true));
     }
 
     function validEvaluationStatus(status) {
@@ -1318,7 +1355,7 @@ service cloud.firestore {
         && proof.get('validation', '') == 'independent-proposal-publish-v1'
         && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
         && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit'])
-        && hasValidAudit(data)
+        && hasValidIndependentAudit(data)
         && data.status == 'submitted'
         && expiryInDocumentedRange(data.expiresAt);
     }
@@ -1498,22 +1535,51 @@ service cloud.firestore {
         && data.researcherId == uid
         && data.createdAt == request.time
         && data.updatedAt == request.time
-        // Two mutually exclusive shapes, so a create pays for one of them. See
-        // validProposalSubmission for why the submitted path is not validProposal.
-        && (data.status == 'draft'
+        // Attached creates keep the pre-independent ternary so a 2-PDF submit
+        // stays inside the expression cap. Independent is a separate arm that
+        // attached success never evaluates.
+        && ((data.status == 'draft'
           ? (validProposal(data)
             && validAttachments(data, false)
-            && (isIndependentProposal(data)
-              || exists(/databases/$(database)/documents/problems/$(data.problemId))))
+            && exists(/databases/$(database)/documents/problems/$(data.problemId)))
           : (data.status == 'submitted'
-            && (isIndependentProposal(data)
-              ? attestedIndependentPublish(proposalId, data)
-              : validProposalSubmission(data, proposalId))));
+            && validProposalSubmission(data, proposalId)))
+          || (isIndependentProposal(data)
+            && ((data.status == 'draft'
+              && validProposal(data)
+              && validAttachments(data, false))
+              || (data.status == 'submitted'
+                && attestedIndependentPublish(proposalId, data)))));
       }
       allow create: if proposalCreateIsAllowed();
       // Submitted proposals may update `audit` so a known transaction hash is
       // never rebroadcast. `confirmed` is not client-writable; validProposal
       // rejects it so a researcher cannot mint a sponsor-facing receipt.
+      function independentProposalUpdateIsAllowed(before, after) {
+        return isIndependentProposal(before)
+          && isIndependentProposal(after)
+          && ((before.status == 'draft'
+            && preservesProposalReceipt(before, after)
+            && ((after.status == 'submitted'
+              && attestedIndependentPublish(proposalId, after))
+              || (after.status in ['draft', 'withdrawn']
+                && validProposal(after)
+                && validAttachments(after, false))))
+            || (before.status != 'draft'
+              && (before.get('matching', {}).get('fundedMinor', 0) == 0
+                && !before.get('matching', {}).get('evaluationComplete', false)
+                && !(before.get('matching', {}).get('status', '') in ['awaiting_confirmation', 'confirmed', 'voided', 'cancelled', 'declined'])
+                || after.diff(before).affectedKeys().hasOnly(['audit', 'updatedAt']))
+              && ((proposalWorkflowWrite(before, after)
+                && hasValidIndependentAudit(after)
+                && validProposalStatus(after.status)
+                && preservesProposalReceipt(before, after)
+                && (after.status == before.status
+                  || (before.status in ['submitted', 'under_review']
+                    && after.status == 'withdrawn')))
+                || (!proposalWorkflowWrite(before, after)
+                  && validIndependentProposalCorrection(before, after)))));
+      }
       function proposalUpdateIsAllowed() {
         let before = resource.data;
         let after = request.resource.data;
@@ -1522,39 +1588,30 @@ service cloud.firestore {
         && publicationWriteAllowed("proposals", proposalId, after)
         && before.researcherId == uid
         && after.researcherId == before.researcherId
-        && after.get('problemId', '') == before.get('problemId', '')
-        && after.get('proposalKind', '') == before.get('proposalKind', '')
         && after.createdAt == before.createdAt
         && after.updatedAt == request.time
         && validProposalWithdrawal(before, after)
-        // Three mutually exclusive shapes, and each write pays for only its own.
-        // The content checks in particular are NOT hoisted out: re-validating an
-        // untouched document on a withdrawal - twenty-seven schema keys, every
-        // text bound and both attachment entries - is what pushed withdrawing a
-        // two-attachment proposal past Firestore's 1000-expression cap. The
-        // workflow branch is safe without them because proposalWorkflowWrite has
-        // already proved that nothing outside those four keys moved.
-        && (before.status == 'draft'
-          ? (preservesProposalReceipt(before, after)
-            && (after.status == 'submitted'
-              ? (isIndependentProposal(after)
-                ? attestedIndependentPublish(proposalId, after)
-                : validProposalSubmission(after, proposalId))
-              : (after.status in ['draft', 'withdrawn']
-                && validProposal(after)
-                && validAttachments(after, false))))
-          : (preservesMockProposalCommitment(before, after)
-            && (proposalWorkflowWrite(before, after)
-            // Only the two fields this write may actually move are checked.
-            // withdrawalReason is bounded by validProposalWithdrawal above.
-            ? (hasValidAudit(after)
-              && validProposalStatus(after.status)
-              && preservesProposalReceipt(before, after)
-              && (after.status == before.status
-                || (before.status in ['submitted', 'under_review']
-                  && after.status == 'withdrawn')))
-            // A correction validates its own shape; see validProposalCorrection.
-            : validProposalCorrection(before, after))));
+        // Attached updates are the original ternary, including after.problemId.
+        // Independent listings omit problemId, so they use the other arm.
+        && (('problemId' in before
+          && after.problemId == before.problemId
+          && (before.status == 'draft'
+            ? (preservesProposalReceipt(before, after)
+              && (after.status == 'submitted'
+                ? validProposalSubmission(after, proposalId)
+                : (after.status in ['draft', 'withdrawn']
+                  && validProposal(after)
+                  && validAttachments(after, false))))
+            : (preservesMockProposalCommitment(before, after)
+              && (proposalWorkflowWrite(before, after)
+              ? (hasValidAudit(after)
+                && validProposalStatus(after.status)
+                && preservesProposalReceipt(before, after)
+                && (after.status == before.status
+                  || (before.status in ['submitted', 'under_review']
+                    && after.status == 'withdrawn')))
+              : validProposalCorrection(before, after)))))
+          || independentProposalUpdateIsAllowed(before, after));
       }
       allow update: if proposalUpdateIsAllowed();
     }
