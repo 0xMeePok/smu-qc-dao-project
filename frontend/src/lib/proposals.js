@@ -309,6 +309,11 @@ export async function updateProposalReceipt({ recordId, audit }) {
   await updateDoc(proposalRef(recordId), { audit, updatedAt: serverTimestamp() });
 }
 
+export async function listIndependentListings({ cursor = null } = {}) {
+  requireFirebase();
+  return (await httpsCallable(functions, "listIndependentListings")(cursor ? { cursor } : {})).data;
+}
+
 export async function listProposals(field, uid) {
   requireFirebase();
   const snapshot = await getDocs(query(collection(db, "proposals"), where(field, "==", uid.toLowerCase())));

@@ -1397,11 +1397,12 @@ service cloud.firestore {
       return hasCompletedProfile(request.auth.uid)
         && data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
         && !(data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
-        && data.keys().hasAny(['problemId'])
-        && exists(/databases/$(database)/documents/problems/$(data.problemId))
-        && (get(/databases/$(database)/documents/problems/$(data.problemId)).data.ownerId == request.auth.uid
-          || (get(/databases/$(database)/documents/problems/$(data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
-            && !(get(/databases/$(database)/documents/problems/$(data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])));
+        && (isIndependentProposal(data)
+          || (data.keys().hasAny(['problemId'])
+            && exists(/databases/$(database)/documents/problems/$(data.problemId))
+            && (get(/databases/$(database)/documents/problems/$(data.problemId)).data.ownerId == request.auth.uid
+              || (get(/databases/$(database)/documents/problems/$(data.problemId)).data.status in ['submitted', 'open', 'cancelled', 'expired']
+                && !(get(/databases/$(database)/documents/problems/$(data.problemId)).data.get('moderationStatus', 'visible') in ['hidden', 'removed'])))));
     }
 
     function proposalOwnedByViewer(data) {
@@ -1423,6 +1424,8 @@ service cloud.firestore {
       // a problemId equality filter, so putting submittedProposalVisibleToMembers
       // on `read` would let any member query every submitted proposal
       // platform-wide. Per-posting lists go through listPostedProposals.
+      // Independent listings have no parent: members get() a published record by
+      // id, and the unexpired catalog is listIndependentListings.
       allow get: if proposalOwnedByViewer(resource.data) || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers(resource.data));
       allow list: if proposalOwnedByViewer(resource.data);
       allow delete: if isActiveUser(request.auth.uid)

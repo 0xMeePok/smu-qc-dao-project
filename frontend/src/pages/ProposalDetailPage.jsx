@@ -17,12 +17,13 @@ import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
 import { OwnerReviewPanel } from "../components/OwnerReviewPanel.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
-import { PROPOSAL_CATEGORIES } from "../config/proposal.js";
+import { PROPOSAL_CATEGORIES, PROPOSAL_MATURITY_LEVELS, isIndependentProposal } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
 import { getMockMatching, mergeMatchingState, proposalFundingStatus, proposalMatchingLocked } from "../lib/matching.js";
 import { recommendationCounts, recommendationEntries } from "../config/workflowStatus.js";
 import { EvaluationBadges, StatusBadge } from "../components/StatusBadge.jsx";
+import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { isModerated } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
 import { ReportableComments } from "../components/ReportableComments.jsx";
@@ -160,14 +161,15 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   if (loading) return <section className="page empty" role="status">Loading proposal…</section>;
   if (!proposal) return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p><button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
   const isOpenFunding = proposal.opportunityType === OPEN_FUNDING_TYPE;
+  const independent = isIndependentProposal(proposal);
   const sponsors = Boolean(user?.id && proposal.postingOwnerId === user.id.toLowerCase());
-  const backRoute = owns ? "proposals" : sponsors ? "my-problems" : `posting/${proposal.problemId}`;
-  const backLabel = owns ? "Back to my proposals" : sponsors ? "Back to my problems" : "Back to opportunity";
-  const showCollaboration = proposal.status !== "draft" && !isModerated(proposal);
+  const backRoute = owns ? "proposals" : independent ? "solutions" : sponsors ? "my-problems" : `posting/${proposal.problemId}`;
+  const backLabel = owns ? "Back to my proposals" : independent ? "Back to independent listings" : sponsors ? "Back to my problems" : "Back to opportunity";
+  const showCollaboration = !independent && proposal.status !== "draft" && !isModerated(proposal);
   const showEscrow = proposal.status !== "draft" && Boolean(proposal.fundingTerms);
   const showFunding = showEscrow || showCollaboration;
-  const reviewers = owns || sponsors;
-  const canReview = sponsors && !owns;
+  const reviewers = owns || (!independent && sponsors);
+  const canReview = !independent && sponsors && !owns;
   const tabs = [
     ["overview", "Overview"],
     ...(showFunding ? [["funding", showEscrow ? "Escrow & funding" : "Match & funding"]] : []),
@@ -187,18 +189,18 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const funding = proposalFundingStatus(proposal);
   return <section className="page detail-page blotter-posting">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
-    {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">Proposal submitted successfully. <button type="button" className="text-button" onClick={openRecord}>Check its on-chain verification</button> under Record.</p>}
+    {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">{independent ? "Independent listing published successfully." : "Proposal submitted successfully."} <button type="button" className="text-button" onClick={openRecord}>Check its on-chain verification</button> under Record.</p>}
     {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
     <div className="detail-layout"><article className="detail-main">
       <div className="blotter-title">
         <div>
-          <span className="eyebrow">{isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
+          <span className="eyebrow">{independent ? "Independent listing" : isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
           <h1>{proposal.title}</h1>
         </div>
         <div className="trust-status-row">
           {proposal.fundingTerms ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}
           {funding.detail && <span className="funding-note">{funding.detail}</span>}
-          {proposal.status !== "draft" && <EvaluationBadges counts={recommendationCounts(proposal)} />}
+          {proposal.status !== "draft" && !independent && <EvaluationBadges counts={recommendationCounts(proposal)} />}
           <VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending />
         </div>
       </div>
@@ -223,6 +225,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {proposal.status === "withdrawn" && <DetailGroup title="Withdrawal">
           <DetailItem heading="Withdrawal reason">{proposal.withdrawalReason}</DetailItem>
         </DetailGroup>}
+        {independent ? <>
+          <DetailGroup title="The solution">
+            <DetailItem heading="Technical approach">{proposal.methodology}</DetailItem>
+            <DetailItem heading="Problems this could address">{proposal.addressedProblems}</DetailItem>
+            <DetailItem heading="Team and relevant experience">{proposal.team}</DetailItem>
+          </DetailGroup>
+        </> : <>
         {isOpenFunding && <>
           <p className="field-hint posting-tab-note">The funder acts as the problem owner for selection. This proposal follows the same funding, selection and approval process as other solution proposals.</p>
           <DetailGroup title="The problem">
@@ -244,6 +253,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
           <DetailItem heading="Milestones and deliverables">{proposal.milestones}</DetailItem>
           <DetailItem heading="Team and relevant experience">{proposal.team}</DetailItem>
         </DetailGroup>
+        </>}
         {proposal.fundingTerms && <DetailGroup title="Escrow payment plan">
           <DetailItem heading="Payment percentages">{proposal.fundingTerms.trancheBps.map(bps => `${bps / 100}%`).join(" / ")}</DetailItem>
           <DetailItem heading="Approval windows">{proposal.fundingTerms.reviewWindows.map(seconds => `${seconds / 86400} days`).join(" / ")}</DetailItem>
@@ -253,7 +263,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {/* The sponsor's feedback (for the author) and comments render nothing
             when there are none, so they follow the proposal instead of an
             usually empty tab. */}
-        {owns && <OwnerReviewPanel proposalId={proposal.id} revisionPathOpen={proposal.status === "submitted" && !locked} />}
+        {owns && !independent && <OwnerReviewPanel proposalId={proposal.id} revisionPathOpen={proposal.status === "submitted" && !locked} />}
         {showCollaboration && <>
           <ReportableComments problemId={proposal.problemId} proposalId={proposal.id} authorId={proposal.researcherId}
             recommenders={Object.keys(recommendationEntries(proposal))} onRecommendationChange={reloadProposal} />
@@ -277,14 +287,16 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
         {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
       </div>
-    </article><aside className="context-panel"><span className="eyebrow">Requested</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl><button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>
+    </article><aside className="context-panel"><span className="eyebrow">{independent ? "Indicative funding" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd>{independent && <><dt>Maturity</dt><dd>{PROPOSAL_MATURITY_LEVELS.find((item) => item.value === proposal.maturity)?.label || "—"}</dd></>}<dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></dl>
+      {independent && <ExpiryCountdown expiresAt={proposal.expiresAt} status={proposal.status} />}
+      {!independent && <button className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>}
       {showEscrow && <button className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
-          that point on. */}
-      {owns && !locked && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
-      {owns && !locked && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
-      {owns && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(`submit-proposal/${proposal.problemId}`)}>Submit a replacement</button>}
+          that point on. Independent edit/withdraw is a later listing workflow. */}
+      {owns && !independent && !locked && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
+      {owns && !independent && !locked && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
+      {owns && !independent && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(`submit-proposal/${proposal.problemId}`)}>Submit a replacement</button>}
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>

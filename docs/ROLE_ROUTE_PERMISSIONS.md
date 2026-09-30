@@ -25,6 +25,7 @@ Access evaluation uses set intersection: an authenticated user is granted access
 |---|---|:---:|:---:|:---:|---|
 | `#/home` | Platform Landing & Hero | Allow | Allow | Allow | None (Public) |
 | `#/discover` | Explore Opportunities | Allow | Allow | Allow | None (Public) |
+| `#/solutions` | Browse Independent Solution Listings | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
 | `#/opportunity/:id` | Opportunity Detail | Allow | Allow | Allow | None (Public) |
 | `#/login` | Role Authentication | Allow | Redirect to Home | Redirect to Home | Preserves ?redirect= param |
 | `#/create` | Publish Problem Statement / Brief | 401 Redirect | Allow (All 3 Brief Types) | 403 Forbidden | 401 Redirect / 403 Access Denied |
@@ -51,6 +52,7 @@ Each user sees navigation links corresponding to their granted capabilities:
 - **Multi-Role Platform Member (`owner + researcher + evaluator + funder`)**:
   - `Home` (`#/home`)
   - `Discover` (`#/discover`)
+  - `Solutions` (`#/solutions`)
   - `Create Brief` (`#/create`)
   - `Action Needed` (`#/actions`)
   - `My Problems` (`#/my-problems`)

@@ -43,6 +43,7 @@ import { createComment as writeComment, editComment as amendComment,
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
 import { listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
+import { listIndependentListings as independentListings } from "./independentProposalCatalog.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
@@ -198,6 +199,11 @@ export const { submitContentReport, listModerationQueue, getModerationContext, m
 export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return listPostedProposalsForProblem({ db, uid, problemId: request.data?.problemId });
+});
+
+export const listIndependentListings = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  await requireMember(request);
+  return independentListings({ db, cursor: request.data?.cursor ?? null });
 });
 
 export const getProposalComparison = onCall(MEMBER_CALL_OPTIONS, async (request) => {

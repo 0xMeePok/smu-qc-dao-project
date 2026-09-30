@@ -29,6 +29,10 @@ because `commitProposal` requires a live parent opportunity. Attached proposals
 keep hash scheme 1 and their frozen v1 field list; adding independent fields
 must not change those historical hashes.
 
+Onboarded members browse published, unexpired independent listings through the
+`listIndependentListings` callable. Client `list` on `proposals` stays
+author/sponsor-only; members `get` a published independent record by id.
+
 A `problems` document in `submitted` or `open` must additionally carry every
 required published-content field for its type, with non-empty text, at least one
 category, an amount above zero, a future expiry, and an `organisation` matching the
