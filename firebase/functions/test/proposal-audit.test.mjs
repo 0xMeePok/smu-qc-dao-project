@@ -108,6 +108,13 @@ describe("QCDAO-75 proposal golden vectors", () => {
 });
 
 describe("QCDAO-76/78 trusted proposal confirmation", () => {
+  it("resolves a pre-escrow receipt after the active deployment changes, without inventing funding terms", async () => {
+    const record = fixture();
+    const result = await verifyMined(record, clientFor(record));
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.entityId, prepareStoredProposal(record).entityId);
+    assert.equal(record.fundingTerms, undefined);
+  });
   for (const type of ["business-problem", "open-funding"]) it(`confirms a matching ${type} transaction`, async () => {
     const record = fixture(type);
     const result = await verifyMinedProposal(record, clientFor(record));
@@ -204,6 +211,14 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
 });
 
 describe("QCDAO-79 durable recovery", () => {
+  it("recovers an old deployment job using its original preparation rules after cutover", async () => {
+    const record = fixture(), { db, records } = store(record), now = Timestamp.fromMillis(1000);
+    await enqueueProposalAudit({ db, record, now });
+    await recover({ db, client: clientFor(record), proposalId: record.id, now, Timestamp });
+    assert.equal(records.get(`proposals/${record.id}`).audit.status, "confirmed");
+    assert.equal(records.get(`proposalAuditJobs/${record.id}`).status, "confirmed");
+    assert.equal(records.get(`proposals/${record.id}`).fundingTerms, undefined);
+  });
   it("persists confirmation and makes duplicate enqueue delivery idempotent", async () => {
     const record = fixture(), { db, records } = store(record), now = Timestamp.fromMillis(1000);
     await enqueueProposalAudit({ db, record, now });

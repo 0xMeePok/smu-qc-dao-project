@@ -21,7 +21,8 @@ export default function ArchitectureHelpPage({ onNavigate }) {
           proposal is published, a hash of that version is written to a smart
           contract on Arbitrum Sepolia. Independent parties can check that the
           current record still matches the hash without putting the text itself
-          on-chain.
+          on-chain. For escrow proposals, mock token deposits, owner approvals
+          and payouts are also recorded on-chain.
         </p>
       </div>
 
@@ -38,9 +39,9 @@ export default function ArchitectureHelpPage({ onNavigate }) {
       <div className="detail-section" id="workflow-status">
         <h2>Workflow status reference</h2>
         <p>
-          Every card, table, detail page, dashboard, audit trail and notification
-          shows a status from this one list. Hover or focus a badge anywhere to see
-          what it means and what happens next.
+          Posting and proposal cards, dashboards and notifications use these
+          workflow statuses. Escrow panels show funding and payment status
+          separately. Hover or focus a badge to see what it means.
         </p>
         <StatusLegend />
       </div>

@@ -145,7 +145,7 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.ok(!actionIds(view).includes("submit"));
   });
 
-  it("[FIT-OPD-034] should let the owner resume a draft and never fund their own posting", () => {
+  it("[FIT-OPD-034] should let the owner resume a draft and fund an eligible published posting", () => {
     const draft = viewPosting({ ...OPEN_POSTING, status: "draft" }, ownerSession);
     assert.equal(draft.actions.find((action) => action.id === "edit").route, "create/posting123");
     const fundingDraft = viewPosting({
@@ -154,7 +154,8 @@ describe("[QCDAO-54] view posting detail page", () => {
       opportunityType: OPEN_FUNDING_TYPE,
     }, ownerSession);
     assert.equal(fundingDraft.actions.find((action) => action.id === "edit").route, "create-funding/posting123");
-    assert.ok(!actionIds(viewPosting(OPEN_POSTING, ownerSession)).includes("fund"));
+    assert.ok(actionIds(viewPosting(OPEN_POSTING, ownerSession)).includes("fund"));
+    assert.ok(!actionIds(draft).includes("fund"));
   });
 
     it("[FIT-OPD-035] should show Evaluate only to an assigned evaluator in review, and Moderate only to an administrator", () => {

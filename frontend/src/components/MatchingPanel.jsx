@@ -8,6 +8,7 @@ import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { Modal } from "./Modal.jsx";
 import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
+import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 
 const money = (currency, amount) => `${currency} ${Number(amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
@@ -71,6 +72,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
   const [rationale, setRationale] = useState("");
   const [page, setPage] = useState(null);
   const [relatedAudit, setRelatedAudit] = useState(null);
+  const [fundingToken, setFundingToken] = useState("all");
   const cursor = page && page.problemId === problemId ? page.cursor : null;
   const actionInFlight = useRef(false);
   const relatedAuditRequest = useRef(0);
@@ -210,9 +212,13 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
 
   if (onlyEscrow) return <section id="proposal-funding" className="detail-section matching-panel" aria-label="Proposal funding">
     <div className="matching-heading"><h2>Proposal funding</h2><span className="draft-badge">On-chain escrow</span></div>
-    <p className="field-hint">Open a proposal, then choose Open escrow to view live funding and delivery approvals.</p>
+    <p className="field-hint">Choose a mock stablecoin to find proposals accepting it. Each proposal’s token is fixed in its payment plan. Open a proposal’s escrow to fund it.</p>
+    {!proposalId && <label>Funding token <select aria-label="Choose funding token" value={fundingToken} onChange={event => setFundingToken(event.target.value)}>
+      <option value="all">All configured tokens</option>{(AUDIT_REGISTRY_CONFIG.escrow?.tokens ?? []).map(token => <option key={token.address} value={token.symbol}>{token.symbol}</option>)}
+    </select></label>}
     {error && <p className="error-banner" role="alert">{error}</p>}
-    <div className="matching-candidates">{items.map((item) => <EscrowProposalLink key={item.id} item={item} onNavigate={onNavigate} />)}</div>
+    <div className="matching-candidates">{items.filter(item => proposalId || fundingToken === "all" || item.currency === fundingToken).map((item) => <EscrowProposalLink key={item.id} item={item} onNavigate={onNavigate} />)}</div>
+    {!items.some(item => proposalId || fundingToken === "all" || item.currency === fundingToken) && <p>No proposals on this page accept {fundingToken}.</p>}
     {!proposalId && <div className="matching-actions">
       {cursor && <button type="button" className="secondary" disabled={loading} onClick={() => setPage(null)}>First proposals</button>}
       {state.nextCursor && <button type="button" className="secondary" disabled={loading} onClick={() => setPage({ problemId, cursor: state.nextCursor })}>Next proposals</button>}

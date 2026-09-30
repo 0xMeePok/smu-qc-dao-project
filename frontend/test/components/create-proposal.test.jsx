@@ -2,7 +2,7 @@ import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../../src/config/proposal.js";
-const mocks = vi.hoisted(() => ({ posting: null, active: null, draft: null, record: null, connected: true, submit: vi.fn(), saveDraft: vi.fn(), update: vi.fn(), anchor: vi.fn(), receipt: vi.fn() }));
+const mocks = vi.hoisted(() => ({ posting: null, active: null, draft: null, record: null, connected: true, submit: vi.fn(), saveDraft: vi.fn(), update: vi.fn(), anchor: vi.fn(), receipt: vi.fn(), assertCurrent: vi.fn() }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: "0xabc" } }) }));
 vi.mock("../../src/lib/postings.js", () => ({ findPosting: async () => mocks.posting }));
 vi.mock("../../src/lib/proposals.js", () => ({
@@ -23,6 +23,7 @@ vi.mock("../../src/lib/proposalAudit.js", () => ({
   anchorProposalBeforeWrite: (...args) => mocks.anchor(...args),
   receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
 }));
+vi.mock("../../src/lib/opportunityAuditFlow.js", () => ({ assertCurrentAuditRecord: (...args) => mocks.assertCurrent(...args) }));
 // Reports in-flight uploads as a count, as the real uploader does (0 on mount).
 vi.mock("../../src/components/AttachmentUploader.jsx", () => ({ AttachmentUploader: ({ scope, onPendingChange }) => {
   React.useEffect(() => { onPendingChange(0); }, []);
@@ -36,6 +37,7 @@ beforeEach(() => { window.scrollTo = vi.fn(); Element.prototype.scrollIntoView =
   mocks.update.mockReset().mockResolvedValue({ id: "proposal1", status: "submitted" });
   mocks.connected = true;
   mocks.receipt.mockReset().mockResolvedValue(undefined);
+  mocks.assertCurrent.mockReset().mockResolvedValue(undefined);
   mocks.anchor.mockReset().mockResolvedValue({ status: "confirmed", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 88 }); });
 afterEach(cleanup);
 const renderForm = async () => { render(<CreateProposalPage postingId="problem1" onNavigate={vi.fn()} />); await screen.findByRole("heading", { name: "Submit a proposal" }); };
@@ -49,6 +51,18 @@ const fill = (extra = []) => {
   toReview();
 };
 describe("proposal submission form", () => {
+  it("blocks a new proposal on a historical parent before requesting a wallet signature", async () => {
+    const message = "This record belongs to an earlier AuditRegistry deployment and is read-only. Its original verification remains available; create a new posting for the current funding workflow.";
+    mocks.assertCurrent.mockRejectedValueOnce(new Error(message));
+    await renderForm(); fill();
+    const currentParent = { ...mocks.posting, audit: { transactionHash: `0x${"7".repeat(64)}` } };
+    mocks.posting = currentParent;
+    fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("create a new posting");
+    expect(mocks.assertCurrent).toHaveBeenCalledWith(currentParent);
+    expect(mocks.anchor).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
   it.each([false, true])("includes the mined receipt in the first submission (open funding=%s)", async (openFunding) => {
     if (openFunding) mocks.posting.opportunityType = "open-funding";
     mocks.submit.mockImplementation(async ({ audit }) => {

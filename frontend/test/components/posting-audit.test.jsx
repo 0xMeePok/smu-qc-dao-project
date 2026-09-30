@@ -16,6 +16,7 @@ const { DEFAULT_AUDIT_REGISTRY_ADDRESS } = await import("../../src/config/auditR
 
 const TX = `0x${"3".repeat(64)}`;
 const ACCOUNT = `0x${"a".repeat(40)}`;
+const getTransaction = async ({ hash }) => ({ hash, to: DEFAULT_AUDIT_REGISTRY_ADDRESS, chainId: 421614 });
 
 function posting(audit) {
   return {
@@ -59,7 +60,7 @@ describe("QCDAO-79 posting audit recovery", () => {
     const cancelled = Object.assign(new Error("Cancelled"), { code: "AUDIT_TRANSACTION_CANCELLED", transactionHash: TX });
     const result = anchorPostingAudit(posting({ ...queuedAudit(), ...(resume ? { status: "pending", transactionHash: TX } : {}) }), {
       account: ACCOUNT,
-      adapters: { writeContract, readContract: configuredReads(), waitForTransactionReceipt: async () => { throw cancelled; } },
+      adapters: { getTransaction, writeContract, readContract: configuredReads(), waitForTransactionReceipt: async () => { throw cancelled; } },
     });
     await expect(result).rejects.toBe(cancelled);
     expect(mocks.updates.at(-1)).toMatchObject({ status: "failed", transactionHash: "" });
@@ -70,6 +71,7 @@ describe("QCDAO-79 posting audit recovery", () => {
   it("writes once and persists the ordered transaction lifecycle", async () => {
     let writes = 0;
     const adapters = {
+      getTransaction,
       writeContract: async () => { writes += 1; return TX; },
       waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }),
       readContract: configuredReads(),
@@ -94,6 +96,7 @@ describe("QCDAO-79 posting audit recovery", () => {
     let writes = 0;
     let waits = 0;
     const adapters = {
+      getTransaction,
       writeContract: async () => { writes += 1; return TX; },
       waitForTransactionReceipt: async ({ hash }) => {
         waits += 1;

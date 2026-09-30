@@ -22,6 +22,7 @@ import { preparePostingAudit, postingAuditReceipt, readPostingAudit } from "../.
 import { prepareFundingOpportunityAudit, fundingOpportunityAuditReceipt, readFundingOpportunityAudit } from "../../src/lib/fundingOpportunityAudit.js";
 import { proposalAuditReceipt, readProposalAudit } from "../../src/lib/proposalAudit.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
+import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 
 const account = `0x${"a".repeat(40)}`;
 const base = {
@@ -49,7 +50,8 @@ function adaptersFor(prepared) {
     if (functionName === "anchorCount") return 1n;
     if (functionName === "anchorAt") return { contentHash: prepared.anchorHash };
     throw new Error(`Unexpected read: ${functionName}`);
-  }), writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() };
+  }), getTransaction: async ({ hash }) => ({ hash, to: AUDIT_REGISTRY_CONFIG.address, chainId: 421614 }),
+  writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() };
 }
 
 beforeEach(() => {

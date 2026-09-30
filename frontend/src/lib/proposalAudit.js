@@ -1,5 +1,5 @@
 import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
-import { configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
+import { assertCurrentAuditRecord, configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
 import { commitProposalAudit, prepareProposalWithdrawal, readOpportunityRevisionIndex, readProposalHashes, readProposalIsAnchored, updateProposalAudit, verifyProposalAudit, withdrawProposalAudit } from "./auditRegistry.js";
 import { findProposal, updateProposalReceipt } from "./proposals.js";
 
@@ -57,7 +57,9 @@ const flow = createOpportunityAuditFlow({
 export function proposalAuditReceipt(record) {
   try {
     const receipt = flow.receipt(record);
-    return receipt ? { ...receipt, solutionHash: prepareStoredProposal(record).solutionHash } : null;
+    if (!receipt) return null;
+    try { return { ...receipt, solutionHash: prepareStoredProposal(record).solutionHash }; }
+    catch { return receipt; }
   } catch { return null; }
 }
 export const anchorProposalAudit = flow.anchor;
@@ -78,6 +80,7 @@ export function receiptForWrite(audit) {
 }
 
 export async function anchorProposalWithdrawal(record, { account, adapters, reason, onStatus } = {}) {
+  await assertCurrentAuditRecord(record, { adapters });
   const address = configuredAuditRegistryAddress();
   if (!address) throw new Error("AuditRegistry is not configured.");
   return withdrawProposalAudit(

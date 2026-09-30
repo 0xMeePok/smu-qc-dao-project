@@ -1,6 +1,7 @@
 import {
   estimateFeesPerGas as wagmiEstimateFeesPerGas,
   getBlock as wagmiGetBlock,
+  getTransaction as wagmiGetTransaction,
   readContract as wagmiReadContract,
   simulateContract as wagmiSimulateContract,
   waitForTransactionReceipt as wagmiWaitForTransactionReceipt,
@@ -15,6 +16,7 @@ import {
 import { wagmiConfig } from "./wagmi.js";
 import { isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
 import { isEscrowRegistry, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
+import { knownAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
 import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, asOpportunityUpdate, prepareOpportunityCommit, prepareOpportunityUpdate, prepareOpportunityWithdrawal, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
@@ -137,6 +139,7 @@ export function createWagmiAuditAdapters(config = wagmiConfig) {
     waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
     readContract: (request) => wagmiReadContract(config, request),
     getBlock: (request) => wagmiGetBlock(config, request),
+    getTransaction: (request) => wagmiGetTransaction(config, request),
   };
 }
 
@@ -157,6 +160,19 @@ function canonicalRegistryAddress(requestedAddress) {
     throw new Error("AuditRegistry address does not match the configured deployment.");
   }
   return configured;
+}
+
+function readRegistryConfig(options) {
+  if (!options.registryConfig) {
+    canonicalRegistryAddress(options.address);
+    return AUDIT_REGISTRY_CONFIG;
+  }
+  const config = knownAuditDeployment(options.registryConfig.address, options.registryConfig.chainId,
+    { activeConfig: AUDIT_REGISTRY_CONFIG });
+  if (options.address && String(options.address).toLowerCase() !== config.address.toLowerCase()) {
+    throw new Error("AuditRegistry read address differs from its known deployment.");
+  }
+  return config;
 }
 
 function cappedRetries(value) {
@@ -443,14 +459,14 @@ function mismatch(mismatches, field, expected, actual, compare = Object.is) {
 
 async function readWithRetries(functionName, args, options) {
   const resolved = auditAdapters(options.adapters);
-  const address = canonicalRegistryAddress(options.address);
+  const config = readRegistryConfig(options);
   return retryRead(
     () => resolved.readContract({
-      address,
-      abi: AUDIT_REGISTRY_ABI,
+      address: config.address,
+      abi: config.abi,
       functionName,
       args,
-      chainId: AUDIT_REGISTRY_CHAIN_ID,
+      chainId: config.chainId,
     }),
     options.maxReadRetries ?? 2,
     options.onRetry,
@@ -549,6 +565,7 @@ export async function verifyOpportunityAudit(input, options = {}) {
 }
 
 export async function verifyProposalAudit(input, options = {}) {
+  const registryConfig = readRegistryConfig(options);
   let expected = asPrepared(input, prepareProposalCommit);
   const actual = await readWithRetries("getProposal", [expected.entityId], options);
   if (options.useRecordedOpportunityRevision === true) {
@@ -578,11 +595,9 @@ export async function verifyProposalAudit(input, options = {}) {
   let escrow;
   // A known content mismatch is already conclusive. Extra RPC failures must not
   // turn that result into an inconclusive network error while checking escrow.
-  if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && mismatches.length === 0) {
-    const configured = canonicalRegistryAddress(options.address);
-    if (!sameHex(configured, AUDIT_REGISTRY_CONFIG.address)) throw new Error("AuditRegistry address differs from the escrow deployment manifest.");
+  if (isEscrowRegistry(registryConfig) && mismatches.length === 0) {
     try {
-      escrow = await verifyProposalEscrow({ expected, config: AUDIT_REGISTRY_CONFIG,
+      escrow = await verifyProposalEscrow({ expected, config: registryConfig,
         readContract: request => retryRead(() => auditAdapters(options.adapters).readContract(request), options.maxReadRetries ?? 2, options.onRetry) });
     } catch (error) {
       if (error.code !== "ESCROW_MISMATCH") throw error;

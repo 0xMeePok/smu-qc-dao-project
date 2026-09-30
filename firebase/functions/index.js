@@ -12,6 +12,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { resolveDomain } from "./siweOrigin.js";
 import { registerModerationCallables } from "./moderationFunctions.js";
 import { registerMatchingNotificationFunctions } from "./matchingNotifications.js";
+import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
   applyRoleChangeTransaction,
@@ -182,6 +183,11 @@ async function requireMember(request) {
 
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
+
+export const { prepareEscrowDeposit, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
+  startEscrowSettlement, queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
+  db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+});
 
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
   listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, listReportableComments,

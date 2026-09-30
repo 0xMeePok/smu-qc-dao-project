@@ -1,21 +1,36 @@
 # Escrow-linked registry verification
 
-The contracts are deployed on Arbitrum Sepolia (chain 421614). The **local**
-frontend and Firebase manifests select this deployment, and the local frontend now
-includes wallet-backed funding, owner approvals, optional funder voting, payments
-and refunds. This application work has not deployed Hosting, Cloud Functions or
-rules, changed live records, or run a new signed live transaction flow.
+This branch implements **QCDAO-110, QCDAO-113 and QCDAO-117**. The replacement linked
+registry/factory provides accepted-proposal binding and reversible moderation pauses.
+Both contracts are confirmed on Arbitrum Sepolia (chain 421614), with compiled
+runtime-bytecode and reciprocal-wiring verification complete. The active stable
+manifest and generated frontend/Firebase configurations select this replacement.
+
+Rollout completed on 2026-09-29. Firebase deployment updated or created all 66
+Functions, including eight active new escrow services. All five escrow indexes are
+ready. The settlement scheduler is enabled and its 15:02:02 UTC attempt reported
+status 0. The rebuilt [hosted application](https://qcdao-a0c7a.web.app) was released
+after the backend. The signed live one-mock-USDC 50%/50% smoke test passed; the full
+authenticated browser workflow has not been exercised. The owner, platform signer,
+existing mock tokens and 10 BPS fee are unchanged. Explorer source publication was
+not requested for the replacement; compiled runtime-bytecode verification passed.
 
 | Setting | Deployed value |
 | --- | --- |
-| EscrowAuditRegistry | `0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD` |
-| FundingEscrowFactory | `0xe5d212491E544694d21c51EF9777F71B32fc5D41` |
+| EscrowAuditRegistry | `0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0` |
+| FundingEscrowFactory | `0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66` |
 | Owner, fee recipient and platform signer | `0x1c608C148F64Fb9657bA4e5fB8992345277371C0` |
 | Initial fee | 10 BPS = 0.1%, charged only on payouts |
 
 The confirmed deployment record is
 [`contracts/audit-registry/manifests/arbitrumSepolia.json`](../contracts/audit-registry/manifests/arbitrumSepolia.json).
-The previous scheme-2 deployment and ABI are preserved under
+The previous linked registry `0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD` and factory
+`0xe5d212491E544694d21c51EF9777F71B32fc5D41` are archived in
+[`pre-qcdao-110-arbitrumSepolia.deployment.json`](../contracts/audit-registry/legacy/pre-qcdao-110-arbitrumSepolia.deployment.json).
+Their historical ABI configuration remains in
+[`auditRegistry.history.json`](../firebase/functions/auditRegistry.history.json),
+alongside the earlier `0x47dA28cAEf8021dD88fe18B80e367746e0036964` registry.
+That earlier scheme-2 deployment and ABI are also preserved under
 [`contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json`](../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json)
 and its adjacent `.deployment.json` file. No historical records were migrated or retired.
 
@@ -24,9 +39,9 @@ and its adjacent `.deployment.json` file. No historical records were migrated or
 With an `EscrowAuditRegistry` manifest selected, every application proposal uses
 **50% upfront and 50% on completion** (`trancheBps: [5000, 5000]`). The split is
 read-only in the form and enforced by shared term validation, server publication
-attestation and Firestore submission/correction rules. There is no exception for
-previous custom splits; the existing proposal dataset is to be cleared separately.
-These code changes do not delete records or redeploy contracts.
+attestation and Firestore submission/correction rules. Historical records keep
+their original deployment and verification path. No existing proposal dataset
+is cleared or automatically migrated during rollout.
 
 The full funding target must be deposited into escrow before the upfront half
 can be released, after both the problem owner and proposal owner approve selection.
@@ -100,23 +115,25 @@ Connect the wallet for the signed-in account on Arbitrum Sepolia to act:
    clearing an insufficient nonzero allowance when needed, then deposits. Each
    transaction is confirmed before the next step. Repeated deposits add to the
    same wallet's contribution.
-2. At full funding, the **configured platform signer** starts upfront approval.
+2. At full funding, the **problem owner** requests selection. The backend verifies
+   ownership, posting eligibility and the canonical escrow, then the configured
+   platform signer starts upfront approval.
    The **problem owner and proposal owner** each approve from their own wallets.
-   The platform signer then executes the approved upfront 50% payment.
+   The platform relay then automatically executes the approved upfront 50% payment.
 3. The **proposal owner** saves and submits delivery evidence, then separately
    confirms completion. The **problem owner** reviews the same evidence and accepts
    it as delivered. When funder voting is enabled, contributing wallets also vote;
    yes votes must represent strictly more than half of all deposited units.
-4. The **platform signer** executes the final 50% payment only after those gates
+4. The **platform relay** executes the final 50% payment only after those gates
    pass. Funders can open eligible expiry/withdrawal refunds and claim their own
    unpaid share through the same panel.
 
 Roles come from on-chain wallet addresses and contributions. A Firebase
 administrator role alone does not authorize a platform payment. The platform
-signer connects its wallet and signs selection/payment transactions directly;
-there is no server relay or automatic release. Private keys stay in the wallet and
-must never be placed in frontend configuration. Contract-only moderation and
-selection-management operations remain outside this panel.
+signer's server key is bound to the settlement functions through Secret Manager as
+`ESCROW_PLATFORM_PRIVATE_KEY`. It must never appear in frontend configuration,
+deployment manifests or Git. The on-chain platform wallet can still execute an
+already-approved payment directly as an operational fallback.
 
 The service re-reads verified state before each requested action and binds final
 approvals, votes and payments to the reviewed evidence hash. A transaction with an
@@ -181,10 +198,11 @@ The existing command in `contracts/audit-registry` also accepts `--deployment` a
 dispatches linked records to the new verifier. Its default now checks the active
 escrow deployment recorded in `manifests/arbitrumSepolia.json`.
 
-## Prepare the application switch
+## Application switch
 
-The local switch has been applied. From the repository root, regenerate a preview
-from the confirmed active deployment if needed:
+The active manifest and frontend/Firebase configurations have been synchronized
+to the replacement. From the repository root, regenerate a preview from that
+confirmed deployment if needed:
 
 ```sh
 node frontend/scripts/sync-audit-registry.mjs \
@@ -199,15 +217,16 @@ chain/address, ambiguous token symbols, and unsupported token precision. Removin
 `VITE_AUDIT_REGISTRY_ADDRESS` / `AUDIT_REGISTRY_ADDRESS` overrides when switching;
 the linked deployment requires its configured address to agree everywhere.
 
-For testing before publication, use the Firebase emulators with
+For local testing, use the Firebase emulators with
 `VITE_FIREBASE_USE_EMULATORS=true` and the updated local Functions. The wallet and
-verification RPC still use real Arbitrum Sepolia. A local frontend connected to the
-unchanged live Functions cannot publish escrow-linked proposals: that server still
-uses its prior registry configuration. Follow the existing Firebase setup in the
-root README; keep the deployer key out of all `VITE_*` variables and browser code.
+verification RPC still use real Arbitrum Sepolia. A frontend connected to Functions
+that still use the prior manifest cannot publish proposals for the replacement
+registry. The matching backend and Hosting rollout completed on 2026-09-29.
+Follow the existing Firebase setup in the root README; keep the deployer key out of
+all `VITE_*` variables and browser code.
 
-Deploy the matching Functions, Firestore rules and rebuilt frontend together as
-part of the planned registry cutover. This includes the mock-action guards and
+Deploy matching Functions and Firestore rules before the rebuilt frontend as
+part of this registry cutover. This includes the mock-action guards and
 the `deliveryEvidence` rules, not only the registry manifests. An updated frontend
 against old rules cannot persist delivery evidence, and old Functions do not
 provide the escrow routing markers or server-side mock-action guards. Existing records remain in their original
@@ -222,13 +241,73 @@ an existing currency symbol to a different address. The current form's currency
 choices remain the existing USDC/USDT/XSGD choices. On-chain token delisting still
 blocks new funding while preserving exits from existing escrows.
 
-The per-proposal wallet controls described above are implemented locally. A global
-deposit/refund portfolio and a server platform relay are not included. The connected
-platform signer wallet is the implemented payment execution path.
+The current scope is QCDAO-110, QCDAO-113 and QCDAO-117. A global deposit/refund
+portfolio and the separate QCDAO-111/112/114/115/116 stories are not part of this
+rollout. Existing contract refund functions remain available.
+No Jira records were changed during implementation or deployment.
+
+## Automatic settlement and funding audit
+
+`prepareEscrowDeposit` checks the latest posting/proposal visibility and funding
+eligibility before the browser asks for a token transaction. The contract independently
+checks expiry, accepted proposal binding and the mirrored posting moderation pause.
+The token and its decimals come from the proposal's immutable contract terms.
+
+`startEscrowSettlement` accepts a proposal selection request only from its problem
+owner. `syncEscrowFunding` checks mined canonical receipts, updates funding history,
+and advances settlement when the required on-chain approvals are complete. The
+scheduled worker resumes queued work when the user closes the browser. A persisted
+transaction outbox serializes the platform signer's nonce and retains the signed
+transaction/hash before broadcast so retries can check or resend the same transaction.
+Neither a browser-supplied amount nor a requested recipient authorizes a payout.
+
+`getEscrowFundingHistory` returns reconciled funding events and their transaction
+references. Each event is tied to the configured registry and factory, the exact
+proposal escrow, a successful canonical receipt and a recomputed event digest.
+Deposit, lock, release, refund, cancellation and expiry events appear in the existing
+audit trail under its escrow filter. Evaluator comments and scores stay off-chain.
+Release projections notify both owners and populate their dashboard payment summaries.
+
+Configure `ESCROW_PLATFORM_PRIVATE_KEY` in the Firebase project's Secret Manager
+before deploying the relay functions. Its derived address must match the factory's
+platform signer. Keep `ARBITRUM_SEPOLIA_RPC_URL` in the Functions runtime environment.
+Only the browser's public RPC setting may use the `VITE_` prefix; never prefix a
+signing key with it. Preserve historical deployment configs before changing the
+active manifest, and deploy backend/rules before the frontend that calls them.
+The frontend build writes directly to `firebase/public`; no separate copy from a
+`frontend/dist` directory is required. Keep production emulator mode disabled when
+building the Hosting bundle.
 
 ## Validation
 
-Wallet UI integration checks on 2026-09-29 passed:
+QCDAO-110/113/117 checks on 2026-09-29 passed:
+
+- 280 escrow contract tests, including three tests that reconcile actual local
+  contract receipts with the production funding-event reconciler.
+- Six deployment-verifier tests and three manifest-sync tests.
+- 320 frontend Node tests and 445 component tests, plus the production build.
+- 491 Functions tests and 354 Firestore/Storage emulator tests, followed by 34
+  focused funding-service/event tests after the final retry fixes.
+- Desktop (1365×1000) and mobile (390×844) rendered checks for the deposit form,
+  amount entry, funding action and event filter, without application errors or
+  page overflow. These used actual components with local deterministic fixtures.
+- 95 focused tests after replacement-manifest synchronization and nine cleanup
+  regression tests.
+
+The replacement testnet deployment is confirmed and has passed runtime-bytecode
+and wiring verification. The signed live one-mock-USDC smoke test passed, including
+cleanup-only recovery, with
+[committed transaction evidence](../contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json).
+It confirmed 20 transactions: 19 business transactions and one gas return. Each
+50% payout was 500,000 base units gross; fees totalled 1,000 base units (0.001 USDC).
+The test verified the accepted-proposal binding and matched 13 escrow events to
+their registry audit anchors using the production reconciler. Both frontend and
+Firebase verification modules accepted the real proposal/escrow records. All mock
+tokens were returned, with 0.0000221284796 test ETH reserved in the recoverable
+derived test wallet. These signed contract/module checks do not establish that a
+full authenticated browser workflow passed; that flow has not been exercised.
+
+Earlier wallet UI integration checks on 2026-09-29 passed:
 
 - 294 frontend Node tests and 422 component tests (`npm test -- --maxWorkers 2`),
   including 20 ABI-checked escrow adapter tests.
@@ -243,9 +322,9 @@ Wallet UI integration checks on 2026-09-29 passed:
 
 These checks cover immutable evidence, visibility, hash mismatches, transaction
 recovery and rejection of mock actions for escrow proposals. Wallet interactions
-used mocked RPC interfaces or a local UI fixture; no new live signed transaction
-was sent through the wallet panel. Frontend, Functions and rules deployment remains
-a separate step.
+used mocked RPC interfaces or a local UI fixture; no signed transaction was sent
+through the wallet panel in those checks. The replacement's completed signed smoke
+test and application rollout are recorded separately above.
 
 Earlier verification baseline, validated locally on 2026-09-27:
 
@@ -265,7 +344,7 @@ Firestore publication/immutability. Contract tests additionally compare the stag
 application ABI bundle against compiled interfaces. The previously canceled deep
 security scan remains incomplete and was not restarted.
 
-The deployed contracts passed read-only runtime-bytecode, wiring, owner, signer
+The previous deployment passed read-only runtime-bytecode, wiring, owner, signer
 and fee checks; see the [verification evidence](../contracts/funding-escrow/manifests/arbitrumSepolia-verification.json).
 An earlier 23-transaction smoke test created a labelled proposal and its escrow,
 confirmed it through the real frontend and Firebase verifier code, and exercised
@@ -287,17 +366,18 @@ contains the escrow address, hashes and confirmed block numbers. These are label
 on-chain test records only; no Firestore records were created.
 
 Explorer source publication is separate from successful bytecode verification.
-The registry source was submitted by the deployment script and was still pending
-when polling stopped. Automatic approval review blocked factory source publication
-pending explicit permission to publish repository code to public Arbiscan. No
-factory source submission was made. After approval, the source-only retry script
-can use the confirmed record without deploying again:
+It was not requested for the replacement contracts during this rollout.
+For the previous deployment, registry source publication was pending when polling
+stopped, and automatic approval review blocked factory source publication. Those
+historical results do not establish the replacement contracts' source-publication
+status. The source-only retry script can use the active confirmed record without
+deploying again:
 
 ```sh
 ESCROW_DEPLOYMENT_RECORD=../audit-registry/manifests/arbitrumSepolia.json \
 ESCROW_VERIFY_CONTRACT=factory npm run verify:source
 ```
 
-Use the same command with `ESCROW_VERIFY_CONTRACT=registry` if its queued request
-does not complete. The script bounds the explorer wait at two minutes and records
+Use the same command with `ESCROW_VERIFY_CONTRACT=registry` to verify the registry
+source. The script bounds the explorer wait at two minutes and records
 its result locally.

@@ -809,6 +809,92 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "escrowFundingEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "proposalId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "registryAddress",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "blockNumber",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "logIndex",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "escrowFundingSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "postingOwnerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "registryAddress",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "escrowFundingSummaries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "researcherId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "registryAddress",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "escrowFundingJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "registryAddress",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextAttemptAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "escrowPostingPauseJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "registryAddress",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextAttemptAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

@@ -14,7 +14,7 @@ vi.mock("../../src/lib/proposals.js", () => ({
   },
 }));
 import { anchorProposalAudit, proposalAuditReceipt, proposalAuditPayload, readProposalAudit } from "../../src/lib/proposalAudit.js";
-import { AUDIT_ENTITY_ID_SCHEME } from "../../src/config/auditRegistry.js";
+import { AUDIT_ENTITY_ID_SCHEME, AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 import { prepareProposalCommit } from "../../src/lib/auditRegistry.js";
 const account = `0x${"a".repeat(40)}`;
 const tx = `0x${"3".repeat(64)}`;
@@ -107,7 +107,9 @@ describe("proposal audit handoff", () => {
   });
   it("recovers a known transaction without rebroadcasting", async () => {
     const writeContract = vi.fn();
-    const result = await anchorProposalAudit({ ...record, audit: { ...proposalAuditReceipt(record), status: "pending", transactionHash: tx } }, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 99n }) } });
+    const result = await anchorProposalAudit({ ...record, audit: { ...proposalAuditReceipt(record), status: "pending", transactionHash: tx } }, { account, adapters: { writeContract, readContract,
+      getTransaction: async () => ({ hash: tx, to: AUDIT_REGISTRY_CONFIG.address, chainId: 421614 }),
+      waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 99n }) } });
     expect(writeContract).not.toHaveBeenCalled();
     expect(mocks.updates.map((audit) => audit.status)).toContain("confirmed");
     expect(result.status).toBe("confirmed");

@@ -35,6 +35,8 @@ function fixture(changes = {}) {
       }
       if (address === escrowConfig.address) {
         if (functionName === "isFundingActive") return changes.active ?? true;
+        if (functionName === "isFundingInvalidated") return changes.invalidated ?? !(changes.active ?? true);
+        if (functionName === "postingFundingPaused") return changes.paused ?? false;
         if (functionName === "postingFundingStarted") return changes.fundingStarted ?? false;
       }
       if (address === proposal.fundingTerms.token) {
@@ -69,6 +71,18 @@ function finalFixture(changes = {}) {
 }
 
 describe("Canonical escrow wallet integration", () => {
+  it("does not offer permanent withdrawal refunds during a reversible funding pause", async () => {
+    const f = fixture({ active: false, invalidated: false, paused: true });
+    // This also validates the new getters before deployment manifests are regenerated.
+    f.config = { ...f.config, abi: [...f.config.abi.filter(item => !["isFundingInvalidated", "postingFundingPaused"].includes(item.name)),
+      { type: "function", name: "isFundingInvalidated", stateMutability: "view", inputs: [{ type: "bytes32" }, { type: "address" }], outputs: [{ type: "bool" }] },
+      { type: "function", name: "postingFundingPaused", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [{ type: "bool" }] },
+    ] };
+    const result = await readEscrow({ ...f, account: funder });
+    assert.equal(result.workflowPaused, true);
+    assert.equal(result.can.deposit, false);
+    assert.equal(result.can.refundInvalidated, false);
+  });
   it("reads all escrow state at one block and uses both mappings, never a supplied escrow address", async () => {
     const f = fixture();
     f.proposal.escrowAddress = `0x${"f".repeat(40)}`;

@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(), load: vi.fn(), save: vi.fn(), account: null, user: null }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(), load: vi.fn(), save: vi.fn(), prepare: vi.fn(), sync: vi.fn(), history: vi.fn(), start: vi.fn(), account: null, user: null }));
+vi.mock("../../src/lib/escrowFunding.js", async importOriginal => ({ ...await importOriginal(),
+  prepareEscrowDeposit: (...args) => mocks.prepare(...args), syncEscrowFunding: (...args) => mocks.sync(...args),
+  getEscrowFundingHistory: (...args) => mocks.history(...args), startEscrowSettlement: (...args) => mocks.start(...args) }));
 vi.mock("wagmi", () => ({ useAccount: () => mocks.account }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/lib/escrow.js", () => ({ readEscrow: (...args) => mocks.read(...args), writeEscrowAction: (...args) => mocks.write(...args),
@@ -19,7 +22,9 @@ const model = (overrides = {}) => ({ address: `0x${"b".repeat(40)}`, state: 0, d
 beforeEach(() => {
   sessionStorage.clear();
   vi.clearAllMocks();
-  mocks.account = { isConnected: true, address: account, chainId: 421614 }; mocks.user = { id: account };
+  mocks.account = { isConnected: true, address: account, chainId: 421614 }; mocks.user = { id: account, roles: ["funder", "owner"] };
+  mocks.prepare.mockReset().mockResolvedValue({}); mocks.sync.mockReset().mockResolvedValue({ events: [] });
+  mocks.history.mockReset().mockResolvedValue({ events: [] }); mocks.start.mockReset().mockResolvedValue({ events: [], settlement: { status: "confirmed" } });
   mocks.read.mockReset().mockResolvedValue(model()); mocks.write.mockReset().mockResolvedValue({ transactionHash: hash });
   mocks.confirm.mockReset().mockResolvedValue({ transactionHash: hash }); mocks.save.mockReset().mockResolvedValue({});
   mocks.load.mockReset().mockResolvedValue({ summary: "Delivery complete", url: "https://example.com/delivery", ownerId: account });
@@ -34,6 +39,28 @@ describe("wallet escrow funding panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ proposal, account, action: "deposit", amount: "12.000001" })));
     await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+    expect(mocks.prepare).toHaveBeenCalledWith({ proposalId: proposal.id });
+    expect(mocks.sync).toHaveBeenCalledWith({ proposalId: proposal.id, transactionHash: hash });
+    expect(screen.getByText(/Deposit confirmed. Your tokens are held/)).toBeTruthy();
+  });
+  it("revalidates eligibility before requesting a deposit signature", async () => {
+    mocks.prepare.mockRejectedValue(new Error("The posting has been closed."));
+    await ready(); fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
+    await screen.findByText("The posting has been closed.");
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it("allows the problem owner to request selection through the platform service", async () => {
+    mocks.read.mockResolvedValue(model({ remaining: 0n, roles: { problemOwner: true } }));
+    await ready(); fireEvent.click(screen.getByRole("button", { name: "Select proposal for upfront approval" }));
+    await waitFor(() => expect(mocks.start).toHaveBeenCalledWith({ proposalId: proposal.id }));
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it("keeps successful wallet payment separate from an indexing failure", async () => {
+    mocks.sync.mockRejectedValue(new Error("Service unavailable"));
+    await ready(); fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
+    await screen.findByText(/wallet transaction confirmed, but funding records/);
+    expect(screen.getByText(/Deposit confirmed. Your tokens are held/)).toBeTruthy();
+    expect(mocks.write).toHaveBeenCalledTimes(1);
   });
   it.each(["disconnected", "wrong wallet", "wrong network"])("prevents signing with %s", async mode => {
     if (mode === "disconnected") mocks.account.isConnected = false;
@@ -113,6 +140,16 @@ describe("wallet escrow funding panel", () => {
     expect(screen.getByRole("button", { name: "Fund escrow" }).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Claim my refund" }));
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "claimRefund" })));
+  });
+  it("keeps historical balances and refunds visible without mixing the current funding index", async () => {
+    mocks.read.mockResolvedValue(model({ isHistorical: true, can: { deposit: false, claimRefund: true } }));
+    await ready();
+    expect(screen.getByText(/belongs to an earlier contract deployment/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fund escrow" }).disabled).toBe(true);
+    expect(screen.queryByRole("heading", { name: "Funding audit trail" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Claim my refund" }));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "claimRefund" })));
+    expect(mocks.sync).not.toHaveBeenCalled();
   });
   it.each([false, true])("renders final voting only for the chosen variant (voting=%s)", funderVoting => {
     render(<EscrowFundingView state={model({ state: 6, funderVoting, roles: { funder: true }, can: { voteMilestone: true }, currentMilestone: { evidenceHash: hash } })}

@@ -1,17 +1,18 @@
 import {
   AUDIT_HASH_SCHEME,
-  AUDIT_ENTITY_ID_SCHEME,
-  AUDIT_REGISTRY_CHAIN_ID,
+  AUDIT_REGISTRY_CONFIG,
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
 import {
   MAX_AUDIT_RETRIES,
   commitOpportunityAudit,
+  createWagmiAuditAdapters,
   prepareOpportunityCommit,
   verifyOpportunityAudit,
   waitForAuditReceipt,
 } from "./auditRegistry.js";
 import { auditErrorMessage } from "./errors.js";
+import { assertActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
 const AUDIT_STATUSES = new Set(["queued", "submitted", "pending", "confirmed", "failed"]);
 
@@ -40,6 +41,18 @@ function storedAudit(setup, opportunity) {
   };
 }
 
+export async function recordAuditDeployment(record, { adapters } = {}) {
+  const resolved = adapters ?? createWagmiAuditAdapters();
+  return resolveAuditDeployment(record, {
+    activeConfig: AUDIT_REGISTRY_CONFIG,
+    getTransaction: typeof resolved.getTransaction === "function" ? request => resolved.getTransaction(request) : undefined,
+  });
+}
+
+export async function assertCurrentAuditRecord(record, options = {}) {
+  return assertActiveAuditDeployment(await recordAuditDeployment(record, options), AUDIT_REGISTRY_CONFIG);
+}
+
 /**
  * Creates the shared chain-delivery flow for one Firestore opportunity kind.
  * The contract, receipt state machine and recovery behaviour stay identical;
@@ -57,12 +70,12 @@ export function createOpportunityAuditFlow({
   persistConfirmed = false,
   enforceWalletRetryLimit = false,
 }) {
-  const prepare = (opportunity) => {
-    const address = configuredAuditRegistryAddress();
+  const prepare = (opportunity, { registryConfig = AUDIT_REGISTRY_CONFIG } = {}) => {
+    const address = registryConfig === AUDIT_REGISTRY_CONFIG ? configuredAuditRegistryAddress() : registryConfig.address;
     if (!address) return null;
-    const prepared = prepareCommit ? prepareCommit(opportunity) : prepareOpportunityCommit({
+    const prepared = prepareCommit ? prepareCommit(opportunity, { registryConfig }) : prepareOpportunityCommit({
       recordId: opportunity.id,
-      actor: AUDIT_ENTITY_ID_SCHEME === 2 ? opportunity.ownerId : undefined,
+      actor: registryConfig.entityIdScheme === 2 ? opportunity.ownerId : undefined,
       payload: payloadFor(opportunity),
       kind,
       expiresAt: opportunity.expiresAt,
@@ -73,7 +86,7 @@ export function createOpportunityAuditFlow({
       prepared,
       audit: {
         schemaVersion: AUDIT_HASH_SCHEME,
-        chainId: AUDIT_REGISTRY_CHAIN_ID,
+        chainId: registryConfig.chainId,
         entityId: prepared.entityId,
         contentHash: prepared.contentHash,
         status: "queued",
@@ -86,8 +99,17 @@ export function createOpportunityAuditFlow({
   };
 
   const receipt = (opportunity) => {
-    const setup = prepare(opportunity);
-    return setup ? storedAudit(setup, opportunity) : null;
+    try {
+      const setup = prepare(opportunity);
+      return setup ? storedAudit(setup, opportunity) : null;
+    } catch (error) {
+      // Old proposals have no escrow terms. Their saved receipt still identifies
+      // a real transaction; read() resolves its original deployment before hashing.
+      const stored = opportunity.audit;
+      if (stored?.schemaVersion !== AUDIT_HASH_SCHEME || !/^0x[0-9a-f]{64}$/i.test(stored.transactionHash ?? "")
+          || !/^0x[0-9a-f]{64}$/i.test(stored.entityId ?? "") || !/^0x[0-9a-f]{64}$/i.test(stored.contentHash ?? "")) throw error;
+      return { ...stored };
+    }
   };
 
   const read = async (opportunity, { adapters } = {}) => {
@@ -97,9 +119,10 @@ export function createOpportunityAuditFlow({
       ? await loadRecord(opportunity.id, { fromServer: true })
       : opportunity;
     if (!current) throw new Error(`This ${entityLabel} is no longer available or you do not have access.`);
-    const setup = prepare(current);
+    const registryConfig = await recordAuditDeployment(current, { adapters });
+    const setup = prepare(current, { registryConfig });
     if (!setup) throw new Error("AuditRegistry is not configured.");
-    return verifyAudit(setup.prepared, { address: setup.address, adapters });
+    return verifyAudit(setup.prepared, { address: setup.address, registryConfig, adapters });
   };
 
   const anchor = async (opportunity, {
@@ -109,7 +132,15 @@ export function createOpportunityAuditFlow({
     persistReceipt = true,
     maxReceiptRetries = 2,
   } = {}) => {
-    const setup = prepare(opportunity);
+    // Edit forms prepare a new receipt and may omit the original transaction.
+    // Check the stored document before a write so that cannot reanchor history.
+    if (!persistReceipt && loadRecord) {
+      const stored = await loadRecord(opportunity.id, { fromServer: true });
+      if (stored?.audit?.transactionHash) await assertCurrentAuditRecord(stored, { adapters });
+    }
+    const registryConfig = await recordAuditDeployment(opportunity, { adapters });
+    if (!persistReceipt) assertActiveAuditDeployment(registryConfig, AUDIT_REGISTRY_CONFIG);
+    const setup = prepare(opportunity, { registryConfig });
     if (!setup) throw new Error("AuditRegistry is not configured.");
 
     if (enforceWalletRetryLimit && !opportunity.audit?.transactionHash && Number(opportunity.audit?.attemptCount ?? 0) >= MAX_AUDIT_RETRIES) {
@@ -183,6 +214,7 @@ export function createOpportunityAuditFlow({
         if (chainReceipt?.status !== "success") throw new Error("AuditRegistry transaction reverted.");
         const verification = await verifyAudit(setup.prepared, {
           address: setup.address,
+          registryConfig,
           adapters,
         });
         if (!verification.verified) {
@@ -216,6 +248,7 @@ export function createOpportunityAuditFlow({
       });
       const verification = await verifyAudit(setup.prepared, {
         address: setup.address,
+        registryConfig,
         adapters,
       });
       if (!verification.verified) {

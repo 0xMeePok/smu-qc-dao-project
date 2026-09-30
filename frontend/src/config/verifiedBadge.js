@@ -12,7 +12,7 @@ export const VERIFIED_STATES = Object.freeze({
 
 /** One-sentence explanation reused on every verified badge tooltip. */
 export const VERIFIED_BADGE_HINT =
-  "Hashes, timestamps, and the submitting wallet are recorded on Arbitrum Sepolia; the record body, attachments, and workflow stay off-chain in Firestore.";
+  "Hashes, timestamps, the submitting wallet and separate escrow funding records are on Arbitrum Sepolia; the record body, attachments, workflow views and notifications stay off-chain in Firestore.";
 
 export const VERIFIED_BADGE_COPY = Object.freeze({
   [VERIFIED_STATES.VERIFIED]: {

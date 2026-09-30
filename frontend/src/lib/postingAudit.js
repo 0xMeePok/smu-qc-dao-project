@@ -2,6 +2,7 @@ import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
 import { AUDIT_REGISTRY_CHAIN_ID, OPPORTUNITY_KIND } from "../config/auditRegistry.js";
 import {
   configuredAuditRegistryAddress,
+  assertCurrentAuditRecord,
   createOpportunityAuditFlow,
 } from "./opportunityAuditFlow.js";
 import { findPosting, postingAuditPayload, updatePostingAudit } from "./postings.js";
@@ -57,6 +58,7 @@ export async function assertWithdrawalWindowOpen(record, adapters) {
 }
 
 export async function anchorOpportunityWithdrawal(record, { account, adapters, reason, onStatus } = {}) {
+  await assertCurrentAuditRecord(record, { adapters });
   const address = configuredAuditRegistryAddress();
   if (!address) throw new Error("AuditRegistry is not configured.");
   await assertWithdrawalWindowOpen(record, adapters);

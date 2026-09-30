@@ -11,20 +11,18 @@
     "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
   ],
   "status": "ready",
-  "startedAt": "2026-09-29T14:51:59.167Z",
   "registry": {
-    "address": "0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0",
+    "address": "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD",
     "constructorArgs": [
       "0x1c608C148F64Fb9657bA4e5fB8992345277371C0"
     ],
-    "transactionHash": "0x2fb5a68e0272b3e170c37d95d6d4dcc2e54ffd7f50b6097d9fc76fef0106c721",
-    "blockNumber": 313983036,
+    "transactionHash": "0x81a127822e0021e8494204cf3b3ad81352e1d6cb69405fd73914cb6c3a0a6cda",
+    "blockNumber": 313125697,
     "status": "confirmed",
-    "verification": "not_requested",
-    "deployedAt": "2026-09-29T14:52:00.000Z"
+    "verification": "submitted_pending"
   },
   "factory": {
-    "address": "0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66",
+    "address": "0xe5d212491E544694d21c51EF9777F71B32fc5D41",
     "constructorArgs": [
       "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
       "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
@@ -34,16 +32,15 @@
         "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
       ],
       10,
-      "0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0"
+      "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD"
     ],
-    "transactionHash": "0xbbc8b6b405c7365429b67055f38dd0ffbf3eeb26fb412adf4f68a447b2eaa0ad",
-    "blockNumber": 313983043,
+    "transactionHash": "0xd7ee062b82c906403a8f8af8ff07034b15c18b53893f6e374235ffff22150fd1",
+    "blockNumber": 313125705,
     "status": "confirmed",
-    "verification": "not_requested",
-    "deployedAt": "2026-09-29T14:52:02.000Z"
+    "verification": "awaiting_source_publication_approval"
   },
   "wiring": {
-    "transactionHash": "0xde2557c418aa5235e1d580fbcf9ed0b030c60c739f1f8e85df99372ca1920a07",
+    "transactionHash": "0x3cc69444d0253e33c83f721f6e1200fb3c80a2f48f9759344306ab47e458ae85",
     "status": "confirmed"
   },
   "tokenMetadata": [

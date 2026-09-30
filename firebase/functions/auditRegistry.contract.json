@@ -1,11 +1,12 @@
 {
   "contractName": "EscrowAuditRegistry",
   "chainId": 421614,
-  "address": "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD",
+  "address": "0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0",
   "entityIdScheme": 2,
   "deployment": {
-    "blockNumber": 313125697,
-    "transactionHash": "0x81a127822e0021e8494204cf3b3ad81352e1d6cb69405fd73914cb6c3a0a6cda"
+    "blockNumber": 313983036,
+    "transactionHash": "0x2fb5a68e0272b3e170c37d95d6d4dcc2e54ffd7f50b6097d9fc76fef0106c721",
+    "deployedAt": "2026-09-29T14:52:00.000Z"
   },
   "abi": [
     {
@@ -357,6 +358,56 @@
         {
           "indexed": true,
           "internalType": "bytes32",
+          "name": "postingId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "paused",
+          "type": "bool"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "actor",
+          "type": "address"
+        }
+      ],
+      "name": "PostingFundingPauseChanged",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "postingId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "proposalId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "escrow",
+          "type": "address"
+        }
+      ],
+      "name": "PostingProposalAccepted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
           "name": "proposalId",
           "type": "bytes32"
         },
@@ -461,6 +512,25 @@
       "name": "acceptOwnership",
       "outputs": [],
       "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "postingId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "acceptedProposalForPosting",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
       "type": "function"
     },
     {
@@ -913,6 +983,30 @@
       "inputs": [
         {
           "internalType": "bytes32",
+          "name": "proposalId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "address",
+          "name": "escrow",
+          "type": "address"
+        }
+      ],
+      "name": "isFundingInvalidated",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
           "name": "opportunityId",
           "type": "bytes32"
         },
@@ -985,6 +1079,25 @@
           "internalType": "address",
           "name": "",
           "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "postingId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "postingFundingPaused",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
         }
       ],
       "stateMutability": "view",
@@ -1168,6 +1281,24 @@
     {
       "inputs": [
         {
+          "internalType": "bytes32",
+          "name": "postingId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "bool",
+          "name": "paused",
+          "type": "bool"
+        }
+      ],
+      "name": "setPostingFundingPaused",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "address",
           "name": "newOwner",
           "type": "address"
@@ -1267,7 +1398,7 @@
     }
   ],
   "escrow": {
-    "factoryAddress": "0xe5d212491E544694d21c51EF9777F71B32fc5D41",
+    "factoryAddress": "0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66",
     "tokens": [
       {
         "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
