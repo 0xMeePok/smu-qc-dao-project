@@ -6,7 +6,7 @@ export function EscrowPaymentPlanFields({ form, disabled, error, onChange }) {
   const terms = form.immutableFundingTerms;
   const percentages = terms ? terms.trancheBps.map(bps => bps / 100).join(", ") : HALF_UPFRONT_PERCENTAGES;
   const voting = terms?.funderVoting ?? form.funderVoting ?? false;
-  return <fieldset className="field-group" disabled={disabled}>
+  return <fieldset className="field-group escrow-plan" disabled={disabled}>
     <legend>Escrow payment plan</legend>
     <Field htmlFor="proposal-tranches" label="Payment percentages" error={error} hint={terms ? "This proposal’s payment split is fixed at creation." : "New proposals use a fixed split: 50% upfront and 50% on completion."}>
       {({ id, describedBy, invalid }) => <input id={id} value={percentages} readOnly aria-invalid={invalid} aria-describedby={describedBy} />}

@@ -15,7 +15,7 @@ export function EscrowReleaseSummary({ onNavigate }) {
     return () => { active = false; };
   }, [user?.id, revision]);
   if (!user?.id) return null;
-  return <section className="card-table" aria-label="Escrow payment summary">
+  return <section className="card-table escrow-release" aria-label="Escrow payment summary">
     <div className="table-header"><div><h3>Proposal payments</h3><p className="field-hint">Confirmed upfront and completion payments for proposals you own or sponsor.</p></div>
       <button className="secondary small" type="button" onClick={() => setRevision(value => value + 1)}>Refresh payments</button></div>
     {error ? <p className="error-banner" role="alert">{error}</p> : !data ? <p className="table-empty">Loading payments…</p>
