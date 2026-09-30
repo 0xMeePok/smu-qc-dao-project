@@ -58,7 +58,10 @@ export function proposalAuditReceipt(record) {
   try {
     const receipt = flow.receipt(record);
     if (!receipt) return null;
-    try { return { ...receipt, solutionHash: prepareStoredProposal(record).solutionHash }; }
+    try {
+      const prepared = prepareStoredProposal(record);
+      return { ...receipt, ...(prepared.solutionHash ? { solutionHash: prepared.solutionHash } : {}) };
+    }
     catch { return receipt; }
   } catch { return null; }
 }

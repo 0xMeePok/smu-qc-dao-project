@@ -323,7 +323,8 @@ service cloud.firestore {
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
         'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
         'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit',
-        'withdrawalReason', 'fundingPlan', 'fundingTerms'
+        'withdrawalReason', 'fundingPlan', 'fundingTerms',
+        'proposalKind', 'expiresAt', 'addressedProblems', 'maturity'
       ]); // Required fields are checked by value below and in the write rules.
     }
 
@@ -363,7 +364,10 @@ service cloud.firestore {
       // rejects new client `confirmed` writes.
       return !('audit' in data)
         || (resource != null && resource.data.get('audit', {}) == data.audit)
-        || validAuditRecord(data.audit);
+        || (validAuditRecord(data.audit)
+          && (isIndependentProposal(data)
+            ? data.audit.schemaVersion == 2
+            : data.audit.schemaVersion == 1));
     }
 
     function validAuditRecord(audit) {
@@ -374,7 +378,7 @@ service cloud.firestore {
           // Equivalent: every one of the nine is checked by name below, so an
           // unknown key can only fit by displacing one, and that check then fails.
           && audit.keys().size() == 9
-          && audit.schemaVersion == 1
+          && audit.schemaVersion in [1, 2]
           && audit.chainId == 421614
           && audit.entityId.matches('^0x[0-9a-f]{64}$')
           && audit.contentHash.matches('^0x[0-9a-f]{64}$')
@@ -897,14 +901,59 @@ service cloud.firestore {
           && plan.funderVoting is bool));
     }
 
+    function isIndependentProposal(data) {
+      return data.get('proposalKind', '') == 'independent';
+    }
+
+    function validIndependentProposal(data) {
+      return isIndependentProposal(data)
+        && !data.keys().hasAny(['problemId', 'postingOwnerId', 'opportunityType'])
+        && optionalString(data, 'title', 160)
+        && optionalString(data, 'summary', 4000)
+        && optionalString(data, 'methodology', 4000)
+        && optionalString(data, 'addressedProblems', 4000)
+        && optionalString(data, 'team', 4000)
+        && optionalString(data, 'category', 80)
+        && optionalString(data, 'maturity', 40)
+        && optionalString(data, 'currency', 8)
+        && (!data.keys().hasAny(['expiresAt']) || data.expiresAt is timestamp)
+        && (data.status == 'draft'
+          ? draftFundingPlanIsBounded(data)
+          : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)));
+    }
+
+    function validIndependentProposalSubmission(data) {
+      return hasProposalSchema(data)
+        && hasValidAudit(data)
+        && isIndependentProposal(data)
+        && !data.keys().hasAny(['problemId', 'postingOwnerId', 'opportunityType'])
+        && (!('fundingTerms' in data) || data.fundingTerms.trancheBps == [5000, 5000])
+        && (data.title.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.title.size() <= 160)
+        && (data.summary.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.summary.size() <= 4000)
+        && (data.methodology.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.methodology.size() <= 4000)
+        && (data.addressedProblems.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.addressedProblems.size() <= 4000)
+        && (data.team.matches('(?s)^(?:..|[\\x{10000}-\\x{10FFFF}]).*$') && data.team.size() <= 4000)
+        && data.amount is number && data.amount > 0 && data.amount <= 1000000000
+        && data.category.matches('^(gate-model|quantum-inspired|quantum-annealing|hybrid|quantum-adjacent)$')
+        && data.maturity.matches('^(concept|laboratory|pilot|production)$')
+        && validCurrency(data.currency)
+        && data.expiresAt is timestamp
+        && expiryInDocumentedRange(data.expiresAt)
+        && optionalString(data, 'withdrawalReason', 1000)
+        && validAttachments(data, true);
+    }
+
     function validProposal(data) {
       return hasProposalSchema(data)
         && hasValidAudit(data)
         && isWalletAddress(data.researcherId)
-        && isNonEmptyString(data.problemId, 128)
-        && (data.status == 'draft'
-          ? (draftProposalTextIsBounded(data) && draftFundingPlanIsBounded(data))
-          : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)))
+        && (isIndependentProposal(data)
+          ? validIndependentProposal(data)
+          : (!data.keys().hasAny(['proposalKind'])
+            && isNonEmptyString(data.problemId, 128)
+            && (data.status == 'draft'
+              ? (draftProposalTextIsBounded(data) && draftFundingPlanIsBounded(data))
+              : (isNonEmptyString(data.title, 160) && isNonEmptyString(data.summary, 4000)))))
         // A draft may not have reached the funding question yet. Absent falls
         // back to zero, which is bounded here and rejected by
         // validSubmittedProposal's `amount > 0` on every path that leaves draft.
@@ -995,8 +1044,9 @@ service cloud.firestore {
       return (matching.get('fundedMinor', 0) == 0
           && !matching.get('evaluationComplete', false)
           && !(matching.get('status', '') in ['awaiting_confirmation', 'confirmed', 'voided', 'cancelled', 'declined'])
-          && get(/databases/$(database)/documents/problems/$(before.problemId)).data
-            .get('matching', {}).get('status', 'open') == 'open')
+          && (isIndependentProposal(before)
+            || get(/databases/$(database)/documents/problems/$(before.problemId)).data
+              .get('matching', {}).get('status', 'open') == 'open'))
         || after.diff(before).affectedKeys().hasOnly(['audit', 'updatedAt']);
     }
 
@@ -1395,9 +1445,12 @@ service cloud.firestore {
         && (data.status == 'draft'
           ? (validProposal(data)
             && validAttachments(data, false)
-            && exists(/databases/$(database)/documents/problems/$(data.problemId)))
+            && (isIndependentProposal(data)
+              || exists(/databases/$(database)/documents/problems/$(data.problemId))))
           : (data.status == 'submitted'
-            && validProposalSubmission(data, proposalId)));
+            && (isIndependentProposal(data)
+              ? validIndependentProposalSubmission(data)
+              : validProposalSubmission(data, proposalId))));
       }
       allow create: if proposalCreateIsAllowed();
       // Submitted proposals may update `audit` so a known transaction hash is
@@ -1411,7 +1464,8 @@ service cloud.firestore {
         && publicationWriteAllowed("proposals", proposalId, after)
         && before.researcherId == uid
         && after.researcherId == before.researcherId
-        && after.problemId == before.problemId
+        && after.get('problemId', '') == before.get('problemId', '')
+        && after.get('proposalKind', '') == before.get('proposalKind', '')
         && after.createdAt == before.createdAt
         && after.updatedAt == request.time
         && validProposalWithdrawal(before, after)
@@ -1425,7 +1479,9 @@ service cloud.firestore {
         && (before.status == 'draft'
           ? (preservesProposalReceipt(before, after)
             && (after.status == 'submitted'
-              ? validProposalSubmission(after, proposalId)
+              ? (isIndependentProposal(after)
+                ? validIndependentProposalSubmission(after)
+                : validProposalSubmission(after, proposalId))
               : (after.status in ['draft', 'withdrawn']
                 && validProposal(after)
                 && validAttachments(after, false))))

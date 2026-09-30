@@ -1,16 +1,25 @@
 import { attestPublication, reserveResource } from "./publication.js";
 import { httpsCallable } from "firebase/functions";
-import { collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, query, runTransaction, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocFromServer, getDocs, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import { db, functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { deleteAttachment, toPostingRecord } from "./attachments.js";
-import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
+import {
+  INDEPENDENT_PROPOSAL_FIELDS,
+  INDEPENDENT_PROPOSAL_KIND,
+  isIndependentProposal,
+  PROPOSAL_FIELDS,
+  PROBLEM_FRAMING_FIELDS,
+} from "../config/proposal.js";
+import { expiryDateFrom } from "../config/postingCategories.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
-import { proposalBlockReason, validateProposal } from "./proposalValidation.js";
+import { proposalBlockReason, validateIndependentProposal, validateProposal } from "./proposalValidation.js";
 import { toDate } from "./datetime.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { HALF_UPFRONT_PERCENTAGES, proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
+
+export { isIndependentProposal, INDEPENDENT_PROPOSAL_KIND };
 
 export const PROPOSAL_STATUS_DRAFT = "draft";
 export const PROPOSAL_STATUS_SUBMITTED = "submitted";
@@ -89,6 +98,39 @@ export function buildProposalDocument({ researcherId, posting, form, attachments
   return record;
 }
 
+export function buildIndependentProposalDocument({
+  researcherId, form, attachments = [], status = PROPOSAL_STATUS_SUBMITTED, now = new Date(), expiresAt = null,
+}) {
+  const expiry = toDate(expiresAt) ?? (form.expiryDays ? expiryDateFrom(form.expiryDays, now) : null);
+  const currency = String(form.currency ?? "").trim();
+  const record = {
+    ...Object.fromEntries(INDEPENDENT_PROPOSAL_FIELDS.map(([key]) => [key, String(form[key] ?? "").trim()])),
+    researcherId: researcherId.toLowerCase(),
+    proposalKind: INDEPENDENT_PROPOSAL_KIND,
+    category: String(form.category ?? ""),
+    maturity: String(form.maturity ?? ""),
+    amount: amountOf(form.amount),
+    currency,
+    attachments: attachments.map(toPostingRecord),
+    status,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  if (expiry) record.expiresAt = Timestamp.fromDate(expiry);
+  if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && currency) {
+    if (status === PROPOSAL_STATUS_DRAFT) record.fundingPlan = {
+      tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "7"),
+      funderVoting: form.funderVoting ?? false,
+    };
+    else record.fundingTerms = proposalFundingTerms({
+      form: { ...form, milestones: form.milestones ?? "" },
+      currency,
+      config: AUDIT_REGISTRY_CONFIG,
+    });
+  }
+  return record;
+}
+
 export async function findActiveProposal(problemId, uid) {
   requireFirebase();
   const slot = await getDoc(authorRef(problemId, uid));
@@ -126,6 +168,23 @@ export async function saveProposalDraft({ proposalId, researcherId, posting, for
   });
   if (exists) {
     // createdAt must equal request.time on create and never move afterwards.
+    const { createdAt, ...rest } = record;
+    await updateDoc(proposalRef(proposalId), rest);
+  } else {
+    await reserveResource("proposals", proposalId);
+    await setDoc(proposalRef(proposalId), record);
+  }
+  return findProposal(proposalId);
+}
+
+export async function saveIndependentProposalDraft({
+  proposalId, researcherId, form, attachments = [], exists = false, expiresAt = null,
+}) {
+  requireFirebase();
+  const record = buildIndependentProposalDocument({
+    researcherId, form, attachments, status: PROPOSAL_STATUS_DRAFT, expiresAt,
+  });
+  if (exists) {
     const { createdAt, ...rest } = record;
     await updateDoc(proposalRef(proposalId), rest);
   } else {
@@ -175,6 +234,31 @@ export async function submitProposal({ proposalId, researcherId, posting, form, 
     transaction.set(authorRef(posting.id, uid), { proposalId });
   });
   // A successful commit is success even if the optional read-back is interrupted.
+  return { id: proposalId };
+}
+
+export async function submitIndependentProposal({
+  proposalId, researcherId, form, attachments = [], fromDraft = false,
+  record: preparedRecord = null, audit = null, expiresAt = null,
+}) {
+  requireFirebase();
+  const uid = researcherId.toLowerCase();
+  if (Object.keys(validateIndependentProposal(form)).length) throw new Error("Complete all required proposal fields.");
+  const prepared = preparedRecord ?? buildIndependentProposalDocument({
+    researcherId: uid, form, attachments, expiresAt,
+  });
+  await attestPublication("proposals", proposalId, { ...prepared, ...(audit ? { audit } : {}) });
+  const built = preparedRecord ?? buildIndependentProposalDocument({
+    researcherId: uid, form, attachments, expiresAt,
+  });
+  const record = audit ? { ...built, audit: { ...audit } } : built;
+  if (fromDraft) {
+    const { createdAt, ...rest } = record;
+    if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG)) rest.fundingPlan = deleteField();
+    await updateDoc(proposalRef(proposalId), rest);
+  } else {
+    await setDoc(proposalRef(proposalId), record);
+  }
   return { id: proposalId };
 }
 

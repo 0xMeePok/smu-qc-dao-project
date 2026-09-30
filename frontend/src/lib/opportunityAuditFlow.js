@@ -85,7 +85,7 @@ export function createOpportunityAuditFlow({
       address,
       prepared,
       audit: {
-        schemaVersion: AUDIT_HASH_SCHEME,
+        schemaVersion: prepared.hashScheme ?? AUDIT_HASH_SCHEME,
         chainId: registryConfig.chainId,
         entityId: prepared.entityId,
         contentHash: prepared.contentHash,

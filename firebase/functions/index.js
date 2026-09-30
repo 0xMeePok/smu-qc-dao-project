@@ -353,7 +353,7 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
   if (record[scope === "problems" ? "ownerId" : "researcherId"] !== uid) {
     throw new HttpsError("permission-denied", "You can publish only your own records.");
   }
-  if (scope === "problems") {
+  if (scope === "problems" || (scope === "proposals" && record.proposalKind === "independent")) {
     const date = new Date(record.expiresAt);
     if (!Number.isFinite(date.getTime())) throw new HttpsError("invalid-argument", "Invalid expiry.");
     record.expiresAt = Timestamp.fromDate(date);
