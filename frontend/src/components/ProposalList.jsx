@@ -1,7 +1,7 @@
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
-import { PROPOSAL_STATUS_DRAFT, deleteProposalDraft, listProposals } from "../lib/proposals.js";
+import { PROPOSAL_STATUS_DRAFT, deleteProposalDraft, isIndependentProposal, listProposals, proposalAuthorRoute } from "../lib/proposals.js";
 import { formatInstant } from "../lib/datetime.js";
 import { Modal } from "./Modal.jsx";
 import { FundingMeta } from "./FundingMeta.jsx";
@@ -11,19 +11,20 @@ import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
 function Row({ item, onNavigate, onDelete }) {
   const isDraft = item.status === PROPOSAL_STATUS_DRAFT;
+  const independent = isIndependentProposal(item);
   return <div className="table-row">
     <div>
       <strong>{item.title || "Untitled draft"}</strong>
       <small className="table-row-meta">
         {isDraft
-          ? `Last saved ${formatInstant(item.updatedAt)}`
+          ? `Last saved ${formatInstant(item.updatedAt)}${independent ? " · Independent listing" : ""}`
           : <FundingMeta item={item} />}
       </small>
     </div>
     <div className="table-row-actions">
       {isDraft && <StatusBadge status={WORKFLOW_STATUS.DRAFT} />}
       <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
-      <button className="text-button" type="button" onClick={() => onNavigate(isDraft ? `edit-proposal/${item.id}` : `proposal/${item.id}`)}>
+      <button className="text-button" type="button" onClick={() => onNavigate(proposalAuthorRoute(item))}>
         {isDraft ? "Resume editing" : "View proposal"}
       </button>
       {isDraft && <button className="text-button danger-text" type="button" onClick={() => onDelete(item)}>Delete</button>}
@@ -69,7 +70,7 @@ export function ProposalList({ received = false, draftsOnly = false, onNavigate 
     {!received && <div className="card-table">
       <div className="table-header"><h3>Drafts {drafts.length > 0 && <span className="count-pill">{drafts.length}</span>}</h3></div>
       {loading ? <p className="table-empty" role="status">Loading drafts…</p>
-        : drafts.length === 0 ? <p className="table-empty">No drafts. Save an unfinished proposal to come back to it.</p>
+        : drafts.length === 0 ? <p className="table-empty">No drafts. Save an unfinished proposal to come back to it, or publish an independent listing from the button above.</p>
         : drafts.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} onDelete={setPendingDelete} />)}
     </div>}
 
@@ -77,7 +78,7 @@ export function ProposalList({ received = false, draftsOnly = false, onNavigate 
       <div className="table-header"><h3>{received ? "Proposals received" : "My proposals"}</h3>{!received && <button className="secondary small" onClick={() => onNavigate("discover")}>Browse opportunities</button>}</div>
       {loading ? <p className="table-empty" role="status">Loading proposals…</p>
         : error ? <p className="error-banner" role="alert">{error}</p>
-        : !submitted.length ? <p className="table-empty">{received ? "No proposals received yet." : "No proposals yet. Choose an open opportunity to submit your approach."}</p>
+        : !submitted.length ? <p className="table-empty">{received ? "No proposals received yet." : "No proposals yet. Choose an open opportunity, or publish an independent listing."}</p>
         : submitted.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} onDelete={setPendingDelete} />)}
     </div>}
 

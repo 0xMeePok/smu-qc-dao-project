@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { WORKFLOW_STATUS } from "./workflowStatus.js";
+import { isIndependentProposal } from "./independentProposal.js";
 
 export const REPORT_REASONS = ["off_topic", "abusive", "misleading", "duplicate", "other"];
 export const MODERATION_REASONS = [...REPORT_REASONS, "spam", "policy_violation", "no_violation", "appeal_accepted"];
@@ -186,6 +187,7 @@ export async function canReadContent(tx, db, type, data, uid, profile) {
   if (type === "problem") return ["submitted", "open", "cancelled", "expired"].includes(data.status);
   if (type === "proposal") {
     if (data.postingOwnerId === uid) return true;
+    if (isIndependentProposal(data)) return MEMBER_VISIBLE_PROPOSAL.includes(data.status);
     if (!data.problemId) return false;
     const parent = await tx.get(db.collection("problems").doc(data.problemId));
     return parent.exists && canReadContent(tx, db, "problem", parent.data(), uid, profile);

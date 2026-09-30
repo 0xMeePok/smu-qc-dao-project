@@ -27,7 +27,7 @@ import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { useAccount } from "wagmi";
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../lib/proposalValidation.js";
 import { getMockMatching, proposalMatchingLocked } from "../lib/matching.js";
-import { PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
+import { PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, isIndependentProposal } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { proposalWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
@@ -164,6 +164,9 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       if (editProposalId) {
         const found = await findProposal(editProposalId);
         if (!found) return { error: "This proposal could not be found or you do not have access." };
+        if (isIndependentProposal(found)) {
+          return { redirect: `create-proposal/${found.id}` };
+        }
         return { posting: await findPosting(found.problemId), record: found, proposalId: found.id };
       }
       const [found, existing, draft] = await Promise.all([
@@ -175,6 +178,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     };
     load().then((result) => {
       if (cancelled) return;
+      if (result.redirect) { onNavigate(result.redirect); return; }
       if (result.error) { setError(result.error); return; }
       setPosting(result.posting);
       setActive(result.active ?? null);
@@ -197,7 +201,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       .finally(() => { if (!cancelled) setLoading(false); });
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [postingId, editProposalId, user.id]);
+  }, [postingId, editProposalId, user.id, onNavigate]);
 
   useEffect(() => {
     if (submitted) window.scrollTo({ top: 0, left: 0 });

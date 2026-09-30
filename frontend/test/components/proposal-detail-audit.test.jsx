@@ -18,6 +18,11 @@ vi.mock("../../src/lib/ownerReviews.js", () => ({
   ownerReviewTrackerLabel: () => "",
   ownerReviewError: (error) => error?.message || "Could not record the review.",
 }));
+vi.mock("../../src/lib/moderation.js", () => ({
+  isModerated: () => false,
+  listReportableComments: async () => ({ items: [] }),
+  moderationError: (error) => error?.message || "Could not reach moderation. Please try again.",
+}));
 vi.mock("../../src/lib/proposalAudit.js", () => ({
   anchorProposalAudit: (...args) => mocks.anchor(...args), proposalAuditReceipt: (record) => record.audit,
   readProposalAudit: (...args) => mocks.verify(...args),

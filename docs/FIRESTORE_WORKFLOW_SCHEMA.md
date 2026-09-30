@@ -8,7 +8,7 @@ immutable. Amounts are numbers from 0 through 1,000,000,000.
 | Collection | Required fields | Optional fields | Initial status |
 | --- | --- | --- | --- |
 | `problems` | Shared: `ownerId`, `organisation`, `title`, `amount`, `currency`, `categories`, `expiresAt`, `status`, `createdAt`, `updatedAt`; business problem: `summary`, `businessContext`, `currentApproach`, `currentLimitations`, `expectedOutcome`, `successCriteria`, `dataAvailability`; open funding: `opportunityType: "open-funding"`, `fundingThesis`, `eligibilityNotes`, `tags` | `attachments`, `audit`, `withdrawalReason`; server-only: `expiryReason`, `expirySource`, `expiryActor`, `expiryActorName`, `expiredAt`; legacy drafts retain the older optional fields | `draft` or complete form submission as `submitted` |
-| `proposals` | `researcherId`, `problemId`, `status`, `createdAt`, `updatedAt`; from `submitted` onwards also `title`, `summary`, `amount`, `postingOwnerId`, `opportunityType`, `category`, `currency`, and every approach field | `outcomes`, `deliverables`, `attachments`, `audit`, `withdrawalReason` | `draft` or complete form submission as `submitted` |
+| `proposals` | Attached: `researcherId`, `problemId`, `status`, `createdAt`, `updatedAt`; from `submitted` onwards also `title`, `summary`, `amount`, `postingOwnerId`, `opportunityType`, `category`, `currency`, and every approach field. Independent (`proposalKind: "independent"`): `researcherId`, `proposalKind`, `status`, timestamps; from `submitted` onwards also `title`, `summary`, `methodology`, `addressedProblems`, `maturity`, `team`, `category`, `amount`, `currency`, `expiresAt`. Independent records omit `problemId`, `postingOwnerId`, and `opportunityType`. | `attachments`, `audit`, `withdrawalReason`; attached also `outcomes` / `deliverables`; independent also optional draft `expiresAt` | `draft` or complete form submission as `submitted` |
 | `evaluations` | `evaluatorId`, `proposalId`, `title`, `score`, `feedback`, `status`, `createdAt`, `updatedAt` | none | `draft` |
 | `funding` | `funderId`, `proposalId`, `problemId`, `title`, `amount`, `status`, `createdAt`, `updatedAt` | `tranches` | `pledged` |
 
@@ -18,6 +18,26 @@ required. A draft carries **no** `postingOwnerId` — that field is the sponsor'
 read ACL and their dashboard filter, so a draft that set it would appear in their
 queue before it was sent. It is bound to the parent opportunity's owner on the
 `submitted` path and may not be introduced on any other.
+
+Independent proposals are a distinct shape in the same collection. They carry
+immutable `proposalKind: "independent"` and **must not** set `problemId` or
+`postingOwnerId`. The author owns the listing (`researcherId`). Publication uses
+the same proposal statuses. The listing's own `expiresAt` is chosen from the
+documented 30 / 60 / 90 / 180 day windows. On-chain, an independent listing is
+anchored as AuditRegistry kind `FundingRequest` (2) under **hash scheme 2**,
+because `commitProposal` requires a live parent opportunity. Attached proposals
+keep hash scheme 1 and their frozen v1 field list; adding independent fields
+must not change those historical hashes.
+
+Onboarded members browse published, unexpired independent listings through the
+`listIndependentListings` callable. Client `list` on `proposals` stays
+author/sponsor-only; members `get` a published independent record by id.
+Members may comment on a published independent listing while its own
+`expiresAt` is still in the future; the catalog and countdown use that same
+deadline, not a parent posting. Evaluator recommendations are not used on
+independent listings. After the window closes the listing leaves the catalog,
+the countdown reads expired, and new comments are refused. Existing comments
+stay readable.
 
 A `problems` document in `submitted` or `open` must additionally carry every
 required published-content field for its type, with non-empty text, at least one
@@ -124,6 +144,16 @@ correction must leave a complete, valid proposal against an opportunity that is
 still open, and it may only touch the content fields — the researcher, the
 opportunity, the sponsor, the opportunity type, the currency and the status are
 all immutable.
+
+Independent listings (`proposalKind: "independent"`) use the same `submitted`
+correction window, but they have no parent posting. Rules must not
+`get(problems/{problemId})` on that path. Allowed content keys include
+`addressedProblems` and `maturity`. Currency, `expiresAt`, attachments,
+`proposalKind` and escrow `fundingTerms` stay frozen. Edit and withdraw are
+blocked once escrow has deposits or matching is locked, without calling
+`getMockMatching` on a parent. On-chain, an independent amendment is
+`updateOpportunity` and a withdrawal is `withdrawOpportunity` (hash scheme 2),
+not `updateHashes` / `withdrawProposal`.
 
 A correction may not carry a `confirmed` `audit` receipt, because that is a
 server attestation about the content the edit has just replaced. Anything still

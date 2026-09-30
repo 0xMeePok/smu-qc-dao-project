@@ -197,6 +197,23 @@ describe("QCDAO-59/60 submitted proposals", () => {
     await assertSucceeds(getDocs(query(collection(env.authenticatedContext(SPONSOR).firestore(), "proposals"), where("postingOwnerId", "==", SPONSOR))));
     await assertSucceeds(getDocs(query(collection(env.authenticatedContext(AUTHOR).firestore(), "proposals"), where("researcherId", "==", AUTHOR))));
   });
+  it("lets onboarded members get a published independent listing but not list the catalog", async () => {
+    const listing = {
+      researcherId: AUTHOR, proposalKind: "independent", title: "Standalone solver",
+      summary: "A catalogued solution", methodology: "Hybrid annealing", addressedProblems: "Routing and packing",
+      team: "Lab group", category: "hybrid", maturity: "pilot", amount: 2000, currency: "USDC",
+      status: "submitted", expiresAt: new Date("2099-01-01"), attachments: [],
+      createdAt: new Date(), updatedAt: new Date(),
+    };
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "proposals", "independent-live"), listing);
+      await setDoc(doc(ctx.firestore(), "proposals", "independent-hidden"), { ...listing, moderationStatus: "hidden" });
+    });
+    const outsider = env.authenticatedContext(OUTSIDER).firestore();
+    await assertSucceeds(getDoc(doc(outsider, "proposals", "independent-live")));
+    await assertFails(getDocs(query(collection(outsider, "proposals"), where("proposalKind", "==", "independent"))));
+    await assertFails(getDoc(doc(outsider, "proposals", "independent-hidden")));
+  });
   it("keeps submitted proposals readable after the parent is cancelled or expired", async () => {
     const cancelledParent = await parent({ status: "cancelled", withdrawalReason: "Programme closed." });
     const expiredParent = await parent({ status: "expired" });

@@ -1467,6 +1467,40 @@ input[type="radio"] { accent-color: var(--brand); }
   font-size: 16px;
 }
 
+.table-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.table-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.table-filter select {
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .table-row {
   display: flex;
   align-items: center;
@@ -2944,6 +2978,15 @@ footer > p { margin: 0 auto 0 0; }
   align-items: center;
   gap: 12px;
   margin-left: auto;
+}
+
+.proposal-tracker .table-row-actions .expiry-countdown strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.proposal-tracker .expiry-normal .expiry-urgency {
+  display: none;
 }
 
 .table-empty {
@@ -4513,8 +4556,8 @@ h1, h2, h3 { font-weight: 500; }
 .blotter-posting { padding-top: 40px; }
 .blotter-posting .back { margin-bottom: 40px; color: var(--muted); }
 .blotter-posting .detail-layout { gap: 72px; }
-.blotter-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 32px; align-items: end; margin-bottom: 28px; }
-.blotter-posting h1 { margin: 8px 0 0; max-width: none; font-size: clamp(36px, 5vw, 56px); font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; }
+.blotter-title { display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: 100%; margin-bottom: 28px; }
+.blotter-posting h1 { margin: 8px 0 0; max-width: none; font-size: clamp(36px, 5vw, 56px); font-weight: 500; line-height: 1.12; letter-spacing: -0.02em; overflow-wrap: break-word; word-break: normal; }
 .blotter-posting .lead { max-width: 62ch; font-size: 20px; line-height: 1.45; }
 .blotter-posting .context-panel,
 .blotter-posting :is(.detail-main, .posting-tab) > .detail-section {
@@ -4540,7 +4583,6 @@ h1, h2, h3 { font-weight: 500; }
 .blotter-posting .context-panel > button,
 .blotter-posting .context-panel-actions > button { border-radius: 0; }
 @media (max-width: 900px) {
-  .blotter-title { grid-template-columns: 1fr; }
   .blotter-posting .detail-layout { gap: 40px; }
   .blotter-posting .context-panel { position: static; }
 }

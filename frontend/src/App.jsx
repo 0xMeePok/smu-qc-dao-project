@@ -1,4 +1,6 @@
 import CreateProposalPage from "./pages/CreateProposalPage.jsx";
+import CreateIndependentProposalPage from "./pages/CreateIndependentProposalPage.jsx";
+import IndependentListingsPage from "./pages/IndependentListingsPage.jsx";
 import ProposalDetailPage from "./pages/ProposalDetailPage.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunityTypes } from "./data.js";
@@ -538,6 +540,8 @@ function syncDiscoverUrl(filters) {
 
 function Discover({ params }) {
   const { postings, loading, loadError, isAuthenticated, hasMore, loadMore } = usePublishedPostings();
+  const { roles } = useAuth();
+  const canBrowseSolutions = Boolean(roles?.some((role) => [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER].includes(role)));
   const paramsKey = params.toString();
   const [filters, setFilters] = useState(() => parseDiscoveryParams(params));
 
@@ -582,6 +586,13 @@ function Discover({ params }) {
       <div className="page-heading">
         <h1>Discover Ledger.</h1>
         <p>Every open problem and funding call, in one place.</p>
+        {canBrowseSolutions && (
+          <p>
+            <button className="text-button" type="button" onClick={() => go("solutions")}>
+              Browse independent solution listings
+            </button>
+          </p>
+        )}
       </div>
 
       <div className="discover-search-row">
@@ -805,6 +816,12 @@ function AppContent() {
     pageComponent = <Home />;
   } else if (section === "discover") {
     pageComponent = <Discover params={params} />;
+  } else if (section === "solutions") {
+    pageComponent = (
+      <RouteGuard targetRoute={section} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
+        <IndependentListingsPage onNavigate={go} />
+      </RouteGuard>
+    );
   } else if (section === "profile") {
     pageComponent = id ? (
       <PublicProfilePage address={id} onNavigate={go} />
@@ -816,6 +833,12 @@ function AppContent() {
         onNavigate={go}
       >
         <ProfilePage onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "create-proposal") {
+    pageComponent = (
+      <RouteGuard targetRoute={fullPath} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
+        <CreateIndependentProposalPage key={id ?? "new"} resumeId={id} onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "submit-proposal" || section === "edit-proposal" || section === "proposal") {
