@@ -289,6 +289,32 @@ export async function updateProposal({ proposalId, researcherId, posting, form, 
   return findProposal(proposalId);
 }
 
+/** Content correction for a published independent listing. Does not read a parent posting. */
+export async function updateIndependentProposal({
+  proposalId, researcherId, form, attachments = [], record: preparedRecord = null, audit = null, expiresAt = null,
+}) {
+  requireFirebase();
+  if (Object.keys(validateIndependentProposal(form)).length) throw new Error("Complete all required proposal fields.");
+  const built = preparedRecord ?? buildIndependentProposalDocument({
+    researcherId, form, attachments, expiresAt, status: PROPOSAL_STATUS_SUBMITTED,
+  });
+  const { createdAt, ...record } = built;
+  await attestPublication("proposals", proposalId, { ...record, audit });
+  await updateDoc(proposalRef(proposalId), {
+    title: record.title,
+    summary: record.summary,
+    methodology: record.methodology,
+    addressedProblems: record.addressedProblems,
+    team: record.team,
+    category: record.category,
+    maturity: record.maturity,
+    amount: record.amount,
+    audit: audit ? { ...audit } : deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+  return findProposal(proposalId);
+}
+
 export async function withdrawProposal(id, reason) {
   requireFirebase();
   const withdrawalReason = String(reason ?? "").trim();

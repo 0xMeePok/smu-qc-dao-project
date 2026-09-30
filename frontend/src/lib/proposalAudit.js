@@ -1,12 +1,12 @@
 import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
 import { assertCurrentAuditRecord, configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
 import {
-  commitProposalAudit, prepareProposalWithdrawal, readOpportunityRevisionIndex, readProposalHashes,
-  readProposalIsAnchored, updateProposalAudit, verifyProposalAudit, withdrawProposalAudit,
-  writeOpportunityAudit,
+  commitProposalAudit, prepareOpportunityWithdrawal, prepareProposalWithdrawal,
+  readOpportunityRevisionIndex, readProposalHashes, readProposalIsAnchored, updateProposalAudit,
+  verifyProposalAudit, withdrawOpportunityAudit, withdrawProposalAudit, writeOpportunityAudit,
 } from "./auditRegistry.js";
 import { findProposal, updateProposalReceipt } from "./proposals.js";
-import { isIndependentProposal } from "../../../firebase/functions/independentProposal.js";
+import { INDEPENDENT_PROPOSAL_HASH_SCHEME, isIndependentProposal } from "../../../firebase/functions/independentProposal.js";
 
 export { proposalAuditPayload } from "../../../firebase/functions/proposalAuditPayload.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
@@ -106,6 +106,16 @@ export async function anchorProposalWithdrawal(record, { account, adapters, reas
   await assertCurrentAuditRecord(record, { adapters });
   const address = configuredAuditRegistryAddress();
   if (!address) throw new Error("AuditRegistry is not configured.");
+  if (isIndependentProposal(record)) {
+    return withdrawOpportunityAudit(
+      prepareOpportunityWithdrawal({
+        recordId: record.id, ownerId: record.researcherId, reason,
+        actor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.researcherId : undefined,
+        hashScheme: INDEPENDENT_PROPOSAL_HASH_SCHEME,
+      }),
+      { address, account, adapters, onStatus },
+    );
+  }
   return withdrawProposalAudit(
     prepareProposalWithdrawal({
       recordId: record.id, researcherId: record.researcherId, reason,

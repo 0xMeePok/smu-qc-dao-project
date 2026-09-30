@@ -165,9 +165,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
         const found = await findProposal(editProposalId);
         if (!found) return { error: "This proposal could not be found or you do not have access." };
         if (isIndependentProposal(found)) {
-          return {
-            redirect: found.status === PROPOSAL_STATUS_DRAFT ? `create-proposal/${found.id}` : `proposal/${found.id}`,
-          };
+          return { redirect: `create-proposal/${found.id}` };
         }
         return { posting: await findPosting(found.problemId), record: found, proposalId: found.id };
       }

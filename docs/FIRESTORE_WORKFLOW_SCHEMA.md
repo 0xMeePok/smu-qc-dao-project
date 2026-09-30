@@ -139,6 +139,16 @@ still open, and it may only touch the content fields — the researcher, the
 opportunity, the sponsor, the opportunity type, the currency and the status are
 all immutable.
 
+Independent listings (`proposalKind: "independent"`) use the same `submitted`
+correction window, but they have no parent posting. Rules must not
+`get(problems/{problemId})` on that path. Allowed content keys include
+`addressedProblems` and `maturity`. Currency, `expiresAt`, attachments,
+`proposalKind` and escrow `fundingTerms` stay frozen. Edit and withdraw are
+blocked once escrow has deposits or matching is locked, without calling
+`getMockMatching` on a parent. On-chain, an independent amendment is
+`updateOpportunity` and a withdrawal is `withdrawOpportunity` (hash scheme 2),
+not `updateHashes` / `withdrawProposal`.
+
 A correction may not carry a `confirmed` `audit` receipt, because that is a
 server attestation about the content the edit has just replaced. Anything still
 in flight is accepted — including the `pending` receipt for the `updateHashes`

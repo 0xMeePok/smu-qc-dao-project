@@ -125,6 +125,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       if (!anchored) {
         let fundingStarted;
         if (proposal.fundingTerms) fundingStarted = (await readEscrow({ proposal, account: address })).totalDeposited > 0n;
+        else if (isIndependentProposal(proposal)) fundingStarted = proposalMatchingLocked(proposal);
         else {
           const current = await getMockMatching(proposal.problemId, { proposalId });
           const candidate = current.proposals.find((item) => item.id === proposalId);
@@ -293,27 +294,31 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       {showEscrow && <button className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
       {/* Editable only while `submitted`. `under_review` means an evaluator has
           the proposal open, and firestore.rules refuses a content write from
-          that point on. Independent edit/withdraw is a later listing workflow. */}
-      {owns && !independent && !locked && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(`edit-proposal/${proposal.id}`)}>Edit proposal</button>}
-      {owns && !independent && !locked && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
-      {owns && !independent && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(`submit-proposal/${proposal.problemId}`)}>Submit a replacement</button>}
+          that point on. Independent listings have no parent posting. */}
+      {owns && !locked && proposal.status === "submitted" && <button className="secondary" onClick={() => onNavigate(independent ? `create-proposal/${proposal.id}` : `edit-proposal/${proposal.id}`)}>Edit proposal</button>}
+      {owns && !locked && ["submitted", "under_review"].includes(proposal.status) && <button className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
+      {owns && proposal.status === "withdrawn" && <button className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
       <div className="modal-head">
         <div>
           <h2 id="withdraw-proposal-title">Withdraw this proposal?</h2>
-          <p id="withdraw-proposal-desc">It leaves evaluation and selection immediately. You can submit a new proposal while the opportunity remains open.</p>
+          <p id="withdraw-proposal-desc">{independent
+            ? "It leaves the catalog immediately. You can publish a new independent listing afterwards."
+            : "It leaves evaluation and selection immediately. You can submit a new proposal while the opportunity remains open."}</p>
         </div>
       </div>
       <div className="modal-body">
-        <Field htmlFor="withdrawal-reason" label="Why are you withdrawing?" error={reasonError} hint="A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to the sponsor. It cannot be changed afterwards.">
+        <Field htmlFor="withdrawal-reason" label="Why are you withdrawing?" error={reasonError} hint={independent
+          ? "A hash of this exact text is anchored on Arbitrum Sepolia, and the text is stored on the listing. It cannot be changed afterwards."
+          : "A hash of this exact text is anchored on Arbitrum Sepolia, and the text is shown to the sponsor. It cannot be changed afterwards."}>
           {({ id, describedBy, invalid }) => <textarea id={id} rows={3} value={anchoredWithdrawal?.reason ?? reason} maxLength={1000} disabled={withdrawing || Boolean(anchoredWithdrawal)} aria-describedby={describedBy} aria-invalid={invalid} onChange={(event) => { if (anchoredWithdrawal) return; setReason(event.target.value); setReasonError(""); }} />}
         </Field>
         {error && anchoredWithdrawal ? <p className="error-banner" role="alert">{error}</p> : null}
         <p className="field-hint">{anchoredWithdrawal
           ? "The withdrawal is already signed on Arbitrum Sepolia. Saving it does not need another signature."
-          : "Your wallet signs the withdrawal before it takes effect. If you decline, the proposal stays in evaluation exactly as it is."}</p>
+          : "Your wallet signs the withdrawal before it takes effect. If you decline, the proposal stays exactly as it is."}</p>
       </div>
       <div className="modal-actions"><button className="secondary" disabled={withdrawing || Boolean(anchoredWithdrawal)} onClick={() => setConfirm(false)}>Keep proposal</button><button className="danger-btn" disabled={withdrawing} onClick={withdraw}>{withdrawing ? (anchoredWithdrawal ? "Saving…" : "Waiting for your wallet…") : (anchoredWithdrawal ? "Finish saving withdrawal" : "Sign and withdraw")}</button></div>
     </Modal>}

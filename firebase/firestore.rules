@@ -1098,8 +1098,40 @@ service cloud.firestore {
       ]);
     }
 
+    // Independent listings have no parent posting. Currency, expiry, attachments
+    // and proposalKind stay frozen; addressedProblems and maturity may move.
+    function independentCorrectionTouchesOnlyContent(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+        'title', 'summary', 'methodology', 'addressedProblems', 'team',
+        'category', 'maturity', 'amount', 'audit', 'updatedAt'
+      ]);
+    }
+
+    function validIndependentProposalCorrection(before, after) {
+      return isIndependentProposal(before)
+        && isIndependentProposal(after)
+        && before.status == 'submitted'
+        && after.status == 'submitted'
+        && independentCorrectionTouchesOnlyContent(before, after)
+        && (!('fundingTerms' in after) || after.fundingTerms.trancheBps == [5000, 5000])
+        && after.get('audit', {}).get('status', 'queued') != 'confirmed'
+        && hasValidAudit(after)
+        && (!before.keys().hasAny(['audit']) || after.keys().hasAny(['audit']))
+        && isNonEmptyString(after.title, 160)
+        && isNonEmptyString(after.summary, 4000)
+        && isNonEmptyString(after.methodology, 4000)
+        && isNonEmptyString(after.addressedProblems, 4000)
+        && isNonEmptyString(after.team, 4000)
+        && validAmount(after.amount) && after.amount > 0
+        && after.category in ['gate-model', 'quantum-inspired', 'quantum-annealing', 'hybrid', 'quantum-adjacent']
+        && after.maturity in ['concept', 'laboratory', 'pilot', 'production']
+        && after.attachments == before.attachments;
+    }
+
     function validProposalCorrection(before, after) {
-      return before.status == 'submitted'
+      return isIndependentProposal(after)
+        ? validIndependentProposalCorrection(before, after)
+        : (before.status == 'submitted'
         && after.status == 'submitted'
         && correctionTouchesOnlyContent(before, after)
         && (!('fundingTerms' in after) || after.fundingTerms.trancheBps == [5000, 5000])
@@ -1144,7 +1176,7 @@ service cloud.firestore {
         // Unchanged attachments were validated when they were attached. Every
         // proposal that reached `submitted` carried digests, so a replaced list
         // is held to that standard, not the four-field legacy shape.
-        && (after.attachments == before.attachments || validAttachments(after, true));
+        && (after.attachments == before.attachments || validAttachments(after, true)));
     }
 
     function validEvaluationStatus(status) {
