@@ -26,3 +26,8 @@ edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/manifests/arbi
 edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/manifests/arbitrumSepolia-smoke.json:generic-api-key:200
 edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/test/FundingEscrow.test.js:generic-api-key:62
 edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/test/FundingEscrow.test.js:generic-api-key:64
+
+# Sep 29 smoke evidence: both findings are the public mock-USDC contract address.
+# Keep these exceptions tied to the exact committed findings, not future file contents.
+d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json:generic-api-key:8
+d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json:generic-api-key:188
