@@ -10,7 +10,7 @@ import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { opportunityWorkflowStatus, proposalWorkflowStatus } from "../config/workflowStatus.js";
 import { StatusBadge } from "../components/StatusBadge.jsx";
 import { POSTING_STATUS_DRAFT, listOwnPostings } from "../lib/postings.js";
-import { PROPOSAL_STATUS_DRAFT, listProposals } from "../lib/proposals.js";
+import { listProposals, proposalAuthorRoute } from "../lib/proposals.js";
 import { opportunityTypeLabel } from "../lib/opportunityPresentation.js";
 
 function formatDate(value) {
@@ -81,8 +81,8 @@ function useProfileList(tab, address) {
         title: proposal.title || "Untitled proposal",
         sub: [proposal.currency && proposal.amount ? `${proposal.currency} ${Number(proposal.amount).toLocaleString()}` : "", formatDate(proposal.createdAt)].filter(Boolean).join(" · "),
         status: proposalWorkflowStatus(proposal),
-        // Drafts open in the editor, as they do from My Proposals.
-        route: proposal.status === PROPOSAL_STATUS_DRAFT ? `edit-proposal/${proposal.id}` : `proposal/${proposal.id}`,
+        // Drafts open in the same editor as My Proposals (independent drafts skip the attached form).
+        route: proposalAuthorRoute(proposal),
       })));
     load
       .then((items) => store({ loading: false, items }))

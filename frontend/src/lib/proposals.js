@@ -24,6 +24,15 @@ export { isIndependentProposal, INDEPENDENT_PROPOSAL_KIND };
 export const PROPOSAL_STATUS_DRAFT = "draft";
 export const PROPOSAL_STATUS_SUBMITTED = "submitted";
 
+/** Author workspace route: independent drafts must not open the attached editor (no parent posting). */
+export function proposalAuthorRoute(record) {
+  if (!record?.id) return "proposals";
+  if (record.status === PROPOSAL_STATUS_DRAFT) {
+    return isIndependentProposal(record) ? `create-proposal/${record.id}` : `edit-proposal/${record.id}`;
+  }
+  return `proposal/${record.id}`;
+}
+
 /** Statuses onboarded members may see on a browsable posting. Drafts stay author-only.
  *  Keep in lockstep with listPostedProposals in firebase/functions/moderation.js. */
 export const MEMBER_VISIBLE_PROPOSAL_STATUSES = [
