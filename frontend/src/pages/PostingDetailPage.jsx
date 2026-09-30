@@ -1,7 +1,7 @@
 import { proposalBlockReason } from "../lib/proposalValidation.js";
 import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findPosting, withdrawPosting } from "../lib/postings.js";
 import {
@@ -122,7 +122,7 @@ function PosterIdentity({ ownerId, organisation, poster, onNavigate }) {
 
 export default function PostingDetailPage({ postingId, onNavigate }) {
   const { isAuthenticated, user } = useAuth();
-  const { address: connectedAddress, isConnected } = useAccount();
+  const { address: connectedAddress, isConnected } = useWallet();
   const [posting, setPosting] = useState(null);
   const [matchingRefresh, setMatchingRefresh] = useState(0);
   const [tab, setTab] = useState("overview");

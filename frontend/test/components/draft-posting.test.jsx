@@ -16,8 +16,8 @@ const mocks = vi.hoisted(() => ({
   anchoredRecord: null,
 }));
 
-vi.mock("wagmi", () => ({
-  useAccount: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true }),
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614, switchChain: async () => {} }),
 }));
 
 vi.mock("../../src/lib/firebase.js", () => ({
@@ -81,7 +81,7 @@ vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
     return <div data-testid="uploader" />;
   },
 }));
-// Pulls in the real wagmi config at import time, which the bare wagmi mock breaks.
+// The reconnect dialog is mocked so the form test does not open Privy.
 vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
   ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));

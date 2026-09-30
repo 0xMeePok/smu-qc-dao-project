@@ -4,7 +4,7 @@ import { EscrowFundingPanel } from "../components/EscrowFundingPanel.jsx";
 import { readEscrow } from "../lib/escrow.js";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findProposal, withdrawProposal } from "../lib/proposals.js";
 import { anchorProposalAudit, anchorProposalWithdrawal, proposalAuditReceipt, readProposalAudit } from "../lib/proposalAudit.js";
@@ -34,7 +34,7 @@ import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 // control below is for a receipt that was left in flight.
 export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false }) {
   const { user } = useAuth();
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useWallet();
   const [proposal, setProposal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

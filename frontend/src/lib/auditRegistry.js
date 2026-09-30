@@ -1,19 +1,12 @@
-import {
-  estimateFeesPerGas as wagmiEstimateFeesPerGas,
-  getBlock as wagmiGetBlock,
-  getTransaction as wagmiGetTransaction,
-  readContract as wagmiReadContract,
-  simulateContract as wagmiSimulateContract,
-  waitForTransactionReceipt as wagmiWaitForTransactionReceipt,
-  writeContract as wagmiWriteContract,
-} from "wagmi/actions";
+import { createPublicClient, createWalletClient, custom, getAddress, http } from "viem";
+import { arbitrumSepolia } from "viem/chains";
 import {
   AUDIT_REGISTRY_ABI,
   AUDIT_REGISTRY_CHAIN_ID,
   AUDIT_REGISTRY_CONFIG,
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
-import { wagmiConfig } from "./wagmi.js";
+import { getActiveWallet } from "./activeWallet.js";
 import { isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
 import { isEscrowRegistry, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
 import { knownAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
@@ -93,13 +86,36 @@ export function decorateAuditRevert(error, functionName) {
   return wrapped;
 }
 
-export function createWagmiAuditAdapters(config = wagmiConfig) {
+let publicClient;
+
+function defaultPublicClient() {
+  if (!publicClient) {
+    publicClient = createPublicClient({
+      chain: arbitrumSepolia,
+      transport: http(import.meta.env?.VITE_ARBITRUM_SEPOLIA_RPC_URL?.trim() || undefined),
+    });
+  }
+  return publicClient;
+}
+
+async function defaultWalletClient(request) {
+  const active = getActiveWallet();
+  if (typeof active.getProvider !== "function") {
+    throw new Error("Connect the wallet selected for this action.");
+  }
+  return createWalletClient({
+    account: getAddress(request.account),
+    chain: arbitrumSepolia,
+    transport: custom(await active.getProvider()),
+  });
+}
+
+export function createAuditAdapters({ client, walletClient } = {}) {
+  const reads = client ?? defaultPublicClient();
+  const signer = walletClient ?? null;
   return {
     writeContract: async (request) => {
-      const { maxFeePerGas, maxPriorityFeePerGas } = await wagmiEstimateFeesPerGas(config, {
-        chainId: request.chainId,
-        type: "eip1559",
-      });
+      const { maxFeePerGas, maxPriorityFeePerGas } = await reads.estimateFeesPerGas({ type: "eip1559" });
       if (typeof maxFeePerGas !== "bigint" || maxFeePerGas <= 0n
           || typeof maxPriorityFeePerGas !== "bigint" || maxPriorityFeePerGas < 0n
           || maxPriorityFeePerGas > maxFeePerGas) {
@@ -115,36 +131,36 @@ export function createWagmiAuditAdapters(config = wagmiConfig) {
         : (MIN_PRIORITY_FEE_WEI < feeCap ? MIN_PRIORITY_FEE_WEI : feeCap);
       // Simulate before the wallet opens. A reverting call on Arbitrum does not
       // fail estimateGas cleanly — the node returns a block-sized gas limit, and
-      // MetaMask prices that as thousands of ETH. The registry write that should
+      // the wallet prices that as thousands of ETH. The registry write that should
       // run is still writeContract; simulation only refuses a call that cannot
       // succeed (wrong function for the id, wrong wallet, reused hash, expired).
       try {
-        await wagmiSimulateContract(config, {
+        await reads.simulateContract({
           address: request.address,
           abi: request.abi,
           functionName: request.functionName,
           args: request.args,
           account: request.account,
-          chainId: request.chainId,
         });
       } catch (error) {
         throw decorateAuditRevert(error, request.functionName);
       }
-      return wagmiWriteContract(config, {
+      const writer = signer ?? await defaultWalletClient(request);
+      return writer.writeContract({
         ...request,
         maxFeePerGas: feeCap,
         maxPriorityFeePerGas: priorityFee,
       });
     },
-    waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
-    readContract: (request) => wagmiReadContract(config, request),
-    getBlock: (request) => wagmiGetBlock(config, request),
-    getTransaction: (request) => wagmiGetTransaction(config, request),
+    waitForTransactionReceipt: (request) => reads.waitForTransactionReceipt(request),
+    readContract: (request) => reads.readContract(request),
+    getBlock: (request) => reads.getBlock(request),
+    getTransaction: (request) => reads.getTransaction(request),
   };
 }
 
 function auditAdapters(adapters) {
-  const resolved = adapters ?? createWagmiAuditAdapters();
+  const resolved = adapters ?? createAuditAdapters();
   for (const method of ["writeContract", "waitForTransactionReceipt", "readContract"]) {
     if (typeof resolved[method] !== "function") {
       throw new TypeError(`Audit adapter is missing ${method}().`);

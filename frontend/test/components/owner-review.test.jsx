@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
   record: vi.fn(),
   find: vi.fn(),
 }));
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: false, address: `0x${"a".repeat(40)}` }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ isConnected: false, address: `0x${"a".repeat(40)}`, chainId: 421614, switchChain: async () => {} }),
+}));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: mocks.userId, roles: mocks.roles } }) }));
 vi.mock("../../src/lib/ownerReviews.js", async (importOriginal) => {
   const actual = await importOriginal();

@@ -17,7 +17,9 @@ vi.mock("../../src/lib/proposals.js", () => ({
   saveProposalDraft: (...args) => mocks.saveDraft(...args),
   updateProposal: (...args) => mocks.update(...args),
 }));
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: "0xabc" }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ isConnected: mocks.connected, address: "0xabc", chainId: 421614, switchChain: async () => {} }),
+}));
 vi.mock("../../src/lib/proposalAudit.js", () => ({
   proposalAuditReceipt: () => ({ status: "queued" }),
   anchorProposalBeforeWrite: (...args) => mocks.anchor(...args),

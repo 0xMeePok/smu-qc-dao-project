@@ -6,7 +6,7 @@ import {
 import {
   MAX_AUDIT_RETRIES,
   commitOpportunityAudit,
-  createWagmiAuditAdapters,
+  createAuditAdapters,
   prepareOpportunityCommit,
   verifyOpportunityAudit,
   waitForAuditReceipt,
@@ -42,7 +42,7 @@ function storedAudit(setup, opportunity) {
 }
 
 export async function recordAuditDeployment(record, { adapters } = {}) {
-  const resolved = adapters ?? createWagmiAuditAdapters();
+  const resolved = adapters ?? createAuditAdapters();
   return resolveAuditDeployment(record, {
     activeConfig: AUDIT_REGISTRY_CONFIG,
     getTransaction: typeof resolved.getTransaction === "function" ? request => resolved.getTransaction(request) : undefined,

@@ -25,8 +25,7 @@ export async function fetchPlatformStatus() {
 }
 
 /**
- * Probes the RPC the frontend itself uses (the same URL wagmi is configured
- * with), from this browser. A dedicated client with no retries keeps the
+ * Probes the RPC the frontend itself uses, from this browser. A dedicated client with no retries keeps the
  * latency honest and fails fast.
  */
 export async function probeBrowserRpc({ url = BROWSER_RPC_URL } = {}) {

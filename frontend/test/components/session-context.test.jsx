@@ -8,19 +8,19 @@ const mocks = vi.hoisted(() => ({
   profileListener: null,
   accountAddress: null,
   disconnect: vi.fn(async () => {}),
+  privyLogout: vi.fn(async () => {}),
   go: vi.fn(),
   revoke: vi.fn(async () => ({ success: true })),
   signOut: vi.fn(),
 }));
 
-vi.mock("wagmi", () => ({
-  useAccount: () => ({ address: mocks.accountAddress }),
-  useDisconnect: () => ({ disconnectAsync: mocks.disconnect }),
-  useSignMessage: () => ({ signMessageAsync: vi.fn() }),
-}));
-vi.mock("wagmi/actions", () => ({
-  getConnection: () => ({ chainId: 421614 }),
-  switchChain: vi.fn(),
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({
+    address: mocks.accountAddress,
+    isConnected: Boolean(mocks.accountAddress),
+    chainId: 421614,
+    switchChain: async () => {},
+  }),
 }));
 vi.mock("firebase/auth", () => ({
   onAuthStateChanged: (_auth, callback) => {
@@ -53,7 +53,9 @@ vi.mock("../../src/lib/profile.js", () => ({
   findProfileByAddress: vi.fn(),
   updateProfile: vi.fn(),
 }));
-vi.mock("../../src/lib/wagmi.js", () => ({ wagmiConfig: {} }));
+vi.mock("../../src/lib/privyLogout.js", () => ({
+  logoutPrivy: (...args) => mocks.privyLogout(...args),
+}));
 vi.mock("../../src/lib/router.js", () => ({ go: (...args) => mocks.go(...args) }));
 vi.mock("../../src/lib/idleTimeout.js", () => ({
   IDLE_CHECK_INTERVAL_MS: 60_000,
@@ -86,6 +88,8 @@ describe("SessionProvider persistence and logout integration", () => {
       mocks.authListener?.(null);
     });
     mocks.revoke.mockResolvedValue({ success: true });
+    mocks.privyLogout.mockClear();
+    mocks.disconnect.mockClear();
   });
 
   afterEach(() => cleanup());
@@ -126,6 +130,7 @@ describe("SessionProvider persistence and logout integration", () => {
     expect(currentSession.isSignedIn).toBe(true);
     expect(currentSession.error).toContain("revocation failed");
     expect(mocks.disconnect).not.toHaveBeenCalled();
+    expect(mocks.privyLogout).not.toHaveBeenCalled();
     expect(mocks.go).not.toHaveBeenCalledWith("login");
   });
 
@@ -137,6 +142,7 @@ describe("SessionProvider persistence and logout integration", () => {
     await waitFor(() => expect(currentSession?.isSignedIn).toBe(false));
     expect(mocks.revoke).toHaveBeenCalledOnce();
     expect(mocks.signOut).toHaveBeenCalledOnce();
+    expect(mocks.privyLogout).toHaveBeenCalledOnce();
     expect(mocks.go).toHaveBeenCalledWith("login");
 
     first.unmount();

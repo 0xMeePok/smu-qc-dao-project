@@ -7,8 +7,8 @@ const mocks = vi.hoisted(() => ({
   verifyProblem: vi.fn(async () => ({ verified: false })),
 }));
 
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(),
-  useAccount: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true }),
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614, switchChain: async () => {} }),
 }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },

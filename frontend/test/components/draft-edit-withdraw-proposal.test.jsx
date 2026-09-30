@@ -20,7 +20,9 @@ vi.mock("../../src/components/EscrowFundingPanel.jsx", () => ({ EscrowFundingPan
   React.useEffect(() => { onStateChange(mocks.escrowState); }, [onStateChange]);
   return <p>Wallet escrow controls</p>;
 } }));
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: account }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ isConnected: mocks.connected, address: account, chainId: 421614, switchChain: async () => {} }),
+}));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
   RelatedAuditReceiptPane: () => null,

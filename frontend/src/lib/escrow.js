@@ -1,9 +1,8 @@
 import { erc20Abi, keccak256, stringToHex } from "viem";
-import { getConnection } from "wagmi/actions";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG, getAuditRegistryAddress } from "../config/auditRegistry.js";
-import { createWagmiAuditAdapters, waitForAuditReceipt } from "./auditRegistry.js";
+import { createAuditAdapters, waitForAuditReceipt } from "./auditRegistry.js";
 import { isTransactionFeeTooLow, isWalletRejection, TRANSACTION_FEE_TOO_LOW_MESSAGE } from "./errors.js";
-import { wagmiConfig } from "./wagmi.js";
+import { getActiveWallet } from "./activeWallet.js";
 import { assertBytes32, prepareOpportunityCommit } from "../../../firebase/functions/auditCanonical.js";
 import { isEscrowRegistry, requireAddress, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
@@ -28,14 +27,14 @@ function deployment(config) {
 }
 
 /** Uses the same simulation and fee estimation as publication transactions. */
-export function createWagmiEscrowAdapters(config = wagmiConfig) {
-  const adapters = createWagmiAuditAdapters(config);
+export function createEscrowAdapters() {
+  const adapters = createAuditAdapters();
   return { ...adapters, writeContract: async request => {
-    const connection = getConnection(config);
-    if (!connection.isConnected || !same(connection.address, request.account)) {
+    const active = getActiveWallet();
+    if (!active.address || !same(active.address, request.account)) {
       throw new Error("Connect the wallet selected for this escrow action.");
     }
-    if (connection.chainId !== request.chainId) throw new Error("Switch your wallet to Arbitrum Sepolia before continuing.");
+    if (active.chainId !== request.chainId) throw new Error("Switch your wallet to Arbitrum Sepolia before continuing.");
     return adapters.writeContract(request);
   } };
 }
@@ -68,7 +67,7 @@ function depositor(value) {
 /** A single-block snapshot, verified through the registry AND factory mappings.
  * Amounts and timestamps are bigint; state/currentTranche/decimals/feeBps are numbers.
  */
-export async function readEscrow({ proposal, account, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+export async function readEscrow({ proposal, account, adapters = createEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
   const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
   if (usingConfiguredDeployment) config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
   deployment(config);
@@ -154,7 +153,7 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     remaining, milestones, currentMilestone, wallet, roles, can, isHistorical };
 }
 
-export async function readPostingFundingStarted(posting, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
+export async function readPostingFundingStarted(posting, { adapters = createEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
   deployment(config);
   const openFunding = posting.opportunityType === "open-funding";
   const expected = prepareOpportunityCommit({ recordId: posting.id, actor: config.entityIdScheme === 2 ? posting.ownerId : undefined,
@@ -190,7 +189,7 @@ export function escrowErrorMessage(error) {
 }
 
 /** Retry confirmation of one known hash without submitting another transaction. */
-export async function confirmEscrowTransaction(transactionHash, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
+export async function confirmEscrowTransaction(transactionHash, { adapters = createEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
   deployment(config);
   const hash = assertBytes32(transactionHash, "Transaction hash");
   try {
@@ -217,7 +216,7 @@ export async function confirmEscrowTransaction(transactionHash, { adapters = cre
 
 /** Called only from a user action. Never retries a write or signs with a server key. */
 export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve,
-  onProgress, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+  onProgress, adapters = createEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
   if (config === AUDIT_REGISTRY_CONFIG) {
     config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
     if (!["claimRefund", "expire", "refundInvalidated"].includes(action)) assertActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);

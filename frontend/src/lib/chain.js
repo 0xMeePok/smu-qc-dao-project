@@ -1,4 +1,4 @@
-import { arbitrumSepolia } from "wagmi/chains";
+import { arbitrumSepolia } from "viem/chains";
 
 export const EXPECTED_CHAIN_ID = arbitrumSepolia.id; // 421614
 export const EXPECTED_CHAIN_NAME = arbitrumSepolia.name;

@@ -13,10 +13,12 @@ const mocks = vi.hoisted(() => ({
   uploader: { onPendingChange: null },
 }));
 
-vi.mock("wagmi", () => ({
-  useAccount: () => ({
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({
     address: mocks.connectedAddress,
     isConnected: Boolean(mocks.connectedAddress),
+    chainId: 421614,
+    switchChain: async () => {},
   }),
 }));
 

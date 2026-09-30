@@ -7,7 +7,7 @@ import {
 } from "./opportunityAuditFlow.js";
 import { findPosting, postingAuditPayload, updatePostingAudit } from "./postings.js";
 import {
-  createWagmiAuditAdapters,
+  createAuditAdapters,
   prepareOpportunityWithdrawal,
   withdrawOpportunityAudit,
   writeOpportunityAudit,
@@ -44,7 +44,7 @@ export function anchorOpportunityBeforeWrite(record, options = {}) {
 export async function assertWithdrawalWindowOpen(record, adapters) {
   let now = Date.now();
   try {
-    const block = await (adapters ?? createWagmiAuditAdapters()).getBlock?.({ chainId: AUDIT_REGISTRY_CHAIN_ID });
+    const block = await (adapters ?? createAuditAdapters()).getBlock?.({ chainId: AUDIT_REGISTRY_CHAIN_ID });
     if (typeof block?.timestamp === "bigint") now = Number(block.timestamp) * 1000;
   } catch {
     // An unreachable node fails the wallet step anyway; fall back to the local clock.

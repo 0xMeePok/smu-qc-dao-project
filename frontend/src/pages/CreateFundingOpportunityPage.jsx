@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
@@ -145,7 +145,7 @@ function expiryWindowFor(expiresAt, createdAt) {
 
 export default function CreateFundingOpportunityPage({ resumeId = null, editOpportunityId = null, onNavigate }) {
   const { address, profile } = useSession();
-  const { address: connectedAddress, isConnected } = useAccount();
+  const { address: connectedAddress, isConnected } = useWallet();
   const [opportunityId, setOpportunityId] = useState(() => editOpportunityId ?? resumeId ?? newFundingOpportunityId());
   const [existing, setExisting] = useState(null);
   const [editBlocked, setEditBlocked] = useState("");

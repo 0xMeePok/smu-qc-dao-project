@@ -4,7 +4,9 @@ const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(
 vi.mock("../../src/lib/escrowFunding.js", async importOriginal => ({ ...await importOriginal(),
   prepareEscrowDeposit: (...args) => mocks.prepare(...args), syncEscrowFunding: (...args) => mocks.sync(...args),
   getEscrowFundingHistory: (...args) => mocks.history(...args), startEscrowSettlement: (...args) => mocks.start(...args) }));
-vi.mock("wagmi", () => ({ useAccount: () => mocks.account }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ switchChain: async () => {}, chainId: 421614, ...mocks.account }),
+}));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/lib/escrow.js", () => ({ readEscrow: (...args) => mocks.read(...args), writeEscrowAction: (...args) => mocks.write(...args),
   confirmEscrowTransaction: (...args) => mocks.confirm(...args), escrowErrorMessage: error => error.message,

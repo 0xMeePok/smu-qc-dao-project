@@ -1,23 +1,13 @@
 import { useState } from "react";
-import { useAccount, useSwitchChain } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
 
 /**
- * Shown whenever a connected wallet is on the wrong chain - independent of the
- * sign-in flow, so switching away mid-session (not just at the moment of signing
- * in) is caught too.
- *
- * Reads `chainId` off `useAccount()`, NOT `useChainId()`. wagmi tracks two separate
- * things: a top-level "preferred" chainId seeded from `chains[0]` that only changes
- * when something explicitly calls `switchChain()`, and each connection's own chainId,
- * which is what actually updates when the wallet reports switching networks on its
- * own. `useChainId()` reads the first one, so it never reacts to the user changing
- * networks in their wallet directly - confirmed live: a real `chainChanged` event
- * updates `useAccount().chainId` immediately but leaves `useChainId()` unmoved.
+ * Shown whenever the Privy wallet is on the wrong chain. The chain id comes from
+ * the wallet Privy connected, including a change the user makes in that wallet.
  */
 export function NetworkBanner() {
-  const { isConnected, chainId } = useAccount();
-  const { switchChainAsync } = useSwitchChain();
+  const { isConnected, chainId, switchChain } = useWallet();
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState(null);
 
@@ -27,7 +17,7 @@ export function NetworkBanner() {
     setSwitching(true);
     setError(null);
     try {
-      await switchChainAsync({ chainId: EXPECTED_CHAIN_ID });
+      await switchChain(EXPECTED_CHAIN_ID);
     } catch (caught) {
       const rejected = caught?.name === "UserRejectedRequestError" || caught?.code === 4001;
       setError(

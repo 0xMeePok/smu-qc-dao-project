@@ -17,8 +17,8 @@ vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
   ...await importOriginal(),
   getMockMatching: (...args) => mocks.matching(...args),
 }));
-vi.mock("wagmi", () => ({
-  useAccount: () => ({ isConnected: true, address: account }),
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ isConnected: true, address: account, chainId: 421614, switchChain: async () => {} }),
 }));
 vi.mock("../../src/context/SessionContext.jsx", () => ({
   useSession: () => ({

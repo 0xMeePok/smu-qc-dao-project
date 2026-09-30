@@ -22,13 +22,8 @@ const mocks = vi.hoisted(() => ({
   user: null,
 }));
 
-vi.mock("wagmi", () => ({
-  useAccount: () => ({ address: VIEWER, isConnected: true }),
-}));
-// Builds a real wagmi config at import time, which the bare wagmi mock breaks.
-vi.mock("../../src/lib/wagmi.js", () => ({
-  wagmiConfig: {},
-  isUsableConnector: () => true,
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ address: VIEWER, isConnected: true, chainId: 421614, switchChain: async () => {} }),
 }));
 vi.mock("../../src/lib/firebase.js", () => ({
   db: {}, auth: null, functions: null, storage: {},

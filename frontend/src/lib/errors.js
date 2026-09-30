@@ -199,8 +199,7 @@ export function messageForFirebaseError(error) {
 // Wallet-level failures (connect rejected, wrong network, extension errors) are
 // handled inline where they occur - see ConnectWalletModal.jsx and
 // SessionContext.jsx, both of which check `error.name === "UserRejectedRequestError"`
-// on the error objects wagmi throws. There is no separate raw-EIP-1193 error path
-// left to map here now that wagmi owns the wallet connection.
+// on the error objects the wallet throws.
 
 export function fieldForFirebaseError(error) {
   if (error instanceof OnboardingError) return error.field;

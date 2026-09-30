@@ -1,6 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useAccount, useDisconnect, useSignMessage } from "wagmi";
-import { getConnection, switchChain } from "wagmi/actions";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
@@ -8,7 +6,9 @@ import { exchangeSignatureForSession, requestSignInMessage, revokeOwnSessions } 
 import { createProfile, findProfileByAddress, updateProfile } from "../lib/profile.js";
 import { messageForFirebaseError } from "../lib/errors.js";
 import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
-import { wagmiConfig } from "../lib/wagmi.js";
+import { logoutPrivy } from "../lib/privyLogout.js";
+import { PrivyWalletNotReadyError, signPrivyMessage } from "../lib/privyWallet.js";
+import { useWallet } from "./WalletContext.jsx";
 import { isAdmin } from "../lib/roles.js";
 import { go } from "../lib/router.js";
 import {
@@ -32,9 +32,7 @@ export const SessionContext = createContext(null);
  * Nothing reaches Firestore until `verifying` has completed against the server.
  */
 export function SessionProvider({ children }) {
-  const { address } = useAccount();
-  const { disconnectAsync } = useDisconnect();
-  const { signMessageAsync } = useSignMessage();
+  const { address, chainId, switchChain } = useWallet();
 
   const [status, setStatus] = useState("signed-out");
   const [profile, setProfile] = useState(null);
@@ -88,41 +86,10 @@ export function SessionProvider({ children }) {
       setStatus("verifying");
 
       try {
-        // `getConnection(config).chainId` - NOT `getChainId(config)`. wagmi keeps two
-        // separate ideas of "chain": a top-level `config.state.chainId` that is
-        // seeded from `chains[0]` at startup and is only ever touched by an explicit
-        // `switchChain()` call, and each connection's own `chainId`, set from what
-        // the wallet actually reported at connect time. `getChainId()` reads the
-        // first one, which is why it silently returned 421614 (our only configured
-        // chain) even while a wallet sitting on mainnet was connected - it was never
-        // wired to the real connection at all, not a matter of the value being stale.
-        //
-        // The network switch and the nonce fetch run CONCURRENTLY, not one after the
-        // other. They used to be sequential because the switch reads as a
-        // prerequisite for "the wallet should be on the right chain before it sees a
-        // message claiming Chain ID: 421614" - but that message text is static server
-        // side (see buildMessage() in functions/index.js) and never actually depends
-        // on what chain the wallet is on AT REQUEST TIME, only at signing time, which
-        // is still safely after both of these resolve. Running them together removes
-        // a whole network round trip from the critical path (the wallet's own
-        // wallet_addEthereumChain/wallet_switchEthereumChain RPC) every time a switch
-        // is needed - previously the getSiweNonce call (already the slowest single
-        // step here - a cross-region Cloud Functions request) didn't even START until
-        // that finished. wagmi's switchChain already falls back to
-        // `wallet_addEthereumChain` (using arbitrumSepolia's own defaults - no custom
-        // RPC/currency needed) when the wallet has never heard of the chain, so this
-        // one call still covers both "wrong network" and "network not added yet".
-        //
-        // If the user dismisses the switch prompt a challenge may already have
-        // been issued and left pending, but that costs them nothing: each attempt
-        // gets its own challenge, and an abandoned one simply expires.
-        const needsSwitch = getConnection(wagmiConfig).chainId !== EXPECTED_CHAIN_ID;
-        const [challenge] = await Promise.all([
-          requestSignInMessage(target),
-          needsSwitch ? switchChain(wagmiConfig, { chainId: EXPECTED_CHAIN_ID }) : null,
-        ]);
-
-        const signature = await signMessageAsync({ message: challenge.message, account: target });
+        if (chainId && chainId !== EXPECTED_CHAIN_ID) await switchChain(EXPECTED_CHAIN_ID);
+        const challenge = await requestSignInMessage(target);
+        const signature = await signPrivyMessage(target, challenge.message);
+        if (!signature) throw new PrivyWalletNotReadyError();
         await exchangeSignatureForSession({ address: target, signature, challengeId: challenge.challengeId });
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
@@ -134,12 +101,13 @@ export function SessionProvider({ children }) {
         const rejected = caught?.name === "UserRejectedRequestError" || caught?.code === 4001;
         const failureMessage = rejected
           ? null
-          : caught?.name === "SwitchChainNotSupportedError"
+          : caught?.name === "PrivyWalletNotReadyError"
+            ? caught.message
+            : caught?.name === "SwitchChainNotSupportedError"
             ? `Your wallet does not support switching networks automatically. Switch to ${EXPECTED_CHAIN_NAME} yourself, then try again.`
             : messageForFirebaseError(caught);
         setError(failureMessage);
         setStatus("signed-out");
-        await disconnectAsync().catch(() => { });
         // The message is returned, not just set into context state, because a caller
         // that awaits signIn() and immediately reads `error` off useSession() (as
         // ConnectWalletModal used to) gets a STALE value: `error` was destructured
@@ -150,7 +118,7 @@ export function SessionProvider({ children }) {
         return { ok: false, rejected, message: failureMessage };
       }
     },
-    [address, signMessageAsync, disconnectAsync],
+    [address, chainId, switchChain],
   );
 
   // Once an address is verified, decide between onboarding and a normal sign-in.
@@ -199,8 +167,8 @@ export function SessionProvider({ children }) {
   // during their own internal session checks, unrelated to anything the user did.
   // Treating every such blip as an account switch used to nuke an in-progress
   // onboarding form - typing for ~20s was enough to hit one. The Firebase session
-  // is independent of wagmi's live connection status anyway: the uid was fixed by a
-  // signature at sign-in time, so a momentary "disconnected" reading from wagmi is
+  // is independent of the live wallet connection anyway: the uid was fixed by a
+  // signature at sign-in time, so a momentary disconnected reading is
   // not itself a reason to end it.
   useEffect(() => {
     if (!verifiedAddress) return undefined;
@@ -269,7 +237,7 @@ export function SessionProvider({ children }) {
         await signOut(auth).catch(() => { });
       }
 
-      await disconnectAsync().catch(() => { });
+      await logoutPrivy().catch(() => { });
       clearActivity();
       reset();
       setError(
@@ -280,7 +248,7 @@ export function SessionProvider({ children }) {
       if (redirectToLogin) go("login");
       return { ok: true };
     },
-    [disconnectAsync, reset],
+    [reset],
   );
 
   const signOutOfSession = useCallback(

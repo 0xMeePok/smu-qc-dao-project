@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
@@ -181,7 +181,7 @@ function formFromPosting(posting) {
 
 export default function CreatePostingPage({ postingId: resumeId, editPostingId, onNavigate }) {
   const { address, profile } = useSession();
-  const { address: connectedAddress, isConnected } = useAccount();
+  const { address: connectedAddress, isConnected } = useWallet();
 
   // Reserved up front: attachments are uploaded while the form is still being
   // filled in, and this id is part of their storage path.

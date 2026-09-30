@@ -1,81 +1,96 @@
 import { useState } from "react";
-import { useConnect } from "wagmi";
+import { useLogin, usePrivy } from "@privy-io/react-auth";
 import { useSession } from "../context/SessionContext.jsx";
-import { isUsableConnector } from "../lib/wagmi.js";
+import { ethereumAddressFromPrivyUser, privyAppId } from "../lib/privy.js";
 import { WalletIcon } from "./WalletIcon.jsx";
 import { Modal } from "./Modal.jsx";
 
 /**
- * Connector picker. Entries come from EIP-6963 discovery, filtered by
- * `isUsableConnector` to MetaMask and Rabby only - see lib/wagmi.js.
+ * Privy is the only wallet connection. After Privy returns an Ethereum address,
+ * the existing server-checked signature still creates the Firebase session.
  */
 export function ConnectWalletModal({ onClose }) {
-  const { connectors, connectAsync } = useConnect();
-  const { signIn } = useSession();
-  const [pending, setPending] = useState(null);
-  const [phase, setPhase] = useState(null);
-  const [error, setError] = useState(null);
+  if (!privyAppId) return <PrivyNotConfigured onClose={onClose} />;
+  return <PrivyConnect onClose={onClose} />;
+}
 
-  // The modal stays open until sign-in genuinely succeeds. It used to close right
-  // after `connectAsync`, before the signature step even ran - so if verification
-  // failed (e.g. Firebase not configured), the modal vanished and nothing told the
-  // user why. Closing only on a real `ok` result fixes that.
-  const choose = async (connector) => {
-    setError(null);
-    setPending(connector.uid);
-    setPhase("connecting");
-    try {
-      const result = await connectAsync({ connector });
-      setPhase("authorizing");
-      const outcome = await signIn(result.accounts?.[0]);
-      if (outcome.ok) {
-        onClose();
-        return;
-      }
-      if (!outcome.rejected) {
-        // `outcome.message` is returned directly from signIn(), not read back off
-        // context state - reading useSession().error here used to be stale (it was
-        // captured at this component's last render, before signIn() had set it),
-        // so every real failure fell through to the generic string below regardless
-        // of what actually went wrong.
-        setError(outcome.message ?? "Sign-in could not be verified. Please try again.");
-      }
-      // A rejected signature needs no error text - the button just becomes
-      // available again so the user can retry.
-    } catch (caught) {
-      const rejected = caught?.name === "UserRejectedRequestError" || caught?.code === 4001;
-      setError(
-        rejected
-          ? "You dismissed the wallet request."
-          : (caught?.shortMessage ?? caught?.message ?? "That wallet could not connect."),
-      );
-    } finally {
-      setPending(null);
-      setPhase(null);
-    }
-  };
-
-  // The same wallet can be announced more than once; collapse by name.
-  const seen = new Set();
-  const available = connectors.filter((connector) => {
-    if (!isUsableConnector(connector)) return false;
-    const key = connector.name.trim().toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
+function PrivyNotConfigured({ onClose }) {
   return (
     <Modal className="modal-narrow" labelledBy="connect-title" onDismiss={onClose}>
       <header className="modal-head">
         <span className="modal-badge modal-badge-brand" aria-hidden="true"><WalletIcon /></span>
         <div>
-          <h2 id="connect-title">Sign in with Wallet</h2>
-          <p>
-            {available.length > 0
-              ? "Choose a wallet. You will be asked to sign a short message proving the wallet is yours — it costs no gas and moves no funds."
-              : "We could not find MetaMask or Rabby in this browser. Install one of them to sign in."}
-          </p>
+          <h2 id="connect-title">Sign in with Privy</h2>
+          <p>Add VITE_PRIVY_APP_ID to frontend/.env.local and restart the dev server. Create the app in the Privy dashboard first.</p>
+        </div>
+      </header>
+      <footer className="modal-actions">
+        <button className="secondary" type="button" onClick={onClose}>Close</button>
+      </footer>
+    </Modal>
+  );
+}
+
+function PrivyConnect({ onClose }) {
+  const { signIn } = useSession();
+  const { authenticated, user } = usePrivy();
+  const [pending, setPending] = useState(false);
+  const [phase, setPhase] = useState(null);
+  const [error, setError] = useState(null);
+
+  const authorize = async (privyUser) => {
+    const address = ethereumAddressFromPrivyUser(privyUser);
+    if (!address) {
+      setError("Privy did not return an Ethereum wallet. Try again.");
+      setPending(false);
+      setPhase(null);
+      return;
+    }
+    setPhase("authorizing");
+    const outcome = await signIn(address);
+    if (outcome.ok) {
+      onClose();
+      return;
+    }
+    if (!outcome.rejected) {
+      setError(outcome.message ?? "Sign-in could not be verified. Please try again.");
+    }
+    setPending(false);
+    setPhase(null);
+  };
+
+  const { login } = useLogin({
+    onComplete: ({ user: loggedInUser }) => authorize(loggedInUser),
+    onError: (caught) => {
+      const message = caught?.message ?? "Privy could not connect.";
+      if (/already logged in/i.test(message) && user) {
+        authorize(user);
+        return;
+      }
+      setError(message);
+      setPending(false);
+      setPhase(null);
+    },
+  });
+
+  const start = () => {
+    setError(null);
+    setPending(true);
+    if (authenticated && user) {
+      authorize(user);
+      return;
+    }
+    setPhase("connecting");
+    login();
+  };
+
+  return (
+    <Modal className="modal-narrow" labelledBy="connect-title" onDismiss={pending ? undefined : onClose}>
+      <header className="modal-head">
+        <span className="modal-badge modal-badge-brand" aria-hidden="true"><WalletIcon /></span>
+        <div>
+          <h2 id="connect-title">Sign in with Privy</h2>
+          <p>Use email to create a wallet, or connect one you already have. You will then sign a short message proving that wallet is yours. It costs no gas and moves no funds.</p>
         </div>
       </header>
 
@@ -85,59 +100,16 @@ export function ConnectWalletModal({ onClose }) {
         </div>
       ) : null}
 
-      {available.length > 0 ? (
-        <div className="connector-list">
-          {available.map((connector) => (
-            <button
-              className="connector"
-              key={connector.uid}
-              type="button"
-              onClick={() => choose(connector)}
-              disabled={pending !== null}
-            >
-              {connector.icon ? (
-                <img src={connector.icon} alt="" width="22" height="22" />
-              ) : (
-                <span className="connector-mark" aria-hidden="true"><WalletIcon /></span>
-              )}
-              <span>{connector.name}</span>
-              {pending === connector.uid ? (
-                <small>{phase === "connecting" ? "Connecting…" : "Authorising…"}</small>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="connector-empty">
-          <p>
-            MetaMask or Rabby, either works — install one, then reload this page and
-            it will appear here.
-          </p>
-          <div className="connector-empty-links">
-            <a
-              className="primary wallet-button"
-              href="https://metamask.io/download/"
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              <WalletIcon />
-              Get MetaMask
-            </a>
-            <a
-              className="secondary wallet-button"
-              href="https://rabby.io/"
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              <WalletIcon />
-              Get Rabby
-            </a>
-          </div>
-        </div>
-      )}
+      <div className="connector-list">
+        <button className="connector" type="button" onClick={start} disabled={pending}>
+          <span className="connector-mark" aria-hidden="true"><WalletIcon /></span>
+          <span>Continue with Privy</span>
+          {pending ? <small>{phase === "connecting" ? "Connecting…" : "Authorising…"}</small> : null}
+        </button>
+      </div>
 
       <footer className="modal-actions">
-        <button className="secondary" type="button" onClick={onClose} disabled={pending !== null}>
+        <button className="secondary" type="button" onClick={onClose} disabled={pending}>
           Cancel
         </button>
       </footer>

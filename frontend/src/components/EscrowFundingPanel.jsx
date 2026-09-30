@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatUnits, keccak256, stringToHex } from "viem";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isModerated } from "../lib/moderation.js";
@@ -123,7 +123,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
 
 export function EscrowFundingPanel({ proposal, onStateChange }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId } = useWallet();
   const storageKey = pendingKey(proposal.id, address);
   const moderated = isModerated(proposal);
   const [state, setState] = useState(null), [evidence, setEvidence] = useState(null);

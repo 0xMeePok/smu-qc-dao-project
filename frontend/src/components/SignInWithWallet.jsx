@@ -1,24 +1,23 @@
 import { useState } from "react";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { useSession } from "../context/SessionContext.jsx";
 import { WalletIcon } from "./WalletIcon.jsx";
 import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 
 /**
- * Always reads "Sign in with Wallet", whether or not a wallet extension is present.
- * Someone with nothing installed still gets a useful path: the picker explains what
- * to install.
+ * Opens Privy, then the existing signature check. An already connected wallet
+ * skips the Privy modal and goes straight to that signature.
  */
 export function SignInWithWallet() {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const { isConnected } = useAccount();
+  const { isConnected } = useWallet();
   const { signIn, error, isVerifying, isChecking, isBusy } = useSession();
 
   const label = isVerifying
     ? "Confirm in your wallet…"
     : isChecking
       ? "Signing in…"
-      : "Sign in with Wallet";
+      : "Sign in with Privy";
 
   const start = async () => {
     // Already connected but not verified - go straight to the signature step.

@@ -7,7 +7,7 @@ import { OnboardingError } from "./errors.js";
  * Sign-in with Ethereum, verified server side.
  *
  *   1. Ask the server for a single-use nonce. It returns the exact message to sign.
- *   2. The wallet signs that message (wagmi does this part).
+ *   2. The Privy wallet signs that message.
  *   3. The server re-derives the message from its own stored nonce, verifies the
  *      signature, burns the nonce, and mints a Firebase custom token whose uid is
  *      the wallet address.
