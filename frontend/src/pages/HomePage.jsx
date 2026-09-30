@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StatusBadge } from "../components/StatusBadge.jsx";
 import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
@@ -22,6 +22,63 @@ const MILESTONES = [
   ["Rollout plan and final report", false],
 ];
 
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+}
+
+function StepPanel({ index }) {
+  if (index === 0) {
+    return <>
+      <p className="desk-panel-kicker">New brief · Business problem</p>
+      <div className="desk-field"><small>Title</small><span>Route optimisation for cold-chain delivery under demand spikes</span></div>
+      <div className="desk-field-row">
+        <div className="desk-field"><small>Budget</small><span>USDT 60,000</span></div>
+        <div className="desk-field"><small>Open for</small><span>90 days</span></div>
+      </div>
+      <div className="desk-chips"><span>Optimisation</span><span>Data &amp; analytics</span></div>
+    </>;
+  }
+  if (index === 1) {
+    const rows = [["Variational circuits for route planning", 100], ["Hybrid annealing for delivery windows", 100], ["Tensor network baseline", 62]];
+    return <>
+      <p className="desk-panel-kicker">Proposals · 3 received</p>
+      {rows.map(([title, pct]) => (
+        <div className="desk-field" key={title}>
+          <div className="desk-progress-head"><span>{title}</span><span>{pct}%</span></div>
+          <div className="desk-progress"><span style={{ width: `${pct}%` }} /></div>
+        </div>
+      ))}
+    </>;
+  }
+  if (index === 2) {
+    const choices = [
+      ["Variational circuits for route planning", "Fully funded · Recommended by 2", true],
+      ["Hybrid annealing for delivery windows", "Fully funded · No recommendation", false],
+      ["Tensor network baseline", "62% funded · Not eligible", false],
+    ];
+    return <>
+      <p className="desk-panel-kicker">Select one fully funded proposal</p>
+      {choices.map(([title, note, selected]) => (
+        <div className={`desk-choice${selected ? " is-on" : ""}`} key={title}>
+          <strong>{title}</strong>
+          <small>{note}</small>
+        </div>
+      ))}
+    </>;
+  }
+  return <>
+    <p className="desk-panel-kicker">Delivery · Milestones</p>
+    <ul className="desk-milestones">
+      {MILESTONES.map(([label, done]) => (
+        <li key={label}>
+          <span>{label}</span>
+          <StatusBadge interactive={false} status={done ? WORKFLOW_STATUS.DECISION_RECORDED : WORKFLOW_STATUS.AWAITING_EVALUATOR_FEEDBACK} />
+        </li>
+      ))}
+    </ul>
+  </>;
+}
+
 function daysLeft(expiresAt) {
   const end = expiresAt?.toDate ? expiresAt.toDate() : expiresAt ? new Date(expiresAt) : null;
   if (!end || Number.isNaN(end.getTime())) return "";
@@ -30,8 +87,46 @@ function daysLeft(expiresAt) {
 }
 
 export default function HomePage({ postings = [], loading = false, isAuthenticated = false, onNavigate, onOpenWorkspaces }) {
-  const [step, setStep] = useState(3);
+  const stepsRef = useRef(null);
+  const progressRef = useRef(null);
+  const [step, setStep] = useState(0);
+  const [compact, setCompact] = useState(() => typeof window !== "undefined" && (window.innerWidth < 960 || window.innerHeight < 640 || prefersReducedMotion()));
   const featured = postings.slice(0, 8);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const isCompact = window.innerWidth < 960 || window.innerHeight < 640 || prefersReducedMotion();
+      setCompact(isCompact);
+      const steps = stepsRef.current;
+      if (!steps || isCompact) return;
+      const box = steps.getBoundingClientRect();
+      const progress = Math.min(1, Math.max(0, -box.top / Math.max(1, box.height - window.innerHeight)));
+      const next = Math.min(STEPS.length - 1, Math.floor(progress * STEPS.length));
+      setStep((current) => (current === next ? current : next));
+      if (progressRef.current) progressRef.current.style.transform = `scaleX(${progress})`;
+    };
+    const onScroll = () => { if (!frame) frame = window.requestAnimationFrame(update); };
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  const scrollToStep = (index) => {
+    const steps = stepsRef.current;
+    if (!steps || compact) {
+      setStep(index);
+      return;
+    }
+    const total = steps.offsetHeight - window.innerHeight;
+    window.scrollBy({ top: steps.getBoundingClientRect().top + ((index + 0.5) / STEPS.length) * total, behavior: "smooth" });
+  };
   const open = (item) => onNavigate(`${item.route ?? "posting"}/${item.id}`);
 
   return (
@@ -73,33 +168,32 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
         </ol>
       </section>
 
-      <section className="desk-how desk-reveal" style={{ "--enter": "1.3s" }} aria-label="From brief to delivery">
-        <p className="desk-kicker">Workflow</p>
-        <div className="desk-how-grid">
-          <ol>
-            {STEPS.map(([title, text], index) => (
-              <li key={title}>
-                <button type="button" className={index === step ? "is-on" : ""} aria-current={index === step ? "step" : undefined} onClick={() => setStep(index)}>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  {title}
-                </button>
-                {index === step && <p>{text}</p>}
-              </li>
-            ))}
-          </ol>
-          {step === 3 && (
-            <div className="desk-milestones">
-              <p className="desk-kicker">Current milestones</p>
-              <ul>
-                {MILESTONES.map(([label, done]) => (
-                  <li key={label}>
-                    <span>{label}</span>
-                    <StatusBadge interactive={false} status={done ? WORKFLOW_STATUS.DECISION_RECORDED : WORKFLOW_STATUS.AWAITING_EVALUATOR_FEEDBACK} />
+      <section id="how" className={`desk-how${compact ? "" : " is-scrub"}`} aria-label="From brief to delivery" ref={stepsRef}>
+        <div className="desk-how-stage">
+          <div className="desk-how-grid">
+            <div>
+              <p className="desk-kicker">From brief to delivery</p>
+              <ol>
+                {STEPS.map(([title, text], index) => (
+                  <li key={title}>
+                    <button type="button" className={index === step ? "is-on" : ""} aria-current={!compact && index === step ? "step" : undefined} onClick={() => scrollToStep(index)}>
+                      {title}
+                    </button>
+                    {(compact || index === step) && <p>{text}</p>}
                   </li>
                 ))}
-              </ul>
+              </ol>
+              {!compact && <div className="desk-step-progress" aria-hidden="true"><span ref={progressRef} /></div>}
             </div>
-          )}
+            <div className="desk-panel" aria-live="polite">
+              {(compact ? [0, 1, 2, 3] : [step]).map((index) => (
+                <div key={index}>
+                  {compact && <p className="desk-panel-step">{STEPS[index][0]}</p>}
+                  <StepPanel index={index} />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 

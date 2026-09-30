@@ -4332,32 +4332,56 @@ h1, h2, h3 { font-weight: 500; }
 .desk-roles strong { font-size: 20px; font-weight: 500; }
 .desk-roles span { color: var(--muted); font-size: 16px; line-height: 1.45; }
 
-.desk-how { padding: 96px 24px; background: #1c140c; color: #e7dcc8; }
-.desk-how .desk-kicker { max-width: 1080px; margin: 0 auto; color: rgba(231, 220, 200, 0.72); }
-.desk-how-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 48px; max-width: 1080px; margin: 28px auto 0; }
-.desk-how ol, .desk-milestones ul { margin: 0; padding: 0; list-style: none; }
-.desk-how li + li { margin-top: 18px; }
+.desk-how { background: #1c140c; color: #e7dcc8; }
+.desk-how.is-scrub { height: 340vh; }
+.desk-how-stage { display: flex; align-items: center; padding: 96px 24px; }
+.desk-how.is-scrub .desk-how-stage {
+  position: sticky;
+  top: var(--header-height);
+  height: calc(100vh - var(--header-height));
+  padding: 32px 24px;
+}
+.desk-how .desk-kicker { margin: 0 0 18px; color: rgba(231, 220, 200, 0.62); }
+.desk-how-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.85fr); gap: 48px; align-items: center; width: 100%; max-width: 1080px; margin: 0 auto; }
+.desk-how ol, .desk-milestones { margin: 0; padding: 0; list-style: none; }
+.desk-how li + li { margin-top: 10px; }
 .desk-how button {
-  display: flex;
-  gap: 16px;
-  align-items: baseline;
+  display: block;
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgba(231, 220, 200, 0.5);
+  color: rgba(231, 220, 200, 0.32);
   font-family: Newsreader, "Iowan Old Style", Palatino, serif;
-  font-size: clamp(28px, 3vw, 40px);
+  font-size: clamp(36px, 4.4vw, 56px);
   font-weight: 500;
-  line-height: 1.05;
+  line-height: 1.02;
   text-align: left;
   cursor: pointer;
+  transition: color 0.35s ease;
 }
-.desk-how button span { font-size: 13px; letter-spacing: 0.06em; }
-.desk-how button.is-on { color: #ff7a4d; }
-.desk-how li p { max-width: 36em; margin: 10px 0 0 42px; color: rgba(231, 220, 200, 0.78); font-size: 18px; line-height: 1.45; }
-.desk-milestones { padding-top: 8px; }
-.desk-milestones li { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; margin: 0; padding: 14px 0; border-top: 1px solid rgba(231, 220, 200, 0.18); }
-.desk-milestones li > span { flex: 1 1 12rem; min-width: 0; }
+.desk-how button.is-on { color: #e7dcc8; }
+.desk-how li p { max-width: 34em; margin: 8px 0 0; color: rgba(231, 220, 200, 0.78); font-size: 18px; line-height: 1.45; }
+.desk-step-progress { overflow: hidden; max-width: 220px; height: 2px; margin-top: 28px; background: rgba(231, 220, 200, 0.22); }
+.desk-step-progress > span { display: block; width: 100%; height: 100%; background: #e7dcc8; transform: scaleX(0); transform-origin: left; }
+.desk-panel { padding: 28px; background: #f4eee3; color: #1c140c; }
+.desk-panel-kicker, .desk-field small, .desk-progress-head span:last-child, .desk-choice small { color: #5c5146; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; letter-spacing: 0.04em; }
+.desk-panel-kicker { margin: 0 0 16px; }
+.desk-field { margin-top: 12px; }
+.desk-field span, .desk-choice strong { display: block; margin-top: 4px; font-size: 16px; font-weight: 500; }
+.desk-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.desk-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.desk-chips span { padding: 4px 8px; border: 1px solid rgba(28, 20, 12, 0.18); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
+.desk-progress-head { display: flex; justify-content: space-between; gap: 12px; }
+.desk-progress-head span:first-child { min-width: 0; font-size: 15px; }
+.desk-progress { overflow: hidden; height: 3px; margin-top: 8px; background: rgba(28, 20, 12, 0.12); }
+.desk-progress > span { display: block; height: 100%; background: #d23a16; }
+.desk-choice { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(28, 20, 12, 0.18); }
+.desk-choice.is-on strong { color: #b72d15; }
+.desk-panel .desk-milestones li { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; margin: 0; padding: 12px 0; border-top: 1px solid rgba(28, 20, 12, 0.18); color: #1c140c; }
+.desk-panel .desk-milestones li > span { flex: 1 1 10rem; min-width: 0; }
+.desk-panel-step { margin: 28px 0 8px; font-size: 28px; }
+.desk-how:not(.is-scrub) button { color: #e7dcc8; font-size: clamp(32px, 6vw, 44px); }
+.desk-how:not(.is-scrub) .desk-panel > div + div { margin-top: 36px; padding-top: 8px; border-top: 1px solid rgba(28, 20, 12, 0.18); }
 
 .desk-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; }
 .desk-pair p { max-width: 36em; margin: 12px 0 0; color: var(--muted); font-size: 18px; line-height: 1.45; }
