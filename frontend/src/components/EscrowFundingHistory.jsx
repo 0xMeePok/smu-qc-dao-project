@@ -9,7 +9,7 @@ export function EscrowFundingHistory({ data, error, busy, onSync }) {
   const summary = data?.summary;
   const reconciliation = data?.reconciliation;
   const reconciled = reconciliation?.complete !== false && (reconciliation?.status === "verified" || reconciliation?.status === "matched" || reconciliation?.matched === true);
-  return <section className="detail-section" aria-labelledby="escrow-history-title">
+  return <section className="detail-section escrow-history" aria-labelledby="escrow-history-title">
     <div className="table-header"><div><h3 id="escrow-history-title">Funding audit trail</h3>
       <p className="field-hint">Confirmed escrow activity checked against the audit registry.</p></div>
       <button type="button" className="secondary small" disabled={busy} onClick={onSync}>{busy ? "Checking…" : "Reconcile funding records"}</button></div>

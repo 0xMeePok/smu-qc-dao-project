@@ -1,0 +1,423 @@
+<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QC DAO Home</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --page-bg: #eef1f8;
+      --page-bg-dark: #05070d;
+      --brand: #0071e3;
+      --brand-hover: #0077ed;
+      --ink: #1d1d1f;
+      --ink-soft: #424245;
+      --muted: #68686d;
+      --surface-glass: rgba(255, 255, 255, 0.6);
+      --surface-glass-dark: rgba(255, 255, 255, 0.08);
+      --radius-pill: 980px;
+      --radius-card: 18px;
+      --radius-panel: 34px;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: var(--ink);
+      background: var(--page-bg);
+      overflow-x: hidden;
+    }
+
+    .glass-header {
+      backdrop-filter: blur(28px) saturate(180%);
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      z-index: 50;
+    }
+
+    .glass-header[data-tone="dark"] {
+      background: rgba(0, 0, 0, 0.4);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: white;
+    }
+
+    .hero-heading {
+      font-size: clamp(48px, 8.4vw, 96px);
+      font-weight: 700;
+      line-height: 1.02;
+      letter-spacing: -0.045em;
+    }
+
+    .blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(90px);
+      opacity: 0.85;
+      will-change: transform;
+      pointer-events: none;
+    }
+
+    .blob-green {
+      background: #30d158;
+      width: 44vw;
+      height: 44vw;
+      top: -8%;
+      left: 44%;
+      animation: drift 20s ease-in-out infinite alternate;
+    }
+
+    .blob-blue {
+      background: #0a84ff;
+      width: 46vw;
+      height: 46vw;
+      top: -12%;
+      left: -8%;
+      animation: drift 16s ease-in-out infinite alternate;
+    }
+
+    @keyframes drift {
+      from { transform: translate(0, 0); }
+      to { transform: translate(5%, 10%); }
+    }
+
+    .glass-card-dark {
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      background: linear-gradient(145deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0.04));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 40px 90px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(30px) saturate(190%);
+    }
+
+    .glass-card-light {
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      background: linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.4));
+      box-shadow: inset 0 1px 0 #fff, 0 16px 40px rgba(30, 60, 120, 0.1);
+      backdrop-filter: blur(30px) saturate(180%);
+    }
+
+    .milestone-green {
+      background: #30d158;
+      color: white;
+    }
+
+    .btn-pill {
+      padding: 14px 26px;
+      border-radius: var(--radius-pill);
+      font-size: 17px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    .step-active {
+      opacity: 1 !important;
+    }
+
+    .step-text {
+      font-size: clamp(34px, 4.6vw, 56px);
+      font-weight: 700;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+  </style>
+</head>
+<body>
+  <div class="min-h-screen relative flex flex-col" data-sd-id="1">
+    <!-- Persistent Header -->
+    <header id="main-nav" class="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-48px)] max-w-[1120px] h-[60px] glass-header rounded-[22px] px-6 flex items-center justify-between z-50" data-sd-id="2">
+      <div class="flex items-center gap-3" data-sd-id="3">
+        <img src="https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg" alt="QC DAO" class="w-8 h-8" data-sd-id="4">
+        <span class="font-semibold text-lg tracking-tight" data-sd-id="5">QC DAO</span>
+        <nav class="hidden md:flex items-center ml-8 gap-6 text-[15px] font-medium opacity-80" data-sd-id="6">
+          <a href="#" id="nav-home" class="hover:opacity-100" data-sd-id="7">Home</a>
+          <a href="#" id="nav-discover" class="hover:opacity-100" data-sd-id="8">Discover</a>
+        </nav>
+      </div>
+      <div class="flex items-center gap-4" data-sd-id="9">
+        <button id="theme-toggle" class="w-9 h-9 flex items-center justify-center opacity-60 hover:opacity-100" data-sd-id="10">
+          <iconify-icon icon="lucide:sun" class="text-xl"></iconify-icon>
+        </button>
+        <button id="wallet-signin" class="bg-[#0071e3] hover:bg-[#0077ed] text-white px-5 py-2.5 rounded-[var(--radius-pill)] text-[14px] font-semibold flex items-center gap-2" data-sd-id="11">
+          <iconify-icon icon="lucide:wallet" class="text-lg"></iconify-icon>
+          Sign in with Wallet
+        </button>
+      </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="relative pt-[180px] pb-[140px] px-6 bg-[#05070d] text-white overflow-hidden" data-sd-id="12">
+      <div class="blob blob-blue opacity-50" data-sd-id="13"></div>
+      <div class="max-w-[1120px] mx-auto text-center relative z-10" data-sd-id="14">
+        <h1 class="hero-heading mb-6" data-sd-id="15">Fund problems<br>with clear outcomes.</h1>
+        <p class="max-w-[560px] mx-auto text-[22px] text-white/70 leading-[1.38] mb-10 tracking-tight" data-sd-id="16">
+          Publish the problems that matter, match with one fully funded proposal, and release funds as outcomes land.
+        </p>
+        <div class="flex justify-center gap-3" data-sd-id="17">
+          <button id="hero-explore" class="btn-pill bg-white text-[#05070d] hover:bg-[#f0f0f3]" data-sd-id="18">Explore opportunities</button>
+          <button id="hero-publish" class="btn-pill border border-white/20 bg-white/10 backdrop-blur-md hover:bg-white/20" data-sd-id="19">Publish a brief</button>
+        </div>
+
+        <!-- Hero Card Mockup -->
+        <div class="mt-24 relative max-w-[820px] mx-auto" data-sd-id="20">
+          <div class="glass-card-dark rounded-[32px] p-8 text-left" data-sd-id="21">
+            <div class="flex items-center gap-2 text-white/60 text-sm mb-4" data-sd-id="22">
+              <div class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-[10px] font-bold" data-sd-id="23">SMU</div>
+              Example brief • Business problem
+            </div>
+            <h3 class="text-2xl font-semibold mb-6 leading-snug" data-sd-id="24">Route optimisation for cold-chain delivery under demand spikes</h3>
+            <div class="grid grid-cols-3 gap-4 mb-8" data-sd-id="25">
+              <div class="bg-white/5 border border-white/10 rounded-2xl p-4" data-sd-id="26">
+                <div class="text-2xl font-semibold" data-sd-id="27">60,000</div>
+                <div class="text-xs text-white/50" data-sd-id="28">USDT budget</div>
+              </div>
+              <div class="bg-white/5 border border-white/10 rounded-2xl p-4" data-sd-id="29">
+                <div class="text-2xl font-semibold" data-sd-id="30">50 days</div>
+                <div class="text-xs text-white/50" data-sd-id="31">left to propose</div>
+              </div>
+              <div class="bg-white/5 border border-white/10 rounded-2xl p-4" data-sd-id="32">
+                <div class="text-2xl font-semibold" data-sd-id="33">3</div>
+                <div class="text-xs text-white/50" data-sd-id="34">proposals</div>
+              </div>
+            </div>
+            <div class="flex gap-1" data-sd-id="35">
+              <div class="h-1 flex-1 bg-[#64d2ff] rounded-full" data-sd-id="36"></div>
+              <div class="h-1 flex-1 bg-white/20 rounded-full" data-sd-id="37"></div>
+              <div class="h-1 flex-1 bg-white/20 rounded-full" data-sd-id="38"></div>
+              <div class="h-1 flex-1 bg-white/20 rounded-full" data-sd-id="39"></div>
+              <div class="h-1 flex-1 bg-white/20 rounded-full" data-sd-id="40"></div>
+            </div>
+            <div class="flex justify-between mt-2 text-xs text-white/50" data-sd-id="41">
+              <span class="text-white" data-sd-id="42">Open</span>
+              <span data-sd-id="43">Complete</span>
+            </div>
+          </div>
+          <!-- Floating Chips -->
+          <div class="absolute -top-8 -left-4 glass-card-dark px-4 py-3 rounded-[22px] flex items-center gap-3 shadow-2xl" data-sd-id="44">
+            <div class="w-8 h-8 bg-[#30d158] rounded-full flex items-center justify-center" data-sd-id="45">
+              <iconify-icon icon="lucide:check" class="text-white"></iconify-icon>
+            </div>
+            <div data-sd-id="46">
+              <div class="text-sm font-semibold" data-sd-id="47">Proposal matched</div>
+              <div class="text-[11px] text-white/60" data-sd-id="48">Variational circuits for route planning</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Roles Section -->
+    <section class="py-32 px-6 bg-[#f5f5f7] relative overflow-hidden" data-sd-id="49">
+      <div class="max-w-[1120px] mx-auto" data-sd-id="50">
+        <div class="text-center mb-16" data-sd-id="51">
+          <h2 class="text-[56px] font-bold tracking-tight mb-4" data-sd-id="52">Four roles.<br>One clear path.</h2>
+          <p class="text-xl text-[#68686d] max-w-[500px] mx-auto" data-sd-id="53">Everyone sees the same brief, the same proposals and the same milestones.</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" data-sd-id="54">
+          <div class="glass-card-light p-8 rounded-[28px] min-h-[250px] flex flex-col" data-sd-id="55">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#3b9bff] to-[#0060df] flex items-center justify-center text-white mb-auto shadow-lg" data-sd-id="56">
+              <iconify-icon icon="lucide:file-text" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-8 mb-2" data-sd-id="57">Problem owner</h4>
+            <p class="text-[#68686d] text-sm leading-relaxed" data-sd-id="58">Publishes a problem with a budget and a deadline.</p>
+          </div>
+          <div class="glass-card-light p-8 rounded-[28px] min-h-[250px] flex flex-col" data-sd-id="59">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#64d2ff] to-[#0a84ff] flex items-center justify-center text-white mb-auto shadow-lg" data-sd-id="60">
+              <iconify-icon icon="lucide:microscope" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-8 mb-2" data-sd-id="61">Researcher</h4>
+            <p class="text-[#68686d] text-sm leading-relaxed" data-sd-id="62">Proposes an approach and delivers the work in stages.</p>
+          </div>
+          <div class="glass-card-light p-8 rounded-[28px] min-h-[250px] flex flex-col" data-sd-id="63">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#7d7aff] to-[#5e5ce6] flex items-center justify-center text-white mb-auto shadow-lg" data-sd-id="64">
+              <iconify-icon icon="lucide:shield-check" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-8 mb-2" data-sd-id="65">Evaluator</h4>
+            <p class="text-[#68686d] text-sm leading-relaxed" data-sd-id="66">Reviews proposals and confirms each milestone.</p>
+          </div>
+          <div class="glass-card-light p-8 rounded-[28px] min-h-[250px] flex flex-col" data-sd-id="67">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#40c8e0] to-[#0071a4] flex items-center justify-center text-white mb-auto shadow-lg" data-sd-id="68">
+              <iconify-icon icon="lucide:banknote" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-8 mb-2" data-sd-id="69">Funder</h4>
+            <p class="text-[#68686d] text-sm leading-relaxed" data-sd-id="70">Backs proposals. Funds release only as outcomes are met.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Walkthrough Section -->
+    <section class="relative py-32 px-6 bg-[#05070d] text-white overflow-hidden" data-sd-id="71">
+      <div class="blob blob-green opacity-30" data-sd-id="72"></div>
+      <div class="max-w-[1120px] mx-auto flex flex-col md:flex-row items-center gap-24 relative z-10" data-sd-id="73">
+        <div class="flex-1" data-sd-id="74">
+          <span class="text-white/60 text-[15px] block mb-6" data-sd-id="75">From brief to delivery</span>
+          <div class="flex flex-col gap-2" data-sd-id="76">
+            <button class="text-left opacity-30 hover:opacity-50 transition-opacity" data-sd-id="77">
+              <span class="step-text" data-sd-id="78">Publish.</span>
+            </button>
+            <button class="text-left opacity-30 hover:opacity-50 transition-opacity" data-sd-id="79">
+              <span class="step-text" data-sd-id="80">Propose.</span>
+            </button>
+            <button class="text-left opacity-30 hover:opacity-50 transition-opacity" data-sd-id="81">
+              <span class="step-text" data-sd-id="82">Match.</span>
+            </button>
+            <button class="text-left step-active" data-sd-id="83">
+              <span class="step-text" data-sd-id="84">Deliver.</span>
+              <p class="mt-4 text-lg text-white/70 max-w-sm" data-sd-id="85">Funds release milestone by milestone as evaluators confirm each outcome.</p>
+            </button>
+          </div>
+          <div class="w-full max-w-[280px] h-[3px] bg-white/10 rounded-full mt-12 overflow-hidden" data-sd-id="86">
+            <div class="w-3/4 h-full bg-white rounded-full" data-sd-id="87"></div>
+          </div>
+        </div>
+        
+        <div class="flex-1 w-full" data-sd-id="88">
+          <div class="glass-card-dark rounded-[34px] p-8 w-full min-h-[420px]" data-sd-id="89">
+            <div class="text-white/50 text-[13px] mb-4" data-sd-id="90">Delivery • Milestones</div>
+            <div class="text-5xl font-bold tracking-tighter mb-1" data-sd-id="91">2 of 3</div>
+            <div class="text-white/60 text-sm mb-8" data-sd-id="92">milestones released</div>
+            
+            <div class="space-y-3" data-sd-id="93">
+              <div class="flex items-center gap-4 bg-white/5 border border-white/10 rounded-2xl p-4" data-sd-id="94">
+                <div class="w-6 h-6 rounded-full bg-[#30d158] flex items-center justify-center" data-sd-id="95">
+                   <iconify-icon icon="lucide:check" class="text-white text-xs"></iconify-icon>
+                </div>
+                <span class="flex-1 text-[15px]" data-sd-id="96">Scheduling model on historical data</span>
+                <span class="text-[15px] text-white/60" data-sd-id="97">Released</span>
+              </div>
+              <div class="flex items-center gap-4 bg-white/5 border border-white/10 rounded-2xl p-4" data-sd-id="98">
+                <div class="w-6 h-6 rounded-full bg-[#30d158] flex items-center justify-center" data-sd-id="99">
+                   <iconify-icon icon="lucide:check" class="text-white text-xs"></iconify-icon>
+                </div>
+                <span class="flex-1 text-[15px]" data-sd-id="100">Pilot across two sites</span>
+                <span class="text-[15px] text-white/60" data-sd-id="101">Released</span>
+              </div>
+              <div class="flex items-center gap-4 bg-white/5 border border-white/10 rounded-2xl p-4" data-sd-id="102">
+                <div class="w-6 h-6 rounded-full border border-white/30 flex items-center justify-center" data-sd-id="103">
+                </div>
+                <span class="flex-1 text-[15px]" data-sd-id="104">Rollout plan and final report</span>
+                <span class="text-[15px] text-white/60" data-sd-id="105">In review</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Discover & Workspaces -->
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-white" data-sd-id="106">
+      <div class="bg-[#eef4fc] rounded-[32px] p-16 text-center relative overflow-hidden" data-sd-id="107">
+        <h3 class="text-[52px] font-bold tracking-tight mb-4" data-sd-id="108">Discover</h3>
+        <p class="text-[#424245] text-lg max-w-sm mx-auto mb-6" data-sd-id="109">Every open problem and funding call, in one place.</p>
+        <div class="flex justify-center gap-8 text-[#0066cc] font-medium" data-sd-id="110">
+          <button class="hover:underline" data-sd-id="111">Browse all ›</button>
+          <button class="hover:underline" data-sd-id="112">See what's open ›</button>
+        </div>
+        <div class="mt-12 glass-card-light rounded-t-[28px] max-w-[420px] mx-auto p-5 text-left" data-sd-id="113">
+          <div class="h-10 bg-black/5 rounded-xl flex items-center px-4 text-black/40 text-sm gap-2 mb-6" data-sd-id="114">
+            <iconify-icon icon="lucide:search"></iconify-icon>
+            Search
+          </div>
+          <div class="space-y-4" data-sd-id="115">
+             <div class="border-b border-black/10 pb-4" data-sd-id="116">
+                <div class="font-bold" data-sd-id="117">Quantum-safe encryption for logistics</div>
+                <div class="text-sm text-black/50" data-sd-id="118">LogiChain Labs</div>
+             </div>
+             <div class="border-b border-black/10 pb-4" data-sd-id="119">
+                <div class="font-bold" data-sd-id="120">Carbon capture efficiency modeling</div>
+                <div class="text-sm text-black/50" data-sd-id="121">EcoResearch</div>
+             </div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-[#05070d] text-white rounded-[32px] p-16 text-center relative overflow-hidden" data-sd-id="122">
+        <h3 class="text-[52px] font-bold tracking-tight mb-4" data-sd-id="123">Workspaces</h3>
+        <p class="text-white/70 text-lg max-w-sm mx-auto mb-6" data-sd-id="124">Every brief, proposal and milestone you’re part of, by role.</p>
+        <div class="flex justify-center gap-8 text-[#2997ff] font-medium" data-sd-id="125">
+          <button class="hover:underline" data-sd-id="126">Open workspaces ›</button>
+        </div>
+        <div class="mt-12 glass-card-dark rounded-t-[28px] max-w-[420px] mx-auto p-6 text-left" data-sd-id="127">
+           <div class="grid grid-cols-2 gap-2 mb-6" data-sd-id="128">
+              <div class="bg-white/10 p-3 rounded-2xl flex items-center gap-2 text-sm" data-sd-id="129">
+                <iconify-icon icon="lucide:file-text"></iconify-icon> Problem owner
+              </div>
+              <div class="bg-white/10 p-3 rounded-2xl flex items-center gap-2 text-sm" data-sd-id="130">
+                <iconify-icon icon="lucide:microscope"></iconify-icon> Researcher
+              </div>
+           </div>
+           <div class="font-bold mb-1" data-sd-id="131">Your briefs and proposals</div>
+           <div class="text-xs text-white/50 mb-4" data-sd-id="132">Track each one from open to complete.</div>
+           <div class="flex gap-1" data-sd-id="133">
+              <div class="h-1 flex-1 bg-[#64d2ff] rounded-full" data-sd-id="134"></div>
+              <div class="h-1 flex-1 bg-[#64d2ff] rounded-full" data-sd-id="135"></div>
+              <div class="h-1 flex-1 bg-white/20 rounded-full" data-sd-id="136"></div>
+              <div class="h-1 flex-1 bg-white/20 rounded-full" data-sd-id="137"></div>
+              <div class="h-1 flex-1 bg-white/20 rounded-full" data-sd-id="138"></div>
+            </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Open Now Rail -->
+    <section class="py-32 bg-white px-6" data-sd-id="139">
+      <div class="max-w-[1120px] mx-auto" data-sd-id="140">
+         <div class="flex justify-between items-end mb-12" data-sd-id="141">
+            <div data-sd-id="142">
+              <h2 class="text-[56px] font-bold tracking-tight mb-2" data-sd-id="143">Open now.</h2>
+              <p class="text-[#68686d] text-xl" data-sd-id="144">Business problems and open funding calls.</p>
+            </div>
+            <div class="flex gap-3" data-sd-id="145">
+               <button class="w-12 h-12 rounded-full border border-black/5 glass-card-light flex items-center justify-center text-xl shadow-sm" data-sd-id="146">
+                 <iconify-icon icon="lucide:chevron-left"></iconify-icon>
+               </button>
+               <button class="w-12 h-12 rounded-full border border-black/5 glass-card-light flex items-center justify-center text-xl shadow-sm" data-sd-id="147">
+                 <iconify-icon icon="lucide:chevron-right"></iconify-icon>
+               </button>
+            </div>
+         </div>
+         <div class="glass-card-light rounded-3xl p-8 text-center text-[#6e6e73]" data-sd-id="148">
+            Sign in to see opportunities posted by other organisations.
+         </div>
+      </div>
+    </section>
+
+    <!-- Closing CTA -->
+    <section class="py-32 px-6 bg-[#f5f5f7] text-center" data-sd-id="149">
+      <h2 class="text-[56px] font-bold tracking-tight mb-6" data-sd-id="150">Have a problem<br>worth solving?</h2>
+      <p class="text-xl text-[#68686d] max-w-[500px] mx-auto mb-10" data-sd-id="151">Write a brief in four steps. Researchers can start proposing as soon as it’s on-chain.</p>
+      <div class="flex justify-center gap-3" data-sd-id="152">
+        <button id="final-publish" class="btn-pill bg-[#0071e3] text-white hover:bg-[#0077ed]" data-sd-id="153">Publish a brief</button>
+        <button id="final-explore" class="btn-pill border border-[#0071e3] text-[#0071e3] hover:bg-[#0071e3]/5" data-sd-id="154">Explore opportunities</button>
+      </div>
+    </section>
+
+    <!-- Simple Footer -->
+    <footer class="py-12 border-t border-black/5 text-center text-[#6e6e73] text-sm bg-[#f5f5f7]" data-sd-id="155">
+      <div class="flex items-center justify-center gap-2 mb-4" data-sd-id="156">
+        <img src="https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg" alt="QC DAO" class="w-6 h-6" data-sd-id="157">
+        <span class="font-semibold" data-sd-id="158">QC DAO</span>
+      </div>
+      <p data-sd-id="159">© 2024 QC DAO. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <script>
+    // Scroll handling for header theme switching
+    window.addEventListener('scroll', () => {
+      const header = document.querySelector('.glass-header');
+      const hero = document.querySelector('section');
+      const heroBottom = hero.offsetTop + hero.offsetHeight;
+      
+      if (window.scrollY < heroBottom - 40) {
+        header.setAttribute('data-tone', 'dark');
+      } else {
+        header.removeAttribute('data-tone');
+      }
+    });
+    
+    // Initial state
+    document.querySelector('.glass-header').setAttribute('data-tone', 'dark');
+  </script>
+
+</body></html>

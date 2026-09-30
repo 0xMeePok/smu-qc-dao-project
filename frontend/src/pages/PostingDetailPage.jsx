@@ -357,7 +357,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const timeLabel = expired || matchClosed ? "Closed" : matchingStatus === "awaiting_confirmation" ? "Creator response window" : "Time remaining";
 
   return (
-    <section className="page detail-page">
+    <section className="page detail-page blotter-posting">
       <button className="back" type="button" onClick={() => onNavigate(ownsPosting ? "my-problems" : "discover")}>
         {ownsPosting ? "Back to my problems" : "Back to opportunities"}
       </button>
@@ -368,16 +368,18 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
       <div className="detail-layout">
         <article className="detail-main">
-          <div className="card-top">
-            <span className="eyebrow">
-              {isOpenFunding ? "Open funding opportunity" : "Problem statement"}
-            </span>
+          <div className="blotter-title">
+            <div>
+              <span className="eyebrow">
+                {isOpenFunding ? "Open funding opportunity" : "Problem statement"}
+              </span>
+              <h1>{posting.title}</h1>
+            </div>
             <div className="trust-status-row">
               <StatusBadge status={opportunityWorkflowStatus(posting)} />
               <VerifiedBadge audit={posting.audit} recordStatus={posting.status} hidePending />
             </div>
           </div>
-          <h1>{posting.title}</h1>
           <ContentModerationNotice record={posting} />
           {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
 
@@ -385,7 +387,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               shown, so a selection made under Proposals still refreshes the match
               state that the sidebar and Match & funding read. */}
           <div className="posting-tabs">
-            <div className="segmented" role="tablist" aria-label="Posting sections">
+            <div className="desk-tabs" role="tablist" aria-label="Posting sections">
               {tabs.map(([value, label]) => (
                 <button key={value} type="button" role="tab" id={`posting-tab-${value}`}
                   aria-selected={activeTab === value} aria-controls={`posting-panel-${value}`}

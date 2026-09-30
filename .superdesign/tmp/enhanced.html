@@ -1,0 +1,459 @@
+<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QC DAO Home</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;650;700&display=swap');
+
+    :root {
+      --page-bg: #eef1f8;
+      --page-bg-dark: #07111f;
+      --brand: #0071e3;
+      --ink: #1d1d1f;
+      --ink-soft: #424245;
+      --muted: #68686d;
+      --surface: #ffffff;
+      --surface-dark: #121821;
+      --radius-pill: 980px;
+      --radius-card: 18px;
+      --radius-panel: 22px;
+      --radius-control: 10px;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: var(--ink);
+      background: var(--page-bg);
+      overflow-x: hidden;
+    }
+
+    .glass-header {
+      backdrop-filter: blur(28px) saturate(180%);
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      z-index: 50;
+    }
+
+    .glass-header[data-tone="dark"] {
+      background: rgba(0, 0, 0, 0.4);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: white;
+    }
+
+    .hero-heading {
+      font-size: clamp(64px, 7vw, 96px);
+      font-weight: 700;
+      line-height: 1.02;
+      letter-spacing: -0.045em;
+    }
+
+    .section-title {
+      font-size: clamp(40px, 4vw, 56px);
+      font-weight: 650;
+      line-height: 1.04;
+      letter-spacing: -0.04em;
+    }
+
+    .eyebrow {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .constellation-orbit {
+      animation: rotate 60s linear infinite;
+    }
+
+    @keyframes rotate {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .ring-pulse {
+      animation: pulse 4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.2; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.1); }
+    }
+
+    .step-text {
+      font-size: clamp(34px, 4.6vw, 56px);
+      font-weight: 700;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+
+    .step-active {
+      opacity: 1 !important;
+    }
+
+    .glass-card-light {
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #ffffff;
+      box-shadow: 0 14px 40px rgba(30, 60, 120, 0.05);
+    }
+
+    .glass-card-dark {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #121821;
+      box-shadow: 0 40px 90px rgba(0, 0, 0, 0.3);
+    }
+
+    .workflow-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 9px 2px 7px;
+      border: 1px solid transparent;
+      border-radius: 980px;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+    .workflow-badge.tone-success {
+      background: #eaf8ee;
+      border-color: #b8e6c4;
+      color: #248a3d;
+    }
+    .workflow-badge.tone-warning {
+      background: #fff5e6;
+      border-color: #ffd79a;
+      color: #b25000;
+    }
+  </style>
+</head>
+<body>
+  <div class="min-h-screen relative flex flex-col">
+    <!-- Persistent Header -->
+    <header id="main-nav" class="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-48px)] max-w-[1120px] h-[60px] glass-header rounded-[22px] px-6 flex items-center justify-between z-50">
+      <div class="flex items-center gap-3">
+        <a href="#" id="nav-brand-logo" class="flex items-center gap-3">
+          <img src="https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg" alt="QC DAO" class="w-8 h-8">
+          <span class="font-semibold text-lg tracking-tight">QC DAO</span>
+        </a>
+        <nav class="hidden md:flex items-center ml-8 gap-6 text-[15px] font-medium opacity-80">
+          <a href="#" id="nav-home-link" class="hover:opacity-100">Home</a>
+          <a href="#" id="nav-discover-link" class="hover:opacity-100">Discover</a>
+        </nav>
+      </div>
+      <div class="flex items-center gap-4">
+        <button id="theme-toggle-btn" class="w-9 h-9 flex items-center justify-center opacity-60 hover:opacity-100">
+          <iconify-icon icon="lucide:sun" class="text-xl"></iconify-icon>
+        </button>
+        <button id="wallet-signin-btn" class="bg-[#0071e3] hover:bg-[#0068d6] text-white px-5 py-2.5 rounded-[980px] text-[14px] font-semibold flex items-center gap-2">
+          <iconify-icon icon="lucide:wallet" class="text-lg"></iconify-icon>
+          Sign in with Wallet
+        </button>
+      </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="relative pt-[180px] pb-[140px] px-6 bg-[#07111f] text-white overflow-hidden">
+      <!-- Animated Ring in unused corner -->
+      <div class="absolute top-20 right-[-10%] w-[400px] h-[400px] pointer-events-none opacity-20">
+        <svg viewBox="0 0 100 100" class="w-full h-full ring-pulse">
+          <circle cx="50" cy="50" r="48" fill="none" stroke="#0071e3" stroke-width="0.5" stroke-dasharray="4 8" />
+          <circle cx="50" cy="50" r="35" fill="none" stroke="#0071e3" stroke-width="0.2" />
+        </svg>
+      </div>
+      
+      <div class="max-w-[1120px] mx-auto text-center relative z-10">
+        <h1 class="hero-heading mb-6 tracking-tight">Fund problems<br>with clear outcomes.</h1>
+        <p class="max-w-[560px] mx-auto text-[20px] text-white/70 leading-[1.45] mb-10">
+          Publish the problems that matter, match with one fully funded proposal, and release funds as outcomes land.
+        </p>
+        <div class="flex justify-center gap-3">
+          <a href="#" id="hero-explore-btn" class="inline-flex items-center px-8 py-4 bg-white text-[#07111f] hover:bg-[#f5f5f7] rounded-full font-semibold transition-colors">Explore opportunities</a>
+          <a href="#" id="hero-publish-btn" class="inline-flex items-center px-8 py-4 border border-white/20 bg-white/10 hover:bg-white/20 rounded-full font-semibold transition-colors backdrop-blur-md">Publish a brief</a>
+        </div>
+
+        <!-- Hero Card Mockup -->
+        <div class="mt-24 relative max-w-[820px] mx-auto">
+          <div class="bg-[#121821] border border-white/10 rounded-[22px] p-8 text-left shadow-2xl">
+            <div class="flex items-center gap-2 text-white/60 text-sm mb-4">
+              <div class="w-7 h-7 bg-white/10 rounded-full flex items-center justify-center text-[10px] font-bold">SMU</div>
+              <span class="eyebrow">Example brief • Business problem</span>
+            </div>
+            <h3 class="text-2xl font-semibold mb-6 leading-tight tracking-tight">Route optimisation for cold-chain delivery under demand spikes</h3>
+            <div class="grid grid-cols-3 gap-4 mb-8">
+              <div class="bg-white/5 border border-white/10 rounded-[10px] p-4">
+                <div class="text-2xl font-bold">60,000</div>
+                <div class="text-xs text-white/50 eyebrow">USDT budget</div>
+              </div>
+              <div class="bg-white/5 border border-white/10 rounded-[10px] p-4">
+                <div class="text-2xl font-bold">50 days</div>
+                <div class="text-xs text-white/50 eyebrow">left to propose</div>
+              </div>
+              <div class="bg-white/5 border border-white/10 rounded-[10px] p-4">
+                <div class="text-2xl font-bold">3</div>
+                <div class="text-xs text-white/50 eyebrow">proposals</div>
+              </div>
+            </div>
+            <div class="flex gap-1.5">
+              <div class="h-1 flex-1 bg-[#0071e3] rounded-full"></div>
+              <div class="h-1 flex-1 bg-white/10 rounded-full"></div>
+              <div class="h-1 flex-1 bg-white/10 rounded-full"></div>
+              <div class="h-1 flex-1 bg-white/10 rounded-full"></div>
+              <div class="h-1 flex-1 bg-white/10 rounded-full"></div>
+            </div>
+          </div>
+          <!-- Floating Badge -->
+          <div class="absolute -top-6 -left-6 bg-[#121821] border border-white/10 px-6 py-5 rounded-[22px] flex flex-col items-start gap-3 shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+            <div class="workflow-badge tone-success">
+              <iconify-icon icon="lucide:check-circle" class="text-[13px]"></iconify-icon>
+              Decision recorded
+            </div>
+            <div class="text-left">
+              <div class="text-[12px] text-white/60">Variational circuits for route planning</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Roles Section -->
+    <section class="py-32 px-6 bg-[#eef1f8] relative overflow-hidden">
+      <div class="max-w-[1120px] mx-auto">
+        <div class="flex items-center justify-between mb-20">
+          <div class="max-w-xl">
+            <h2 class="section-title mb-6 tracking-tight">Four roles.<br>One clear path.</h2>
+            <p class="text-[20px] text-[#68686d] leading-[1.45]">Everyone sees the same brief, the same proposals and the same milestones.</p>
+          </div>
+          <!-- Constellation SVG -->
+          <div class="hidden lg:block w-48 h-48">
+            <svg viewBox="0 0 100 100" class="w-full h-full constellation-orbit">
+              <circle cx="50" cy="50" r="40" fill="none" stroke="#0071e3" stroke-width="0.5" stroke-dasharray="2 4" />
+              <circle cx="50" cy="10" r="4" fill="#0071e3" />
+              <circle cx="90" cy="50" r="4" fill="#0071e3" />
+              <circle cx="50" cy="90" r="4" fill="#0071e3" />
+              <circle cx="10" cy="50" r="4" fill="#0071e3" />
+              <line x1="50" y1="10" x2="90" y2="50" stroke="#0071e3" stroke-width="0.5" />
+              <line x1="90" y1="50" x2="50" y2="90" stroke="#0071e3" stroke-width="0.5" />
+              <line x1="50" y1="90" x2="10" y2="50" stroke="#0071e3" stroke-width="0.5" />
+              <line x1="10" y1="50" x2="50" y2="10" stroke="#0071e3" stroke-width="0.5" />
+            </svg>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div class="bg-white border border-black/5 p-8 rounded-[18px] min-h-[250px] flex flex-col hover:border-[#0071e3]/20 transition-all">
+            <div class="w-12 h-12 rounded-[10px] bg-[#0071e3] flex items-center justify-center text-white mb-auto shadow-lg">
+              <iconify-icon icon="lucide:file-text" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-xl font-semibold mt-8 mb-2 tracking-tight">Problem owner</h4>
+            <p class="text-[#68686d] text-base">Publishes a problem with a budget and a deadline.</p>
+          </div>
+          <div class="bg-white border border-black/5 p-8 rounded-[18px] min-h-[250px] flex flex-col hover:border-[#0071e3]/20 transition-all">
+            <div class="w-12 h-12 rounded-[10px] bg-[#0071e3] flex items-center justify-center text-white mb-auto shadow-lg">
+              <iconify-icon icon="lucide:microscope" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-xl font-semibold mt-8 mb-2 tracking-tight">Researcher</h4>
+            <p class="text-[#68686d] text-base">Proposes an approach and delivers the work in stages.</p>
+          </div>
+          <div class="bg-white border border-black/5 p-8 rounded-[18px] min-h-[250px] flex flex-col hover:border-[#0071e3]/20 transition-all">
+            <div class="w-12 h-12 rounded-[10px] bg-[#0071e3] flex items-center justify-center text-white mb-auto shadow-lg">
+              <iconify-icon icon="lucide:shield-check" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-xl font-semibold mt-8 mb-2 tracking-tight">Evaluator</h4>
+            <p class="text-[#68686d] text-base">Reviews proposals and confirms each milestone.</p>
+          </div>
+          <div class="bg-white border border-black/5 p-8 rounded-[18px] min-h-[250px] flex flex-col hover:border-[#0071e3]/20 transition-all">
+            <div class="w-12 h-12 rounded-[10px] bg-[#0071e3] flex items-center justify-center text-white mb-auto shadow-lg">
+              <iconify-icon icon="lucide:banknote" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-xl font-semibold mt-8 mb-2 tracking-tight">Funder</h4>
+            <p class="text-[#68686d] text-base">Backs proposals. Funds release only as outcomes are met.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Wide Walkthrough Section -->
+    <section class="py-32 px-6 bg-[#07111f] text-white">
+      <div class="max-w-[1120px] mx-auto">
+        <span class="eyebrow text-white/50 block mb-12">From brief to delivery</span>
+        <div class="flex flex-col lg:flex-row items-start gap-12 lg:gap-24">
+          <!-- Steps List (Quiet Left Column) -->
+          <div class="w-full lg:w-[420px] flex flex-col gap-8">
+            <div class="opacity-30">
+              <h2 class="step-text mb-2">Publish.</h2>
+            </div>
+            <div class="opacity-30">
+              <h2 class="step-text mb-2">Propose.</h2>
+            </div>
+            <div class="opacity-30">
+              <h2 class="step-text mb-2">Match.</h2>
+            </div>
+            <div class="step-active">
+              <h2 class="step-text mb-4">Deliver.</h2>
+              <p class="text-lg text-white/70 max-w-sm leading-[1.45]">Funds release milestone by milestone as evaluators confirm each outcome.</p>
+            </div>
+            <div class="w-full h-[3px] bg-white/10 rounded-full mt-8 overflow-hidden">
+              <div class="w-3/4 h-full bg-white rounded-full"></div>
+            </div>
+          </div>
+          
+          <!-- Example Panel (Right Column, Solid Surface) -->
+          <div class="flex-1 w-full">
+            <div class="bg-[#121821] border border-white/10 rounded-[22px] p-10 w-full min-h-[460px] shadow-2xl relative overflow-hidden">
+              <!-- Subtle orbital dot background decorator -->
+              <svg class="absolute top-0 right-0 w-32 h-32 opacity-10" viewBox="0 0 100 100">
+                <circle cx="80" cy="20" r="2" fill="white" />
+                <circle cx="80" cy="20" r="15" fill="none" stroke="white" stroke-width="0.5" />
+              </svg>
+
+              <div class="eyebrow text-white/40 mb-6">Delivery • Milestones</div>
+              <div class="text-6xl font-bold tracking-tighter mb-2">2 of 3</div>
+              <div class="text-white/60 text-[15px] mb-12">milestones released</div>
+              
+              <div class="space-y-4">
+                <div class="flex items-center justify-between gap-4 bg-white/5 border border-white/10 rounded-[10px] p-5 transition-colors hover:bg-white/[0.08]">
+                  <span class="flex-1 text-[17px] font-medium">Scheduling model on historical data</span>
+                  <div class="workflow-badge tone-success">
+                    <iconify-icon icon="lucide:check-circle" class="text-[13px]"></iconify-icon>
+                    Decision recorded
+                  </div>
+                </div>
+                <div class="flex items-center justify-between gap-4 bg-white/5 border border-white/10 rounded-[10px] p-5 transition-colors hover:bg-white/[0.08]">
+                  <span class="flex-1 text-[17px] font-medium">Pilot across two sites</span>
+                  <div class="workflow-badge tone-success">
+                    <iconify-icon icon="lucide:check-circle" class="text-[13px]"></iconify-icon>
+                    Decision recorded
+                  </div>
+                </div>
+                <div class="flex items-center justify-between gap-4 bg-white/5 border border-white/10 rounded-[10px] p-5 transition-colors hover:bg-white/[0.08]">
+                  <span class="flex-1 text-[17px] font-medium">Rollout plan and final report</span>
+                  <div class="workflow-badge tone-warning">
+                    <iconify-icon icon="lucide:hourglass" class="text-[13px]"></iconify-icon>
+                    Awaiting evaluator feedback
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Discover & Workspaces -->
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-white">
+      <div class="bg-[#eef1f8] rounded-[22px] p-16 text-center relative overflow-hidden flex flex-col">
+        <h3 class="section-title mb-4">Discover</h3>
+        <p class="text-[#424245] text-[19px] max-w-sm mx-auto mb-8">Every open problem and funding call, in one place.</p>
+        <div class="flex justify-center gap-8 text-[#0071e3] font-medium text-[17px]">
+          <a href="#" id="discover-browse-all" class="hover:underline">Browse all ›</a>
+          <a href="#" id="discover-open-only" class="hover:underline">See what's open ›</a>
+        </div>
+        <div class="mt-12 bg-white border border-black/5 rounded-t-[18px] max-w-[420px] mx-auto p-6 text-left shadow-sm w-full">
+          <div class="h-12 bg-black/[0.04] rounded-[10px] flex items-center px-4 text-[#68686d] text-sm gap-3 mb-6">
+            <iconify-icon icon="lucide:search" class="text-lg"></iconify-icon>
+            Search opportunities
+          </div>
+          <div class="space-y-6">
+             <div class="border-b border-black/5 pb-6">
+                <div class="font-semibold text-lg tracking-tight">Quantum-safe encryption for logistics</div>
+                <div class="text-sm text-[#68686d] eyebrow mt-1">LogiChain Labs</div>
+             </div>
+             <div class="pb-4">
+                <div class="font-semibold text-lg tracking-tight">Carbon capture efficiency modeling</div>
+                <div class="text-sm text-[#68686d] eyebrow mt-1">EcoResearch</div>
+             </div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-[#07111f] text-white rounded-[22px] p-16 text-center relative overflow-hidden flex flex-col">
+        <h3 class="section-title mb-4">Workspaces</h3>
+        <p class="text-white/70 text-[19px] max-w-sm mx-auto mb-8">Every brief, proposal and milestone you’re part of, by role.</p>
+        <div class="flex justify-center gap-8 text-[#0071e3] font-medium text-[17px]">
+          <a href="#" id="workspaces-open-btn" class="hover:underline">Open workspaces ›</a>
+        </div>
+        <div class="mt-12 bg-[#121821] border border-white/10 rounded-t-[18px] max-w-[420px] mx-auto p-8 text-left shadow-2xl w-full">
+           <div class="grid grid-cols-2 gap-3 mb-8">
+              <div class="bg-white/5 border border-white/10 p-3 rounded-[10px] flex items-center gap-3 text-sm">
+                <iconify-icon icon="lucide:file-text" class="text-white/60"></iconify-icon>
+                <span class="eyebrow">Problem owner</span>
+              </div>
+              <div class="bg-white/5 border border-white/10 p-3 rounded-[10px] flex items-center gap-3 text-sm">
+                <iconify-icon icon="lucide:microscope" class="text-white/60"></iconify-icon>
+                <span class="eyebrow">Researcher</span>
+              </div>
+           </div>
+           <div class="font-semibold text-lg tracking-tight mb-2">Your briefs and proposals</div>
+           <div class="text-sm text-white/50 mb-6">Track each one from open to complete.</div>
+           <div class="flex gap-2">
+              <div class="h-1 flex-1 bg-[#0071e3] rounded-full"></div>
+              <div class="h-1 flex-1 bg-[#0071e3] rounded-full"></div>
+              <div class="h-1 flex-1 bg-white/10 rounded-full"></div>
+              <div class="h-1 flex-1 bg-white/10 rounded-full"></div>
+              <div class="h-1 flex-1 bg-white/10 rounded-full"></div>
+            </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Open Now Rail -->
+    <section class="py-32 bg-white px-6">
+      <div class="max-w-[1120px] mx-auto">
+         <div class="flex justify-between items-end mb-16">
+            <div>
+              <h2 class="section-title mb-4">Open now.</h2>
+              <p class="text-[#68686d] text-xl">Business problems and open funding calls.</p>
+            </div>
+            <div class="flex gap-3">
+               <button id="rail-prev" class="w-12 h-12 rounded-full border border-black/5 bg-white flex items-center justify-center text-xl shadow-sm hover:shadow-md transition-shadow">
+                 <iconify-icon icon="lucide:chevron-left"></iconify-icon>
+               </button>
+               <button id="rail-next" class="w-12 h-12 rounded-full border border-black/5 bg-white flex items-center justify-center text-xl shadow-sm hover:shadow-md transition-shadow">
+                 <iconify-icon icon="lucide:chevron-right"></iconify-icon>
+               </button>
+            </div>
+         </div>
+         <div class="bg-[#f5f5f7] rounded-[18px] p-12 text-center text-[#68686d] border border-black/5">
+            Sign in to see opportunities posted by other organisations.
+         </div>
+      </div>
+    </section>
+
+    <!-- Closing CTA -->
+    <section class="py-32 px-6 bg-[#eef1f8] text-center">
+      <h2 class="section-title mb-8">Have a problem<br>worth solving?</h2>
+      <p class="text-[20px] text-[#68686d] max-w-[500px] mx-auto mb-12">Write a brief in four steps. Researchers can start proposing as soon as it’s on-chain.</p>
+      <div class="flex justify-center gap-4">
+        <a href="#" id="final-publish-btn" class="inline-flex items-center px-8 py-4 bg-[#0071e3] text-white hover:bg-[#0068d6] rounded-full font-semibold transition-colors">Publish a brief</a>
+        <a href="#" id="final-explore-btn" class="inline-flex items-center px-8 py-4 border border-[#0071e3] text-[#0071e3] hover:bg-[#0071e3]/5 rounded-full font-semibold transition-colors">Explore opportunities</a>
+      </div>
+    </section>
+
+    <!-- Simple Footer -->
+    <footer class="py-12 border-t border-black/5 text-center text-[#68686d] text-sm bg-[#eef1f8]">
+      <div class="flex items-center justify-center gap-3 mb-6">
+        <img src="https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg" alt="QC DAO" class="w-6 h-6">
+        <span class="font-semibold tracking-tight text-[#1d1d1f]">QC DAO</span>
+      </div>
+      <p>© 2024 QC DAO. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <script>
+    window.addEventListener('scroll', () => {
+      const header = document.querySelector('.glass-header');
+      const hero = document.querySelector('section');
+      const heroBottom = hero.offsetTop + hero.offsetHeight;
+      
+      if (window.scrollY < heroBottom - 40) {
+        header.setAttribute('data-tone', 'dark');
+      } else {
+        header.removeAttribute('data-tone');
+      }
+    });
+    document.querySelector('.glass-header').setAttribute('data-tone', 'dark');
+  </script>
+
+</body></html>

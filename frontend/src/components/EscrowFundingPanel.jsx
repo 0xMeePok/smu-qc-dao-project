@@ -88,7 +88,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       </div>}
       {state.state === 6 && <>
         <div className="field-group"><h4>Delivery evidence</h4>
-          {evidenceReady ? <><p style={{ whiteSpace: "pre-wrap" }}>{evidence.summary}</p><a href={evidence.url} target="_blank" rel="noreferrer">Review delivery evidence</a><p className="field-hint">This evidence matches the hash submitted on-chain.</p></>
+          {evidenceReady ? <><p className="escrow-evidence">{evidence.summary}</p><a href={evidence.url} target="_blank" rel="noreferrer">Review delivery evidence</a><p className="field-hint">This evidence matches the hash submitted on-chain.</p></>
             : <p>{nonzero(state.currentMilestone?.evidenceHash) ? "The on-chain evidence is not available or does not match its saved content. Approvals are disabled until matching evidence can be reviewed." : "The proposal owner must submit delivery evidence before final approval."}</p>}
           {state.roles.proposalOwner && <>
             <Field label="Delivery summary" htmlFor="escrow-delivery-summary">{({ id }) => <textarea id={id} maxLength={4000} value={delivery.summary} disabled={disabled} onChange={event => setDelivery({ ...delivery, summary: event.target.value })} />}</Field>

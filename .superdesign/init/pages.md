@@ -1,0 +1,1221 @@
+# Page dependency trees
+
+## #/home
+Entry: `frontend/src/pages/HomePage.jsx`
+
+- frontend/src/pages/HomePage.jsx
+
+## #/discover
+Entry: `frontend/src/App.jsx`
+
+- frontend/src/App.jsx
+  - frontend/src/pages/CreateProposalPage.jsx
+    - frontend/src/context/AuthContext.jsx
+      - frontend/src/config/roles.js
+      - frontend/src/context/SessionContext.jsx
+        - frontend/src/lib/firebase.js
+        - frontend/src/lib/authFlow.js
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/errors.js
+        - frontend/src/lib/profile.js
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/authFlow.js (cycle)
+          - frontend/src/lib/errors.js (cycle)
+          - frontend/src/lib/validation.js
+          - frontend/src/lib/stats.js
+          - frontend/src/lib/chain.js
+          - frontend/src/lib/roles.js
+        - frontend/src/lib/errors.js (cycle)
+        - frontend/src/lib/chain.js (cycle)
+        - frontend/src/lib/wagmi.js
+        - frontend/src/lib/roles.js (cycle)
+        - frontend/src/lib/router.js
+        - frontend/src/lib/idleTimeout.js
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/lib/roles.js (cycle)
+    - frontend/src/components/Field.jsx
+    - frontend/src/components/ProposalCategorySelect.jsx
+      - frontend/src/config/proposal.js
+    - frontend/src/components/AttachmentUploader.jsx
+      - frontend/src/lib/attachments.js
+        - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx
+      - frontend/src/lib/datetime.js
+        - frontend/src/config/workflowStatus.js
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/lib/postings.js
+      - frontend/src/lib/publication.js
+        - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/config/postingCategories.js
+      - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/proposals.js
+      - frontend/src/lib/publication.js (cycle)
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/config/proposal.js (cycle)
+      - frontend/src/config/fundingOpportunity.js
+        - frontend/src/config/postingCategories.js (cycle)
+      - frontend/src/lib/proposalValidation.js
+        - frontend/src/config/proposal.js (cycle)
+        - frontend/src/config/fundingOpportunity.js (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/proposalAudit.js
+      - frontend/src/config/auditRegistry.js
+      - frontend/src/lib/opportunityAuditFlow.js
+        - frontend/src/config/auditRegistry.js (cycle)
+        - frontend/src/lib/auditRegistry.js
+          - frontend/src/config/auditRegistry.js (cycle)
+          - frontend/src/lib/wagmi.js (cycle)
+          - frontend/src/lib/errors.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/auditRegistry.js (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/components/LeaveDraftPrompt.jsx
+      - frontend/src/components/Modal.jsx
+    - frontend/src/lib/draftGuard.js
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/components/SubmissionError.jsx
+    - frontend/src/components/SubmissionProgress.jsx
+    - frontend/src/lib/proposalValidation.js (cycle)
+    - frontend/src/lib/matching.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/config/proposal.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/pages/ProposalDetailPage.jsx
+      - frontend/src/lib/proposalValidation.js (cycle)
+      - frontend/src/context/AuthContext.jsx (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/proposalAudit.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/AuditReceipt.jsx
+        - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/ConnectWalletModal.jsx
+        - frontend/src/context/SessionContext.jsx (cycle)
+        - frontend/src/lib/wagmi.js (cycle)
+        - frontend/src/components/WalletIcon.jsx
+        - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/Field.jsx (cycle)
+      - frontend/src/components/OwnerReviewPanel.jsx
+        - frontend/src/components/Field.jsx (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/lib/ownerReviews.js
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/authFlow.js (cycle)
+          - frontend/src/config/workflowStatus.js (cycle)
+        - frontend/src/config/workflowStatus.js (cycle)
+        - frontend/src/components/StatusBadge.jsx
+          - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/ProposalRevisionTrail.jsx
+        - frontend/src/lib/proposals.js (cycle)
+        - frontend/src/lib/proposalValidation.js (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/config/proposal.js (cycle)
+        - frontend/src/config/workflowStatus.js (cycle)
+        - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/config/proposal.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/components/MatchingPanel.jsx
+        - frontend/src/context/AuthContext.jsx (cycle)
+        - frontend/src/lib/matching.js (cycle)
+        - frontend/src/config/workflowStatus.js (cycle)
+        - frontend/src/components/StatusBadge.jsx (cycle)
+        - frontend/src/lib/proposals.js (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/components/ExpiryCountdown.jsx (cycle)
+        - frontend/src/components/Modal.jsx (cycle)
+        - frontend/src/components/RelatedAuditReceiptPane.jsx
+          - frontend/src/components/AuditDetailPane.jsx
+          - frontend/src/components/AuditReceipt.jsx (cycle)
+          - frontend/src/config/fundingOpportunity.js (cycle)
+          - frontend/src/lib/datetime.js (cycle)
+          - frontend/src/lib/fundingOpportunityAudit.js
+          - frontend/src/lib/postingAudit.js
+          - frontend/src/lib/proposalAudit.js (cycle)
+      - frontend/src/lib/matching.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/lib/moderation.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/components/ReportContentButton.jsx
+        - frontend/src/context/AuthContext.jsx (cycle)
+        - frontend/src/lib/moderation.js (cycle)
+        - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/ReportableComments.jsx
+        - frontend/src/context/AuthContext.jsx (cycle)
+        - frontend/src/config/roles.js (cycle)
+        - frontend/src/lib/moderation.js (cycle)
+        - frontend/src/lib/comments.js
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/authFlow.js (cycle)
+          - frontend/src/lib/datetime.js (cycle)
+          - frontend/src/config/workflowStatus.js (cycle)
+        - frontend/src/components/ReportContentButton.jsx (cycle)
+        - frontend/src/components/StatusBadge.jsx (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/VerifiedBadge.jsx
+        - frontend/src/config/verifiedBadge.js
+      - frontend/src/components/DetailGroup.jsx
+    - frontend/src/components/BriefWizard.jsx
+  - frontend/src/pages/ProposalDetailPage.jsx (cycle)
+  - frontend/src/data.js
+  - frontend/src/config/postingCategories.js (cycle)
+  - frontend/src/config/roles.js (cycle)
+  - frontend/src/config/routes.js
+    - frontend/src/config/roles.js (cycle)
+  - frontend/src/context/AuthContext.jsx (cycle)
+  - frontend/src/context/SessionContext.jsx (cycle)
+  - frontend/src/lib/chain.js (cycle)
+  - frontend/src/lib/roles.js (cycle)
+  - frontend/src/components/ResponsiveHeader.jsx
+  - frontend/src/lib/theme.js
+  - frontend/src/components/ModerationNotifications.jsx
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/router.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/components/RouteGuard.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/components/AccessDenied.jsx
+      - frontend/src/config/roles.js (cycle)
+      - frontend/src/context/AuthContext.jsx (cycle)
+  - frontend/src/components/Login.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/config/roles.js (cycle)
+    - frontend/src/components/SignInWithWallet.jsx
+      - frontend/src/context/SessionContext.jsx (cycle)
+      - frontend/src/components/WalletIcon.jsx (cycle)
+      - frontend/src/components/ConnectWalletModal.jsx (cycle)
+    - frontend/src/config/routes.js (cycle)
+  - frontend/src/components/AccessDenied.jsx (cycle)
+  - frontend/src/components/SignInWithWallet.jsx (cycle)
+  - frontend/src/components/OnboardingModal.jsx
+    - frontend/src/components/Field.jsx (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/router.js (cycle)
+    - frontend/src/lib/validation.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+  - frontend/src/components/NetworkBanner.jsx
+    - frontend/src/lib/chain.js (cycle)
+  - frontend/src/pages/ProfilePage.jsx
+    - frontend/src/components/Field.jsx (cycle)
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/lib/roles.js (cycle)
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/validation.js (cycle)
+    - frontend/src/components/ModerationNotifications.jsx (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/lib/opportunityPresentation.js
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/config/postingCategories.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/pages/PublicProfilePage.jsx
+    - frontend/src/lib/profile.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/chain.js (cycle)
+  - frontend/src/components/SuspensionBanner.jsx
+    - frontend/src/context/SessionContext.jsx (cycle)
+  - frontend/src/components/RoleViews.jsx
+    - frontend/src/components/ProposalList.jsx
+      - frontend/src/lib/proposalValidation.js (cycle)
+      - frontend/src/context/AuthContext.jsx (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/FundingMeta.jsx
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/lib/matching.js (cycle)
+        - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/components/VerifiedBadge.jsx (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/ProposalTracker.jsx
+      - frontend/src/components/ExpiryCountdown.jsx (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/lib/proposalQueues.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/ownerReviews.js (cycle)
+    - frontend/src/lib/proposalQueues.js (cycle)
+    - frontend/src/components/ProposalComparison.jsx
+      - frontend/src/context/AuthContext.jsx (cycle)
+      - frontend/src/config/proposal.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/comments.js (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/matching.js (cycle)
+      - frontend/src/lib/moderation.js (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/proposalValidation.js (cycle)
+      - frontend/src/lib/proposalComparison.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/comments.js (cycle)
+        - frontend/src/lib/matching.js (cycle)
+        - frontend/src/config/proposal.js (cycle)
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/components/MatchingPanel.jsx (cycle)
+    - frontend/src/components/OwnerReviewPanel.jsx (cycle)
+    - frontend/src/components/MockFundingPortfolio.jsx
+      - frontend/src/context/AuthContext.jsx (cycle)
+      - frontend/src/lib/matching.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/RelatedAuditReceiptPane.jsx (cycle)
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/components/RelatedAuditReceiptPane.jsx (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/matching.js (cycle)
+    - frontend/src/config/roles.js (cycle)
+    - frontend/src/components/VerifiedBadge.jsx (cycle)
+  - frontend/src/pages/AdminPage.jsx
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/lib/roles.js (cycle)
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/admin.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/components/UserManagementTable.jsx
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/lib/roles.js (cycle)
+    - frontend/src/components/RoleChangeModal.jsx
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/lib/roles.js (cycle)
+      - frontend/src/lib/admin.js (cycle)
+    - frontend/src/components/SuspendUserModal.jsx
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/lib/admin.js (cycle)
+    - frontend/src/components/RoleViews.jsx (cycle)
+    - frontend/src/components/ProposalAuditQueue.jsx
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/components/AuditReceipt.jsx (cycle)
+      - frontend/src/components/AuditDetailPane.jsx (cycle)
+      - frontend/src/components/LiveVerifiedBadge.jsx
+        - frontend/src/config/verifiedBadge.js (cycle)
+        - frontend/src/components/VerifiedBadge.jsx (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/postingAudit.js (cycle)
+      - frontend/src/lib/fundingOpportunityAudit.js (cycle)
+    - frontend/src/components/PostingSubmissionLogs.jsx
+      - frontend/src/components/SubmissionLogs.jsx
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/lib/chain.js (cycle)
+        - frontend/src/config/postingCategories.js (cycle)
+        - frontend/src/config/fundingOpportunity.js (cycle)
+        - frontend/src/lib/postingAudit.js (cycle)
+        - frontend/src/lib/fundingOpportunityAudit.js (cycle)
+        - frontend/src/components/AuditReceipt.jsx (cycle)
+        - frontend/src/components/AuditDetailPane.jsx (cycle)
+        - frontend/src/components/LiveVerifiedBadge.jsx (cycle)
+        - frontend/src/components/StatusBadge.jsx (cycle)
+        - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/FundingSubmissionLogs.jsx
+      - frontend/src/components/SubmissionLogs.jsx (cycle)
+    - frontend/src/components/ModerationQueue.jsx
+      - frontend/src/lib/moderation.js (cycle)
+      - frontend/src/config/proposal.js (cycle)
+      - frontend/src/lib/postings.js (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/components/RelatedAuditReceiptPane.jsx (cycle)
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/components/ExpiryAdminUtility.jsx
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/OnChainOffChainLegend.jsx
+      - frontend/src/config/verifiedBadge.js (cycle)
+  - frontend/src/pages/HomePage.jsx
+  - frontend/src/pages/ArchitectureHelpPage.jsx
+    - frontend/src/components/OnChainOffChainLegend.jsx (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/lib/roles.js (cycle)
+  - frontend/src/pages/CreatePostingPage.jsx
+    - frontend/src/components/AttachmentUploader.jsx (cycle)
+    - frontend/src/components/ConnectWalletModal.jsx (cycle)
+    - frontend/src/components/LeaveDraftPrompt.jsx (cycle)
+    - frontend/src/lib/draftGuard.js (cycle)
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx (cycle)
+    - frontend/src/components/AuditReceipt.jsx (cycle)
+    - frontend/src/components/SubmissionProgress.jsx (cycle)
+    - frontend/src/components/SubmissionError.jsx (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/postingAudit.js (cycle)
+    - frontend/src/lib/opportunityEdit.js
+      - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/matching.js (cycle)
+    - frontend/src/components/OpportunityTypeSwitch.jsx
+    - frontend/src/components/BriefWizard.jsx (cycle)
+    - frontend/src/lib/validation.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/pages/CreateFundingOpportunityPage.jsx
+    - frontend/src/components/AttachmentUploader.jsx (cycle)
+    - frontend/src/components/AuditReceipt.jsx (cycle)
+    - frontend/src/components/SubmissionProgress.jsx (cycle)
+    - frontend/src/components/ConnectWalletModal.jsx (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx (cycle)
+    - frontend/src/components/OpportunityTypeSwitch.jsx (cycle)
+    - frontend/src/components/BriefWizard.jsx (cycle)
+    - frontend/src/lib/validation.js (cycle)
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/fundingOpportunities.js
+      - frontend/src/lib/publication.js (cycle)
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/config/postingCategories.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/components/LeaveDraftPrompt.jsx (cycle)
+    - frontend/src/lib/draftGuard.js (cycle)
+    - frontend/src/lib/fundingOpportunityAudit.js (cycle)
+    - frontend/src/lib/opportunityEdit.js (cycle)
+    - frontend/src/lib/matching.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+  - frontend/src/pages/OpportunityEditPage.jsx
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/pages/CreatePostingPage.jsx (cycle)
+    - frontend/src/pages/CreateFundingOpportunityPage.jsx (cycle)
+  - frontend/src/pages/PostingDetailPage.jsx
+    - frontend/src/lib/proposalValidation.js (cycle)
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx (cycle)
+    - frontend/src/components/AuditReceipt.jsx (cycle)
+    - frontend/src/components/ConnectWalletModal.jsx (cycle)
+    - frontend/src/components/PostingProposals.jsx
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/proposalValidation.js (cycle)
+      - frontend/src/components/FundingMeta.jsx (cycle)
+      - frontend/src/components/VerifiedBadge.jsx (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/MatchingPanel.jsx (cycle)
+    - frontend/src/components/ProposalComparison.jsx (cycle)
+    - frontend/src/lib/matching.js (cycle)
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/components/ReportContentButton.jsx (cycle)
+    - frontend/src/components/ReportableComments.jsx (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/components/Field.jsx (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/postingAudit.js (cycle)
+    - frontend/src/lib/fundingOpportunityAudit.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/postingActions.js
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/config/roles.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/lib/proposalValidation.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/profile.js (cycle)
+    - frontend/src/components/DetailGroup.jsx (cycle)
+    - frontend/src/components/VerifiedBadge.jsx (cycle)
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/opportunityEdit.js (cycle)
+    - frontend/src/components/OpportunityRevisionTrail.jsx
+      - frontend/src/lib/postings.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/lib/postings.js (cycle)
+  - frontend/src/config/fundingOpportunity.js (cycle)
+  - frontend/src/lib/opportunityPresentation.js (cycle)
+  - frontend/src/components/ExpiryCountdown.jsx (cycle)
+  - frontend/src/components/VerifiedBadge.jsx (cycle)
+  - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/lib/opportunityDiscovery.js
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+
+## #/profile
+Entry: `frontend/src/pages/ProfilePage.jsx`
+
+- frontend/src/pages/ProfilePage.jsx
+  - frontend/src/components/Field.jsx
+  - frontend/src/context/SessionContext.jsx
+    - frontend/src/lib/firebase.js
+    - frontend/src/lib/authFlow.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/errors.js
+    - frontend/src/lib/profile.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/validation.js
+        - frontend/src/config/postingCategories.js
+        - frontend/src/config/fundingOpportunity.js
+          - frontend/src/config/postingCategories.js (cycle)
+      - frontend/src/lib/stats.js
+      - frontend/src/lib/chain.js
+      - frontend/src/lib/roles.js
+        - frontend/src/config/roles.js
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/wagmi.js
+    - frontend/src/lib/roles.js (cycle)
+    - frontend/src/lib/router.js
+    - frontend/src/lib/idleTimeout.js
+  - frontend/src/lib/roles.js (cycle)
+  - frontend/src/lib/chain.js (cycle)
+  - frontend/src/lib/errors.js (cycle)
+  - frontend/src/lib/validation.js (cycle)
+  - frontend/src/components/ModerationNotifications.jsx
+    - frontend/src/lib/moderation.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/lib/datetime.js
+      - frontend/src/config/workflowStatus.js
+    - frontend/src/lib/router.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx
+      - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/config/fundingOpportunity.js (cycle)
+  - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/lib/postings.js
+    - frontend/src/lib/publication.js
+      - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/lib/attachments.js
+      - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/lib/proposals.js
+    - frontend/src/lib/publication.js (cycle)
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/config/proposal.js
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/proposalValidation.js
+      - frontend/src/config/proposal.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/lib/opportunityPresentation.js
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+
+## #/create brief
+Entry: `frontend/src/pages/CreatePostingPage.jsx`
+
+- frontend/src/pages/CreatePostingPage.jsx
+  - frontend/src/components/AttachmentUploader.jsx
+    - frontend/src/lib/attachments.js
+      - frontend/src/lib/firebase.js
+  - frontend/src/components/ConnectWalletModal.jsx
+    - frontend/src/context/SessionContext.jsx
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/errors.js
+      - frontend/src/lib/profile.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+        - frontend/src/lib/validation.js
+          - frontend/src/config/postingCategories.js
+          - frontend/src/config/fundingOpportunity.js
+        - frontend/src/lib/stats.js
+        - frontend/src/lib/chain.js
+        - frontend/src/lib/roles.js
+          - frontend/src/config/roles.js
+      - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/lib/wagmi.js
+      - frontend/src/lib/roles.js (cycle)
+      - frontend/src/lib/router.js
+      - frontend/src/lib/idleTimeout.js
+    - frontend/src/lib/wagmi.js (cycle)
+    - frontend/src/components/WalletIcon.jsx
+    - frontend/src/components/Modal.jsx
+  - frontend/src/components/LeaveDraftPrompt.jsx
+    - frontend/src/components/Modal.jsx (cycle)
+  - frontend/src/lib/draftGuard.js
+  - frontend/src/context/SessionContext.jsx (cycle)
+  - frontend/src/config/postingCategories.js (cycle)
+  - frontend/src/lib/postings.js
+    - frontend/src/lib/publication.js
+      - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/lib/datetime.js
+      - frontend/src/config/workflowStatus.js
+  - frontend/src/lib/attachments.js (cycle)
+  - frontend/src/lib/errors.js (cycle)
+  - frontend/src/components/ExpiryCountdown.jsx
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/AuditReceipt.jsx
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/components/SubmissionProgress.jsx
+  - frontend/src/components/SubmissionError.jsx
+  - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/lib/postingAudit.js
+    - frontend/src/config/auditRegistry.js
+    - frontend/src/config/auditRegistry.js (cycle)
+    - frontend/src/lib/opportunityAuditFlow.js
+      - frontend/src/config/auditRegistry.js (cycle)
+      - frontend/src/lib/auditRegistry.js
+        - frontend/src/config/auditRegistry.js (cycle)
+        - frontend/src/lib/wagmi.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/auditRegistry.js (cycle)
+  - frontend/src/lib/opportunityEdit.js
+    - frontend/src/config/fundingOpportunity.js (cycle)
+  - frontend/src/lib/matching.js
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/OpportunityTypeSwitch.jsx
+  - frontend/src/components/BriefWizard.jsx
+  - frontend/src/lib/validation.js (cycle)
+  - frontend/src/config/workflowStatus.js (cycle)
+
+## #/posting
+Entry: `frontend/src/pages/PostingDetailPage.jsx`
+
+- frontend/src/pages/PostingDetailPage.jsx
+  - frontend/src/lib/proposalValidation.js
+    - frontend/src/config/proposal.js
+    - frontend/src/config/fundingOpportunity.js
+      - frontend/src/config/postingCategories.js
+    - frontend/src/lib/datetime.js
+      - frontend/src/config/workflowStatus.js
+    - frontend/src/lib/errors.js
+  - frontend/src/context/AuthContext.jsx
+    - frontend/src/config/roles.js
+    - frontend/src/context/SessionContext.jsx
+      - frontend/src/lib/firebase.js
+      - frontend/src/lib/authFlow.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/profile.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+        - frontend/src/lib/validation.js
+          - frontend/src/config/postingCategories.js (cycle)
+          - frontend/src/config/fundingOpportunity.js (cycle)
+        - frontend/src/lib/stats.js
+        - frontend/src/lib/chain.js
+        - frontend/src/lib/roles.js
+          - frontend/src/config/roles.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/lib/wagmi.js
+      - frontend/src/lib/roles.js (cycle)
+      - frontend/src/lib/router.js
+      - frontend/src/lib/idleTimeout.js
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/roles.js (cycle)
+  - frontend/src/lib/postings.js
+    - frontend/src/lib/publication.js
+      - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/lib/attachments.js
+      - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/config/postingCategories.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/lib/attachments.js (cycle)
+  - frontend/src/lib/errors.js (cycle)
+  - frontend/src/config/postingCategories.js (cycle)
+  - frontend/src/components/ExpiryCountdown.jsx
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/AuditReceipt.jsx
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/components/ConnectWalletModal.jsx
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/lib/wagmi.js (cycle)
+    - frontend/src/components/WalletIcon.jsx
+    - frontend/src/components/Modal.jsx
+  - frontend/src/components/PostingProposals.jsx
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/proposals.js
+      - frontend/src/lib/publication.js (cycle)
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/config/proposal.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/proposalValidation.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/proposalValidation.js (cycle)
+    - frontend/src/components/FundingMeta.jsx
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/matching.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx
+        - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/VerifiedBadge.jsx
+      - frontend/src/config/verifiedBadge.js
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/MatchingPanel.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/lib/matching.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/components/RelatedAuditReceiptPane.jsx
+      - frontend/src/components/AuditDetailPane.jsx
+        - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/AuditReceipt.jsx (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/fundingOpportunityAudit.js
+        - frontend/src/config/auditRegistry.js
+        - frontend/src/lib/opportunityAuditFlow.js
+          - frontend/src/config/auditRegistry.js (cycle)
+          - frontend/src/lib/auditRegistry.js
+          - frontend/src/lib/errors.js (cycle)
+        - frontend/src/lib/fundingOpportunities.js
+          - frontend/src/lib/publication.js (cycle)
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/authFlow.js (cycle)
+          - frontend/src/config/postingCategories.js (cycle)
+          - frontend/src/lib/datetime.js (cycle)
+          - frontend/src/lib/attachments.js (cycle)
+          - frontend/src/config/fundingOpportunity.js (cycle)
+          - frontend/src/lib/postings.js (cycle)
+        - frontend/src/lib/auditRegistry.js (cycle)
+        - frontend/src/lib/postings.js (cycle)
+        - frontend/src/lib/postingAudit.js
+          - frontend/src/config/auditRegistry.js (cycle)
+          - frontend/src/config/auditRegistry.js (cycle)
+          - frontend/src/lib/opportunityAuditFlow.js (cycle)
+          - frontend/src/lib/postings.js (cycle)
+          - frontend/src/lib/auditRegistry.js (cycle)
+      - frontend/src/lib/postingAudit.js (cycle)
+      - frontend/src/lib/proposalAudit.js
+        - frontend/src/config/auditRegistry.js (cycle)
+        - frontend/src/lib/opportunityAuditFlow.js (cycle)
+        - frontend/src/lib/auditRegistry.js (cycle)
+        - frontend/src/lib/proposals.js (cycle)
+  - frontend/src/components/ProposalComparison.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/config/proposal.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/comments.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/matching.js (cycle)
+    - frontend/src/lib/moderation.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/lib/proposalValidation.js (cycle)
+    - frontend/src/lib/proposalComparison.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/comments.js (cycle)
+      - frontend/src/lib/matching.js (cycle)
+      - frontend/src/config/proposal.js (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/lib/matching.js (cycle)
+  - frontend/src/lib/moderation.js (cycle)
+  - frontend/src/components/ReportContentButton.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+  - frontend/src/components/ReportableComments.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/config/roles.js (cycle)
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/lib/comments.js (cycle)
+    - frontend/src/components/ReportContentButton.jsx (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/components/Modal.jsx (cycle)
+  - frontend/src/components/Field.jsx
+  - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/lib/postingAudit.js (cycle)
+  - frontend/src/lib/fundingOpportunityAudit.js (cycle)
+  - frontend/src/config/fundingOpportunity.js (cycle)
+  - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/lib/postingActions.js
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/config/roles.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/lib/proposalValidation.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/lib/profile.js (cycle)
+  - frontend/src/components/DetailGroup.jsx
+  - frontend/src/components/VerifiedBadge.jsx (cycle)
+  - frontend/src/lib/chain.js (cycle)
+  - frontend/src/lib/opportunityEdit.js
+    - frontend/src/config/fundingOpportunity.js (cycle)
+  - frontend/src/components/OpportunityRevisionTrail.jsx
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+
+## #/proposal
+Entry: `frontend/src/pages/ProposalDetailPage.jsx`
+
+- frontend/src/pages/ProposalDetailPage.jsx
+  - frontend/src/lib/proposalValidation.js
+    - frontend/src/config/proposal.js
+    - frontend/src/config/fundingOpportunity.js
+      - frontend/src/config/postingCategories.js
+    - frontend/src/lib/datetime.js
+      - frontend/src/config/workflowStatus.js
+    - frontend/src/lib/errors.js
+  - frontend/src/context/AuthContext.jsx
+    - frontend/src/config/roles.js
+    - frontend/src/context/SessionContext.jsx
+      - frontend/src/lib/firebase.js
+      - frontend/src/lib/authFlow.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/profile.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+        - frontend/src/lib/validation.js
+          - frontend/src/config/postingCategories.js (cycle)
+          - frontend/src/config/fundingOpportunity.js (cycle)
+        - frontend/src/lib/stats.js
+        - frontend/src/lib/chain.js
+        - frontend/src/lib/roles.js
+          - frontend/src/config/roles.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/lib/wagmi.js
+      - frontend/src/lib/roles.js (cycle)
+      - frontend/src/lib/router.js
+      - frontend/src/lib/idleTimeout.js
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/roles.js (cycle)
+  - frontend/src/lib/proposals.js
+    - frontend/src/lib/publication.js
+      - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+    - frontend/src/lib/attachments.js
+      - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/config/proposal.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/proposalValidation.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/lib/proposalAudit.js
+    - frontend/src/config/auditRegistry.js
+    - frontend/src/lib/opportunityAuditFlow.js
+      - frontend/src/config/auditRegistry.js (cycle)
+      - frontend/src/lib/auditRegistry.js
+        - frontend/src/config/auditRegistry.js (cycle)
+        - frontend/src/lib/wagmi.js (cycle)
+        - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/auditRegistry.js (cycle)
+    - frontend/src/lib/proposals.js (cycle)
+  - frontend/src/lib/errors.js (cycle)
+  - frontend/src/lib/attachments.js (cycle)
+  - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/components/AuditReceipt.jsx
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/components/ConnectWalletModal.jsx
+    - frontend/src/context/SessionContext.jsx (cycle)
+    - frontend/src/lib/wagmi.js (cycle)
+    - frontend/src/components/WalletIcon.jsx
+    - frontend/src/components/Modal.jsx
+  - frontend/src/components/Modal.jsx (cycle)
+  - frontend/src/components/Field.jsx
+  - frontend/src/components/OwnerReviewPanel.jsx
+    - frontend/src/components/Field.jsx (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/lib/ownerReviews.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx
+      - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/ProposalRevisionTrail.jsx
+    - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/lib/proposalValidation.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/config/proposal.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/config/proposal.js (cycle)
+  - frontend/src/config/fundingOpportunity.js (cycle)
+  - frontend/src/components/MatchingPanel.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/lib/matching.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/components/RelatedAuditReceiptPane.jsx
+      - frontend/src/components/AuditDetailPane.jsx
+        - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/AuditReceipt.jsx (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/fundingOpportunityAudit.js
+        - frontend/src/config/auditRegistry.js (cycle)
+        - frontend/src/lib/opportunityAuditFlow.js (cycle)
+        - frontend/src/lib/fundingOpportunities.js
+          - frontend/src/lib/publication.js (cycle)
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/authFlow.js (cycle)
+          - frontend/src/config/postingCategories.js (cycle)
+          - frontend/src/lib/datetime.js (cycle)
+          - frontend/src/lib/attachments.js (cycle)
+          - frontend/src/config/fundingOpportunity.js (cycle)
+          - frontend/src/lib/postings.js
+        - frontend/src/lib/auditRegistry.js (cycle)
+        - frontend/src/lib/postings.js (cycle)
+        - frontend/src/lib/postingAudit.js
+          - frontend/src/config/auditRegistry.js (cycle)
+          - frontend/src/config/auditRegistry.js (cycle)
+          - frontend/src/lib/opportunityAuditFlow.js (cycle)
+          - frontend/src/lib/postings.js (cycle)
+          - frontend/src/lib/auditRegistry.js (cycle)
+      - frontend/src/lib/postingAudit.js (cycle)
+      - frontend/src/lib/proposalAudit.js (cycle)
+  - frontend/src/lib/matching.js (cycle)
+  - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/StatusBadge.jsx (cycle)
+  - frontend/src/lib/moderation.js
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+  - frontend/src/components/ReportContentButton.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+  - frontend/src/components/ReportableComments.jsx
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/config/roles.js (cycle)
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/lib/comments.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/ReportContentButton.jsx (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+  - frontend/src/components/VerifiedBadge.jsx
+    - frontend/src/config/verifiedBadge.js
+  - frontend/src/components/DetailGroup.jsx
+
+## #/admin
+Entry: `frontend/src/pages/AdminPage.jsx`
+
+- frontend/src/pages/AdminPage.jsx
+  - frontend/src/context/SessionContext.jsx
+    - frontend/src/lib/firebase.js
+    - frontend/src/lib/authFlow.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/errors.js
+    - frontend/src/lib/profile.js
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/errors.js (cycle)
+      - frontend/src/lib/validation.js
+        - frontend/src/config/postingCategories.js
+        - frontend/src/config/fundingOpportunity.js
+          - frontend/src/config/postingCategories.js (cycle)
+      - frontend/src/lib/stats.js
+      - frontend/src/lib/chain.js
+      - frontend/src/lib/roles.js
+        - frontend/src/config/roles.js
+    - frontend/src/lib/errors.js (cycle)
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/wagmi.js
+    - frontend/src/lib/roles.js (cycle)
+    - frontend/src/lib/router.js
+    - frontend/src/lib/idleTimeout.js
+  - frontend/src/lib/roles.js (cycle)
+  - frontend/src/lib/chain.js (cycle)
+  - frontend/src/lib/admin.js
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/lib/authFlow.js (cycle)
+  - frontend/src/components/UserManagementTable.jsx
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/roles.js (cycle)
+  - frontend/src/components/RoleChangeModal.jsx
+    - frontend/src/components/Modal.jsx
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/roles.js (cycle)
+    - frontend/src/lib/admin.js (cycle)
+  - frontend/src/components/SuspendUserModal.jsx
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/lib/chain.js (cycle)
+    - frontend/src/lib/admin.js (cycle)
+  - frontend/src/components/RoleViews.jsx
+    - frontend/src/components/ProposalList.jsx
+      - frontend/src/lib/proposalValidation.js
+        - frontend/src/config/proposal.js
+        - frontend/src/config/fundingOpportunity.js (cycle)
+        - frontend/src/lib/datetime.js
+          - frontend/src/config/workflowStatus.js
+        - frontend/src/lib/errors.js (cycle)
+      - frontend/src/context/AuthContext.jsx
+        - frontend/src/config/roles.js (cycle)
+        - frontend/src/context/SessionContext.jsx (cycle)
+        - frontend/src/lib/chain.js (cycle)
+        - frontend/src/lib/roles.js (cycle)
+      - frontend/src/lib/proposals.js
+        - frontend/src/lib/publication.js
+          - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/attachments.js
+          - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/config/proposal.js (cycle)
+        - frontend/src/config/fundingOpportunity.js (cycle)
+        - frontend/src/lib/proposalValidation.js (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/FundingMeta.jsx
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/lib/matching.js
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/authFlow.js (cycle)
+          - frontend/src/config/workflowStatus.js (cycle)
+        - frontend/src/components/StatusBadge.jsx
+          - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/VerifiedBadge.jsx
+        - frontend/src/config/verifiedBadge.js
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/ProposalTracker.jsx
+      - frontend/src/components/ExpiryCountdown.jsx
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/lib/proposalQueues.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/ownerReviews.js
+          - frontend/src/lib/firebase.js (cycle)
+          - frontend/src/lib/authFlow.js (cycle)
+          - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/lib/proposalQueues.js (cycle)
+    - frontend/src/components/ProposalComparison.jsx
+      - frontend/src/context/AuthContext.jsx (cycle)
+      - frontend/src/config/proposal.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/comments.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/lib/attachments.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/matching.js (cycle)
+      - frontend/src/lib/moderation.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/proposalValidation.js (cycle)
+      - frontend/src/lib/proposalComparison.js
+        - frontend/src/lib/firebase.js (cycle)
+        - frontend/src/lib/authFlow.js (cycle)
+        - frontend/src/lib/comments.js (cycle)
+        - frontend/src/lib/matching.js (cycle)
+        - frontend/src/config/proposal.js (cycle)
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/components/MatchingPanel.jsx
+      - frontend/src/context/AuthContext.jsx (cycle)
+      - frontend/src/lib/matching.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/ExpiryCountdown.jsx (cycle)
+      - frontend/src/components/Modal.jsx (cycle)
+      - frontend/src/components/RelatedAuditReceiptPane.jsx
+        - frontend/src/components/AuditDetailPane.jsx
+          - frontend/src/components/Modal.jsx (cycle)
+        - frontend/src/components/AuditReceipt.jsx
+          - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/config/fundingOpportunity.js (cycle)
+        - frontend/src/lib/datetime.js (cycle)
+        - frontend/src/lib/fundingOpportunityAudit.js
+          - frontend/src/config/auditRegistry.js
+          - frontend/src/lib/opportunityAuditFlow.js
+          - frontend/src/lib/fundingOpportunities.js
+          - frontend/src/lib/auditRegistry.js
+          - frontend/src/lib/postings.js
+          - frontend/src/lib/postingAudit.js
+        - frontend/src/lib/postingAudit.js (cycle)
+        - frontend/src/lib/proposalAudit.js
+          - frontend/src/config/auditRegistry.js (cycle)
+          - frontend/src/lib/opportunityAuditFlow.js (cycle)
+          - frontend/src/lib/auditRegistry.js (cycle)
+          - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/components/OwnerReviewPanel.jsx
+      - frontend/src/components/Field.jsx
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/ownerReviews.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/components/MockFundingPortfolio.jsx
+      - frontend/src/context/AuthContext.jsx (cycle)
+      - frontend/src/lib/matching.js (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/lib/proposals.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/components/RelatedAuditReceiptPane.jsx (cycle)
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/context/AuthContext.jsx (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/components/RelatedAuditReceiptPane.jsx (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/components/ExpiryCountdown.jsx (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+    - frontend/src/components/StatusBadge.jsx (cycle)
+    - frontend/src/lib/matching.js (cycle)
+    - frontend/src/config/roles.js (cycle)
+    - frontend/src/components/VerifiedBadge.jsx (cycle)
+  - frontend/src/components/ProposalAuditQueue.jsx
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/components/AuditReceipt.jsx (cycle)
+    - frontend/src/components/AuditDetailPane.jsx (cycle)
+    - frontend/src/components/LiveVerifiedBadge.jsx
+      - frontend/src/config/verifiedBadge.js (cycle)
+      - frontend/src/components/VerifiedBadge.jsx (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/config/fundingOpportunity.js (cycle)
+    - frontend/src/lib/postingAudit.js (cycle)
+    - frontend/src/lib/fundingOpportunityAudit.js (cycle)
+  - frontend/src/components/PostingSubmissionLogs.jsx
+    - frontend/src/components/SubmissionLogs.jsx
+      - frontend/src/lib/firebase.js (cycle)
+      - frontend/src/lib/datetime.js (cycle)
+      - frontend/src/lib/chain.js (cycle)
+      - frontend/src/config/postingCategories.js (cycle)
+      - frontend/src/config/fundingOpportunity.js (cycle)
+      - frontend/src/lib/postingAudit.js (cycle)
+      - frontend/src/lib/fundingOpportunityAudit.js (cycle)
+      - frontend/src/components/AuditReceipt.jsx (cycle)
+      - frontend/src/components/AuditDetailPane.jsx (cycle)
+      - frontend/src/components/LiveVerifiedBadge.jsx (cycle)
+      - frontend/src/components/StatusBadge.jsx (cycle)
+      - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/FundingSubmissionLogs.jsx
+    - frontend/src/components/SubmissionLogs.jsx (cycle)
+  - frontend/src/components/ModerationQueue.jsx
+    - frontend/src/lib/moderation.js (cycle)
+    - frontend/src/config/proposal.js (cycle)
+    - frontend/src/lib/postings.js (cycle)
+    - frontend/src/lib/proposals.js (cycle)
+    - frontend/src/lib/datetime.js (cycle)
+    - frontend/src/components/Modal.jsx (cycle)
+    - frontend/src/lib/attachments.js (cycle)
+    - frontend/src/components/RelatedAuditReceiptPane.jsx (cycle)
+  - frontend/src/lib/moderation.js (cycle)
+  - frontend/src/components/ExpiryAdminUtility.jsx
+    - frontend/src/lib/firebase.js (cycle)
+    - frontend/src/config/workflowStatus.js (cycle)
+  - frontend/src/components/OnChainOffChainLegend.jsx
+    - frontend/src/config/verifiedBadge.js (cycle)
+

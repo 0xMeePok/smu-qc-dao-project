@@ -1,3 +1,6 @@
+# Superdesign temporary HTML
+.superdesign/tmp/
+
 # Dependencies
 node_modules/
 */node_modules/

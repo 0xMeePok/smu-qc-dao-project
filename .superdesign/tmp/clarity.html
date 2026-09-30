@@ -1,0 +1,460 @@
+<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QC DAO Home</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --page-bg-light: #eef1f8;
+      --page-bg-dark: #07111f;
+      --ink-light: #1d1d1f;
+      --ink-dark: #f5f5f7;
+      --muted-light: #68686d;
+      --muted-dark: #c7c7cc;
+      --brand: #0071e3;
+      --surface-light: #ffffff;
+      --surface-dark: #121821;
+      --radius-pill: 980px;
+      --radius-card: 18px;
+      --radius-panel: 22px;
+      --radius-controls: 10px;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: var(--ink-light);
+      background: var(--page-bg-light);
+      overflow-x: hidden;
+    }
+
+    .glass-header {
+      backdrop-filter: blur(28px) saturate(180%);
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      z-index: 50;
+      transition: all 0.4s ease;
+    }
+
+    .glass-header[data-tone="dark"] {
+      background: rgba(7, 17, 31, 0.8);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: white;
+    }
+
+    .hero-heading {
+      font-size: clamp(64px, 7vw, 96px);
+      font-weight: 700;
+      line-height: 1.02;
+      letter-spacing: -0.045em;
+    }
+
+    .section-title {
+      font-size: clamp(40px, 4.5vw, 56px);
+      font-weight: 650;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    .blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.25;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .blob-blue { background: #0071e3; width: 40vw; height: 40vw; top: -10%; left: -10%; }
+    .blob-purple { background: #5e5ce6; width: 35vw; height: 35vw; top: 20%; right: -5%; }
+
+    .btn-pill {
+      padding: 14px 26px;
+      border-radius: var(--radius-pill);
+      font-size: 17px;
+      font-weight: 500;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .card-border {
+      border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .dark .card-border {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    @keyframes strokeDraw {
+      from { stroke-dashoffset: 200; }
+      to { stroke-dashoffset: 0; }
+    }
+
+    .animated-path {
+      stroke-dasharray: 200;
+      stroke-dashoffset: 200;
+      animation: strokeDraw 2s ease-out forwards;
+    }
+
+    @keyframes orbit {
+      0% { offset-distance: 0%; }
+      100% { offset-distance: 100%; }
+    }
+
+    .orbital-dot {
+      offset-path: path('M 0 0 Q 50 100 100 0 T 200 0');
+      animation: orbit 4s linear infinite;
+    }
+
+    .step-list-btn {
+      display: block;
+      text-align: left;
+      opacity: 0.3;
+      transition: opacity 0.4s ease;
+      cursor: pointer;
+    }
+
+    .step-list-btn.active {
+      opacity: 1;
+    }
+
+    .step-text {
+      font-size: clamp(34px, 4.6vw, 56px);
+      font-weight: 700;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+
+    .milestone-card {
+      background: var(--surface-dark);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-panel);
+    }
+  </style>
+</head>
+<body>
+  <div class="min-h-screen relative flex flex-col">
+    <!-- Persistent Header -->
+    <header id="main-nav" class="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-48px)] max-w-[1120px] h-[64px] glass-header rounded-[22px] px-6 flex items-center justify-between z-50" data-tone="dark">
+      <div class="flex items-center gap-3">
+        <a href="#" id="nav-brand-link" class="flex items-center gap-3">
+          <img src="https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg" alt="QC DAO" class="w-8 h-8">
+          <span class="font-semibold text-lg tracking-tight">QC DAO</span>
+        </a>
+        <nav class="hidden md:flex items-center ml-10 gap-8 text-[15px] font-medium opacity-80">
+          <a href="#" id="nav-home-link" class="hover:opacity-100 transition-opacity">Home</a>
+          <a href="#" id="nav-discover-link" class="hover:opacity-100 transition-opacity">Discover</a>
+        </nav>
+      </div>
+      <div class="flex items-center gap-4">
+        <button id="theme-toggle-btn" class="w-9 h-9 flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
+          <iconify-icon icon="lucide:sun" class="text-xl"></iconify-icon>
+        </button>
+        <a href="#" id="cta-wallet-link" class="bg-[#0071e3] hover:bg-[#0068d6] text-white px-6 py-2.5 rounded-full text-[14px] font-semibold flex items-center gap-2 transition-colors">
+          <iconify-icon icon="lucide:wallet" class="text-lg"></iconify-icon>
+          Sign in with Wallet
+        </a>
+      </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="relative pt-[200px] pb-[120px] px-6 bg-[#07111f] text-white overflow-hidden">
+      <!-- Blurs moved to margin -->
+      <div class="blob blob-blue opacity-20 -left-20 -top-20"></div>
+      <div class="blob blob-purple opacity-20 -right-20 bottom-0"></div>
+      
+      <div class="max-w-[1120px] mx-auto relative z-10 text-center">
+        <h1 class="hero-heading mb-8">Fund problems<br>with clear outcomes.</h1>
+        <p class="max-w-[620px] mx-auto text-[20px] text-white/70 leading-[1.45] mb-12 tracking-tight">
+          Publish the problems that matter, match with one fully funded proposal, and release funds as outcomes land.
+        </p>
+        <div class="flex justify-center gap-4">
+          <a href="#" id="cta-hero-explore" class="btn-pill bg-white text-[#07111f] hover:bg-[#f5f5f7]">Explore opportunities</a>
+          <a href="#" id="cta-hero-publish" class="btn-pill border border-white/20 bg-white/5 hover:bg-white/10">Publish a brief</a>
+        </div>
+
+        <!-- Hero Card - Solid Surface -->
+        <div class="mt-24 relative max-w-[860px] mx-auto group">
+          <div class="bg-[#121821] card-border rounded-[32px] p-10 text-left shadow-2xl relative z-10">
+            <div class="flex items-center gap-3 text-white/50 text-[13px] font-semibold tracking-wider uppercase mb-6">
+              <div class="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center text-[11px] text-white font-bold">SMU</div>
+              Example brief • Business problem
+            </div>
+            <h3 class="text-[32px] font-semibold mb-8 leading-tight tracking-tight">Route optimisation for cold-chain delivery under demand spikes</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+              <div class="bg-white/5 border border-white/10 rounded-2xl p-5">
+                <div class="text-3xl font-bold mb-1">60,000</div>
+                <div class="text-[12px] text-white/50 font-medium">USDT budget</div>
+              </div>
+              <div class="bg-white/5 border border-white/10 rounded-2xl p-5">
+                <div class="text-3xl font-bold mb-1">50 days</div>
+                <div class="text-[12px] text-white/50 font-medium">left to propose</div>
+              </div>
+              <div class="bg-white/5 border border-white/10 rounded-2xl p-5">
+                <div class="text-3xl font-bold mb-1">3</div>
+                <div class="text-[12px] text-white/50 font-medium">proposals</div>
+              </div>
+            </div>
+            <div class="relative h-1.5 w-full bg-white/10 rounded-full overflow-hidden mb-3">
+              <div class="absolute left-0 top-0 h-full bg-[#0071e3] w-1/5 rounded-full"></div>
+            </div>
+            <div class="flex justify-between text-[12px] font-semibold">
+              <span class="text-[#0071e3]">Open</span>
+              <span class="text-white/40">Complete</span>
+            </div>
+          </div>
+          <!-- Floating Badge -->
+          <div class="absolute -top-6 -left-6 bg-[#121821] border border-white/10 p-5 rounded-[22px] flex items-center gap-4 shadow-2xl z-20">
+            <div class="w-10 h-10 bg-[#34c759] rounded-full flex items-center justify-center">
+              <iconify-icon icon="lucide:check" class="text-white text-xl"></iconify-icon>
+            </div>
+            <div>
+              <div class="text-[15px] font-bold">Proposal matched</div>
+              <div class="text-[12px] text-white/60">Variational circuits for route planning</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Roles Section -->
+    <section class="py-32 px-6 bg-[#eef1f8] relative overflow-hidden">
+      <div class="max-w-[1120px] mx-auto">
+        <div class="text-center mb-20">
+          <h2 class="section-title mb-6">Four roles.<br>One clear path.</h2>
+          <p class="text-[20px] text-[#68686d] max-w-[560px] mx-auto leading-relaxed">Everyone sees the same brief, the same proposals and the same milestones.</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div class="bg-white card-border p-8 rounded-[22px] min-h-[280px] flex flex-col shadow-sm">
+            <div class="w-12 h-12 rounded-2xl bg-[#0071e3] flex items-center justify-center text-white mb-auto shadow-md">
+              <iconify-icon icon="lucide:file-text" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-10 mb-3 tracking-tight">Problem owner</h4>
+            <p class="text-[#68686d] text-[15px] leading-relaxed">Publishes a problem with a budget and a deadline.</p>
+          </div>
+          <div class="bg-white card-border p-8 rounded-[22px] min-h-[280px] flex flex-col shadow-sm">
+            <div class="w-12 h-12 rounded-2xl bg-[#0071e3] flex items-center justify-center text-white mb-auto shadow-md">
+              <iconify-icon icon="lucide:microscope" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-10 mb-3 tracking-tight">Researcher</h4>
+            <p class="text-[#68686d] text-[15px] leading-relaxed">Proposes an approach and delivers the work in stages.</p>
+          </div>
+          <div class="bg-white card-border p-8 rounded-[22px] min-h-[280px] flex flex-col shadow-sm">
+            <div class="w-12 h-12 rounded-2xl bg-[#5e5ce6] flex items-center justify-center text-white mb-auto shadow-md">
+              <iconify-icon icon="lucide:shield-check" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-10 mb-3 tracking-tight">Evaluator</h4>
+            <p class="text-[#68686d] text-[15px] leading-relaxed">Reviews proposals and confirms each milestone.</p>
+          </div>
+          <div class="bg-white card-border p-8 rounded-[22px] min-h-[280px] flex flex-col shadow-sm">
+            <div class="w-12 h-12 rounded-2xl bg-[#0071a4] flex items-center justify-center text-white mb-auto shadow-md">
+              <iconify-icon icon="lucide:banknote" class="text-2xl"></iconify-icon>
+            </div>
+            <h4 class="text-2xl font-bold mt-10 mb-3 tracking-tight">Funder</h4>
+            <p class="text-[#68686d] text-[15px] leading-relaxed">Backs proposals. Funds release only as outcomes are met.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Walkthrough Section -->
+    <section class="relative py-32 px-6 bg-[#07111f] text-white overflow-hidden">
+      <div class="max-w-[1120px] mx-auto flex flex-col lg:flex-row items-center gap-24 relative z-10">
+        <div class="flex-1 relative" id="walkthrough-steps">
+          <span class="text-white/50 text-[13px] font-semibold uppercase tracking-[0.04em] block mb-10">From brief to delivery</span>
+          
+          <!-- Animated Path Visualization -->
+          <div class="absolute -left-12 top-24 h-[300px] w-8 hidden md:block">
+            <svg width="24" height="280" viewBox="0 0 24 280" fill="none">
+              <path d="M12 0V280" stroke="rgba(255,255,255,0.1)" stroke-width="2" stroke-linecap="round" />
+              <path class="animated-path" d="M12 0V210" stroke="#0071e3" stroke-width="2" stroke-linecap="round" />
+              <circle cx="12" cy="210" r="4" fill="#0071e3" class="orbital-dot-static" />
+            </svg>
+          </div>
+
+          <div class="flex flex-col gap-4">
+            <button class="step-list-btn" id="step-publish-btn">
+              <span class="step-text">Publish.</span>
+            </button>
+            <button class="step-list-btn" id="step-propose-btn">
+              <span class="step-text">Propose.</span>
+            </button>
+            <button class="step-list-btn" id="step-match-btn">
+              <span class="step-text">Match.</span>
+            </button>
+            <button class="step-list-btn active" id="step-deliver-btn">
+              <span class="step-text">Deliver.</span>
+              <p class="mt-6 text-[18px] text-white/70 max-w-sm leading-relaxed">Funds release milestone by milestone as evaluators confirm each outcome.</p>
+            </button>
+          </div>
+          <div class="w-full max-w-[280px] h-[3px] bg-white/10 rounded-full mt-16 overflow-hidden">
+            <div class="w-3/4 h-full bg-[#0071e3] rounded-full"></div>
+          </div>
+        </div>
+        
+        <div class="flex-1 w-full">
+          <div class="milestone-card p-10 w-full min-h-[460px] shadow-2xl">
+            <div class="text-white/50 text-[13px] font-semibold uppercase tracking-wider mb-6">Delivery • Milestones</div>
+            <div class="text-[64px] font-bold tracking-tighter mb-2 leading-none">2 of 3</div>
+            <div class="text-white/60 text-[16px] mb-12">milestones released</div>
+            
+            <div class="space-y-4">
+              <div class="flex items-center gap-5 bg-white/5 border border-white/10 rounded-[18px] p-5 transition-colors hover:bg-white/10">
+                <div class="w-7 h-7 rounded-full bg-[#34c759] flex items-center justify-center shadow-lg">
+                   <iconify-icon icon="lucide:check" class="text-white text-sm"></iconify-icon>
+                </div>
+                <span class="flex-1 text-[16px] font-medium">Scheduling model on historical data</span>
+                <span class="text-[14px] font-semibold text-[#34c759]">Released</span>
+              </div>
+              <div class="flex items-center gap-5 bg-white/5 border border-white/10 rounded-[18px] p-5 transition-colors hover:bg-white/10">
+                <div class="w-7 h-7 rounded-full bg-[#34c759] flex items-center justify-center shadow-lg">
+                   <iconify-icon icon="lucide:check" class="text-white text-sm"></iconify-icon>
+                </div>
+                <span class="flex-1 text-[16px] font-medium">Pilot across two sites</span>
+                <span class="text-[14px] font-semibold text-[#34c759]">Released</span>
+              </div>
+              <div class="flex items-center gap-5 bg-white/5 border border-white/10 rounded-[18px] p-5">
+                <div class="w-7 h-7 rounded-full border border-white/20 flex items-center justify-center">
+                </div>
+                <span class="flex-1 text-[16px] font-medium text-white/50">Rollout plan and final report</span>
+                <span class="text-[14px] font-semibold text-white/30">In review</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Discover & Workspaces -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 bg-[#eef1f8]">
+      <div class="bg-white rounded-[32px] card-border p-20 text-center relative overflow-hidden group shadow-sm">
+        <h3 class="text-[52px] font-bold tracking-tight mb-6">Discover</h3>
+        <p class="text-[#68686d] text-[19px] max-w-[320px] mx-auto mb-10 leading-relaxed">Every open problem and funding call, in one place.</p>
+        <div class="flex justify-center gap-10">
+          <a href="#" id="discover-browse-link" class="text-[#0071e3] font-semibold hover:underline text-[17px]">Browse all ›</a>
+          <a href="#" id="discover-open-link" class="text-[#0071e3] font-semibold hover:underline text-[17px]">See what's open ›</a>
+        </div>
+        <!-- Mockup Visual -->
+        <div class="mt-16 bg-[#f5f5f7] border border-black/5 rounded-t-[28px] max-w-[440px] mx-auto p-6 text-left shadow-lg transition-transform group-hover:-translate-y-2">
+          <div class="h-11 bg-white border border-black/5 rounded-xl flex items-center px-4 text-black/40 text-[15px] gap-3 mb-8">
+            <iconify-icon icon="lucide:search" class="text-lg"></iconify-icon>
+            Search
+          </div>
+          <div class="space-y-6">
+             <div class="border-b border-black/5 pb-6 flex justify-between items-center">
+                <div>
+                  <div class="font-bold text-[17px]">Quantum-safe encryption for logistics</div>
+                  <div class="text-[14px] text-black/50">LogiChain Labs</div>
+                </div>
+                <span class="text-[15px] font-bold">$45,000</span>
+             </div>
+             <div class="border-b border-black/5 pb-6 flex justify-between items-center">
+                <div>
+                  <div class="font-bold text-[17px]">Carbon capture efficiency modeling</div>
+                  <div class="text-[14px] text-black/50">EcoResearch</div>
+                </div>
+                <span class="text-[15px] font-bold">$32,000</span>
+             </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="bg-[#07111f] text-white rounded-[32px] card-border p-20 text-center relative overflow-hidden group shadow-xl">
+        <h3 class="text-[52px] font-bold tracking-tight mb-6">Workspaces</h3>
+        <p class="text-white/60 text-[19px] max-w-[320px] mx-auto mb-10 leading-relaxed">Every brief, proposal and milestone you’re part of, by role.</p>
+        <div class="flex justify-center mb-16">
+          <a href="#" id="workspaces-open-link" class="text-[#0071e3] font-semibold hover:underline text-[17px]">Open workspaces ›</a>
+        </div>
+        <!-- Mockup Visual -->
+        <div class="mt-4 bg-[#121821] border border-white/10 rounded-t-[28px] max-w-[440px] mx-auto p-8 text-left shadow-2xl transition-transform group-hover:-translate-y-2">
+           <div class="grid grid-cols-2 gap-3 mb-10">
+              <div class="bg-white/5 border border-white/10 p-4 rounded-xl flex items-center gap-3 text-[14px] font-medium">
+                <iconify-icon icon="lucide:file-text" class="text-white/60 text-lg"></iconify-icon> Problem owner
+              </div>
+              <div class="bg-white/5 border border-white/10 p-4 rounded-xl flex items-center gap-3 text-[14px] font-medium">
+                <iconify-icon icon="lucide:microscope" class="text-white/60 text-lg"></iconify-icon> Researcher
+              </div>
+           </div>
+           <div class="font-bold text-[18px] mb-2">Your active briefs</div>
+           <div class="text-[13px] text-white/50 mb-6">Track milestones from draft to delivery.</div>
+           <div class="flex gap-1.5">
+              <div class="h-1.5 flex-1 bg-[#0071e3] rounded-full"></div>
+              <div class="h-1.5 flex-1 bg-[#0071e3] rounded-full"></div>
+              <div class="h-1.5 flex-1 bg-white/10 rounded-full"></div>
+              <div class="h-1.5 flex-1 bg-white/10 rounded-full"></div>
+              <div class="h-1.5 flex-1 bg-white/10 rounded-full"></div>
+            </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Open Now Rail -->
+    <section class="py-32 bg-white px-6" id="open-now">
+      <div class="max-w-[1120px] mx-auto">
+         <div class="flex justify-between items-end mb-16">
+            <div>
+              <h2 class="section-title mb-4">Open now.</h2>
+              <p class="text-[#68686d] text-[20px]">Business problems and open funding calls.</p>
+            </div>
+            <div class="flex gap-3">
+               <button id="rail-prev-btn" class="w-12 h-12 rounded-full border border-black/10 flex items-center justify-center text-xl transition-all hover:bg-[#f5f5f7]">
+                 <iconify-icon icon="lucide:chevron-left"></iconify-icon>
+               </button>
+               <button id="rail-next-btn" class="w-12 h-12 rounded-full border border-black/10 flex items-center justify-center text-xl transition-all hover:bg-[#f5f5f7]">
+                 <iconify-icon icon="lucide:chevron-right"></iconify-icon>
+               </button>
+            </div>
+         </div>
+         <!-- Rail placeholder -->
+         <div class="bg-[#f5f5f7] rounded-[22px] p-20 text-center text-[#68686d] text-[17px] border border-black/5 shadow-inner">
+            Sign in to see opportunities posted by other organisations.
+         </div>
+      </div>
+    </section>
+
+    <!-- Closing CTA -->
+    <section class="py-40 px-6 bg-[#f5f5f7] text-center relative overflow-hidden">
+      <div class="max-w-[1120px] mx-auto relative z-10">
+        <h2 class="section-title mb-8">Have a problem<br>worth solving?</h2>
+        <p class="text-[20px] text-[#68686d] max-w-[560px] mx-auto mb-12 leading-relaxed">Write a brief in four steps. Researchers can start proposing as soon as it’s on-chain.</p>
+        <div class="flex justify-center gap-4">
+          <a href="#" id="final-publish-link" class="btn-pill bg-[#0071e3] text-white hover:bg-[#0068d6] shadow-lg transition-all">Publish a brief</a>
+          <a href="#" id="final-explore-link" class="btn-pill border border-[#0071e3] text-[#0071e3] hover:bg-[#0071e3]/5 transition-all">Explore opportunities</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Standard Footer -->
+    <footer class="py-16 border-t border-black/5 text-[#68686d] bg-white">
+      <div class="max-w-[1120px] mx-auto px-6 text-center">
+        <div class="flex items-center justify-center gap-3 mb-6">
+          <img src="https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/f80543aa-8789-448b-b957-772bc86ccafa/brand-assets/frontend-src-components-ResponsiveHeader.jsx-BrandMark/qc-dao-mark.svg" alt="QC DAO" class="w-7 h-7">
+          <span class="font-bold text-black">QC DAO</span>
+        </div>
+        <p class="text-[14px]">© 2024 QC DAO. All rights reserved.</p>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // Header theme switching on scroll
+    window.addEventListener('scroll', () => {
+      const header = document.querySelector('.glass-header');
+      const hero = document.querySelector('section');
+      const heroBottom = hero.offsetTop + hero.offsetHeight;
+      
+      if (window.scrollY < heroBottom - 80) {
+        header.setAttribute('data-tone', 'dark');
+      } else {
+        header.removeAttribute('data-tone');
+      }
+    });
+    
+    // Initial setup
+    document.querySelector('.glass-header').setAttribute('data-tone', 'dark');
+  </script>
+
+</body></html>

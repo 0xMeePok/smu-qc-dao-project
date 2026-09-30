@@ -1,3 +1,85 @@
+# Layouts
+
+The app is a single shell in `frontend/src/App.jsx`. Hash routes render inside `<main>`. The sticky header is `ResponsiveHeader` plus the account controls defined in `App.jsx`.
+
+## ResponsiveHeader
+
+- Path: `frontend/src/components/ResponsiveHeader.jsx`
+- Mobile navigation toggle, focus return, and permitted links.
+
+```jsx
+import { useEffect, useRef, useState } from "react";
+
+export function BrandMark({ size = 28 }) {
+  return <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+    <defs><linearGradient id="qc-brand-gradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3b9bff" /><stop offset="1" stopColor="#0060df" /></linearGradient></defs>
+    <rect width="32" height="32" rx="8" fill="url(#qc-brand-gradient)" />
+    <circle cx="14.5" cy="14.5" r="7" fill="none" stroke="#fff" strokeWidth="2.4" />
+    <circle cx="14.5" cy="14.5" r="2.1" fill="#fff" />
+    <path d="M19.6 19.6 23 23" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" />
+    <circle cx="23.6" cy="23.6" r="2" fill="#fff" />
+  </svg>;
+}
+
+export function ResponsiveHeader({ route, primaryRoutes, workspaceRoutes, desktopWorkspaces, accountControls, onNavigate }) {
+  const [open, setOpen] = useState(false);
+  const header = useRef(null);
+  const toggle = useRef(null);
+
+  useEffect(() => { setOpen(false); }, [route]);
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 901px)");
+    const closeOnDesktop = () => { if (desktop.matches) setOpen(false); };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event) => { if (!header.current?.contains(event.target)) setOpen(false); };
+    const escape = (event) => {
+      if (event.key === "Escape") { setOpen(false); toggle.current?.focus(); }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
+  }, [open]);
+
+  const navigate = (key) => { setOpen(false); onNavigate(key); };
+  const navButton = ({ key, label }) => <button key={key} type="button" className={route === key ? "active" : ""}
+    aria-current={route === key ? "page" : undefined} onClick={() => navigate(key)}>{label}</button>;
+
+  return <header className="topbar" ref={header} onBlur={(event) => {
+    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+  }}>
+    <div className="topbar-left">
+      <button className="brand" type="button" onClick={() => navigate("home")} aria-label="QC DAO home"><BrandMark />QC DAO</button>
+      <button ref={toggle} className="mobile-menu-toggle" type="button" aria-label={open ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={open} aria-controls="header-navigation" onClick={() => setOpen((previous) => !previous)}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+          {open ? <path d="m6 6 12 12M6 18 18 6" /> : <path d="M4 6h16M4 12h16M4 18h16" />}
+        </svg>
+      </button>
+    </div>
+    <div id="header-navigation" className={`topbar-panel${open ? " is-open" : ""}`}>
+      <nav aria-label="Primary navigation">
+        <div className="primary-nav-links">{primaryRoutes.map(navButton)}</div>
+        {workspaceRoutes.length > 0 && <>
+          <div className="desktop-workspaces">{desktopWorkspaces}</div>
+          <div className="mobile-workspaces"><span className="eyebrow">Workspaces</span><div>{workspaceRoutes.map(navButton)}</div></div>
+        </>}
+      </nav>
+      <div className="topbar-right">{accountControls}</div>
+    </div>
+  </header>;
+}
+```
+
+## App shell
+
+- Path: `frontend/src/App.jsx`
+- Top bar, theme toggle, wallet sign-in, and the route switch.
+
+```jsx
 import CreateProposalPage from "./pages/CreateProposalPage.jsx";
 import ProposalDetailPage from "./pages/ProposalDetailPage.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -39,6 +121,7 @@ import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { listPublishedPostings } from "./lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
 import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
+import { ExpiryCountdown } from "./components/ExpiryCountdown.jsx";
 import { VerifiedBadge } from "./components/VerifiedBadge.jsx";
 import { opportunityWorkflowStatus, workflowStatusLabel } from "./config/workflowStatus.js";
 import { StatusBadge } from "./components/StatusBadge.jsx";
@@ -130,6 +213,14 @@ function PlusIcon() {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M5 12h14M12 5v14" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ direction = "right", size = 16 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={direction === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"} />
     </svg>
   );
 }
@@ -298,6 +389,12 @@ function Shell({ route, children }) {
 
   return (
     <div className={`app-shell${onHome ? " is-home" : ""}`}>
+      {/* The Liquid Glass colour field every pane floats over. */}
+      <div className="ambient-backdrop" aria-hidden="true">
+        <span className="ambient-blob b1" />
+        <span className="ambient-blob b2" />
+        <span className="ambient-blob b3" />
+      </div>
       <ResponsiveHeader route={route} primaryRoutes={primaryRoutes} workspaceRoutes={workspaceRoutes}
         desktopWorkspaces={<WorkspacesLink route={route} workspaceRoutes={workspaceRoutes} />}
         accountControls={<AccountControls theme={theme} onToggleTheme={toggleTheme} canCreate={canCreate} workspaceRoutes={workspaceRoutes} />}
@@ -393,6 +490,15 @@ function StakeholderIcon({ type }) {
   );
 }
 
+function proposalLabel(count) {
+  return `${count} ${count === 1 ? "proposal" : "proposals"}`;
+}
+
+function categoryLine(labels) {
+  if (labels.length === 0) return "";
+  return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} +${labels.length - 2}` : labels.join(", ");
+}
+
 function openOpportunity(item) {
   go(`${item.route ?? "opportunity"}/${item.id}`);
 }
@@ -403,6 +509,50 @@ function OpportunityTrust({ item }) {
       <StatusBadge status={opportunityWorkflowStatus(item)} />
       <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
     </span>
+  );
+}
+
+// One row per opportunity. The stretched hit button makes the whole row a link
+// while the verification badge above it stays independently focusable.
+function OpportunityRow({ item }) {
+  const categories = categoryLine(item.categoryLabels);
+  return (
+    <div className="opportunity-row">
+      <button className="opportunity-card-hit" type="button" onClick={() => openOpportunity(item)} aria-label={`View ${item.title}`} />
+      <div className="opportunity-row-main">
+        <strong>{item.title}</strong>
+        <small>{[item.owner, item.type, categories].filter(Boolean).join(" · ")}</small>
+        <OpportunityTrust item={item} />
+      </div>
+      <div className="opportunity-row-side">
+        <strong>{item.amount}</strong>
+        <small>
+          <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} showInstant={false} />
+          <span aria-hidden="true"> · </span>
+          {proposalLabel(item.proposalCount)}
+        </small>
+      </div>
+      <span className="row-chevron"><ChevronIcon /></span>
+    </div>
+  );
+}
+
+function OpportunityTile({ item }) {
+  const categories = categoryLine(item.categoryLabels);
+  return (
+    <div className="opportunity-tile">
+      <button className="opportunity-card-hit" type="button" onClick={() => openOpportunity(item)} aria-label={`View ${item.title}`} />
+      <small className="opportunity-tile-type">{item.type}</small>
+      <strong className="opportunity-tile-title">{item.title}</strong>
+      <span className="opportunity-tile-org">{item.owner}</span>
+      <span className="opportunity-tile-spacer" />
+      {categories && <small className="opportunity-tile-tags">{categories}</small>}
+      <OpportunityTrust item={item} />
+      <div className="opportunity-tile-foot">
+        <strong>{item.amount}</strong>
+        <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} showInstant={false} />
+      </div>
+    </div>
   );
 }
 
@@ -440,8 +590,12 @@ function OpportunityTable({ items }) {
   );
 }
 
-function OpportunityList({ items }) {
-  return <OpportunityTable items={items} />;
+function OpportunityList({ items, view = "rows" }) {
+  if (view === "cards") {
+    return <div className="opportunity-grid">{items.map((item) => <OpportunityTile item={item} key={item.id} />)}</div>;
+  }
+  if (view === "table") return <OpportunityTable items={items} />;
+  return <div className="opportunity-list">{items.map((item) => <OpportunityRow item={item} key={item.id} />)}</div>;
 }
 
 function OpportunityListSkeleton() {
@@ -536,10 +690,34 @@ function syncDiscoverUrl(filters) {
   }
 }
 
+const DISCOVER_VIEWS = [
+  { value: "rows", label: "List", icon: <path d="M3 6h18M3 12h18M3 18h18" /> },
+  { value: "cards", label: "Cards", icon: <><rect width="7" height="7" x="3" y="3" rx="1.5" /><rect width="7" height="7" x="14" y="3" rx="1.5" /><rect width="7" height="7" x="14" y="14" rx="1.5" /><rect width="7" height="7" x="3" y="14" rx="1.5" /></> },
+  { value: "table", label: "Table", icon: <><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18M3 15h18M9 3v18" /></> },
+];
+const DISCOVER_VIEW_KEY = "qcdao-discover-view";
+
+function useDiscoverView() {
+  const [view, setView] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(DISCOVER_VIEW_KEY);
+      return DISCOVER_VIEWS.some(({ value }) => value === stored) ? stored : "rows";
+    } catch {
+      return "rows";
+    }
+  });
+  const choose = (next) => {
+    setView(next);
+    try { window.localStorage.setItem(DISCOVER_VIEW_KEY, next); } catch { /* private mode */ }
+  };
+  return [view, choose];
+}
+
 function Discover({ params }) {
   const { postings, loading, loadError, isAuthenticated, hasMore, loadMore } = usePublishedPostings();
   const paramsKey = params.toString();
   const [filters, setFilters] = useState(() => parseDiscoveryParams(params));
+  const [view, setView] = useDiscoverView();
 
   useEffect(() => {
     setFilters(parseDiscoveryParams(params));
@@ -580,7 +758,7 @@ function Discover({ params }) {
   return (
     <section className="page discover-page">
       <div className="page-heading">
-        <h1>Discover Ledger.</h1>
+        <h1>Discover</h1>
         <p>Every open problem and funding call, in one place.</p>
       </div>
 
@@ -692,7 +870,7 @@ function Discover({ params }) {
       )}
 
       <div className="discover-toolbar">
-        <div className="desk-tabs" role="group" aria-label="Posting type">
+        <div className="segmented" role="group" aria-label="Posting type">
           {typeTabs.map((item) => (
             <button
               className={filters.type === item.value ? "selected" : ""}
@@ -712,6 +890,21 @@ function Discover({ params }) {
               {results.totalPages > 1 && ` · showing ${results.firstResult}–${results.lastResult}`}
             </span>
           )}
+          <div className="segmented segmented-icons" role="group" aria-label="Layout">
+            {DISCOVER_VIEWS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={view === option.value ? "selected" : ""}
+                aria-pressed={view === option.value}
+                aria-label={option.label}
+                title={option.label}
+                onClick={() => setView(option.value)}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">{option.icon}</svg>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -739,7 +932,7 @@ function Discover({ params }) {
               <button className="secondary" type="button" onClick={clearFilters}>Clear all filters</button>
             </div>
           ) : (
-            <OpportunityList items={results.items} />
+            <OpportunityList items={results.items} view={view} />
           )}
           {results.totalPages > 1 && (
             <nav className="discover-pagination" aria-label="Opportunity pages">
@@ -966,3 +1159,4 @@ export default function App() {
     </AuthProvider>
   );
 }
+```
