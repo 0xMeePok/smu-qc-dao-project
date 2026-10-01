@@ -42,11 +42,11 @@ export function ProposalRevisionTrail({ proposalId, field, uid }) {
     return () => { cancelled = true; };
   }, [proposalId, field, uid]);
 
-  if (loading) return <div className="detail-section"><h2>Edit history</h2><p role="status">Loading edit history…</p></div>;
-  if (error) return <div className="detail-section"><h2>Edit history</h2><p className="error-banner" role="alert">{error}</p></div>;
+  if (loading) return <div className="detail-section history-card history-card-edits"><h2>Edit history</h2><p role="status">Loading edit history…</p></div>;
+  if (error) return <div className="detail-section history-card history-card-edits"><h2>Edit history</h2><p className="error-banner" role="alert">{error}</p></div>;
   if (!entries.length) return null;
 
-  return <div className="detail-section">
+  return <div className="detail-section history-card history-card-edits">
     <h2>Edit history</h2>
     <p className="field-hint">Every change made after submission. Recorded by the platform, not by the author.</p>
     <ol className="revision-trail">

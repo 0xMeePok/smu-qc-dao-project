@@ -54,6 +54,7 @@ import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { shortenAddress } from "../lib/chain.js";
 import { canEditOpportunity } from "../lib/opportunityEdit.js";
 import { OpportunityRevisionTrail } from "../components/OpportunityRevisionTrail.jsx";
+import { ConsolidatedAuditTrail } from "../components/ConsolidatedAuditTrail.jsx";
 
 /**
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
@@ -524,6 +525,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
               onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
             />
             <OpportunityRevisionTrail postingId={posting.id} uid={user?.id} isOwner={ownsPosting} />
+            {activeTab === "record" && <ConsolidatedAuditTrail scope="problem" entityId={posting.id} onNavigate={onNavigate} />}
           </div>
         </article>
 

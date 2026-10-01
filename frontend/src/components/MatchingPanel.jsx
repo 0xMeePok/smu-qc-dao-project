@@ -9,6 +9,7 @@ import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { Modal } from "./Modal.jsx";
 import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
+import { highlightElement } from "../lib/highlightTarget.js";
 
 const money = (currency, amount) => `${currency} ${Number(amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
@@ -60,7 +61,7 @@ export function SelectionResponseDialog({ kind, problemId, proposal, onCancel, o
   </Modal>;
 }
 
-export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
+export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onOpenAuditReceipt }) {
   const { user } = useAuth();
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
@@ -165,10 +166,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
   const contributions = (state?.contributions ?? []).filter((item) => !proposalId || item.proposalId === proposalId);
   const receiptFor = (type, id) => state?.history?.find((entry) => entry.type === type && (!id || entry.proposalId === id));
   const ownerReceipt = receiptFor("owner_confirmed", state?.matching?.proposalId) || receiptFor("owner_selected", state?.matching?.proposalId);
-  const showReceipt = (entry) => {
-    const element = document.getElementById(`matching-event-${entry.id}`);
-    if (element) { element.open = true; element.scrollIntoView?.({ behavior: "smooth", block: "nearest" }); }
-  };
+  const showReceipt = (entry) => highlightElement(`matching-event-${entry.id}`);
   const selectedProposalId = state?.matching?.proposalId;
   const selectedAudit = receiptFor("owner_selected", selectedProposalId);
   const creatorAudit = receiptFor("creator_confirmed", selectedProposalId);
@@ -202,6 +200,12 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
       });
     }
   };
+  const showAuditReceipt = () => {
+    if (onOpenAuditReceipt?.()) return;
+    const entry = settlementAudit || creatorAudit || ownerReceipt || selectedAudit;
+    if (entry) showReceipt(entry);
+    openProposalAudit(selectedProposalId);
+  };
   const openAction = (kind, item) => {
     if (Object.hasOwn(item, "fundingTerms")) return;
     setError(""); setRationale("");
@@ -234,13 +238,13 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
       <dt>Problem owner acceptance</dt><dd>{state.matching.ownerApprovedAt ? <><StatusBadge status={WORKFLOW_STATUS.ACCEPTED} /> {formatInstant(state.matching.ownerApprovedAt)}</> : <StatusBadge status={WORKFLOW_STATUS.PENDING_APPROVAL} />}</dd>
       <dt>Proposal creator acceptance</dt><dd>{state.matching.creatorApprovedAt ? <><StatusBadge status={WORKFLOW_STATUS.ACCEPTED} /> {formatInstant(state.matching.creatorApprovedAt)}</> : invalidated ? "Not accepted before closure" : <StatusBadge status={WORKFLOW_STATUS.PENDING_APPROVAL} />}</dd>
     </dl>}
-    <div className="matching-actions matching-receipts">
-    {selectedAudit && <button type="button" className="text-button" onClick={() => showReceipt(selectedAudit)}>View selection record</button>}
-    {ownerReceipt && state?.matching?.ownerApprovedAt && <button type="button" className="text-button" onClick={() => showReceipt(ownerReceipt)}>View owner acceptance record</button>}
-    {creatorAudit && state?.matching?.creatorApprovedAt && <button type="button" className="text-button" onClick={() => showReceipt(creatorAudit)}>View creator acceptance record</button>}
-    {canOpenSelectedAudit && <button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={() => openProposalAudit(selectedProposalId)}>{relatedAudit?.loading ? "Loading audit receipt…" : "View audit receipt"}</button>}
-    {settlementAudit && confirmed && <button type="button" className="text-button" onClick={() => showReceipt(settlementAudit)}>View funding settlement record</button>}
-    {state?.history?.filter((entry) => ["owner_declined", "creator_declined", "posting_reopened", "posting_invalidated"].includes(entry.type) && (!proposalId || !entry.proposalId || entry.proposalId === proposalId)).map((entry) => <button key={entry.id} type="button" className="text-button" onClick={() => showReceipt(entry)}>{entry.type === "posting_reopened" ? "View reopening record" : entry.type === "posting_invalidated" ? "View invalidation record" : "View rejection record"} · {formatInstant(entry.createdAt)}</button>)}
+    <div className="record-jumps">
+    {selectedAudit && <button type="button" className="record-jump" onClick={() => showReceipt(selectedAudit)}>View selection record</button>}
+    {ownerReceipt && state?.matching?.ownerApprovedAt && <button type="button" className="record-jump" onClick={() => showReceipt(ownerReceipt)}>View owner acceptance record</button>}
+    {creatorAudit && state?.matching?.creatorApprovedAt && <button type="button" className="record-jump" onClick={() => showReceipt(creatorAudit)}>View creator acceptance record</button>}
+    {canOpenSelectedAudit && <button type="button" className="record-jump" disabled={relatedAudit?.loading} onClick={showAuditReceipt}>{relatedAudit?.loading ? "Loading audit receipt…" : "View audit receipt"}</button>}
+    {settlementAudit && confirmed && <button type="button" className="record-jump" onClick={() => showReceipt(settlementAudit)}>View funding settlement record</button>}
+    {state?.history?.filter((entry) => ["owner_declined", "creator_declined", "posting_reopened", "posting_invalidated"].includes(entry.type) && (!proposalId || !entry.proposalId || entry.proposalId === proposalId)).map((entry) => <button key={entry.id} type="button" className="record-jump" onClick={() => showReceipt(entry)}>{entry.type === "posting_reopened" ? "View reopening record" : entry.type === "posting_invalidated" ? "View invalidation record" : "View rejection record"} · {formatInstant(entry.createdAt)}</button>)}
     </div>
     {waiting && <div className="matching-notice" role="status"><strong>{shorterWindow ? "Acceptance window ends at posting expiry" : "Seven-day acceptance window"}</strong>
       <p>The problem owner accepted by selecting this proposal. The creator still needs to accept.</p>
@@ -276,7 +280,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate }) {
     {contributions.length > 0 && <div className="matching-contributions"><h3>Your mock contributions</h3>{contributions.map((item) => <p key={item.id}>{money(item.currency, item.amount)} <StatusBadge status={contributionWorkflowStatus(item.status)} />{item.status === "refunded" && <span className="funding-note">Returned to you</span>}</p>)}</div>}
     <button className="text-button" type="button" disabled={busy || loading} onClick={refresh}>{loading ? "Refreshing…" : "Refresh funding status"}</button>
     {state?.canForceExpire && waiting && <button className="text-button danger-text" type="button" disabled={busy || loading} onClick={() => openAction("expire", { id: state.matching.proposalId, title: "Expire the current confirmation window" })}>Expire window for demonstration</button>}
-    {state?.history?.length > 0 && <div className="matching-history"><h3>Decision record</h3><p className="field-hint">Off-chain receipts recorded by the server. No blockchain transaction or wallet signature is required for selection or acceptance.</p>{state.history.map((entry) => <details key={entry.id} id={`matching-event-${entry.id}`}><summary>{eventLabel(entry.type)} {eventWorkflowStatus(entry.type) && <StatusBadge status={eventWorkflowStatus(entry.type)} interactive={false} />} · {formatInstant(entry.createdAt)}</summary><dl><dt>Actor</dt><dd>{entry.actorId || (["funding_contributed", "funding_target_reached"].includes(entry.type) ? "Private contributor" : "Scheduled expiry")}</dd><dt>Role</dt><dd>{entry.actorRole || "Member"}</dd>{entry.actorWallet && <><dt>Connected wallet</dt><dd>{entry.actorWallet}</dd></>}<dt>Proposal</dt><dd>{entry.proposalId || "All proposals"}</dd>{entry.reason && <><dt>Reason</dt><dd>{entry.reason}</dd></>}<dt>Receipt</dt><dd>Recorded off-chain</dd><dt>Record reference</dt><dd>{entry.id}</dd>{entry.deadlineAt && <><dt>Acceptance deadline</dt><dd>{formatInstant(entry.deadlineAt)}</dd>{waiting && entry.proposalId === state.matching.proposalId && <><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={state.matching.deadlineAt} showInstant={false} /></dd></>}</>}</dl>{["owner_selected", "owner_confirmed", "creator_confirmed", "match_confirmed"].includes(entry.type) && entry.proposalId ? <button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={() => openProposalAudit(entry.proposalId)}>View audit receipt</button> : null}</details>)}{state.historyTruncated && <p className="field-hint">Showing the latest 100 events.</p>}</div>}
+    {state?.history?.length > 0 && <div className="matching-history history-card history-card-decisions"><h3>Decision record</h3><p className="field-hint">Off-chain receipts recorded by the server. No blockchain transaction or wallet signature is required for selection or acceptance.</p>{state.history.map((entry) => <details key={entry.id} id={`matching-event-${entry.id}`}><summary>{eventLabel(entry.type)} {eventWorkflowStatus(entry.type) && <StatusBadge status={eventWorkflowStatus(entry.type)} interactive={false} />} · {formatInstant(entry.createdAt)}</summary><dl><dt>Actor</dt><dd>{entry.actorId || (["funding_contributed", "funding_target_reached"].includes(entry.type) ? "Private contributor" : "Scheduled expiry")}</dd><dt>Role</dt><dd>{entry.actorRole || "Member"}</dd>{entry.actorWallet && <><dt>Connected wallet</dt><dd>{entry.actorWallet}</dd></>}<dt>Proposal</dt><dd>{entry.proposalId || "All proposals"}</dd>{entry.reason && <><dt>Reason</dt><dd>{entry.reason}</dd></>}<dt>Receipt</dt><dd>Recorded off-chain</dd><dt>Record reference</dt><dd>{entry.id}</dd>{entry.deadlineAt && <><dt>Acceptance deadline</dt><dd>{formatInstant(entry.deadlineAt)}</dd>{waiting && entry.proposalId === state.matching.proposalId && <><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={state.matching.deadlineAt} showInstant={false} /></dd></>}</>}</dl>{["owner_selected", "owner_confirmed", "creator_confirmed", "match_confirmed"].includes(entry.type) && entry.proposalId ? <button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={() => openProposalAudit(entry.proposalId)}>View audit receipt</button> : null}</details>)}{state.historyTruncated && <p className="field-hint">Showing the latest 100 events.</p>}</div>}
     {pending && <Modal labelledBy="matching-action-title" onDismiss={() => { if (!busy) setPending(null); }}>
       <form onSubmit={act}><div className="modal-head"><h2 id="matching-action-title">{pending.kind === "fund" ? "Fund this proposal with mock funds" : pending.kind === "decline" ? RESPONSE_COPY.decline.title : pending.kind === "evaluate" ? "Complete mock expert evaluation?" : pending.kind === "expire" ? "Expire this window now?" : RESPONSE_COPY.confirm.title}</h2></div>
         <div className="modal-body"><strong>{pending.item.title}</strong>

@@ -228,7 +228,7 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
   };
   const role = roleText(item.authorRole);
   const outcome = !removed && item.qualifying ? item.recommendation : null;
-  return <article className={nested ? "matching-candidate comment-reply" : "matching-candidate"}>
+  return <article id={`comment-${item.id}`} className={nested ? "matching-candidate comment-reply" : "matching-candidate"}>
     {editing && !removed ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
       allowRecommendations={allowRecommendations} onPosted={onChanged} onCancel={onCancel} /> : <>
       {outcome && <p className="comment-recommendation"><StatusBadge status={outcome} prefix="Evaluator · " /></p>}

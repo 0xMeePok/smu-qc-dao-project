@@ -177,7 +177,9 @@ describe("server-backed mock funding and mutual matching", () => {
     expect(screen.queryByRole("button", { name: "Accept as problem owner" })).toBeNull();
     expect(screen.getByRole("button", { name: "Reject selection" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "View owner acceptance record" }));
-    expect(document.getElementById("matching-event-selection").open).toBe(true);
+    const receipt = document.getElementById("matching-event-selection");
+    expect(receipt.open).toBe(true);
+    expect(receipt.classList.contains("is-referenced")).toBe(true);
   });
 
   it.each(["owner", "creator"])("lets the %s reject, shows the selected refund and restores sibling funding", async (actor) => {

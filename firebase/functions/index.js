@@ -45,6 +45,7 @@ import { getProposalComparison as readProposalComparison } from "./proposalCompa
 import { listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
 import { listIndependentListings as independentListings } from "./independentProposalCatalog.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
+import { readAuditTrail } from "./auditTrail.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -258,6 +259,13 @@ export const deleteComment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
 export const getMockMatching = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return readMockMatching({ db, uid, problemId: request.data?.problemId, proposalId: request.data?.proposalId, cursor: request.data?.cursor });
+});
+
+// QCDAO-96 and QCDAO-97. One chronological trail over the records the caller may view.
+export const listAuditTrail = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  const profile = (await db.collection("users").doc(uid).get()).data();
+  return readAuditTrail({ db, uid, profile, input: request.data ?? {} });
 });
 export const fundMockProposal = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);

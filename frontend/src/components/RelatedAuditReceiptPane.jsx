@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { AuditDetailPane } from "./AuditDetailPane.jsx";
+import { highlightElement } from "../lib/highlightTarget.js";
 import { AuditReceipt } from "./AuditReceipt.jsx";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { toDate } from "../lib/datetime.js";
@@ -47,6 +49,7 @@ export function RelatedAuditReceipt({ kind, record }) {
         firebaseReference={`proposals/${record.id}`}
         recordTimestamp={record.updatedAt ?? record.createdAt}
         onVerify={() => readProposalAudit(record)}
+        anchorId="related-audit-receipt"
       />
     );
   }
@@ -68,6 +71,7 @@ export function RelatedAuditReceipt({ kind, record }) {
       onVerify={() => (isOpenFunding
         ? readFundingOpportunityAudit(prepared)
         : readPostingAudit(prepared))}
+      anchorId="related-audit-receipt"
     />
   );
 }
@@ -84,6 +88,11 @@ export function RelatedAuditReceiptPane({
   onClose,
 }) {
   const known = Object.values(RELATED_AUDIT_KIND).includes(kind);
+  useEffect(() => {
+    if (loading || !record || kind === RELATED_AUDIT_KIND.COMMENT) return undefined;
+    const timer = window.setTimeout(() => highlightElement("related-audit-receipt"), 50);
+    return () => window.clearTimeout(timer);
+  }, [loading, record, kind]);
   if (!onClose || (!loading && !error && !record && !known)) return null;
 
   const title = kind === RELATED_AUDIT_KIND.PROPOSAL

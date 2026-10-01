@@ -56,12 +56,12 @@ export function OpportunityRevisionTrail({ postingId, uid, isOwner = false }) {
     return () => { cancelled = true; };
   }, [postingId, uid, isOwner]);
 
-  if (loading) return <div className="detail-section"><h2>Edit history</h2><p role="status">Loading edit history…</p></div>;
-  if (error) return <div className="detail-section"><h2>Edit history</h2><p className="error-banner" role="alert">{error}</p></div>;
+  if (loading) return <div className="detail-section history-card history-card-edits"><h2>Edit history</h2><p role="status">Loading edit history…</p></div>;
+  if (error) return <div className="detail-section history-card history-card-edits"><h2>Edit history</h2><p className="error-banner" role="alert">{error}</p></div>;
   if (!entries.length) return null;
 
   return (
-    <div className="detail-section">
+    <div className="detail-section history-card history-card-edits">
       <h2>Edit history</h2>
       <p className="field-hint">Every change made after publication. Recorded by the platform, not by the owner.</p>
       <ol className="revision-trail">

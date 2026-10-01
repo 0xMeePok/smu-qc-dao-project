@@ -123,6 +123,7 @@ export function AuditReceipt({
   onVerify,
   onRetry,
   entityLabel = "Posting",
+  anchorId,
 }) {
   const [verification, setVerification] = useState(null);
   const [checking, setChecking] = useState(false);
@@ -174,7 +175,7 @@ export function AuditReceipt({
 
   if (!audit) {
     return (
-      <section className="audit-receipt audit-unavailable" aria-label="Audit receipt">
+      <section id={anchorId} className="audit-receipt audit-unavailable" aria-label="Audit receipt">
         <h2>On-chain verification</h2>
         <p>
           This record remains available in the workflow. Its verification receipt is
@@ -213,7 +214,7 @@ export function AuditReceipt({
     : null;
 
   return (
-    <section className="audit-receipt" aria-label="Audit receipt">
+    <section id={anchorId} className="audit-receipt" aria-label="Audit receipt">
       <div className="audit-receipt-heading">
         <div>
           <span className="eyebrow">Audit receipt</span>

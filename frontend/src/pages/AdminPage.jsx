@@ -7,6 +7,7 @@ import { UserManagementTable } from "../components/UserManagementTable.jsx";
 import { RoleChangeModal } from "../components/RoleChangeModal.jsx";
 import { SuspendUserModal } from "../components/SuspendUserModal.jsx";
 import { AdminAudit } from "../components/RoleViews.jsx";
+import { ConsolidatedAuditTrail } from "../components/ConsolidatedAuditTrail.jsx";
 import { ProposalAuditQueue } from "../components/ProposalAuditQueue.jsx";
 import { PostingSubmissionLogs } from "../components/PostingSubmissionLogs.jsx";
 import { FundingSubmissionLogs } from "../components/FundingSubmissionLogs.jsx";
@@ -294,6 +295,7 @@ export default function AdminPage({ onNavigate }) {
           >
             <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
             <ExpiryAdminUtility />
+            <ConsolidatedAuditTrail scope="admin" onNavigate={onNavigate} />
             <AdminAudit />
           </div>
         )}
