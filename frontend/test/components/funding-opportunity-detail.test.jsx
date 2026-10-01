@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -85,7 +85,7 @@ describe("[QCDAO-51] open-funding detail", () => {
     expect(screen.getByText("Fund research into resilient supply chains.")).toBeTruthy();
     expect(screen.getByText("Universities and research organisations may apply.")).toBeTruthy();
     expect(screen.getByText("logistics")).toBeTruthy();
-    expect(screen.getByText("Funder")).toBeTruthy();
+    expect(within(screen.getByTestId("audit-receipt")).getByText("Funder")).toBeTruthy();
     expect(screen.queryByText("Business context")).toBeNull();
     expect(screen.queryByText("Supporting documents")).toBeNull();
 

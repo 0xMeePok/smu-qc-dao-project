@@ -451,7 +451,8 @@ export { FunderDashboard as FundingPortfolio } from "./FunderDashboard.jsx";
 const AUDIT_PAGE_SIZE = 50;
 
 const AUDIT_FILTERS = {
-  all: { label: "All Events", types: null },
+  // Sign-out receipts are written for every session revocation and drown the log.
+  all: { label: "All Events", types: ["role_change", "suspension_change", "opportunity_expired", "escrow"] },
   role_change: { label: "Role Changes", types: ["role_change"] },
   suspension: { label: "Suspensions & Reinstatements", types: ["suspension_change"] },
   opportunity_expired: { label: "Opportunity Expiries", types: ["opportunity_expired"] },
@@ -499,7 +500,7 @@ export function AdminAudit() {
     try {
       const constraints = [];
       const { types } = AUDIT_FILTERS[filterType] ?? AUDIT_FILTERS.all;
-      if (types) constraints.push(where("type", "in", types));
+      constraints.push(where("type", "in", types));
       constraints.push(orderBy("timestamp", "desc"));
       if (append && cursorRef.current) constraints.push(startAfter(cursorRef.current));
       constraints.push(limit(PAGE_SIZE));

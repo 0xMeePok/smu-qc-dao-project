@@ -93,7 +93,11 @@ describe("[QCDAO-56] admin audit trail", () => {
     render(<AdminAudit />);
 
     const more = await screen.findByRole("button", { name: "Load older events" });
-    expect(mocks.calls[0].constraints.map((constraint) => constraint.kind)).toEqual(["orderBy", "limit"]);
+    expect(mocks.calls[0].constraints.map((constraint) => constraint.kind)).toEqual(["where", "orderBy", "limit"]);
+    expect(mocks.calls[0].constraints[0]).toEqual({
+      kind: "where", field: "type", op: "in",
+      value: ["role_change", "suspension_change", "opportunity_expired", "escrow"],
+    });
     fireEvent.click(more);
 
     expect(await screen.findByText("Oldest posting")).toBeTruthy();

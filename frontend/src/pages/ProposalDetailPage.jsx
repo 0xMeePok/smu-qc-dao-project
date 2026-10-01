@@ -18,6 +18,8 @@ import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
 import { OwnerReviewPanel } from "../components/OwnerReviewPanel.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
+import { ConsolidatedAuditTrail } from "../components/ConsolidatedAuditTrail.jsx";
+import { highlightWhenPresent } from "../lib/highlightTarget.js";
 import { PROPOSAL_CATEGORIES, PROPOSAL_MATURITY_LEVELS, independentListingWindowOpen, isIndependentProposal } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
@@ -74,6 +76,14 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [proposalId, initialTab]);
+  useEffect(() => {
+    if (!proposal?.id) return undefined;
+    const commentId = new URLSearchParams(window.location.hash.split("?")[1] || "").get("comment");
+    if (!commentId) return undefined;
+    setTab("overview");
+    highlightWhenPresent(`comment-${commentId}`);
+    return undefined;
+  }, [proposal?.id]);
   const owns = Boolean(proposal && user?.id?.toLowerCase() === proposal.researcherId);
   const anchor = async (record = proposal, promptForWallet = true) => {
     if (!record || anchorInFlight.current.has(record.id)) return;
@@ -188,6 +198,11 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     flushSync(() => setTab("record"));
     document.getElementById("proposal-panel-record")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
+  const showProposalReceipt = () => {
+    flushSync(() => setTab("record"));
+    highlightWhenPresent("entity-audit-receipt");
+    return true;
+  };
   // Independent listings stay editable until a deposit is known. Attached
   // escrow proposals stay locked while that state is still loading.
   const locked = !listingOpen || (proposal.fundingTerms
@@ -289,7 +304,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
         {isOpenFunding && <OpenFundingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} />}
-        {proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} /> : !isOpenFunding && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onChange={(next) => {
+        {proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} /> : !isOpenFunding && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
           if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...current.matching, ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
         }} />}
@@ -300,9 +315,10 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>}
 
       <div className={panel("record")} role="tabpanel" id="proposal-panel-record" aria-labelledby="proposal-tab-record">
-        <AuditReceipt entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
+        <AuditReceipt anchorId="entity-audit-receipt" entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
         {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
         {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
+        {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("overview")); highlightWhenPresent(`comment-${item.commentId}`); }} />}
       </div>
     </article><aside className="context-panel"><span className="eyebrow">{independent ? "Indicative funding" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl>
       <div><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd></div>
