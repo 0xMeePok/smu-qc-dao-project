@@ -68,6 +68,30 @@ for proposal count and funding progress without gaining access to proposal bodie
 funder records. Deploy function, rules, and index changes together so the projection
 and its read policy stay in sync.
 
+Open funding grants use a separate single-owner custody pool. The authenticated
+`getOpenFundingSummary` callable returns confirmed pool balances and proposals
+visible to the caller; `prepareOpenFundingAction` returns a wallet transaction
+for pool creation, deposits, selections, acceptance, expiry or withdrawals.
+Amounts are integer strings in token base units. The owner deposits first and
+may reserve several proposals within the available balance. Each researcher
+has seven days to accept, including when the posting closes during that window.
+`syncOpenFunding` verifies the canonical pool, records accepted proposal status
+and queues its existing milestone escrow for settlement. It never selects one
+winner for the posting. Grant deposits and acceptance are signed by the user's
+wallet; the backend does not fund them.
+
+`getFunderDashboard` returns the member's posted grants, proposals approaching
+them, recorded decisions and confirmed escrow commitments. Its committed,
+locked, released and refunded totals are grouped by chain and token. Pool and
+escrow RPC failures are reported without substituting off-chain funding amounts.
+The grant projection collection is callable-only. Ship its rules and the
+owner/opportunity-type and deposit-actor indexes with these functions.
+
+Grant actions stay disabled until the active deployment manifest includes the
+new canonical pool factory functions and `escrow.openFundingPoolAbi`. Exporting
+the staged ABI bundle does not enable an existing deployed contract. The active
+production manifest remains unchanged by this implementation.
+
 ## Connect to the shared backend
 
 1. Ask Ashley for the six `VITE_FIREBASE_*` values.

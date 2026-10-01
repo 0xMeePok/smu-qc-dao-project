@@ -33,6 +33,27 @@ afterEach(cleanup);
 const ready = async () => { render(<EscrowFundingPanel proposal={proposal} />); await screen.findByText("Open for funding"); };
 
 describe("wallet escrow funding panel", () => {
+  it("shows grant acceptance status without pooled contribution controls before acceptance", () => {
+    render(<EscrowFundingView state={model({ isGrant: true })} walletReady amount="" delivery={{ summary: "", url: "" }}
+      fundingBlockReason="Sign in with a funder or problem owner account to deposit."
+      settlement={{ status: "waiting", message: "The posting owner must select the fully funded proposal." }} />);
+    expect(screen.getByText("Waiting for grant funding")).toBeTruthy();
+    expect(screen.getByText("Grant funding moves into this escrow when the researcher accepts the selected offer.")).toBeTruthy();
+    expect(screen.queryByLabelText("Contribution (USDC)")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fund escrow" })).toBeNull();
+    expect(screen.queryByText(/posting owner must select/)).toBeNull();
+    expect(screen.queryByText(/Sign in with a funder/)).toBeNull();
+  });
+  it("retains the grant owner's final delivery approval after grant acceptance", async () => {
+    mocks.read.mockResolvedValue(model({ isGrant: true, state: 6, currentMilestone: { evidenceHash: hash },
+      roles: { problemOwner: true }, can: { approveMilestone: true } }));
+    render(<EscrowFundingPanel proposal={{ ...proposal, opportunityType: "open-funding" }} />);
+    await screen.findByText("Delivery in progress");
+    await screen.findByRole("link", { name: "Review delivery evidence" });
+    const approve = screen.getByRole("button", { name: "Accept as delivered" });
+    expect(approve.disabled).toBe(false); fireEvent.click(approve);
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "approveMilestone", evidenceHash: hash })));
+  });
   it("sends the exact decimal input only after a user action and refreshes after confirmation", async () => {
     await ready(); expect(mocks.write).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "12.000001" } });
@@ -54,6 +75,66 @@ describe("wallet escrow funding panel", () => {
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Select proposal for upfront approval" }));
     await waitFor(() => expect(mocks.start).toHaveBeenCalledWith({ proposalId: proposal.id }));
     expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it.each(["a sibling is selected", "the posting is paused"])("prevents selecting a fully funded proposal when %s", async reason => {
+    mocks.read.mockResolvedValue(model({ remaining: 0n, workflowActive: false,
+      workflowPaused: reason === "the posting is paused", roles: { problemOwner: true } }));
+    await ready();
+    const select = screen.getByRole("button", { name: "Select proposal for upfront approval" });
+    expect(select.disabled).toBe(true);
+    fireEvent.click(select);
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it("shows both on-chain handshake approvals and the actual deadline", async () => {
+    mocks.read.mockResolvedValue(model({ state: 1, roles: { proposalOwner: true }, ownerApproved: true,
+      can: { approveSelection: true }, supportsSelectionRejection: true }));
+    render(<EscrowFundingPanel proposal={proposal} />);
+    await screen.findByText("Awaiting upfront approval");
+    expect(screen.getByText("Problem owner: approved. Proposal owner: pending.")).toBeTruthy();
+    expect(screen.getByText(/Upfront approval time remaining/)).toBeTruthy();
+    expect(screen.getByText(/Funding and selection are paused for every other proposal/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Approve upfront payment" }));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "approveSelection", selectionId })));
+  });
+  it.each(["problemOwner", "proposalOwner"])("lets the %s reject the pending main selection with a reason", async role => {
+    mocks.read.mockResolvedValue(model({ state: 1, roles: { [role]: true },
+      supportsSelectionRejection: true, can: { approveSelection: true, rejectSelection: true } }));
+    render(<EscrowFundingPanel proposal={proposal} />);
+    await screen.findByText("Awaiting upfront approval");
+    const reject = screen.getByRole("button", { name: "Reject selection and refund" });
+    expect(reject.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Reason for rejecting selection"), { target: { value: "too short" } });
+    fireEvent.click(reject);
+    expect(mocks.write).not.toHaveBeenCalled();
+    const reason = "The revised project scope cannot be delivered.";
+    fireEvent.change(screen.getByLabelText("Reason for rejecting selection"), { target: { value: reason } });
+    expect(reject.disabled).toBe(false);
+    fireEvent.click(reject);
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "rejectSelection", selectionId, reason })));
+    expect(mocks.sync).toHaveBeenCalledWith({ proposalId: proposal.id, transactionHash: hash });
+    expect(await screen.findByText(/Selection rejected. This proposal’s full contribution balance is refundable/)).toBeTruthy();
+  });
+  it("opens expired pending-selection refunds without allowing late approval or rejection", async () => {
+    mocks.read.mockResolvedValue(model({ state: 1, roles: { problemOwner: true }, supportsSelectionRejection: true,
+      can: { expire: true, approveSelection: false, rejectSelection: false } }));
+    render(<EscrowFundingPanel proposal={proposal} />);
+    await screen.findByText("Awaiting upfront approval");
+    expect(screen.getByRole("button", { name: "Approve upfront payment" }).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Reject selection and refund" })).toBeNull();
+    expect(screen.getByText(/full contribution balance is refundable after rejection or expiry/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open expired escrow refunds" }));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "expire" })));
+  });
+  it("explains a pending sibling lock and keeps grants outside the main rejection controls", () => {
+    const { rerender } = render(<EscrowFundingView state={model({ blockedBySelection: true, workflowActive: false })}
+      walletReady amount="" delivery={{ summary: "", url: "" }} />);
+    expect(screen.getByText(/another proposal awaits both owners’ approval/)).toBeTruthy();
+    rerender(<EscrowFundingView state={model({ state: 1, isGrant: true, supportsSelectionRejection: true,
+      roles: { problemOwner: true }, can: { rejectSelection: true } })} walletReady amount="" delivery={{ summary: "", url: "" }} />);
+    expect(screen.queryByLabelText("Reason for rejecting selection")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject selection and refund" })).toBeNull();
+    expect(screen.queryByText(/Upfront approval time remaining/)).toBeNull();
   });
   it("keeps successful wallet payment separate from an indexing failure", async () => {
     mocks.sync.mockRejectedValue(new Error("Service unavailable"));

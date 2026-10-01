@@ -27,7 +27,8 @@ function fixture({ release = false } = {}) {
   const state = { state: release ? 6 : 0, totalDeposited: BigInt(record.fundingTerms.target),
     totalReleased: release ? BigInt(record.fundingTerms.target) / 2n : 0n, totalRefunded: 0n,
     currentTranche: release ? 1n : 0n, selectionId: hash("5"), ownerApproved: false, solutionApproved: false,
-    yesWeight: 0n, approvalDeadline: nextDay, expiresAt: 2000000000n, platformSigner: platform, active: true };
+    yesWeight: 0n, approvalDeadline: nextDay, expiresAt: 2000000000n, platformSigner: platform,
+    active: true, invalidated: false, pendingProposalEntityId: zero };
   function eventLog(eventName, args, logIndex, transactionHash, blockNumber) {
     const registry = ["FundingEventAnchored", "ProposalEscrowLinked"].includes(eventName);
     const abi = registry ? config.abi : config.escrow.escrowAbi;
@@ -59,6 +60,8 @@ function fixture({ release = false } = {}) {
     reads.push(request);
     if (request.functionName === "fundingAnchorCount") return BigInt(anchors.length);
     if (request.functionName === "isFundingActive") return state.active;
+    if (request.functionName === "isFundingInvalidated") return state.invalidated;
+    if (request.functionName === "pendingProposalForPosting") return state.pendingProposalEntityId;
     if (request.functionName === "platformSigner") return platform;
     if (request.functionName === "outstandingBalance") return state.totalDeposited - state.totalReleased - state.totalRefunded;
     if (request.functionName in state && request.address === escrowAddress) return state[request.functionName];
@@ -67,8 +70,13 @@ function fixture({ release = false } = {}) {
       fee: 0n, paid: release && Number(request.args[0]) === 0 };
     return result;
   };
-  return { db, client, config, record, parent, expected, state, receipts, anchors, reads, ranges, add, now };
+  return { db, client, config, record, parent, expected, state, receipts, anchors, reads, ranges, add, eventLog, now };
 }
+
+const currentMainConfig = { ...config, abi: [...config.abi.filter(item => item.name !== "pendingProposalForPosting"),
+  { type: "function", name: "pendingProposalForPosting", stateMutability: "view", inputs: [{ name: "postingId", type: "bytes32" }], outputs: [{ name: "", type: "bytes32" }] }] };
+const localWorkerWallet = signedBytes => () => ({ account: { address: platform }, chain: { id: 421614 },
+  prepareTransactionRequest: async request => request, signTransaction: async () => signedBytes });
 
 describe("escrow funding service", () => {
   it("projects confirmed chain deposits, hashes and exact base units with deterministic audit IDs", async () => {
@@ -176,6 +184,102 @@ describe("escrow funding service", () => {
     assert.equal(final.functionName, "releaseMilestone");
     assert.deepEqual(final.args, [hash("5"), 1n, hash("8")]);
     assert(!final.args.includes(owner)); // No caller-controlled recipient override.
+  });
+
+  it("requires full funding before reserving a main proposal and blocks siblings using the confirmed chain pending selection", async () => {
+    const f = fixture(); f.config = currentMainConfig; f.state.totalDeposited = 10n;
+    await assert.rejects(startEscrowSettlement({ ...f, uid: owner, proposalId: f.record.id }), /fully funded/);
+    assert.equal(f.db.records.get(`problems/${f.parent.id}`).escrowSelection, undefined);
+    f.state.pendingProposalEntityId = hash("a"); f.state.active = false;
+    const verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    assert.equal(verified.summary.pendingProposalEntityId, hash("a"));
+    assert.equal(verified.summary.invalidated, false);
+    assert(f.reads.filter(read => ["pendingProposalForPosting", "isFundingInvalidated"].includes(read.functionName)).every(read => read.blockNumber === 100n));
+    await assert.rejects(prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id }), /awaiting owner acceptance/);
+    assert.equal(settlementAction({ ...f, verified, job: {} }).action, undefined);
+  });
+
+  it("uses confirmed chain time for handshake expiry and preserves historical main expiry semantics without the new getter", async () => {
+    const f = fixture(); f.config = currentMainConfig; f.state.state = 1;
+    f.state.ownerApproved = true; f.state.solutionApproved = true;
+    const verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    const decision = () => settlementAction({ ...f, verified, job: {}, now: Timestamp.fromMillis(2100000000000) });
+    assert.equal(decision().action.functionName, "release"); // A future host clock cannot expire a live chain window.
+    verified.summary.timestamp = Number(f.state.approvalDeadline);
+    assert.equal(decision().action.functionName, "expire");
+    const legacyConfig = { ...config, abi: config.abi.filter(item => item.name !== "pendingProposalForPosting") };
+    assert.equal(settlementAction({ ...f, config: legacyConfig, verified, job: {} }).settlement.status, "blocked");
+    verified.summary.timestamp = Number(f.state.expiresAt);
+    assert.equal(settlementAction({ ...f, config: legacyConfig, verified, job: {} }).action.functionName, "expire");
+    verified.summary.state = "Active"; verified.summary.timestamp = Number(f.state.approvalDeadline);
+    assert.equal(settlementAction({ ...f, config: legacyConfig, verified, job: {} }).action.functionName, "expire");
+  });
+
+  it("requires both final approvals and strictly more than half the deposit weight only when funder voting is configured", async () => {
+    const f = fixture({ release: true }), verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    const decision = () => settlementAction({ ...f, verified, job: {} });
+    assert.equal(decision().settlement.status, "awaiting-approvals");
+    verified.data.ownerApproved = true;
+    assert.equal(decision().settlement.status, "awaiting-approvals");
+    verified.data.solutionApproved = true; verified.data.yesWeight = verified.data.totalDeposited / 2n;
+    assert.equal(decision().settlement.status, "awaiting-votes");
+    verified.data.yesWeight++;
+    assert.equal(decision().action.functionName, "releaseMilestone");
+    verified.expected = { ...verified.expected, fundingTerms: { ...verified.expected.fundingTerms, funderVoting: false } };
+    verified.data.yesWeight = 0n;
+    assert.equal(decision().action.functionName, "releaseMilestone");
+    verified.milestones[1].evidenceHash = zero;
+    assert.equal(decision().settlement.status, "waiting");
+  });
+
+  it("automatically expires an unanswered main selection and clears its posting reservation only after confirmed reconciliation", async () => {
+    const f = fixture(); f.config = currentMainConfig; f.state.state = 1;
+    f.state.pendingProposalEntityId = f.expected.entityId;
+    const selectionId = f.state.selectionId, boundary = f.state.approvalDeadline, signedBytes = "0x3456", pendingHash = keccak256(signedBytes), actions = [];
+    f.add(2, fundingDigest(["bytes32", "address", "uint64"], [selectionId, researcher, boundary]), "SelectionLocked",
+      { selectionId, solutionOwner: researcher, approvalDeadline: boundary }, hash("d"), 95n, platform);
+    f.client.getBlock = async ({ blockNumber } = {}) => ({ hash: hash("4"), timestamp: blockNumber >= 100n ? boundary : 1900000000n });
+    f.client.simulateContract = async request => actions.push(request.functionName);
+    f.client.getTransactionCount = async () => 7;
+    f.client.sendRawTransaction = async () => pendingHash;
+    await enqueueEscrowFunding(f);
+    const parentPath = `problems/${f.parent.id}`, jobPath = `escrowFundingJobs/${key(f.record.id)}`;
+    f.db.records.set(parentPath, { ...f.parent, escrowSelection: { proposalId: f.record.id, selectionId, registryAddress: config.address } });
+    f.db.records.set(jobPath, { ...f.db.records.get(jobPath), selectionId, selectionRequested: true });
+    const getWallet = localWorkerWallet(signedBytes), runAt = Timestamp.fromMillis(Number(boundary) * 1000);
+    assert.equal((await sweepEscrowFunding({ ...f, getWallet, now: runAt })).processed, 1);
+    assert.deepEqual(actions, ["expire"]);
+    assert(f.db.records.get(parentPath).escrowSelection);
+    const anchor = f.eventLog("FundingEventAnchored", { proposalId: f.expected.entityId, escrow: escrowAddress, eventType: 6,
+      digest: fundingDigest(["uint256", "uint256", "uint256"], [0n, boundary, f.state.totalDeposited]), actor: platform, timestamp: boundary }, 2, pendingHash, 102n);
+    f.anchors.push(anchor);
+    f.receipts.set(pendingHash, { to: escrowAddress, transactionHash: pendingHash, status: "success", blockNumber: 102n, blockHash: hash("4"), logs: [
+      f.eventLog("StateChanged", { previousState: 1, newState: 5 }, 0, pendingHash, 102n),
+      f.eventLog("RefundsOpened", { pool: f.state.totalDeposited, availableAt: boundary }, 1, pendingHash, 102n), anchor] });
+    f.state.state = 5; f.state.pendingProposalEntityId = zero; f.client.getBlockNumber = async () => 103n;
+    await sweepEscrowFunding({ ...f, getWallet, now: Timestamp.fromMillis(runAt.toMillis() + 60000) });
+    assert.equal(f.db.records.get(parentPath).escrowSelection, null);
+    assert.equal(f.db.records.get(jobPath).selectionRequested, false);
+    assert.equal(f.db.records.get(`escrowFundingSummaries/${key(f.record.id)}`).state, "Expired");
+    assert.deepEqual(actions, ["expire"]);
+  });
+
+  it("automatically opens refunds for an invalidated losing sibling but never refunds one that is only temporarily paused", async () => {
+    const f = fixture(); f.config = currentMainConfig; f.state.active = false;
+    f.state.pendingProposalEntityId = hash("a");
+    let verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    assert.equal(settlementAction({ ...f, verified, job: {} }).action, undefined);
+    f.state.pendingProposalEntityId = zero; f.state.invalidated = true;
+    f.db.records.set(`problems/${f.parent.id}`, { ...f.parent, acceptedProposalId: "winner-proposal" });
+    const signedBytes = "0x4567", pendingHash = keccak256(signedBytes), actions = [];
+    f.client.simulateContract = async request => actions.push(request.functionName);
+    f.client.getTransactionCount = async () => 7; f.client.sendRawTransaction = async () => pendingHash;
+    await enqueueEscrowFunding(f);
+    assert.equal((await sweepEscrowFunding({ ...f, getWallet: localWorkerWallet(signedBytes) })).processed, 1);
+    assert.deepEqual(actions, ["refundInvalidated"]);
+    f.state.state = 7;
+    verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    assert.equal(settlementAction({ ...f, verified, parent: { ...f.parent, acceptedProposalId: "winner-proposal" }, job: {} }).action, undefined);
   });
 
   it("consumes invalidated selection requests and releases the pre-payment posting reservation", async () => {

@@ -1702,6 +1702,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Verified grant custody totals and wallet preparations are callable-only.
+    match /openFundingSummaries/{id} { allow read, write: if false; }
+
     // Reports include the reporter's identity. Queue, evidence, history and
     // author notifications are returned by scoped callables, never enumerable
     // through browser SDKs. Moderation and report counters are server-owned.

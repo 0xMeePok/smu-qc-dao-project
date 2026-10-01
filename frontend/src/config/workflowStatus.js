@@ -49,3 +49,9 @@ export function closedStatusLabel(status) {
   const key = String(status ?? "").trim().toLowerCase();
   return CLOSED_OPPORTUNITY_STATUSES.has(key) ? workflowStatusLabel(opportunityWorkflowStatus({ status: key })) : null;
 }
+
+/** Escrow state values follow the contract enum; grant offer labels are separate. */
+export function fundingStateLabel(state) {
+  if (typeof state === "number") return ["Pending", "Locked", "Released", "Refunded", "Cancelled", "Expired", "Locked · delivery in progress", "Voided"][state] ?? "Unknown";
+  return String(state ?? "Pending").replaceAll("_", " ");
+}

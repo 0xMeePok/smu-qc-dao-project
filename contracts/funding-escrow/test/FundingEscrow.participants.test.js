@@ -111,7 +111,7 @@ describe("Uncapped participation and individual refund claims", function () {
     await assertAccounting(c);
   });
 
-  it("keeps cumulative shares fixed across selection invalidation and relocking", async function () {
+  it("keeps cumulative shares fixed across selection rejection and full refunds", async function () {
     const c = await fixture({ trancheBps: [5000, 5000] });
     await c.escrow.connect(c.alice).deposit(100n);
     await c.escrow.connect(c.bob).deposit(400n);
@@ -119,16 +119,12 @@ describe("Uncapped participation and individual refund claims", function () {
     const funders = [{ signer: c.alice, amount: 600n }, { signer: c.bob, amount: 400n }];
     await c.escrow.lockSelection(c.selectionId, c.solution.address);
     await c.escrow.invalidateSelection(c.selectionId, c.reason);
-    await expect(c.escrow.connect(c.other).deposit(1n)).to.be.revertedWithCustomError(c.escrow, "FundingTargetExceeded");
+    await expect(c.escrow.connect(c.other).deposit(1n)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     await checkPrefixes(c, funders);
     const next = c.ethers.id("replacement-selection");
-    await c.escrow.lockSelection(next, c.solution.address);
-    await c.escrow.connect(c.owner).approveSelection(next);
-    await c.escrow.connect(c.solution).approveSelection(next);
-    await c.escrow.release(next);
-    await c.escrow.connect(c.admin).voidEscrow(c.reason);
-    expect((await c.escrow.depositorSummary(c.alice.address)).claimable).to.equal(300n);
-    expect((await c.escrow.depositorSummary(c.bob.address)).claimable).to.equal(200n);
+    await expect(c.escrow.lockSelection(next, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
+    expect((await c.escrow.depositorSummary(c.alice.address)).claimable).to.equal(600n);
+    expect((await c.escrow.depositorSummary(c.bob.address)).claimable).to.equal(400n);
     await c.escrow.connect(c.bob).claimRefund();
     await c.escrow.connect(c.alice).claimRefund();
     await assertAccounting(c);

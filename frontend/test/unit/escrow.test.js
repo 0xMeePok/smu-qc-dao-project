@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { encodeFunctionData, keccak256, stringToHex } from "viem";
-import { confirmEscrowTransaction, ESCROW_STATE, escrowErrorMessage, hashEscrowEvidence, readEscrow, readPostingFundingStarted, writeEscrowAction } from "../../src/lib/escrow.js";
+import { confirmEscrowTransaction, ESCROW_STATE, escrowErrorMessage, hashEscrowEvidence, hashEscrowSelectionRejection, readEscrow, readPostingFundingStarted, writeEscrowAction } from "../../src/lib/escrow.js";
 import { escrowAddress, escrowClient, escrowConfig, escrowRecord, owner, researcher, txHash } from "../../../firebase/functions/test/fixtures/escrowAuditFixture.js";
 import { opportunityEntityId } from "../../../firebase/functions/auditCanonical.js";
 
@@ -14,6 +14,7 @@ const target = 1_200_250_000n;
 function fixture(changes = {}) {
   const proposal = escrowRecord();
   if (changes.funderVoting !== undefined) proposal.fundingTerms.funderVoting = changes.funderVoting;
+  if (changes.opportunityType !== undefined) proposal.opportunityType = changes.opportunityType;
   const base = escrowClient(proposal);
   const reads = [], writes = [], waits = [];
   const state = {
@@ -38,6 +39,7 @@ function fixture(changes = {}) {
         if (functionName === "isFundingInvalidated") return changes.invalidated ?? !(changes.active ?? true);
         if (functionName === "postingFundingPaused") return changes.paused ?? false;
         if (functionName === "postingFundingStarted") return changes.fundingStarted ?? false;
+        if (functionName === "pendingProposalForPosting") return changes.pendingProposalId ?? zeroHash;
       }
       if (address === proposal.fundingTerms.token) {
         if (functionName === "decimals") return 6;
@@ -68,6 +70,22 @@ function fixture(changes = {}) {
 function finalFixture(changes = {}) {
   return fixture({ ...changes, state: { state: ESCROW_STATE.Active, currentTranche: 1n,
     totalDeposited: target, totalReleased: target / 2n, outstandingBalance: target / 2n, ...changes.state } });
+}
+
+function rejectionFixture(changes = {}) {
+  const f = fixture({ ...changes, state: { state: ESCROW_STATE.Locked, totalDeposited: target, ...changes.state } });
+  f.config = { ...f.config, abi: [...f.config.abi,
+    { type: "function", name: "pendingProposalForPosting", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [{ type: "bytes32" }] }],
+    escrow: { ...f.config.escrow, escrowAbi: [...f.config.escrow.escrowAbi,
+      { type: "function", name: "rejectSelection", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "bytes32" }], outputs: [] }] } };
+  return f;
+}
+
+function legacySelectionFixture(changes = {}) {
+  const f = fixture(changes);
+  f.config = { ...f.config, abi: f.config.abi.filter(item => item.name !== "pendingProposalForPosting"),
+    escrow: { ...f.config.escrow, escrowAbi: f.config.escrow.escrowAbi.filter(item => item.name !== "rejectSelection") } };
+  return f;
 }
 
 describe("Canonical escrow wallet integration", () => {
@@ -199,6 +217,7 @@ describe("Canonical escrow wallet integration", () => {
     const confirmed = await confirmEscrowTransaction(txHash, f);
     assert.equal(confirmed.receipt.status, "success");
     assert.equal(f.writes.length, 1);
+    assert.ok(f.waits.every(request => request.confirmations === 1));
   });
 
   for (const outcome of ["cancelled", "replaced", "reverted"]) it(`does not deposit after a ${outcome} token approval`, async () => {
@@ -257,6 +276,60 @@ describe("Canonical escrow wallet integration", () => {
     await assert.rejects(writeEscrowAction({ ...approved, account: owner, action: "release" }), /not available/);
   });
 
+  it("lets either main-workflow owner reject only the current pending selection with a reason hash", async () => {
+    const reason = "The delivery scope no longer fits our requirements.";
+    for (const account of [owner, researcher]) {
+      const f = rejectionFixture();
+      await writeEscrowAction({ ...f, account, action: "rejectSelection", selectionId, reason });
+      assert.deepEqual(f.writes[0].args, [selectionId, hashEscrowSelectionRejection(reason)]);
+    }
+    for (const account of [funder, platform]) {
+      const f = rejectionFixture();
+      await assert.rejects(writeEscrowAction({ ...f, account, action: "rejectSelection", reason }), /not available/);
+      assert.equal(f.writes.length, 0);
+    }
+    const stale = rejectionFixture();
+    await assert.rejects(writeEscrowAction({ ...stale, account: owner, action: "rejectSelection", reason, selectionId: zeroHash }), /proposal changed/);
+    assert.equal(stale.writes.length, 0);
+    const invalid = rejectionFixture();
+    await assert.rejects(writeEscrowAction({ ...invalid, account: owner, action: "rejectSelection", reason: "too short" }), /10–2,000/);
+    assert.equal(invalid.writes.length, 0);
+  });
+
+  it("opens main selection expiry refunds exactly at its approval deadline", async () => {
+    const before = await readEscrow({ ...rejectionFixture({ timestamp: 1_900_086_399n }), account: owner });
+    assert.equal(before.can.approveSelection, true);
+    assert.equal(before.can.rejectSelection, true);
+    assert.equal(before.can.expire, false);
+    const deadline = rejectionFixture({ timestamp: 1_900_086_400n });
+    const expired = await readEscrow({ ...deadline, account: owner });
+    assert.equal(expired.can.approveSelection, false);
+    assert.equal(expired.can.rejectSelection, false);
+    assert.equal(expired.can.expire, true);
+    await writeEscrowAction({ ...deadline, account: funder, action: "expire" });
+    assert.deepEqual(deadline.writes[0].args, []);
+  });
+
+  it("keeps selection rejection unavailable on old deployments, grants and delivery milestones", async () => {
+    const old = await readEscrow({ ...legacySelectionFixture({ state: { state: ESCROW_STATE.Locked } }), account: owner });
+    assert.equal(old.supportsSelectionRejection, false);
+    assert.equal(old.can.rejectSelection, false);
+    const grant = await readEscrow({ ...rejectionFixture({ opportunityType: "open-funding", funderVoting: false }), account: owner });
+    assert.equal(grant.can.rejectSelection, false);
+    const active = await readEscrow({ ...rejectionFixture({ state: { state: ESCROW_STATE.Active, currentTranche: 1n } }), account: researcher });
+    assert.equal(active.can.rejectSelection, false);
+  });
+
+  it("shows the canonical pending sibling lock without enabling funding or permanent refunds", async () => {
+    const f = rejectionFixture({ active: false, invalidated: false, pendingProposalId: `0x${"7".repeat(64)}`,
+      state: { state: ESCROW_STATE.Open, totalDeposited: 0n } });
+    const snapshot = await readEscrow({ ...f, account: funder });
+    assert.equal(snapshot.blockedBySelection, true);
+    assert.equal(snapshot.can.deposit, false);
+    assert.equal(snapshot.can.lockSelection, false);
+    assert.equal(snapshot.can.refundInvalidated, false);
+  });
+
   it("keeps refund and expiration exits available after registry withdrawal", async () => {
     const f = finalFixture({ active: false, timestamp: 1_900_086_400n, depositor: { deposited: 10n, claimable: 5n } });
     const snapshot = await readEscrow({ ...f, account: funder });
@@ -271,13 +344,13 @@ describe("Canonical escrow wallet integration", () => {
     assert.deepEqual(f.writes.map(write => [write.functionName, write.args]), [["claimRefund", []], ["expire", []], ["refundInvalidated", []]]);
   });
 
-  it("matches the contract's distinct upfront and final refund deadlines", async () => {
-    const locked = fixture({ state: { state: ESCROW_STATE.Locked, totalDeposited: target,
+  it("preserves earlier deployments' distinct upfront and final refund deadlines", async () => {
+    const locked = legacySelectionFixture({ state: { state: ESCROW_STATE.Locked, totalDeposited: target,
       approvalDeadline: 1_900_000_000n, ownerApproved: true, solutionApproved: true }, depositor: { deposited: 10n } });
     const lapsedUpfront = await readEscrow({ ...locked, account: platform });
     assert.equal(lapsedUpfront.can.release, false);
     assert.equal(lapsedUpfront.can.expire, false); // Upfront refunds still wait for the posting expiry.
-    const expiredPosting = await readEscrow({ ...fixture({ timestamp: 2_000_000_000n,
+    const expiredPosting = await readEscrow({ ...legacySelectionFixture({ timestamp: 2_000_000_000n,
       state: { state: ESCROW_STATE.Locked, approvalDeadline: 1_900_000_000n } }), account: platform });
     assert.equal(expiredPosting.can.expire, true);
     const finalDeadline = await readEscrow({ ...finalFixture({ timestamp: 1_900_086_400n }), account: researcher });
@@ -298,6 +371,10 @@ describe("Canonical escrow wallet integration", () => {
 });
 
 describe("Escrow evidence and error messages", () => {
+  it("hashes normalized rejection reasons and validates their bounds", () => {
+    assert.equal(hashEscrowSelectionRejection("  Cafe\u0301 research scope changed.  "), hashEscrowSelectionRejection("Café research scope changed."));
+    for (const reason of [undefined, "too short", "x".repeat(2001)]) assert.throws(() => hashEscrowSelectionRejection(reason), /10–2,000/);
+  });
   it("hashes the exact normalized delivery schema and rejects invalid evidence", () => {
     assert.equal(hashEscrowEvidence(evidence), keccak256(stringToHex(JSON.stringify({ scheme: "qcdao.escrow.delivery.v1", ...evidence }))));
     assert.equal(hashEscrowEvidence({ summary: " Cafe\u0301 ", url: " https://example.com/proof " }), hashEscrowEvidence({ summary: "Caf\u00e9", url: "https://example.com/proof" }));

@@ -59,8 +59,25 @@ export async function verifyEscrowDeployment(provider, record, artifacts) {
   if (address(factory) !== factoryAddress || address(registry) !== registryAddress || address(signer) !== platform) {
     throw new Error("Registry/factory wiring or platform signer mismatch.");
   }
+  const helpers = {};
+  if (new Interface(artifacts.factory.abi).hasFunction("openFundingPoolDeployer")) {
+    for (const [key, name] of [["escrowDeployer", "FundingEscrowDeployer"], ["openFundingPoolDeployer", "OpenFundingPoolDeployer"]]) {
+      const artifact = artifacts[key];
+      if (artifact?.contractName !== name) throw new Error("Grant factory creation helper artifacts are required.");
+      const helperAddress = address(await read(factoryAddress, artifacts.factory, key));
+      if (!runtimeMatches(await provider.getCode(helperAddress), artifact)
+          || address(await read(helperAddress, artifact, "factory")) !== factoryAddress) {
+        throw new Error("Grant factory creation helper bytecode or wiring mismatch.");
+      }
+      if (record[key]?.address && address(record[key].address) !== helperAddress) {
+        throw new Error("Grant factory creation helper deployment record mismatch.");
+      }
+      helpers[key] = helperAddress;
+    }
+  }
   return { contractName: "EscrowAuditRegistry", address: registryAddress, factoryAddress,
     chainId: record.chainId, bytecodeMatches: true, wiringMatches: true, platformSigner: signer,
     registryOwner, factoryOwner, feeBps: Number(feeBps),
-    registryCodeHash: keccak256(registryCode), factoryCodeHash: keccak256(factoryCode), readOnly: true };
+    registryCodeHash: keccak256(registryCode), factoryCodeHash: keccak256(factoryCode),
+    ...helpers, openFundingGrants: !!helpers.openFundingPoolDeployer, readOnly: true };
 }

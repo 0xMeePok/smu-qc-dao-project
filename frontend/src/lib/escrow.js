@@ -52,6 +52,12 @@ export function hashEscrowEvidence(evidence) {
   return keccak256(stringToHex(JSON.stringify({ scheme: "qcdao.escrow.delivery.v1", summary, url })));
 }
 
+export function hashEscrowSelectionRejection(reason) {
+  const normalized = String(reason ?? "").trim().normalize("NFC");
+  if (normalized.length < 10 || normalized.length > 2000) throw new Error("Enter a rejection reason of 10–2,000 characters.");
+  return keccak256(stringToHex(JSON.stringify({ scheme: "qcdao.escrow.selection-rejection.v1", reason: normalized })));
+}
+
 function milestone(value) {
   return {
     bps: Number(field(value, "bps", 0)), reviewWindow: BigInt(field(value, "reviewWindow", 1)),
@@ -90,7 +96,9 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     "approvalDeadline", "ownerApproved", "solutionApproved", "yesWeight", "noWeight", "refundsEnabled", "refundAvailableAt", "outstandingBalance", "funderCount"];
   const supportsInvalidation = config.abi.some(item => item.type === "function" && item.name === "isFundingInvalidated");
   const supportsPause = config.abi.some(item => item.type === "function" && item.name === "postingFundingPaused");
-  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused] = await Promise.all([
+  const supportsPendingSelection = config.abi.some(item => item.type === "function" && item.name === "pendingProposalForPosting");
+  const supportsSelectionRejection = config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "rejectSelection");
+  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused, pendingProposalId] = await Promise.all([
     Promise.all(names.map(name => read(name))),
     readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
@@ -98,11 +106,22 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     readContract({ address: canonical.factoryAddress, abi: config.escrow.factoryAbi, functionName: "allowedTokens", args: [expected.fundingTerms.token] }),
     supportsInvalidation ? readContract({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, canonical.address] }) : null,
     supportsPause ? readContract({ address: config.address, abi: config.abi, functionName: "postingFundingPaused", args: [expected.opportunityId] }) : false,
+    supportsPendingSelection ? readContract({ address: config.address, abi: config.abi, functionName: "pendingProposalForPosting", args: [expected.opportunityId] }) : ZERO_HASH,
   ]);
   if (!same(field(registered, "proposalHash", 4), expected.proposalHash) || !same(field(registered, "solutionHash", 5), expected.solutionHash)) {
     throw new Error("Mismatch detected: this proposal differs from its current on-chain record. Refresh before continuing.");
   }
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
+  let grantEscrow = false;
+  if (proposal.opportunityType === "open-funding" && config.escrow.openFundingPoolAbi?.length
+      && config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "openFundingPool")) {
+    const pool = await read("openFundingPool");
+    if (pool && !/^0x0{40}$/i.test(pool)) {
+      grantEscrow = true;
+      const offer = await readContract({ address: pool, abi: config.escrow.openFundingPoolAbi, functionName: "getOffer", args: [expected.entityId] });
+      snapshot.grantOfferState = Number(field(offer, "state", 2));
+    }
+  }
   for (const name of ["state", "currentTranche", "feeBps"]) snapshot[name] = Number(snapshot[name]);
   for (const name of ["fundingTarget", "totalDeposited", "totalReleased", "totalRefunded", "feePaid", "expiresAt", "approvalDeadline", "yesWeight", "noWeight", "refundAvailableAt", "outstandingBalance", "funderCount"]) snapshot[name] = BigInt(snapshot[name]);
   const decimals = Number(snapshot.tokenDecimals);
@@ -137,6 +156,7 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     deposit: Boolean(walletAddress && open && active && tokenListed && tokenPrecisionValid && block.timestamp < snapshot.expiresAt && remaining > 0n && wallet.balance > 0n),
     lockSelection: roles.platform && open && active && block.timestamp < snapshot.expiresAt && remaining === 0n,
     approveSelection: upfront && reviewOpen && needsOwnerApproval,
+    rejectSelection: supportsSelectionRejection && proposal.opportunityType !== "open-funding" && upfront && reviewOpen && (roles.problemOwner || roles.proposalOwner),
     submitMilestone: final && reviewOpen && roles.proposalOwner,
     approveMilestone: final && reviewOpen && evidenceReady && needsOwnerApproval,
     voteMilestone: final && reviewOpen && evidenceReady && snapshot.funderVoting && roles.funder && !wallet.hasVoted,
@@ -144,14 +164,17 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     releaseMilestone: final && reviewOpen && roles.platform && bothApproved && evidenceReady && majorityApproved,
     claimRefund: Boolean(walletAddress && wallet.depositor?.claimable > 0n),
     expire: Boolean(walletAddress && [ESCROW_STATE.Open, ESCROW_STATE.Locked, ESCROW_STATE.Active].includes(snapshot.state)
-      && block.timestamp >= (final ? snapshot.approvalDeadline : snapshot.expiresAt)),
+      && !(grantEscrow && open) && block.timestamp >= (final || ((grantEscrow || supportsSelectionRejection) && upfront) ? snapshot.approvalDeadline : snapshot.expiresAt)),
     refundInvalidated: Boolean(walletAddress && (supportsInvalidation ? invalidated : !active) && ![ESCROW_STATE.Released, ESCROW_STATE.Refunded, ESCROW_STATE.Voided].includes(snapshot.state)),
   };
-  if (isHistorical) for (const action of ["deposit", "lockSelection", "approveSelection", "submitMilestone", "approveMilestone", "voteMilestone", "release", "releaseMilestone"]) can[action] = false;
-  return { ...canonical, ...snapshot, chainId: config.chainId, token: expected.fundingTerms.token, decimals,
+  if (isHistorical) for (const action of ["deposit", "lockSelection", "approveSelection", "rejectSelection", "submitMilestone", "approveMilestone", "voteMilestone", "release", "releaseMilestone"]) can[action] = false;
+  // Grant funding comes from its owner's pool after researcher acceptance.
+  if (proposal.opportunityType === "open-funding") { can.deposit = false; can.lockSelection = false; }
+  return { ...canonical, ...snapshot, isGrant: proposal.opportunityType === "open-funding", chainId: config.chainId, token: expected.fundingTerms.token, decimals,
     symbol: config.escrow.tokens.find(token => same(token.address, expected.fundingTerms.token))?.symbol ?? proposal.currency,
     entityId: expected.entityId, blockNumber: block.number, timestamp: block.timestamp, workflowActive: active, workflowPaused: paused, workflowInvalidated: supportsInvalidation ? invalidated : !active, tokenListed, tokenPrecisionValid,
-    remaining, milestones, currentMilestone, wallet, roles, can, isHistorical };
+    remaining, milestones, currentMilestone, wallet, roles, can, isHistorical, supportsSelectionRejection, pendingProposalId,
+    blockedBySelection: !same(pendingProposalId, ZERO_HASH) && !same(pendingProposalId, expected.entityId) };
 }
 
 export async function readPostingFundingStarted(posting, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
@@ -190,12 +213,12 @@ export function escrowErrorMessage(error) {
 }
 
 /** Retry confirmation of one known hash without submitting another transaction. */
-export async function confirmEscrowTransaction(transactionHash, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
+export async function confirmEscrowTransaction(transactionHash, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG, confirmations = 1 } = {}) {
   deployment(config);
   const hash = assertBytes32(transactionHash, "Transaction hash");
   try {
     let replaced = false;
-    const receipt = await waitForAuditReceipt({ transactionHash: hash, maxRetries: 0,
+    const receipt = await waitForAuditReceipt({ transactionHash: hash, maxRetries: 0, confirmations,
       adapters: { ...adapters, waitForTransactionReceipt: request => adapters.waitForTransactionReceipt({
         ...request, onReplaced: replacement => {
           if (replacement.reason === "replaced") replaced = true;
@@ -216,7 +239,7 @@ export async function confirmEscrowTransaction(transactionHash, { adapters = cre
 }
 
 /** Called only from a user action. Never retries a write or signs with a server key. */
-export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve,
+export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve, reason,
   onProgress, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
   if (config === AUDIT_REGISTRY_CONFIG) {
     config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
@@ -263,6 +286,10 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
   if (action === "approveSelection" || action === "release") {
     if (selectionId && !same(selectionId, snapshot.selectionId)) throw new Error("The selected proposal changed. Refresh before continuing.");
     return send(action, [snapshot.selectionId]);
+  }
+  if (action === "rejectSelection") {
+    if (selectionId && !same(selectionId, snapshot.selectionId)) throw new Error("The selected proposal changed. Refresh before continuing.");
+    return send(action, [snapshot.selectionId, hashEscrowSelectionRejection(reason)]);
   }
   if (action === "submitMilestone") {
     const digest = hashEscrowEvidence(evidence);

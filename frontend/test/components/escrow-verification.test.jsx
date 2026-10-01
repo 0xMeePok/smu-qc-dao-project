@@ -83,6 +83,16 @@ describe("Escrow registry frontend compatibility", () => {
     expect(screen.getByLabelText("Payment percentages").closest("fieldset").disabled).toBe(true);
   });
 
+  it("keeps the grant plan separate without removing majority voting from business proposals", () => {
+    const { rerender } = render(<EscrowPaymentPlanFields form={{ funderVoting: true }} grant onChange={vi.fn()} />);
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.getByText("Grant payments use approval from the grant owner and proposal owner.")).toBeTruthy();
+    expect(screen.queryByText("more than 50% of all contributed funds")).toBeNull();
+    rerender(<EscrowPaymentPlanFields form={{ funderVoting: true }} onChange={vi.fn()} />);
+    expect(screen.getByRole("radio", { name: "Both owners and a funding-weighted majority of funders" }).checked).toBe(true);
+    expect(screen.getByText("more than 50% of all contributed funds")).toBeTruthy();
+  });
+
   it("normalizes old draft splits to 50/50 and preserves the selected approval variant", () => {
     const original = escrowRecord();
     const restored = formFromProposal({ ...original, status: "draft", fundingTerms: undefined,

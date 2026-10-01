@@ -17,6 +17,7 @@ import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { PostingProposals } from "../components/PostingProposals.jsx";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
+import { OpenFundingPanel } from "../components/OpenFundingPanel.jsx";
 import { ProposalComparison } from "../components/ProposalComparison.jsx";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { readPostingFundingStarted } from "../lib/escrow.js";
@@ -91,7 +92,7 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
         </div>
       )}
       {isOpenFunding && !blocked ? (
-        <p className="field-hint">Propose a problem and solution. The funder acts as the problem owner for selection.</p>
+        <p className="field-hint">Propose a problem and solution to this grant call. The owner can fund multiple proposals from their deposited pool.</p>
       ) : null}
     </>
   );
@@ -120,12 +121,12 @@ function PosterIdentity({ ownerId, organisation, poster, onNavigate }) {
   );
 }
 
-export default function PostingDetailPage({ postingId, onNavigate }) {
+export default function PostingDetailPage({ postingId, onNavigate, initialTab = "overview" }) {
   const { isAuthenticated, user } = useAuth();
   const { address: connectedAddress, isConnected } = useAccount();
   const [posting, setPosting] = useState(null);
   const [matchingRefresh, setMatchingRefresh] = useState(0);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(initialTab);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
@@ -152,7 +153,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
     setReason("");
     setReasonError("");
     setAnchoredWithdrawal(null);
-    setTab("overview");
+    setTab(initialTab);
 
     findPosting(postingId)
       .then((found) => { if (!cancelled) setPosting(found); })
@@ -160,7 +161,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [postingId]);
+  }, [postingId, initialTab]);
 
   useEffect(() => {
     setPoster(null);
@@ -342,7 +343,7 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
   const tabs = [
     ["overview", "Overview"],
     ["proposals", `Proposals${proposalCount ? ` (${proposalCount})` : ""}`],
-    ...(showCollaboration ? [["funding", "Match & funding"]] : []),
+    ...(showCollaboration ? [["funding", isOpenFunding ? "Grant funding" : "Match & funding"]] : []),
     ["record", "Record"],
   ];
   const activeTab = tabs.some(([value]) => value === tab) ? tab : "overview";
@@ -502,8 +503,10 @@ export default function PostingDetailPage({ postingId, onNavigate }) {
 
           {showCollaboration && (
             <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
-              <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
-              <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
+              {isOpenFunding ? <OpenFundingPanel problemId={posting.id} onNavigate={onNavigate} /> : <>
+                <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
+                <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
+              </>}
             </div>
           )}
 

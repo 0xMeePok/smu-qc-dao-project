@@ -100,9 +100,9 @@ export function buildProposalDocument({ researcherId, posting, form, attachments
   if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG)) {
     if (status === PROPOSAL_STATUS_DRAFT) record.fundingPlan = {
       tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "7"),
-      funderVoting: form.funderVoting ?? false,
+      funderVoting: posting.opportunityType === OPEN_FUNDING_TYPE ? false : form.funderVoting ?? false,
     };
-    else record.fundingTerms = proposalFundingTerms({ form, currency: posting.currency, config: AUDIT_REGISTRY_CONFIG });
+    else record.fundingTerms = proposalFundingTerms({ form: posting.opportunityType === OPEN_FUNDING_TYPE ? { ...form, funderVoting: false } : form, currency: posting.currency, config: AUDIT_REGISTRY_CONFIG });
   }
   return record;
 }

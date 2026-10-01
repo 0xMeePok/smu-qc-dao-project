@@ -44,7 +44,7 @@ export function validateProposal(form, posting) {
   const amount = Number(form.amount);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) errors.amount = "Enter a funding amount greater than 0 and no more than 1,000,000,000.";
   if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && !errors.amount) {
-    try { proposalFundingTerms({ form, currency: posting?.currency, config: AUDIT_REGISTRY_CONFIG }); }
+    try { proposalFundingTerms({ form: posting?.opportunityType === OPEN_FUNDING_TYPE ? { ...form, funderVoting: false } : form, currency: posting?.currency, config: AUDIT_REGISTRY_CONFIG }); }
     catch (error) { errors.fundingPlan = error.message; }
   }
   return errors;

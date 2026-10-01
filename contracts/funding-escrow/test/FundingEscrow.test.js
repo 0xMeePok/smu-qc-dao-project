@@ -139,10 +139,10 @@ describe("FundingEscrow: selection and dual approval", function () {
     await expect(c.escrow.lockSelection(c.selectionId, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
   });
 
-  it("caps the approval deadline at posting expiry", async function () {
+  it("keeps the seven-day approval window when the posting expires sooner", async function () {
     const c = await fixture({ duration: 86400 });
     await lock(c);
-    expect(await c.escrow.approvalDeadline()).to.equal(c.expiresAt);
+    expect(await c.escrow.approvalDeadline()).to.equal(BigInt((await c.ethers.provider.getBlock("latest")).timestamp) + 7n * 86400n);
   });
 
   it("rejects approvals outside a locked selection and from unrelated wallets", async function () {
@@ -203,34 +203,32 @@ describe("FundingEscrow: selection and dual approval", function () {
     await assertAccounting(c);
   });
 
-  it("invalidation clears both approvals, rejects stale transactions and requires a fresh selection ID", async function () {
+  it("invalidation clears both approvals and permanently refunds the rejected selection", async function () {
     const c = await fixture(); await approve(c);
     await expect(c.escrow.connect(c.other).invalidateSelection(c.selectionId, c.reason)).to.be.revertedWithCustomError(c.escrow, "AccessDenied");
     await expect(c.escrow.invalidateSelection(c.selectionId, c.ethers.ZeroHash)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
     await expect(c.escrow.invalidateSelection(c.ethers.id("wrong"), c.reason)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     await expect(c.escrow.invalidateSelection(c.selectionId, c.reason)).to.emit(c.escrow, "SelectionInvalidated").withArgs(c.selectionId, c.reason);
-    expect(await c.escrow.state()).to.equal(State.Open);
+    expect(await c.escrow.state()).to.equal(State.Cancelled);
     expect(await c.escrow.ownerApproved()).to.equal(false);
     expect(await c.escrow.solutionApproved()).to.equal(false);
     expect(await c.escrow.solutionOwner()).to.equal(c.ethers.ZeroAddress);
     expect(await c.escrow.approvalDeadline()).to.equal(0n);
-    await expect(c.escrow.lockSelection(c.selectionId, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
+    await expect(c.escrow.lockSelection(c.selectionId, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     const next = c.ethers.id("selection-2");
-    await expect(c.escrow.lockSelection(next, c.other.address)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
-    await c.escrow.lockSelection(next, c.solution.address);
+    await expect(c.escrow.lockSelection(next, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     await expect(c.escrow.release(c.selectionId)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
-    await expect(c.escrow.release(next)).to.be.revertedWithCustomError(c.escrow, "ApprovalIncomplete");
-    await expect(c.escrow.connect(c.other).approveSelection(next)).to.be.revertedWithCustomError(c.escrow, "AccessDenied");
-    await c.escrow.connect(c.owner).approveSelection(next);
-    await c.escrow.connect(c.solution).approveSelection(next);
-    await c.escrow.release(next);
+    await expect(c.escrow.release(next)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
+    expect((await c.escrow.depositorSummary(c.alice.address)).claimable).to.equal(c.target);
+    await c.escrow.connect(c.alice).claimRefund();
+    expect(await c.registry.pendingProposalForPosting(c.postingId)).to.equal(c.ethers.ZeroHash);
     await assertAccounting(c);
   });
 
   it("invalidation after posting expiry cannot reopen funding", async function () {
     const c = await fixture(); await lock(c); await at(c, c.expiresAt);
     await c.escrow.invalidateSelection(c.selectionId, c.reason);
-    expect(await c.escrow.state()).to.equal(State.Expired);
+    expect(await c.escrow.state()).to.equal(State.Cancelled);
     await c.escrow.connect(c.alice).claimRefund();
   });
 });
@@ -241,7 +239,7 @@ describe("FundingEscrow: cancellation, expiry and pull refunds", function () {
       const c = await fixture();
       if (phase === "locked") await lock(c); else await fund(c);
       if (phase === "cancelled") await c.escrow.cancel(c.reason);
-      await at(c, c.expiresAt - 1n);
+      await at(c, (phase === "locked" ? await c.escrow.approvalDeadline() : c.expiresAt) - 1n);
       await expect(c.escrow.connect(c.alice).claimRefund()).to.be.revertedWithCustomError(c.escrow, "WindowStillOpen");
     });
   }
