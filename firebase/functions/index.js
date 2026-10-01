@@ -32,7 +32,7 @@ import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
-import { PUBLISH_VALIDATION, isPublishableProblem } from "./publicationValidation.js";
+import { PUBLISH_VALIDATION, INDEPENDENT_PUBLISH_VALIDATION, isPublishableProblem, isPublishableIndependentProposal } from "./publicationValidation.js";
 import { requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
   selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
@@ -43,6 +43,7 @@ import { createComment as writeComment, editComment as amendComment,
 import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
 import { listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
+import { listIndependentListings as independentListings } from "./independentProposalCatalog.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
@@ -200,6 +201,11 @@ export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) =
   return listPostedProposalsForProblem({ db, uid, problemId: request.data?.problemId });
 });
 
+export const listIndependentListings = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  await requireMember(request);
+  return independentListings({ db, cursor: request.data?.cursor ?? null });
+});
+
 export const getProposalComparison = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return readProposalComparison({ db, uid, problemId: request.data?.problemId });
@@ -353,7 +359,7 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
   if (record[scope === "problems" ? "ownerId" : "researcherId"] !== uid) {
     throw new HttpsError("permission-denied", "You can publish only your own records.");
   }
-  if (scope === "problems") {
+  if (scope === "problems" || (scope === "proposals" && record.proposalKind === "independent")) {
     const date = new Date(record.expiresAt);
     if (!Number.isFinite(date.getTime())) throw new HttpsError("invalid-argument", "Invalid expiry.");
     record.expiresAt = Timestamp.fromDate(date);
@@ -401,12 +407,16 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
     // publish against this proof without re-running those checks, because running
     // them there crossed Firestore's 1,000-expression cap. An unmarked proof still
     // serves the other paths (edits), which keep their own rules validation.
-    const publishable = scope === "problems" && isPublishableProblem(content, {
+    const publishableProblem = scope === "problems" && isPublishableProblem(content, {
       uid, profileOrganisation: profile?.data()?.organisation,
     });
+    const publishableIndependent = scope === "proposals" && isPublishableIndependentProposal(content, { uid });
+    const validation = publishableProblem ? PUBLISH_VALIDATION
+      : publishableIndependent ? INDEPENDENT_PUBLISH_VALIDATION
+      : null;
     tx.set(proofRef, {
       uid, record: content, transactionHash: audit.transactionHash, verifiedAt: Timestamp.now(),
-      ...(publishable ? { validation: PUBLISH_VALIDATION } : {}),
+      ...(validation ? { validation } : {}),
     });
   });
   return { verified: true };

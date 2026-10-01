@@ -1,5 +1,7 @@
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
 import { fundingTermsHash, normalizeFundingTerms } from "./escrowAudit.js";
+import { INDEPENDENT_PROPOSAL_HASH_SCHEME } from "./independentProposal.js";
+
 export const AUDIT_HASH_SCHEME = 1;
 const OPPORTUNITY_KIND = { BUSINESS_PROBLEM: 0, OPEN_FUNDING: 1, FUNDING_REQUEST: 2 };
 
@@ -21,8 +23,8 @@ function assertEntityType(entityType) {
 }
 
 function assertHashScheme(hashScheme) {
-  if (hashScheme !== AUDIT_HASH_SCHEME) {
-    throw new TypeError(`Only canonical audit hash scheme ${AUDIT_HASH_SCHEME} is supported.`);
+  if (hashScheme !== AUDIT_HASH_SCHEME && hashScheme !== INDEPENDENT_PROPOSAL_HASH_SCHEME) {
+    throw new TypeError(`Canonical audit hash scheme must be ${AUDIT_HASH_SCHEME} or ${INDEPENDENT_PROPOSAL_HASH_SCHEME}.`);
   }
 }
 

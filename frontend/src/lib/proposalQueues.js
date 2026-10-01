@@ -37,7 +37,7 @@ export function sortProposalRows(rows, sort = "closing") {
   return [...(rows ?? [])].sort((a, b) => {
     if (sort === "submitted") return (time(b.createdAt ?? b.submittedAt) || 0) - (time(a.createdAt ?? a.submittedAt) || 0);
     // Earliest deadline first, with postings that carry no deadline last.
-    const left = time(a.posting?.expiresAt), right = time(b.posting?.expiresAt);
+    const left = time(a.expiresAt ?? a.posting?.expiresAt), right = time(b.expiresAt ?? b.posting?.expiresAt);
     if (Number.isNaN(left) && Number.isNaN(right)) return 0;
     if (Number.isNaN(left)) return 1;
     if (Number.isNaN(right)) return -1;
@@ -54,6 +54,10 @@ export function filterProposalRows(rows, status = "all") {
 
 export function statusOptions(rows) {
   return [...new Set((rows ?? []).map(statusOf).filter(Boolean))].sort();
+}
+
+export function isIndependentQueueRow(row) {
+  return row?.proposalKind === "independent" || !row?.problemId;
 }
 
 export function queueError(error) {

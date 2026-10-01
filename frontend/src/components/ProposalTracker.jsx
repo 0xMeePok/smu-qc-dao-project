@@ -8,6 +8,7 @@ import {
   PROPOSAL_SORTS,
   commentCountLabel,
   filterProposalRows,
+  isIndependentQueueRow,
   ownerReviewStatus,
   listMyProposalQueue,
   queueError,
@@ -40,37 +41,41 @@ export function ProposalTracker({ onNavigate }) {
   const visible = useMemo(() => sortProposalRows(filterProposalRows(rows, status), sort), [rows, status, sort]);
   const statuses = useMemo(() => statusOptions(rows), [rows]);
 
-  return <div className="card-table">
+  return <div className="card-table proposal-tracker">
     <div className="table-header">
       <h3>My proposals {rows.length > 0 && <span className="count-pill">{rows.length}</span>}</h3>
-      {rows.length > 0 && <div className="table-header-controls">
-        <label className="comment-sort">Status
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">All statuses</option>
-            {statuses.map((value) => <option key={value} value={value}>{workflowStatusLabel(value)}</option>)}
-          </select>
-        </label>
-        <label className="comment-sort">Sort by
-          <select value={sort} onChange={(event) => setSort(event.target.value)}>
-            {PROPOSAL_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </label>
-      </div>}
+      <div className="table-header-actions">
+        <button className="secondary small" type="button" onClick={() => onNavigate("discover")}>Browse opportunities</button>
+        <button className="primary small" type="button" onClick={() => onNavigate("create-proposal")}>Publish independent proposal</button>
+      </div>
     </div>
+    {rows.length > 0 && <div className="table-toolbar">
+      <label className="table-filter">Status
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="all">All statuses</option>
+          {statuses.map((value) => <option key={value} value={value}>{workflowStatusLabel(value)}</option>)}
+        </select>
+      </label>
+      <label className="table-filter">Sort
+        <select value={sort} onChange={(event) => setSort(event.target.value)}>
+          {PROPOSAL_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+    </div>}
     {loading ? <p className="table-empty" role="status">Loading proposals…</p>
       : error ? <p className="error-banner" role="alert">{error}</p>
-      : !visible.length ? <p className="table-empty">No proposals yet. Choose an open opportunity to submit your approach.</p>
-      : visible.map((item) => { const review = ownerReviewStatus(item.ownerReview); return <div className="table-row" key={item.id}>
+      : !visible.length ? <p className="table-empty">No proposals yet. Respond to an open opportunity, or publish an independent listing.</p>
+      : visible.map((item) => { const review = ownerReviewStatus(item.ownerReview); const independent = isIndependentQueueRow(item); return <div className="table-row" key={item.id}>
         <div>
           {/* The bold line is this member's own proposal; the opportunity it answers
               is named beneath it, so neither title can be mistaken for the other. */}
           <strong>{item.title || "Untitled proposal"}</strong>
           <small className="table-row-meta">
-            Proposal for: {item.posting?.title || "Untitled opportunity"}
+            {independent ? "Independent listing" : `Proposal for: ${item.posting?.title || "Untitled opportunity"}`}
           </small>
           <span className="status-badges">
             <StatusBadge status={item.workflowStatus} />
-            <EvaluationBadges counts={recommendationCounts(item.recommendations ?? [])} />
+            {!independent && <EvaluationBadges counts={recommendationCounts(item.recommendations ?? [])} />}
             {review && <StatusBadge status={review.status} prefix="Owner · " />}
           </span>
           <small className="table-row-meta">
@@ -78,7 +83,12 @@ export function ProposalTracker({ onNavigate }) {
           </small>
         </div>
         <div className="table-row-actions">
-          <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
+          {independent && item.status !== "withdrawn" ? (
+            <ExpiryCountdown expiresAt={item.expiresAt ?? item.posting?.expiresAt} status="submitted" showInstant={false} />
+          ) : !independent ? (
+            <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
+          ) : null}
+          {independent && item.status === "submitted" && <button className="text-button" type="button" onClick={() => onNavigate(`create-proposal/${item.id}`)}>Edit</button>}
           <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
         </div>
       </div>; })}

@@ -109,6 +109,8 @@ export async function listMyProposals({ db, uid }) {
       currency: data.currency ?? "",
       createdAt: iso(data.createdAt),
       updatedAt: iso(data.updatedAt),
+      proposalKind: data.proposalKind ?? null,
+      expiresAt: iso(data.expiresAt),
       problemId: data.problemId ?? null,
       posting: postingView(data.problemId, problems.get(data.problemId)),
       evaluationComplete: data.matching?.evaluationComplete === true,

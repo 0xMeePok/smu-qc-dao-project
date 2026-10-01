@@ -355,7 +355,7 @@ export function ResearcherProposals({ onNavigate }) {
   return <section className="page dashboard-page">
     <div className="page-heading">
       <h1>My Research Proposals</h1>
-      <p>Track every submission, its evaluator feedback and the time left on each opportunity.</p>
+      <p>Track submissions to posted problems and independent listings you have published. Unfinished drafts resume below — independent drafts open the independent form, not a parent opportunity.</p>
     </div>
     <ProposalTracker onNavigate={onNavigate} />
     <ProposalList draftsOnly onNavigate={onNavigate} />

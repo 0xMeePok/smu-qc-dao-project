@@ -3,6 +3,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
 import { recommendationEntries, workflowStatusLabel } from "./workflowStatus.js";
+import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 
 export const ROLE_EVALUATOR = 2;
 export const ROLE_ADMIN = 1;
@@ -51,6 +52,7 @@ function heldBy(proposal, uid) {
 
 /** One recommendation per evaluator per solution, and never from its own author. */
 function canRecommend({ proposal, uid, role, isReply, commentId = null }) {
+  if (isIndependentProposal(proposal?.data?.())) return false;
   if (role !== ROLE_EVALUATOR || isReply || ownSolution(proposal, uid)) return false;
   const mine = heldBy(proposal, uid);
   return !mine || mine.commentId === commentId;
@@ -58,6 +60,9 @@ function canRecommend({ proposal, uid, role, isReply, commentId = null }) {
 
 function assertRecommendationAllowed({ proposal, uid, recommendation, isReply, commentId = null }) {
   if (recommendation == null || recommendation === "" || isReply) return;
+  if (isIndependentProposal(proposal?.data?.())) {
+    fail("invalid-argument", "Recommendations are not used on independent listings.");
+  }
   if (ownSolution(proposal, uid)) {
     fail("permission-denied", "You cannot recommend your own solution.");
   }
@@ -172,11 +177,18 @@ async function loadReadableProposal(tx, db, uid, profile, proposalId) {
   if (!proposal.exists) fail("permission-denied", "This discussion is not available.");
   const data = proposal.data();
   if (data.status === "draft") fail("failed-precondition", "Comments are only allowed on submitted solutions.");
-  if (!data.problemId) fail("failed-precondition", "This proposal is not linked to an opportunity.");
+  if (!isIndependentProposal(data) && !data.problemId) fail("failed-precondition", "This proposal is not linked to an opportunity.");
   if (!await canReadContent(tx, db, "proposal", data, uid, profile)) {
     fail("permission-denied", "This discussion is not available.");
   }
   return proposal;
+}
+
+function assertIndependentDiscussionOpen(proposal, now) {
+  if (!isIndependentProposal(proposal?.data?.())) return;
+  if (!independentListingWindowOpen(proposal.data(), now)) {
+    fail("failed-precondition", "The listing window has closed. Comments can no longer be added.");
+  }
 }
 
 function isMockEvaluation(matching = {}) {
@@ -358,6 +370,7 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
   return db.runTransaction(async (tx) => {
     const profile = await loadMember(tx, db, uid);
     const proposal = await loadReadableProposal(tx, db, uid, profile, proposalId);
+    assertIndependentDiscussionOpen(proposal, now);
     const parent = await loadReplyParent(tx, db, proposalId, replyTo);
     await assertReplyAllowance(tx, db, parent, uid);
     const role = accessLevel(profile);
@@ -369,7 +382,7 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     const record = {
       authorId: uid,
       proposalId,
-      problemId: proposal.data().problemId,
+      ...(proposal.data().problemId ? { problemId: proposal.data().problemId } : {}),
       parentId: replyTo,
       replyCount: 0,
       body: text,
@@ -394,7 +407,7 @@ export async function createComment({ db, uid, proposalId, body, recommendation,
     applyQueuedNotices(tx, notices);
     applyQueuedNotices(tx, gateNotices);
     applyFeedbackSummary(tx, db, summaryDocs, {
-      commentId: ref.id, next: record, proposalId, problemId: proposal.data().problemId, now,
+      commentId: ref.id, next: record, proposalId, problemId: proposal.data().problemId || "", now,
     });
     return view(ref.id, record);
   });

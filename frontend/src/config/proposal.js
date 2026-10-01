@@ -1,3 +1,13 @@
+export {
+  INDEPENDENT_PROPOSAL_FIELDS,
+  INDEPENDENT_PROPOSAL_HASH_SCHEME,
+  INDEPENDENT_PROPOSAL_KIND,
+  PROPOSAL_MATURITY_LEVELS,
+  PROPOSAL_MATURITY_VALUES,
+  isIndependentProposal,
+  independentListingWindowOpen,
+} from "../../../firebase/functions/independentProposal.js";
+
 export const PROPOSAL_CATEGORIES = [
   { value: "gate-model", label: "Gate-based quantum computing" },
   { value: "quantum-inspired", label: "Quantum-inspired approaches" },

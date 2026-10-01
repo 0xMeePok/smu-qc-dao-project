@@ -85,7 +85,7 @@ export function createOpportunityAuditFlow({
       address,
       prepared,
       audit: {
-        schemaVersion: AUDIT_HASH_SCHEME,
+        schemaVersion: prepared.hashScheme ?? AUDIT_HASH_SCHEME,
         chainId: registryConfig.chainId,
         entityId: prepared.entityId,
         contentHash: prepared.contentHash,
@@ -135,7 +135,13 @@ export function createOpportunityAuditFlow({
     // Edit forms prepare a new receipt and may omit the original transaction.
     // Check the stored document before a write so that cannot reanchor history.
     if (!persistReceipt && loadRecord) {
-      const stored = await loadRecord(opportunity.id, { fromServer: true });
+      let stored = null;
+      try {
+        stored = await loadRecord(opportunity.id, { fromServer: true });
+      } catch {
+        // Creates have no stored record yet. Firestore denies get() of a missing
+        // proposals/{id}, which must not block the wallet step.
+      }
       if (stored?.audit?.transactionHash) await assertCurrentAuditRecord(stored, { adapters });
     }
     const registryConfig = await recordAuditDeployment(opportunity, { adapters });

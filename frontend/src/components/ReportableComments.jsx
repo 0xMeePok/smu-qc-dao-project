@@ -29,18 +29,22 @@ function roleText(authorRole) {
   return "";
 }
 
-export function ReportableComments({ problemId, proposalId, authorId, recommenders = [], onRecommendationChange }) {
+export function ReportableComments({
+  problemId, proposalId, authorId, recommenders = [], onRecommendationChange,
+  discussionOpen = true, allowRecommendations = true,
+}) {
   const { user } = useAuth();
-  return <CommentsPage key={`${user?.id || "guest"}:${problemId}:${proposalId || ""}`}
+  return <CommentsPage key={`${user?.id || "guest"}:${problemId || ""}:${proposalId || ""}`}
     problemId={problemId} proposalId={proposalId} authorId={authorId}
-    recommenders={recommenders} onRecommendationChange={onRecommendationChange} />;
+    recommenders={recommenders} onRecommendationChange={onRecommendationChange}
+    discussionOpen={discussionOpen} allowRecommendations={allowRecommendations} />;
 }
 
 function replyCount(item) {
   return item?.replyCount ?? item?.replies?.length ?? 0;
 }
 
-function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecommendationChange }) {
+function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecommendationChange, discussionOpen, allowRecommendations }) {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
@@ -51,18 +55,22 @@ function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecomme
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const request = useRef(0);
   const busy = useRef(false);
-  const canCompose = Boolean(user?.id && proposalId);
+  const parentPayload = {
+    ...(proposalId ? { proposalId } : {}),
+    ...(problemId ? { problemId } : {}),
+  };
+  const canCompose = Boolean(user?.id && proposalId && discussionOpen);
   // One recommendation per evaluator, and never from the solution's own author.
   const ownSolution = Boolean(authorId && user?.id && authorId.toLowerCase() === user.id.toLowerCase());
   const recommended = recommenders.some((id) => id.toLowerCase() === user?.id?.toLowerCase())
     || items.some((item) => item.qualifying && sameAuthor(user, item));
   async function load(nextCursor, direction = sort) {
-    if (busy.current || !problemId) return;
+    if (busy.current || !(problemId || proposalId)) return;
     busy.current = true;
     const token = ++request.current;
     setLoading(true); setError("");
     try {
-      const data = await listReportableComments({ problemId, ...(proposalId ? { proposalId } : {}),
+      const data = await listReportableComments({ ...parentPayload,
         ...(nextCursor ? { cursor: nextCursor } : {}), ...(direction === "newest" ? { sort: "newest" } : {}) });
       if (token !== request.current) return;
       setItems((previous) => [...new Map([...(nextCursor ? previous : []), ...(data.items ?? [])].map((item) => [item.id, item])).values()]);
@@ -82,7 +90,7 @@ function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecomme
   }
   // QCDAO-70: replies arrive as a bounded preview; a thread pages on demand.
   async function loadThread(threadId, cursor) {
-    return listReportableComments({ problemId, ...(proposalId ? { proposalId } : {}), threadId,
+    return listReportableComments({ ...parentPayload, threadId,
       ...(cursor ? { cursor } : {}) });
   }
   function toggleThread(id, open) {
@@ -114,23 +122,25 @@ function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecomme
       </label>}
     </div>
     {canCompose && !editingId && <CommentComposer proposalId={proposalId} evaluator={isEvaluator(user)}
-      ownSolution={ownSolution} recommended={recommended} onPosted={changed} onRefresh={changed} />}
+      ownSolution={ownSolution} recommended={recommended} allowRecommendations={allowRecommendations}
+      onPosted={changed} onRefresh={changed} />}
+    {!discussionOpen && items.length > 0 && <p className="field-hint">The listing window has closed. Existing comments remain visible.</p>}
     {error && <p role="alert" className="field-hint">{error}</p>}
     {items.map((item) => <CommentItem key={item.id} item={item} user={user} editing={editingId === item.id}
       editingId={editingId} canReply={canCompose} expanded={expandedIds.has(item.id)}
       onToggle={() => toggleThread(item.id)} onReply={() => toggleThread(item.id, true)}
       onEdit={(id) => setEditingId(id || item.id)} onCancel={() => setEditingId(null)} onChanged={changed}
-      onLoadReplies={loadThread} />)}
+      onLoadReplies={loadThread} allowRecommendations={allowRecommendations} />)}
     {loading && <p role="status" className="field-hint">Loading comments…</p>}
     {(cursor || error) && <button className="secondary" type="button" disabled={loading} onClick={() => load(cursor, sort)}>{error ? "Retry comments" : "Load more comments"}</button>}
   </section>;
 }
 
-function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, parentId, ownSolution = false, recommended = false, onRefresh }) {
+function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, parentId, ownSolution = false, recommended = false, onRefresh, allowRecommendations = true }) {
   const reply = Boolean(parentId) || Boolean(initial?.parentId);
   // Editing my own recommendation keeps the picker; a second one is refused.
-  const blocked = evaluator && !reply && (ownSolution || (recommended && !initial?.qualifying));
-  const recommend = evaluator && !reply && !blocked;
+  const blocked = allowRecommendations && evaluator && !reply && (ownSolution || (recommended && !initial?.qualifying));
+  const recommend = allowRecommendations && evaluator && !reply && !blocked;
   const [body, setBody] = useState(initial?.body || "");
   const [recommendation, setRecommendation] = useState(initial?.recommendation || "");
   const [error, setError] = useState("");
@@ -181,7 +191,7 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
   </form>;
 }
 
-function CommentItem({ item, user, editing, editingId, canReply, expanded, onToggle, onReply, onEdit, onCancel, onChanged, onLoadReplies, nested }) {
+function CommentItem({ item, user, editing, editingId, canReply, expanded, onToggle, onReply, onEdit, onCancel, onChanged, onLoadReplies, nested, allowRecommendations = true }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [extraReplies, setExtraReplies] = useState([]);
@@ -220,7 +230,7 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
   const outcome = !removed && item.qualifying ? item.recommendation : null;
   return <article className={nested ? "matching-candidate comment-reply" : "matching-candidate"}>
     {editing && !removed ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
-      onPosted={onChanged} onCancel={onCancel} /> : <>
+      allowRecommendations={allowRecommendations} onPosted={onChanged} onCancel={onCancel} /> : <>
       {outcome && <p className="comment-recommendation"><StatusBadge status={outcome} prefix="Evaluator · " /></p>}
       <p className={removed ? "proposal-text comment-removed" : "proposal-text"}>
         {removed ? "This comment was removed" : (item.body || item.text || item.content)}
@@ -241,12 +251,12 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
     </>}
     {parent && expanded && <div className="comment-replies">
       {replies.map((reply) => <CommentItem key={reply.id} item={reply} user={user} nested editing={editingId === reply.id}
-        onEdit={() => onEdit(reply.id)} onCancel={onCancel} onChanged={onChanged} />)}
+        onEdit={() => onEdit(reply.id)} onCancel={onCancel} onChanged={onChanged} allowRecommendations={allowRecommendations} />)}
       {replyCursor && <button type="button" className="text-button" disabled={loadingReplies} onClick={loadMoreReplies}>
         {loadingReplies ? "Loading…" : "Load more replies"}
       </button>}
       {canReply && !editingId && <CommentComposer proposalId={item.proposalId} parentId={item.id} evaluator={isEvaluator(user)}
-        onPosted={onChanged} />}
+        allowRecommendations={allowRecommendations} onPosted={onChanged} />}
     </div>}
   </article>;
 }
