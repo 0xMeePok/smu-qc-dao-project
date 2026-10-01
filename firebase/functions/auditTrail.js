@@ -432,13 +432,16 @@ async function collect(db, scope, filters, uid) {
   const proposalIds = new Set();
   for (const row of batches.flat()) {
     if (row.proposalId) proposalIds.add(row.proposalId);
-    if (row.title && row.researcherId) titles.proposal.set(row.id, row.title);
+    if (row.title && row.researcherId && visibleProposal(row, uid, scope.isAdmin)) titles.proposal.set(row.id, row.title);
     if (row.title && row.ownerId && !row.researcherId) titles.problem.set(row.id, row.title);
   }
   const missingTitles = [...proposalIds].filter((id) => id && !titles.proposal.has(id)).slice(0, 40);
   const loadedTitles = await Promise.all(missingTitles.map(async (id) => {
     const snap = await db.collection("proposals").doc(id).get();
-    return snap.exists ? [id, snap.data().title || "Proposal"] : null;
+    if (!snap.exists) return null;
+    const data = snap.data();
+    if (!visibleProposal(data, uid, scope.isAdmin)) return null;
+    return [id, data.title || "Proposal"];
   }));
   for (const entry of loadedTitles) if (entry) titles.proposal.set(entry[0], entry[1]);
   const events = [];

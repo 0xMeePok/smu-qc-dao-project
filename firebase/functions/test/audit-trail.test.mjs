@@ -49,6 +49,7 @@ function memoryDb(initial) {
     },
   });
   return {
+    records,
     collection: (name) => ({
       doc: (id) => ({ get: async () => snapshot(`${name}/${id}`) }),
       where: (field, op, value) => query(name).where(field, op, value),
@@ -172,6 +173,37 @@ describe("QCDAO-96 and QCDAO-97 consolidated audit trail", () => {
       () => readAuditTrail({ db: fixture(), uid: member, profile: profile(0), input: {} }),
       (error) => error instanceof HttpsError && error.code === "permission-denied",
     );
+  });
+
+  it("does not label events with titles of drafts or hidden proposals", async () => {
+    const db = fixture();
+    db.records.set("proposals/draft-proposal", {
+      researcherId: creator, problemId: "problem-1", status: "draft", title: "Secret draft title",
+      createdAt: at("2026-09-02T00:00:00Z"),
+    });
+    db.records.set("proposals/hidden-proposal", {
+      researcherId: creator, problemId: "problem-1", status: "submitted", title: "Secret hidden title",
+      moderationStatus: "hidden", createdAt: at("2026-09-03T00:00:00Z"),
+    });
+    db.records.set("matchingEvents/draft-selected", {
+      type: "owner_selected", problemId: "problem-1", proposalId: "draft-proposal", actorId: owner,
+      actorRole: "problem_owner", createdAt: at("2026-09-18T00:00:00Z"),
+    });
+    db.records.set("matchingEvents/hidden-selected", {
+      type: "owner_selected", problemId: "problem-1", proposalId: "hidden-proposal", actorId: owner,
+      actorRole: "problem_owner", createdAt: at("2026-09-19T00:00:00Z"),
+    });
+    const memberView = await problemTrail(db, member, 0);
+    const memberText = JSON.stringify(memberView.items);
+    assert.equal(memberText.includes("Secret draft title"), false);
+    assert.equal(memberText.includes("Secret hidden title"), false);
+    assert.equal(memberView.items.find((item) => item.proposalId === "draft-proposal").entityLabel, "Route medicines");
+    assert.equal(memberView.items.find((item) => item.proposalId === "hidden-proposal").entityLabel, "Route medicines");
+
+    const adminView = await problemTrail(db, admin, 1);
+    const adminText = JSON.stringify(adminView.items);
+    assert.equal(adminText.includes("Secret draft title"), false);
+    assert.equal(adminText.includes("Secret hidden title"), true);
   });
 
   it("hides trails for records the member cannot view and rejects a bad date range", async () => {
