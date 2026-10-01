@@ -57,3 +57,24 @@ it("refuses ambiguous token symbols, missing decimals and metadata beyond uint25
     }
   });
 });
+
+it("enables grant ABI only for verified deployment evidence bound to both creation helpers", async () => {
+  await scenario(async ({ record, sync, file }) => {
+    const poolAbi = [{ type: "function", name: "deposit", inputs: [{ name: "amount", type: "uint256" }], outputs: [], stateMutability: "nonpayable" }];
+    await writeFile(file("OpenFundingPool"), JSON.stringify({ contractName: "OpenFundingPool", abi: poolAbi }));
+    const escrowDeployerAddress = `0x${"7".repeat(40)}`, openFundingPoolDeployerAddress = `0x${"8".repeat(40)}`;
+    const grantRecord = { ...record, workflowVersion: 2, capabilities: ["open-funding-grants"],
+      escrowDeployer: { address: escrowDeployerAddress }, openFundingPoolDeployer: { address: openFundingPoolDeployerAddress },
+      openFunding: { version: 1, verified: true, registryAddress: record.registry.address, factoryAddress: record.factory.address,
+        escrowDeployerAddress, openFundingPoolDeployerAddress } };
+    const args = ["--open-funding-pool-artifact", file("OpenFundingPool")];
+    await sync(grantRecord, args);
+    assert.deepEqual(JSON.parse(await readFile(file("output"), "utf8")).escrow.openFundingPoolAbi, poolAbi);
+    for (const patch of [{ workflowVersion: 1 }, { capabilities: [] },
+      { openFunding: { ...grantRecord.openFunding, verified: false } },
+      { openFunding: { ...grantRecord.openFunding, factoryAddress: escrowDeployerAddress } },
+      { openFundingPoolDeployer: { address: escrowDeployerAddress } }]) {
+      await assert.rejects(sync({ ...grantRecord, ...patch }, args), /verified grant deployment/);
+    }
+  });
+});

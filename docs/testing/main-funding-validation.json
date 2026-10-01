@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "checks": 9,
+  "results": [
+    "business problem and proposals publish canonical receipts; only the posting owner selects a fully funded proposal",
+    "selection starts exactly seven days and temporarily blocks every sibling without prematurely invalidating their deposits",
+    "dual approval releases exactly 50%, commits the single winner, and refunds losing proposals in full",
+    "owners-only completion requires submitted evidence and both owners before the remaining 50% is released",
+    "funder-voting completion also requires both owners; a 50% tie blocks payment and an 80% weighted majority releases the balance",
+    "problem owner rejection immediately refunds all selected deposits and reopens sibling funding",
+    "proposal owner rejection immediately refunds all selected deposits and reopens sibling funding",
+    "the backend scheduler expires an unapproved selection at seven days, clears its lock, and enables full refunds and sibling funding",
+    "the full seven-day handshake remains usable when the posting closes sooner"
+  ],
+  "projectId": "demo-main-funding-e2e-mup2gt5o",
+  "chainId": 421614,
+  "registry": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "factory": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+  "scope": "Isolated EVM, Firestore emulator, canonical receipts, production settlement worker, signed durable outbox; no live deployment",
+  "validationDate": "2026-10-01",
+  "command": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8180 node scripts/main-funding-e2e.mjs",
+  "regressions": {
+    "openFundingIntegrationChecks": 10,
+    "contractTests": 305,
+    "contractScriptTests": 9,
+    "deploymentVerifierTests": 8,
+    "focusedBackendTests": 165,
+    "frontendNodeTests": 376,
+    "frontendComponentTests": 476,
+    "frontendProductionBuild": "passed; existing chunk size warning"
+  },
+  "deployment": "Active testnet manifests and contracts unchanged. Updated behavior requires deployment of updated contracts and services.",
+  "browserCoverage": "This run exercises real contracts and backend services through an isolated EVM and Firestore emulator; it does not use browser wallet interaction."
+}

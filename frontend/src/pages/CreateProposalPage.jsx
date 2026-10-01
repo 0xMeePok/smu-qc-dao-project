@@ -287,7 +287,8 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       if (editing) {
         if (form.immutableFundingTerms) {
           const current = await findProposal(proposalId, { fromServer: true });
-          if (!current || (await readEscrow({ proposal: current, account: address })).totalDeposited > 0n) {
+          const escrow = current ? await readEscrow({ proposal: current, account: address }) : null;
+          if (!escrow || escrow.totalDeposited > 0n || escrow.grantOfferState) {
             throw new Error("Funding has started. This proposal can no longer be edited.");
           }
         } else {
@@ -387,7 +388,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
               </fieldset>
             </WizardPanel>
             {isOpenFunding && <WizardPanel index={stepIndex("framing")} current={wizard.current}>
-              <fieldset className="field-group" disabled={disabled}><legend>Problem framing</legend><p className="field-hint">The funder acts as the problem owner for selection. Your proposal follows the same evaluation, selection and approval process as a funded problem proposal.</p>{PROBLEM_FRAMING_FIELDS.map(textField)}</fieldset>
+              <fieldset className="field-group" disabled={disabled}><legend>Problem framing</legend><p className="field-hint">The grant owner can select multiple proposals from their deposited funds. If selected, you have seven days to accept before the offer expires.</p>{PROBLEM_FRAMING_FIELDS.map(textField)}</fieldset>
             </WizardPanel>}
             <WizardPanel index={stepIndex("outcomes")} current={wizard.current}>
               <fieldset className="field-group" disabled={disabled}><legend>Outcomes and delivery</legend>{PROPOSAL_FIELDS.slice(4).map(textField)}</fieldset>
@@ -397,7 +398,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
                 <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} error={errors.amount}>
                   {({ id, describedBy, invalid }) => <input id={id} type={ESCROW_LINKED ? "text" : "number"} inputMode="decimal" min="0.000001" max="1000000000" step="any" disabled={ESCROW_LINKED && editing} required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
                 </Field>
-                {ESCROW_LINKED && <EscrowPaymentPlanFields form={form} disabled={disabled || editing} error={errors.fundingPlan} onChange={update} />}
+                {ESCROW_LINKED && <EscrowPaymentPlanFields form={form} grant={isOpenFunding} disabled={disabled || editing} error={errors.fundingPlan} onChange={update} />}
                 {editing && <p className="field-hint">Supporting PDFs cannot be changed after submission. They stay as the files under review.</p>}
                 <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments} onChange={setAttachments} onPendingChange={(count) => setPending(count > 0)} disabled={disabled || editing} />
               </fieldset>

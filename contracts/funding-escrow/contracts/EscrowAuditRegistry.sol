@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {AuditRegistryExtensible} from "audit-registry/contracts/AuditRegistryExtensible.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {FundingTerms, FundingEvent, IFundingFactory, IFundedEscrow} from "./FundingTypes.sol";
+import {FundingTerms, FundingEvent, IFundingFactory, IFundedEscrow, IOpenFundingPool} from "./FundingTypes.sol";
 
 /// @notice Registry deployment whose proposals always receive a canonical escrow.
 contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
@@ -24,6 +24,7 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
     mapping(bytes32 postingId => bool) public postingFundingStarted;
     mapping(bytes32 postingId => bool) public postingFundingPaused;
     mapping(bytes32 postingId => bytes32) public acceptedProposalForPosting;
+    mapping(bytes32 postingId => bytes32) public pendingProposalForPosting;
     mapping(bytes32 proposalId => FundingAnchor[]) private _fundingAnchors;
 
     event FundingFactoryConfigured(address indexed factory);
@@ -76,6 +77,8 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
         if (proposalVoided[proposalId]) revert InvalidState();
         address escrow = proposalEscrow[proposalId];
         if (escrow != address(0) && IFundedEscrow(escrow).totalDeposited() != 0) revert FundingTermsFrozen();
+        address pool = fundingFactory.openFundingPoolForPosting(getProposal(proposalId).opportunityId);
+        if (pool != address(0) && IOpenFundingPool(pool).offerState(proposalId) != 0) revert FundingTermsFrozen();
         super.updateHashes(proposalId, proposalHash, solutionHash, expectedRevision);
     }
 
@@ -89,7 +92,14 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
 
     function isFundingActive(bytes32 proposalId, address escrow) external view returns (bool) {
         if (!_isFundingCurrent(proposalId, escrow)) return false;
-        return !postingFundingPaused[getProposal(proposalId).opportunityId];
+        bytes32 postingId = getProposal(proposalId).opportunityId;
+        bytes32 pending = pendingProposalForPosting[postingId];
+        return !postingFundingPaused[postingId] && (pending == bytes32(0) || pending == proposalId);
+    }
+
+    function recordOpenFundingDeposit(bytes32 postingId) external {
+        if (msg.sender == address(0) || fundingFactory.openFundingPoolForPosting(postingId) != msg.sender) revert AccessDenied();
+        postingFundingStarted[postingId] = true;
     }
 
     /// @notice Reversible moderation never gives permission to permanently void custody.
@@ -102,7 +112,8 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
         if (escrow == address(0) || proposalEscrow[proposalId] != escrow || proposalVoided[proposalId]) return false;
         Proposal memory proposal = getProposal(proposalId);
         bytes32 accepted = acceptedProposalForPosting[proposal.opportunityId];
-        if (accepted != bytes32(0) && accepted != proposalId) return false;
+        if (getOpportunity(proposal.opportunityId).kind != OpportunityKind.OpenFunding
+            && accepted != bytes32(0) && accepted != proposalId) return false;
         return !proposal.withdrawn && !getOpportunity(proposal.opportunityId).withdrawn;
     }
 
@@ -112,12 +123,28 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
         if (eventType == FundingEvent.EscrowCreated || digest == bytes32(0) || actor == address(0)) revert InvalidInput();
         if (eventType == FundingEvent.Deposit) postingFundingStarted[getProposal(proposalId).opportunityId] = true;
         if (eventType == FundingEvent.Voided) proposalVoided[proposalId] = true;
+        bytes32 postingId = getProposal(proposalId).opportunityId;
+        if (getOpportunity(postingId).kind != OpportunityKind.OpenFunding) {
+            if (eventType == FundingEvent.SelectionLocked) {
+                if (pendingProposalForPosting[postingId] != bytes32(0)) revert InvalidState();
+                pendingProposalForPosting[postingId] = proposalId;
+            } else if (eventType == FundingEvent.SelectionInvalidated || eventType == FundingEvent.Expired
+                || eventType == FundingEvent.Cancelled || eventType == FundingEvent.Voided) {
+                if (pendingProposalForPosting[postingId] == proposalId) pendingProposalForPosting[postingId] = bytes32(0);
+            }
+        }
         if (eventType == FundingEvent.TrancheReleased) {
-            bytes32 postingId = getProposal(proposalId).opportunityId;
+            // Grant opportunities support several independent awards. A payout
+            // must never invalidate their other selected proposals.
+            if (getOpportunity(postingId).kind == OpportunityKind.OpenFunding) {
+                _record(proposalId, eventType, digest, actor);
+                return;
+            }
             bytes32 accepted = acceptedProposalForPosting[postingId];
             if (accepted != bytes32(0) && accepted != proposalId) revert InvalidState();
             if (accepted == bytes32(0)) {
                 acceptedProposalForPosting[postingId] = proposalId;
+                pendingProposalForPosting[postingId] = bytes32(0);
                 emit PostingProposalAccepted(postingId, proposalId, msg.sender);
             }
         }

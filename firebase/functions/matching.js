@@ -13,6 +13,9 @@ const usesEscrow = (proposal) => Object.hasOwn(proposal || {}, "fundingTerms");
 function requireMockProposal(proposal) {
   if (usesEscrow(proposal)) fail("failed-precondition", "This proposal uses wallet escrow. Open the proposal to manage its on-chain funding.");
 }
+function requirePooledPosting(problem) {
+  if (problem.opportunityType === "open-funding") fail("failed-precondition", "Open funding uses its owner's prefunded grant pool. Use the grant workflow instead.");
+}
 const millis = (value) => value?.toMillis?.() ?? 0;
 const iso = (value) => value?.toDate?.().toISOString() ?? null;
 function validId(value, name) {
@@ -284,6 +287,7 @@ export async function fundMockProposal({ db, uid, problemId, proposalId, amount,
   const result = await runContendedTransaction(db, async (tx) => {
     const ref = db.collection("mockFunding").doc(id);
     const [ctx, previous] = await Promise.all([readContext({ db, tx, problemId, uid, proposalId, mockAction: true }), tx.get(ref)]);
+    requirePooledPosting(ctx.problem);
     const at = now || Timestamp.now();
     if (previous.exists) {
       const value = previous.data();
@@ -336,6 +340,7 @@ export async function selectMockProposal({ db, uid, problemId, proposalId, ratio
   await prepare({ db, uid, problemId, proposalId, now });
   const result = await runContendedTransaction(db, async (tx) => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId, mockAction: true });
+    requirePooledPosting(ctx.problem);
     const at = now || Timestamp.now();
     if (ctx.problem.ownerId !== uid) fail("permission-denied", "Only the problem owner can select a proposal.");
     if (expireContext(tx, ctx, at)) return { expired: true };
@@ -374,6 +379,7 @@ export async function confirmMockProposal({ db, uid, problemId, proposalId, now 
   await prepare({ db, uid, problemId, proposalId, now });
   const result = await runContendedTransaction(db, async (tx) => {
     const ctx = await readContext({ db, tx, problemId, uid, proposalId, mockAction: true });
+    requirePooledPosting(ctx.problem);
     const at = now || Timestamp.now();
     const chosen = ctx.proposals.find((doc) => doc.id === proposalId);
     const owner = ctx.problem.ownerId === uid;

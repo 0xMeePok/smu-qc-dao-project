@@ -493,8 +493,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             onVerify={() => readFundingOpportunityAudit(published)}
           />
           <div className="form-actions">
+            <button className="primary" type="button" onClick={() => onNavigate(`posting/${published.id}?tab=funding`)}>Deposit grant funds</button>
             <button
-              className="primary"
+              className="secondary"
               type="button"
               onClick={() => onNavigate(`posting/${published.id}`)}
             >

@@ -49,9 +49,9 @@ describe("Milestone payments: immutable plans, arithmetic and approvals", functi
     const now = BigInt((await c.ethers.provider.getBlock("latest")).timestamp);
     expect(await c.escrow.approvalDeadline()).to.equal(now + 7n * 86400n);
   });
-  it("uses a shorter first review window when configured", async function () {
+  it("keeps seven days for the handshake even with a shorter first review window", async function () {
     const c = await fixture({ reviewWindows: [3600] }); await lock(c);
-    expect(await c.escrow.approvalDeadline()).to.equal(BigInt((await c.ethers.provider.getBlock("latest")).timestamp) + 3600n);
+    expect(await c.escrow.approvalDeadline()).to.equal(BigInt((await c.ethers.provider.getBlock("latest")).timestamp) + 7n * 86400n);
   });
   it("handles full-width multiplication without intermediate overflow", async function () {
     const c = await fixture({ target: 1n << 250n, feeBps: 9999, trancheBps: [3333, 3333, 3334] });
@@ -180,4 +180,3 @@ describe("Optional funder voting: additional to dual approval", function () {
     await assertAccounting(c);
   });
 });
-

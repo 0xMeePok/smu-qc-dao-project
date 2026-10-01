@@ -13,6 +13,7 @@ import { resolveDomain } from "./siweOrigin.js";
 import { registerModerationCallables } from "./moderationFunctions.js";
 import { registerMatchingNotificationFunctions } from "./matchingNotifications.js";
 import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
+import { registerOpenFundingFunctions } from "./openFundingFunctions.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
   applyRoleChangeTransaction,
@@ -163,6 +164,7 @@ export const syncProblemMarketplaceMetrics = onDocumentWritten(
 
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,
+  cacheTime: 0,
   transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL || undefined),
 });
 
@@ -188,6 +190,10 @@ const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
 export const { prepareEscrowDeposit, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
   startEscrowSettlement, queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
   db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+});
+
+export const { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding, getFunderDashboard } = registerOpenFundingFunctions({
+  db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS,
 });
 
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,

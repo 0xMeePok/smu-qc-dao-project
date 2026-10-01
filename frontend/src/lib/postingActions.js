@@ -66,6 +66,7 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
 
   if (
     isAuthenticated
+    && posting.opportunityType !== OPEN_FUNDING_TYPE
     && roles.some(role => [ROLES.FUNDER, ROLES.OWNER].includes(role))
     && !user?.isSuspended
     && !posting.moderated && !isModerated(posting)
@@ -88,6 +89,10 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
       label: "Review proposals",
       kind: "primary",
     });
+  }
+
+  if (isAuthenticated && owns && posting.opportunityType === OPEN_FUNDING_TYPE && status !== "draft" && !isModerated(posting)) {
+    actions.push({ id: "fund", label: "Manage grant funding", route: "funding", kind: "secondary" });
   }
 
   if (isAuthenticated && roles.includes(ROLES.EVALUATOR) && EVALUABLE_STATUSES.has(status) && !deadlinePassed) {

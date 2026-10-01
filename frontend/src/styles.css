@@ -1419,6 +1419,13 @@ input[type="radio"] { accent-color: var(--brand); }
   margin-bottom: 36px;
 }
 
+.funder-totals { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.funder-totals .stat-num { font-size: 22px; overflow-wrap: anywhere; }
+.funder-dashboard .table-row > div { min-width: 0; }
+.funder-dashboard .table-row-meta { overflow-wrap: anywhere; }
+@media (max-width: 900px) { .funder-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { .funder-totals { grid-template-columns: 1fr; } }
+
 .stat-card {
   display: flex;
   flex-direction: column;

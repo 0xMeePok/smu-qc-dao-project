@@ -94,8 +94,18 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
         const refund = named("RefundsOpened").filter(log => log.logIndex < anchor.logIndex).at(-1);
         if (changed && refund) {
           const laterReleases = escrowLogs.filter(log => log.eventName === "TrancheReleased" && log.logIndex > anchor.logIndex).length;
+          const previousState = Number(changed.args.previousState);
+          let approvalExpiry = previousState === 6 || (previousState === 1
+            && (config.abi.some(item => item.type === "function" && item.name === "pendingProposalForPosting")
+              || config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "rejectSelection")));
+          // Grant escrows used their acceptance approval deadline before the
+          // main workflow gained its separate pending-selection registry lock.
+          if (previousState === 1 && !approvalExpiry && config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "openFundingPool")) {
+            const pool = await read("openFundingPool");
+            approvalExpiry = /^0x[0-9a-f]{40}$/i.test(pool ?? "") && !/^0x0{40}$/i.test(pool);
+          }
           add(refund, ["uint256", "uint256", "uint256"],
-            [BigInt(tranche) - BigInt(laterReleases), Number(changed.args.previousState) === 6 ? deadline : expiresAt, refund.args.pool]);
+            [BigInt(tranche) - BigInt(laterReleases), approvalExpiry ? deadline : expiresAt, refund.args.pool]);
         }
         break;
       }

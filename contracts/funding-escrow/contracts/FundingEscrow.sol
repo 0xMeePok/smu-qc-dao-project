@@ -67,6 +67,7 @@ contract FundingEscrow is ReentrancyGuard {
     IEscrowAuditRegistry public immutable auditRegistry;
     uint8 public immutable tokenDecimals;
     bool public immutable funderVoting;
+    address public immutable openFundingPool;
 
     State public state;
     uint256 public totalDeposited;
@@ -140,6 +141,7 @@ contract FundingEscrow is ReentrancyGuard {
         auditRegistry = IEscrowAuditRegistry(init.auditRegistry);
         tokenDecimals = IFundingFactory(init.factory).tokenDecimals(init.token);
         funderVoting = init.funderVoting;
+        openFundingPool = IFundingFactory(init.factory).openFundingPoolForPosting(init.postingId);
         _buildPlan(init.target, bps, windows, descriptions);
     }
 
@@ -161,6 +163,7 @@ contract FundingEscrow is ReentrancyGuard {
     }
 
     function deposit(uint256 amount) external nonReentrant {
+        if (openFundingPool != address(0)) revert AccessDenied();
         if (state != State.Open) revert InvalidState();
         if (block.timestamp >= expiresAt) revert WindowClosed();
         _requireWorkflowActive();
@@ -183,6 +186,7 @@ contract FundingEscrow is ReentrancyGuard {
     }
 
     function lockSelection(bytes32 selectionId_, address solutionOwner_) external nonReentrant onlyPlatform {
+        if (openFundingPool != address(0)) revert AccessDenied();
         if (state != State.Open) revert InvalidState();
         if (block.timestamp >= expiresAt) revert WindowClosed();
         _requireWorkflowActive();
@@ -191,13 +195,59 @@ contract FundingEscrow is ReentrancyGuard {
         selectionId = selectionId_;
         usedSelections[selectionId_] = true;
         solutionOwner = solutionOwner_;
-        uint256 window = _milestones[0].reviewWindow;
-        if (window > APPROVAL_WINDOW) window = APPROVAL_WINDOW;
-        uint256 deadline = block.timestamp + window;
-        approvalDeadline = deadline < expiresAt ? uint64(deadline) : expiresAt;
+        approvalDeadline = uint64(block.timestamp + APPROVAL_WINDOW);
         _setState(State.Locked);
         _audit(FundingEvent.SelectionLocked, keccak256(abi.encode(selectionId_, solutionOwner_, approvalDeadline)));
         emit SelectionLocked(selectionId_, solutionOwner_, approvalDeadline);
+    }
+
+    /// @notice The selected grant is fully funded by its owner's custody pool.
+    /// Owner selection and researcher acceptance satisfy the initial dual approval.
+    function acceptOpenFunding() external nonReentrant {
+        if (msg.sender != openFundingPool || openFundingPool == address(0)) revert AccessDenied();
+        if (state != State.Open || totalDeposited != 0) revert InvalidState();
+        _requireWorkflowActive();
+        if (!tokenRegistry.allowedTokens(address(token))) revert TokenNotListed();
+        TokenDecimals.requireUnchanged(address(token), tokenDecimals);
+        uint256 amount = fundingTarget;
+        _recordContribution(problemOwner, amount);
+        contributions[problemOwner] = amount;
+        depositCounts[problemOwner] = 1;
+        totalDeposited = amount;
+        totalDepositCount = 1;
+        auditRegistry.recordFundingEvent(proposalId, FundingEvent.Deposit,
+            keccak256(abi.encode(problemOwner, amount, amount)), problemOwner);
+        _transferInExact(msg.sender, amount);
+        TokenDecimals.requireUnchanged(address(token), tokenDecimals);
+        _requireWorkflowActive();
+        selectionId = proposalId;
+        usedSelections[proposalId] = true;
+        solutionOwner = proposalOwner;
+        uint256 window = _milestones[0].reviewWindow;
+        if (window > APPROVAL_WINDOW) window = APPROVAL_WINDOW;
+        approvalDeadline = uint64(block.timestamp + window);
+        ownerApproved = true;
+        solutionApproved = true;
+        _setState(State.Locked);
+        _audit(FundingEvent.SelectionLocked, keccak256(abi.encode(selectionId, proposalOwner, approvalDeadline)));
+        auditRegistry.recordFundingEvent(proposalId, FundingEvent.Approval,
+            keccak256(abi.encode(selectionId, uint256(0), problemOwner)), problemOwner);
+        auditRegistry.recordFundingEvent(proposalId, FundingEvent.Approval,
+            keccak256(abi.encode(selectionId, uint256(0), proposalOwner)), proposalOwner);
+        emit Deposited(postingId, proposalId, problemOwner, address(token), amount, amount, 1);
+        emit SelectionLocked(selectionId, solutionOwner, approvalDeadline);
+        emit SelectionApproved(selectionId, problemOwner);
+        emit SelectionApproved(selectionId, proposalOwner);
+    }
+
+    /// @notice An unanswered or withdrawn grant is voided without moving custody.
+    function voidOpenFunding() external nonReentrant {
+        if (msg.sender != openFundingPool || openFundingPool == address(0)) revert AccessDenied();
+        if (state == State.Voided) return; // An admin may already have invalidated it.
+        if (totalDeposited != 0) revert InvalidState();
+        _openRefunds(State.Voided, uint64(block.timestamp));
+        _audit(FundingEvent.Voided, keccak256("OPEN_FUNDING_OFFER_VOIDED"));
+        emit EscrowVoided(msg.sender, keccak256("OPEN_FUNDING_OFFER_VOIDED"), 0);
     }
 
     /// @dev A growing Fenwick tree preserves cumulative wallet intervals without
@@ -334,15 +384,26 @@ contract FundingEscrow is ReentrancyGuard {
     }
 
     function invalidateSelection(bytes32 expectedSelectionId, bytes32 reasonHash) external nonReentrant onlyPlatform {
+        _invalidateSelection(expectedSelectionId, reasonHash);
+    }
+
+    /// @notice Either owner can reject the main workflow's unpaid selection.
+    function rejectSelection(bytes32 expectedSelectionId, bytes32 reasonHash) external nonReentrant {
+        if (openFundingPool != address(0) || (msg.sender != problemOwner && msg.sender != proposalOwner)) revert AccessDenied();
+        if (state != State.Locked || selectionId != expectedSelectionId) revert InvalidState();
+        if (block.timestamp >= approvalDeadline) revert WindowClosed();
+        _invalidateSelection(expectedSelectionId, reasonHash);
+    }
+
+    function _invalidateSelection(bytes32 expectedSelectionId, bytes32 reasonHash) private {
         if (state != State.Locked || selectionId != expectedSelectionId) revert InvalidState();
         if (reasonHash == bytes32(0)) revert InvalidInput();
+        _openRefunds(State.Cancelled, uint64(block.timestamp));
         selectionId = bytes32(0);
         solutionOwner = address(0);
         approvalDeadline = 0;
         ownerApproved = false;
         solutionApproved = false;
-        if (block.timestamp >= expiresAt) _expire();
-        else _setState(State.Open);
         _audit(FundingEvent.SelectionInvalidated, keccak256(abi.encode(expectedSelectionId, reasonHash)));
         emit SelectionInvalidated(expectedSelectionId, reasonHash);
     }
@@ -379,7 +440,11 @@ contract FundingEscrow is ReentrancyGuard {
 
     function _expire() private {
         if (state != State.Open && state != State.Locked && state != State.Active) revert InvalidState();
-        uint256 deadline = state == State.Active ? approvalDeadline : expiresAt;
+        // Unfunded grant offers expire through their pool, whose seven-day
+        // reservation window may outlive the posting's submission deadline.
+        if (openFundingPool != address(0) && state == State.Open) revert InvalidState();
+        uint256 deadline = state == State.Active || state == State.Locked
+            ? approvalDeadline : expiresAt;
         if (block.timestamp < deadline) revert WindowStillOpen();
         _openRefunds(State.Expired, uint64(block.timestamp));
         _audit(FundingEvent.Expired, keccak256(abi.encode(currentTranche, deadline, refundPool)));
@@ -428,7 +493,8 @@ contract FundingEscrow is ReentrancyGuard {
         if (unpaid == 0) { summary.status = DepositStatus.Released; return summary; }
         if (summary.refunded == unpaid) { summary.status = DepositStatus.Refunded; return summary; }
         bool eligible = refundsEnabled ? block.timestamp >= refundAvailableAt
-            : block.timestamp >= (state == State.Active ? approvalDeadline : expiresAt);
+            : block.timestamp >= (state == State.Active || state == State.Locked
+                ? approvalDeadline : expiresAt);
         if (eligible) {
             summary.claimable = unpaid - summary.refunded;
             summary.status = DepositStatus.Refundable;

@@ -31,3 +31,13 @@ edd939476d97aacc286dbe11f8031e8f735d971c:contracts/funding-escrow/test/FundingEs
 # Keep these exceptions tied to the exact committed findings, not future file contents.
 d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json:generic-api-key:8
 d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json:generic-api-key:188
+
+# Oct 1 local wallet evidence: these seven findings are the public mock-USDC
+# contract address, not credentials. Scope exceptions to the exact committed findings.
+9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:144
+9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:240
+9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:317
+9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:376
+9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:390
+9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:403
+9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:420

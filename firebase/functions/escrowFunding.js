@@ -19,6 +19,8 @@ const timestamp = ms => Timestamp.fromMillis(ms);
 const blocked = data => data?.moderated || ["hidden", "removed"].includes(data?.moderationStatus);
 const desiredPostingPause = data => Boolean(blocked(data) || ["withdrawn", "cancelled", "draft"].includes(data?.status));
 export const deploymentKey = config => `${config.chainId}_${config.address.toLowerCase()}`;
+const isOpenFunding = (record, parent) => record?.opportunityType === "open-funding" || parent?.opportunityType === "open-funding";
+const hasRegistryFunction = (config, name) => config.abi?.some(item => item.type === "function" && item.name === name);
 const jobKey = (config, id) => `${deploymentKey(config)}_${id}`;
 const publicSettlement = job => job?.settlement ?? { status: "waiting", message: "Waiting for the selected proposal and both owners' approvals." };
 const safeMessage = error => error instanceof HttpsError ? error.message
@@ -57,9 +59,12 @@ export function fundingBlockReason(record, parent, chain, now = Date.now(), { de
   if (blocked(parent) || blocked(record)) return "Funding is paused while this content is moderated.";
   if (["draft", "withdrawn", "cancelled", "rejected"].includes(record.status)
       || ["draft", "withdrawn", "cancelled"].includes(parent.status)) return "This posting or proposal is no longer eligible for funding.";
-  const accepted = parent.acceptedProposalId || parent.escrowSelection?.proposalId;
+  const accepted = isOpenFunding(record, parent) ? null : parent.acceptedProposalId || parent.escrowSelection?.proposalId;
   if (accepted && accepted !== record.id) return "A different proposal has been selected for this posting.";
-  if (parent.acceptedSolutionId && parent.acceptedSolutionId !== record.id) return "This posting already has an accepted solution.";
+  if (!isOpenFunding(record, parent) && parent.acceptedSolutionId && parent.acceptedSolutionId !== record.id) return "This posting already has an accepted solution.";
+  if (deposit && isOpenFunding(record, parent)) return "Open funding is deposited by its owner into the grant pool. Use the grant workflow for this proposal.";
+  if (!isOpenFunding(record, parent) && chain?.pendingProposalEntityId && !same(chain.pendingProposalEntityId, ZERO)
+      && !same(chain.pendingProposalEntityId, chain.proposalEntityId)) return "A different proposal is awaiting owner acceptance for this posting.";
   if (chain && !chain.active) return "The on-chain posting or proposal is inactive or paused.";
   if (deposit && (! ["submitted", "open"].includes(parent.status)
       || !["submitted", "under_review"].includes(record.status)
@@ -87,10 +92,17 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     "selectionId", "ownerApproved", "solutionApproved", "yesWeight", "approvalDeadline", "expiresAt", "platformSigner"];
   const values = await Promise.all(names.map(functionName => read({ address: escrow.address, abi: config.escrow.escrowAbi, functionName })));
   const data = Object.fromEntries(names.map((name, i) => [name, values[i]]));
-  const [active, count] = await Promise.all([
+  const [active, invalidated, count, pendingProposalEntityId, block] = await Promise.all([
     read({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, escrow.address] }),
+    read({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, escrow.address] }),
     read({ address: config.address, abi: config.abi, functionName: "fundingAnchorCount", args: [expected.entityId] }),
+    !isOpenFunding(record, parent) && hasRegistryFunction(config, "pendingProposalForPosting")
+      ? read({ address: config.address, abi: config.abi, functionName: "pendingProposalForPosting", args: [expected.opportunityId] }) : null,
+    client.getBlock({ blockNumber }),
   ]);
+  if (typeof block?.timestamp !== "bigint" || block.timestamp < 0n || block.timestamp > BigInt(Math.floor(Number.MAX_SAFE_INTEGER / 1000))) {
+    throw new Error("Escrow reconciliation mismatch: confirmed block time cannot be verified.");
+  }
   const milestones = await Promise.all(expected.fundingTerms.trancheBps.map((_, index) => read({ address: escrow.address,
     abi: config.escrow.escrowAbi, functionName: "milestoneAt", args: [BigInt(index)] })));
   const token = config.escrow.tokens.find(item => same(item.address, expected.fundingTerms.token));
@@ -101,9 +113,10 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     totalReleased: String(data.totalReleased), totalRefunded: String(data.totalRefunded), outstandingBalance: String(data.outstandingBalance),
     fundingTarget: expected.fundingTerms.target.toString(), expiresAt: String(data.expiresAt),
     upfrontReleased: milestoneValue(milestones[0], "paid", 6) === true,
-    finalReleased: milestoneValue(milestones.at(-1), "paid", 6) === true, active,
-    blockNumber: Number(blockNumber), currentTranche: Number(data.currentTranche) };
-  summary.fundingBlockReason = fundingBlockReason(record, parent, summary, Date.now(), { deposit: true });
+    finalReleased: milestoneValue(milestones.at(-1), "paid", 6) === true, active, invalidated,
+    proposalEntityId: expected.entityId, pendingProposalEntityId,
+    timestamp: Number(block.timestamp), blockNumber: Number(blockNumber), currentTranche: Number(data.currentTranche) };
+  summary.fundingBlockReason = fundingBlockReason(record, parent, summary, summary.timestamp * 1000, { deposit: true });
   return { expected, escrow, data, summary, milestones, anchorCount: Number(count) };
 }
 
@@ -169,9 +182,10 @@ export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
 export async function prepareEscrowDeposit({ db, client, config, uid, proposalId }) {
   await assertFundingChain(client, config);
   const context = await loadFundingContext({ db, uid, proposalId });
-  const blockNumber = await client.getBlockNumber();
+  if (isOpenFunding(context.record, context.parent)) fail("failed-precondition", "Open funding is deposited by its owner into the grant pool. Use the grant workflow for this proposal.");
+  const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
   const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
-  const reason = fundingBlockReason(context.record, context.parent, verified.summary, Date.now(), { deposit: true });
+  const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000, { deposit: true });
   if (reason) fail("failed-precondition", reason);
   await enqueueEscrowFunding({ db, config, record: context.record });
   return { escrowAddress: verified.escrow.address, tokenAddress: verified.summary.tokenAddress, chainId: config.chainId,
@@ -246,7 +260,7 @@ export async function resumePlatformTransaction({ db, client, config, now = Time
   if (!pending?.transactionHash) return { status: "idle" };
   let receipt;
   try { receipt = await client.getTransactionReceipt({ hash: pending.transactionHash }); } catch { /* not mined */ }
-  const head = await client.getBlockNumber();
+  const head = await client.getBlockNumber({ cacheTime: 0 });
   if (!receipt || receipt.blockNumber + 1n > head) {
     if (!receipt && pending.signerAddress && Number.isInteger(pending.nonce)) {
       const confirmedNonce = await client.getTransactionCount({ address: pending.signerAddress, blockNumber: head - 1n });
@@ -283,17 +297,30 @@ export async function resumePlatformTransaction({ db, client, config, now = Time
 
 export function settlementAction({ verified, config, record, parent, job, now }) {
   const { data, expected, summary, milestones, escrow } = verified;
-  const reason = fundingBlockReason(record, parent, summary, now.toMillis());
-  if (reason) return { settlement: { status: "blocked", message: reason } };
   const base = { address: escrow.address, abi: config.escrow.escrowAbi, proposalId: record.id };
-  if (summary.state === "Open" && job.selectionRequested && !fundingBlockReason(record, parent, summary, now.toMillis(), { deposit: false })
-      && BigInt(summary.totalDeposited) === BigInt(summary.fundingTarget) && BigInt(data.expiresAt) * 1000n > BigInt(now.toMillis())) {
+  const chainMillis = summary.timestamp * 1000;
+  if (["Open", "Locked", "Active"].includes(summary.state) && summary.invalidated) {
+    return { action: { ...base, key: `refund-invalidated:${record.id}`, functionName: "refundInvalidated", args: [] } };
+  }
+  const deadline = summary.state === "Active" || (summary.state === "Locked"
+    && (isOpenFunding(record, parent) || hasRegistryFunction(config, "pendingProposalForPosting")))
+    ? BigInt(data.approvalDeadline) : BigInt(data.expiresAt);
+  if (["Open", "Locked", "Active"].includes(summary.state) && !(summary.state === "Open" && isOpenFunding(record, parent))
+      && deadline * 1000n <= BigInt(chainMillis)) {
+    return { action: { ...base, key: `expire:${record.id}:${data.currentTranche}:${deadline}`, functionName: "expire", args: [] } };
+  }
+  const reason = fundingBlockReason(record, parent, summary, chainMillis);
+  if (reason) return { settlement: { status: "blocked", message: reason } };
+  if (!isOpenFunding(record, parent) && summary.state === "Open" && job.selectionRequested && !fundingBlockReason(record, parent, summary, chainMillis, { deposit: false })
+      && BigInt(summary.totalDeposited) === BigInt(summary.fundingTarget) && BigInt(data.expiresAt) * 1000n > BigInt(chainMillis)) {
     return { action: { ...base, key: `select:${record.id}:${job.selectionId}`, functionName: "lockSelection",
       args: [job.selectionId, expected.expectedResearcher] } };
   }
   if (!["Locked", "Active"].includes(summary.state)) return { settlement: { status: summary.state === "Released" ? "complete" : "waiting",
-    message: summary.state === "Released" ? "Both escrow payments are confirmed." : "The posting owner must select the fully funded proposal." } };
-  if (BigInt(data.approvalDeadline) * 1000n <= BigInt(now.toMillis())) return { settlement: { status: "blocked", message: "The approval window has elapsed." } };
+    message: summary.state === "Released" ? "Both escrow payments are confirmed." : isOpenFunding(record, parent)
+      ? summary.state === "Open" ? "Grant funding moves into this escrow when the researcher accepts the selected offer." : `The grant escrow is ${summary.state.toLowerCase()}.`
+      : "The posting owner must select the fully funded proposal." } };
+  if (BigInt(data.approvalDeadline) * 1000n <= BigInt(chainMillis)) return { settlement: { status: "blocked", message: "The approval window has elapsed." } };
   if (!data.ownerApproved || !data.solutionApproved) return { settlement: { status: "awaiting-approvals", message: "Both owners must approve the current payment." } };
   const index = Number(data.currentTranche), milestone = milestones[index];
   if (index > 0 && expected.fundingTerms.funderVoting && BigInt(data.yesWeight) <= BigInt(summary.totalDeposited) / 2n) {
@@ -321,7 +348,7 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
   });
   if (!job) return getEscrowFundingHistory({ db, config, uid, proposalId });
   try {
-    const head = await client.getBlockNumber(), safeBlock = head - 1n;
+    const head = await client.getBlockNumber({ cacheTime: 0 }), safeBlock = head - 1n;
     const fromBlock = job.cursorBlock == null ? await initialBlock(context.record, client, config) : BigInt(job.cursorBlock) + 1n;
     if (job.cursorBlock != null) {
       const previous = await client.getBlock({ blockNumber: BigInt(job.cursorBlock) });
@@ -388,7 +415,7 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
       if (complete) tx.set(db.collection(FUNDING_SUMMARIES).doc(jobKey(config, proposalId)), {
         ...verified.summary, transactionHash: lastHash, confirmedAt: now.toDate().toISOString(), reconciliation,
       });
-      if (complete && verified.summary.upfrontReleased && parent?.exists && parent.data().acceptedProposalId !== proposalId) {
+      if (!isOpenFunding(context.record, context.parent) && complete && verified.summary.upfrontReleased && parent?.exists && parent.data().acceptedProposalId !== proposalId) {
         tx.update(parentRef, { acceptedProposalId: proposalId, hasAcceptedSolution: true, updatedAt: now });
       }
       if (complete && verified.summary.upfrontReleased && proposal?.exists && ["submitted", "under_review"].includes(proposal.data().status)) {
@@ -420,20 +447,21 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
 export async function startEscrowSettlement(options) {
   const { db, config, uid, proposalId, client, now = Timestamp.now() } = options;
   const context = await loadFundingContext({ db, uid, proposalId });
+  if (isOpenFunding(context.record, context.parent)) fail("failed-precondition", "Select grant proposals from the prefunded open funding pool.");
   if (!same(context.parent.ownerId, uid)) fail("permission-denied", "Only the posting owner may select the funded proposal.");
   await assertFundingChain(client, config);
-  const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: await client.getBlockNumber() - 1n });
-  const reason = fundingBlockReason(context.record, context.parent, verified.summary, now.toMillis());
+  const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: await client.getBlockNumber({ cacheTime: 0 }) - 1n });
+  const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000);
   if (reason) fail("failed-precondition", reason);
   if (verified.summary.state !== "Open" || BigInt(verified.summary.totalDeposited) !== BigInt(verified.summary.fundingTarget)
-      || BigInt(verified.summary.expiresAt) * 1000n <= BigInt(now.toMillis())) fail("failed-precondition", "Selection requires a fully funded, open escrow.");
+      || BigInt(verified.summary.expiresAt) * 1000n <= BigInt(verified.summary.timestamp * 1000)) fail("failed-precondition", "Selection requires a fully funded, open escrow.");
   await enqueueEscrowFunding({ db, config, record: context.record, now });
   const ref = db.collection(FUNDING_JOBS).doc(jobKey(config, proposalId));
   await db.runTransaction(async tx => {
     const parentRef = db.collection("problems").doc(context.record.problemId), proposalRef = db.collection("proposals").doc(proposalId);
     const [parent, proposal, job] = await Promise.all([tx.get(parentRef), tx.get(proposalRef), tx.get(ref)]);
     if (!job.exists) fail("failed-precondition", "Confirm the proposal's registry receipt before selecting it.");
-    const blockedReason = fundingBlockReason({ ...proposal.data(), id: proposalId }, parent.data(), verified.summary, now.toMillis());
+    const blockedReason = fundingBlockReason({ ...proposal.data(), id: proposalId }, parent.data(), verified.summary, verified.summary.timestamp * 1000);
     if (blockedReason || !same(parent.data().ownerId, uid)) fail("failed-precondition", blockedReason || "Posting ownership changed.");
     const selectionId = job.data().selectionRequested ? job.data().selectionId : keccak256(stringToHex(`${jobKey(config, proposalId)}:${randomUUID()}`));
     tx.set(ref, { ...job.data(), selectionRequested: true, selectionId, requestedBy: uid, nextAttemptAt: now, updatedAt: now });

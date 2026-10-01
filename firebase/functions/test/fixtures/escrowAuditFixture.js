@@ -39,6 +39,7 @@ export function escrowClient(record = escrowRecord()) {
         if (functionName === "getOpportunity") return { owner, expiresAt: 2_000_000_000n };
         if (functionName === "fundingFactory") return escrowConfig.escrow.factoryAddress;
         if (functionName === "proposalEscrow") return escrowAddress;
+        if (functionName === "pendingProposalForPosting") return `0x${"0".repeat(64)}`;
         if (functionName === "anchorCount") return 1n;
         if (functionName === "anchorAt") return { contentHash: expected.anchorHash };
       } else if (address.toLowerCase() === escrowConfig.escrow.factoryAddress) {
@@ -48,7 +49,8 @@ export function escrowClient(record = escrowRecord()) {
         const values = { postingId: expected.opportunityId, proposalId: expected.entityId, token: terms.token,
           fundingTarget: terms.target, funderVoting: terms.funderVoting, proposalOwner: researcher, problemOwner: owner,
           tokenRegistry: escrowConfig.escrow.factoryAddress, auditRegistry: escrowConfig.address,
-          milestoneCount: BigInt(terms.trancheBps.length), expiresAt: 2_000_000_000n, tokenDecimals: 6 };
+          milestoneCount: BigInt(terms.trancheBps.length), expiresAt: 2_000_000_000n, tokenDecimals: 6,
+          openFundingPool: `0x${"0".repeat(40)}` };
         if (functionName in values) return values[functionName];
         if (functionName === "milestoneAt") {
           const index = Number(args[0]);

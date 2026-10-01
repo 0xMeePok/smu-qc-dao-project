@@ -2,6 +2,7 @@ import { expect } from "chai";
 import fs from "node:fs";
 import { fixture } from "../test/helpers.js";
 import { runtimeMatches, verifyEscrowDeployment } from "../lib/verifyDeployment.js";
+import { creationHelpersFromFactoryBuild, loadEscrowDeploymentArtifacts } from "../lib/deploymentArtifacts.js";
 
 const load = name => JSON.parse(fs.readFileSync(new URL(`../artifacts/contracts/${name}.sol/${name}.json`, import.meta.url)));
 
@@ -15,7 +16,7 @@ async function setup() {
   // identifier is adapted to exercise the verifier's Arbitrum Sepolia policy.
   const provider = { getNetwork: async () => ({ chainId: 421614n }),
     getCode: address => c.ethers.provider.getCode(address), call: request => c.ethers.provider.call(request) };
-  const artifacts = { registry: load("EscrowAuditRegistry"), factory: load("FundingEscrowFactory") };
+  const artifacts = await loadEscrowDeploymentArtifacts();
   return { c, record, provider, artifacts };
 }
 
@@ -28,6 +29,8 @@ describe("Read-only linked registry deployment verifier", function () {
     expect(result.wiringMatches).to.equal(true);
     expect(result.readOnly).to.equal(true);
     expect(result.factoryAddress).to.equal(await c.factory.getAddress());
+    expect(result.openFundingGrants).to.equal(true);
+    expect(result.escrowDeployer).to.equal(await c.factory.escrowDeployer());
     expect(await c.ethers.provider.getTransactionCount(c.admin.address)).to.equal(nonce);
   });
   it("rejects the wrong chain and incomplete deployment records", async function () {
@@ -65,10 +68,34 @@ describe("Read-only linked registry deployment verifier", function () {
     await c.factory.connect(c.admin).setFeeBps(10);
     expect((await verifyEscrowDeployment(provider, record, artifacts)).feeBps).to.equal(10);
   });
+  it("rejects unverified or mismatched creation helpers", async function () {
+    const { c, record, provider, artifacts } = await setup();
+    await expect(verifyEscrowDeployment(provider, record, { ...artifacts, escrowDeployer: undefined }))
+      .to.be.rejectedWith("helper artifacts");
+    await expect(verifyEscrowDeployment(provider, { ...record, openFundingPoolDeployer: { address: c.other.address } }, artifacts))
+      .to.be.rejectedWith("helper deployment record mismatch");
+    const helper = await c.factory.openFundingPoolDeployer();
+    const changed = { ...provider, getCode: async address => address === helper ? "0x00" : provider.getCode(address) };
+    await expect(verifyEscrowDeployment(changed, record, artifacts)).to.be.rejectedWith("helper bytecode or wiring mismatch");
+  });
   it("keeps the staged application ABIs identical to the compiled production interfaces", function () {
     const staged = JSON.parse(fs.readFileSync(new URL("../../../firebase/functions/escrowRegistry.abis.json", import.meta.url)));
     expect(staged.registry).to.deep.equal(load("EscrowAuditRegistry").abi);
     expect(staged.factory).to.deep.equal(load("FundingEscrowFactory").abi);
     expect(staged.escrow).to.deep.equal(load("FundingEscrow").abi);
+    expect(staged.openFundingPool).to.deep.equal(load("OpenFundingPool").abi);
+  });
+  it("verifies embedded helper metadata from the factory compilation without discarding metadata bytes", async function () {
+    const { c, artifacts } = await setup();
+    const code = await c.ethers.provider.getCode(await c.factory.escrowDeployer());
+    expect(runtimeMatches(code, artifacts.escrowDeployer)).to.equal(true);
+    const offset = artifacts.escrowDeployer.deployedBytecode.length - 30;
+    const changed = code.slice(0, offset) + (code.slice(offset, offset + 2) === "00" ? "01" : "00") + code.slice(offset + 2);
+    expect(runtimeMatches(changed, artifacts.escrowDeployer)).to.equal(false);
+    const output = JSON.parse(fs.readFileSync(new URL(`../artifacts/build-info/${artifacts.factory.buildInfoId}.output.json`, import.meta.url)));
+    expect(() => creationHelpersFromFactoryBuild({ ...artifacts.factory, bytecode: "0x00" }, output)).to.throw("does not match");
+    const missing = structuredClone(output);
+    delete missing.output.contracts["project/contracts/FundingEscrowDeployer.sol"];
+    expect(() => creationHelpersFromFactoryBuild(artifacts.factory, missing)).to.throw("missing");
   });
 });
