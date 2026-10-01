@@ -1,6 +1,7 @@
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
 import { EscrowFundingPanel } from "../components/EscrowFundingPanel.jsx";
+import { OpenFundingPanel } from "../components/OpenFundingPanel.jsx";
 import { readEscrow } from "../lib/escrow.js";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -35,7 +36,7 @@ import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
 // control below is for a receipt that was left in flight.
-export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false }) {
+export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false, initialTab = "overview" }) {
   const { user } = useAuth();
   const { address, isConnected } = useAccount();
   const [proposal, setProposal] = useState(null);
@@ -52,7 +53,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   // withdrawProposal that would revert — and so the anchored reason cannot be
   // edited into something the receipt no longer describes.
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(initialTab);
   const [escrowState, setEscrowState] = useState(null);
   useEffect(() => {
     const fundingStarted = proposal?.fundingTerms ? escrowState?.totalDeposited > 0n : proposalMatchingLocked(proposal)
@@ -68,13 +69,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setProposal(null); setEscrowState(null); setError(""); setConfirm(false);
-    setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab("overview");
+    setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab);
     setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [proposalId]);
+  }, [proposalId, initialTab]);
   useEffect(() => {
     if (!proposal?.id) return undefined;
     const commentId = new URLSearchParams(window.location.hash.split("?")[1] || "").get("comment");
@@ -207,7 +208,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const locked = !listingOpen || (proposal.fundingTerms
     ? (independent ? escrowState?.totalDeposited > 0n : !escrowState || escrowState.totalDeposited > 0n)
     : proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status));
-  const canEdit = owns && !locked && proposal.status === "submitted";
+  const canEdit = owns && !locked && !escrowState?.grantOfferState && proposal.status === "submitted";
   const canWithdraw = owns && !locked && ["submitted", "under_review"].includes(proposal.status);
   const funding = proposalFundingStatus(proposal);
   return <section className="page detail-page blotter-posting">
@@ -256,7 +257,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
           </DetailGroup>
         </> : <>
         {isOpenFunding && <>
-          <p className="field-hint posting-tab-note">The funder acts as the problem owner for selection. This proposal follows the same funding, selection and approval process as other solution proposals.</p>
+          <p className="field-hint posting-tab-note">The grant owner can select multiple proposals from their deposited funds. You have seven days to accept a selected grant; acceptance funds this proposal’s escrow and starts its payment plan.</p>
           <DetailGroup title="The problem">
             <DetailItem heading="Proposed problem statement">{proposal.proposedProblem}</DetailItem>
             <DetailItem heading="Business or scientific relevance">{proposal.relevance}</DetailItem>
@@ -302,7 +303,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
-        {proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} /> : <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
+        {isOpenFunding && <OpenFundingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} />}
+        {proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} /> : !isOpenFunding && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
           if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...current.matching, ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
         }} />}

@@ -446,71 +446,7 @@ export function EvaluatorQueue({ onNavigate }) {
   );
 }
 
-export function FundingPortfolio({ onNavigate }) {
-  const { user } = useAuth();
-  const [data, setData] = useState([]);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function fetchData() {
-      if (!user?.id || !db) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const q = query(collection(db, "funding"), where("funderId", "==", user.id));
-        const querySnapshot = await getDocs(q);
-        setData(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (err) {
-        setError(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, [user?.id]);
-
-  return (
-    <section className="page dashboard-page">
-      <div className="page-heading">
-        <div className="eyebrow-row">
-          <RoleBadge role="funder" />
-          <span>Fund: {user?.org}</span>
-        </div>
-        <h1>Funding Commitments & Escrow</h1>
-        <p>Oversee capital allocation, approve milestone disbursement tranches, and monitor portfolio performance.</p>
-      </div>
-
-      <ProposalList received onNavigate={onNavigate} />
-
-      <div className="card-table">
-        <div className="table-header">
-          <h3>Disbursement Schedule</h3>
-          <button className="primary small" type="button" onClick={() => onNavigate("create")}>+ New Funding Call</button>
-        </div>
-        
-        {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>
-        ) : error ? (
-          <div className="error-banner" style={{ padding: "2rem", color: "red" }}>
-             <strong>Error:</strong> {error.message}
-          </div>
-        ) : data.length === 0 ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>No funding commitments found.</div>
-        ) : (
-          data.map(item => (
-            <div className="table-row" key={item.id}>
-              <div>
-                <strong>{item.title}</strong>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
-  );
-}
+export { FunderDashboard as FundingPortfolio } from "./FunderDashboard.jsx";
 
 const AUDIT_PAGE_SIZE = 50;
 

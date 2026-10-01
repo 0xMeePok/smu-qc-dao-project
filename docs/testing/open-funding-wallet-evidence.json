@@ -1,0 +1,592 @@
+{
+  "capturedAt": "2026-10-01T03:41:43.713Z",
+  "environment": {
+    "projectId": "demo-wallet-e2e",
+    "frontend": "http://127.0.0.1:5173",
+    "rpc": "http://127.0.0.1:8545",
+    "chainId": 421614,
+    "latestBlock": "2706",
+    "safeBlock": "2705",
+    "chainTimestamp": "1790876533",
+    "configMatches": true,
+    "configSHA256": "e7879a6c6b8f704271783505d3c8d07af5525c0210dfa461471446769ee8bbc1",
+    "localManifest": "/tmp/qcdao-wallet-e2e/local-deployment.json",
+    "multicall3": "0xca11bde05977b3631167028862be2a173976ca11",
+    "multicallCodePresent": true
+  },
+  "deploymentVerification": {
+    "contractName": "EscrowAuditRegistry",
+    "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "factoryAddress": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    "chainId": 421614,
+    "bytecodeMatches": true,
+    "wiringMatches": true,
+    "platformSigner": "0xA5b1971dE2e876ba3952eb712E47aCF1325fAF0f",
+    "registryOwner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "factoryOwner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "feeBps": 0,
+    "registryCodeHash": "0xd0f722fd0e5ce5d0ae14c87c1f13542b7648eda68457ffccecf38fa410e9f7b7",
+    "factoryCodeHash": "0xa8915237659eb222d3ce282ae1a0878798b2e71881fb11f39f9838ce1713591c",
+    "escrowDeployer": "0x75537828f2ce51be7289709686A69CbFDbB714F1",
+    "openFundingPoolDeployer": "0xE451980132E65465d0a498c53f0b5227326Dd73F",
+    "openFundingGrants": true,
+    "readOnly": true
+  },
+  "token": {
+    "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "symbol": "USDC",
+    "decimals": 6,
+    "onChainSymbol": "USDC",
+    "onChainDecimals": 6
+  },
+  "accounts": [
+    {
+      "label": "Grant Owner E2E",
+      "address": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+      "tokenBalanceBaseUnits": "40000000000",
+      "ethBalanceWei": "99997104896979734279"
+    },
+    {
+      "label": "Researcher A E2E",
+      "address": "0x56BC54Ad0A2470336220E4204f14B512766b5410",
+      "tokenBalanceBaseUnits": "0",
+      "ethBalanceWei": "99995542992968800951"
+    },
+    {
+      "label": "Researcher B E2E",
+      "address": "0x66c24a632e4D0F777b88E8DaD1dDea514a57cA0e",
+      "tokenBalanceBaseUnits": "0",
+      "ethBalanceWei": "99995542980968800867"
+    }
+  ],
+  "postings": [
+    {
+      "id": "18pRxgm3gDlYCHLl02Mf",
+      "title": "Wallet E2E: 100k multi-proposal grant",
+      "status": "submitted",
+      "type": "open-funding",
+      "amount": 100000,
+      "audit": {
+        "schemaVersion": 1,
+        "chainId": 421614,
+        "entityId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "contentHash": "0x3d88ce7a7f67ebd83fcb1700403d97206d4780259ac48be3044eae2bf29a6a62",
+        "status": "pending",
+        "transactionHash": "0xb36b7551bb1e6828e6a0fb357b89cf30001f7f5e849ac1946ec28f0532753d0c",
+        "blockNumber": 753,
+        "attemptCount": 1,
+        "lastError": ""
+      },
+      "acceptedProposalId": null,
+      "proof": {
+        "receiptStatus": "success",
+        "blockNumber": "753",
+        "confirmed": true,
+        "receiptMatchesHash": true,
+        "registryMatches": true,
+        "ownerMatches": true,
+        "kindMatches": true,
+        "contentMatches": true,
+        "expiryMatches": true
+      },
+      "grant": {
+        "supported": true,
+        "exists": true,
+        "problemId": "18pRxgm3gDlYCHLl02Mf",
+        "title": "Wallet E2E: 100k multi-proposal grant",
+        "owner": "0x5c6688532a27492da6c534a37cede11a86823152",
+        "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "poolAddress": "0xec3287708ff5439f31a1e2610d0e408d33a76f85",
+        "chainId": 421614,
+        "blockNumber": 2705,
+        "timestamp": 1790876533,
+        "closed": false,
+        "withdrawn": false,
+        "paused": false,
+        "canCreate": false,
+        "canDeposit": true,
+        "canSelect": true,
+        "canWithdraw": false,
+        "totalDeposited": "110000000000",
+        "totalAllocated": "0",
+        "totalReserved": "100000000000",
+        "totalWithdrawn": "0",
+        "available": "10000000000",
+        "selections": [
+          {
+            "proposalId": "T7Zd5o8eCavIpLKUi9Dm",
+            "entityId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+            "title": "Wallet E2E A: quantum route optimisation",
+            "researcherId": "0x56bc54ad0a2470336220e4204f14b512766b5410",
+            "escrowAddress": "0x98a01f8ff48b849ccaf4d8d987ee200683a1a11e",
+            "amountBaseUnits": "50000000000",
+            "acceptanceDeadline": "1791481151",
+            "status": "pending",
+            "canAccept": false,
+            "canVoid": false,
+            "canSelect": false
+          },
+          {
+            "proposalId": "viLgFKGtCvWx0Lzcr369",
+            "entityId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+            "title": "Wallet E2E B: quantum demand scheduling",
+            "researcherId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e",
+            "escrowAddress": "0x29f77c1f6da21a6c4dc2efd5de58faec584e55d2",
+            "amountBaseUnits": "50000000000",
+            "acceptanceDeadline": "1791481187",
+            "status": "pending",
+            "canAccept": false,
+            "canVoid": false,
+            "canSelect": false
+          }
+        ],
+        "truncated": false,
+        "tokenAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+        "tokenSymbol": "USDC",
+        "tokenDecimals": 6
+      },
+      "poolTokenBalanceBaseUnits": "110000000000",
+      "poolAccountingMatches": true,
+      "poolEvents": [
+        {
+          "event": "Deposited",
+          "args": {
+            "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+            "owner": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+            "amount": "100000000000",
+            "totalDeposited": "100000000000"
+          },
+          "blockNumber": "1593",
+          "blockTimestamp": "1790875419",
+          "transactionHash": "0xacbc0c633ac6a651cdaa1d3ebe783d578a6b9314d419b96e7a919912a0782407"
+        },
+        {
+          "event": "ProposalSelected",
+          "args": {
+            "proposalId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+            "researcher": "0x56BC54Ad0A2470336220E4204f14B512766b5410",
+            "escrow": "0x98A01f8FF48B849CcaF4d8D987eE200683a1a11e",
+            "amount": "50000000000",
+            "acceptanceDeadline": "1791481151"
+          },
+          "blockNumber": "2523",
+          "blockTimestamp": "1790876351",
+          "transactionHash": "0xf6f7449b71fc591a81573d5c40ede29329860bd2d2bd21c28e3486b0774c7ac6",
+          "acceptanceWindowSeconds": "604800"
+        },
+        {
+          "event": "ProposalSelected",
+          "args": {
+            "proposalId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+            "researcher": "0x66c24a632e4D0F777b88E8DaD1dDea514a57cA0e",
+            "escrow": "0x29f77C1f6da21a6c4DC2Efd5DE58FAec584e55D2",
+            "amount": "50000000000",
+            "acceptanceDeadline": "1791481187"
+          },
+          "blockNumber": "2559",
+          "blockTimestamp": "1790876387",
+          "transactionHash": "0x923773d68558ae3887b63f5d195b5ad958eeac36e991611ee78d7b5747a2c54d",
+          "acceptanceWindowSeconds": "604800"
+        },
+        {
+          "event": "Deposited",
+          "args": {
+            "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+            "owner": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+            "amount": "10000000000",
+            "totalDeposited": "110000000000"
+          },
+          "blockNumber": "2658",
+          "blockTimestamp": "1790876486",
+          "transactionHash": "0xf474ea0c80e8b19658694679fdaea1083aa71318b23e580c43e2b83d5e601c8c"
+        }
+      ]
+    }
+  ],
+  "proposals": [
+    {
+      "id": "T7Zd5o8eCavIpLKUi9Dm",
+      "title": "Wallet E2E A: quantum route optimisation",
+      "status": "submitted",
+      "amount": 50000,
+      "researcherId": "0x56bc54ad0a2470336220e4204f14b512766b5410",
+      "audit": {
+        "schemaVersion": 1,
+        "chainId": 421614,
+        "entityId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+        "contentHash": "0xca6622e6222caa4d4c362185ff92c31f97d13574fbdd439eedd40f5247067212",
+        "status": "confirmed",
+        "transactionHash": "0x9e1d4586619a58c1b96f0beeb52c33f539404be4933c6eac189b415f31d6755c",
+        "blockNumber": 1849,
+        "attemptCount": 1,
+        "lastError": ""
+      },
+      "proof": {
+        "receiptStatus": "success",
+        "blockNumber": "1849",
+        "confirmed": true,
+        "registryMatches": true,
+        "canonicalContentAndCustodyVerified": true
+      },
+      "escrow": {
+        "proposalId": "T7Zd5o8eCavIpLKUi9Dm",
+        "problemId": "18pRxgm3gDlYCHLl02Mf",
+        "title": "Wallet E2E A: quantum route optimisation",
+        "postingTitle": "Wallet E2E: 100k multi-proposal grant",
+        "postingOwnerId": "0x5c6688532a27492da6c534a37cede11a86823152",
+        "researcherId": "0x56bc54ad0a2470336220e4204f14b512766b5410",
+        "registryAddress": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+        "escrowAddress": "0x98a01f8ff48b849ccaf4d8d987ee200683a1a11e",
+        "tokenAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+        "tokenSymbol": "USDC",
+        "tokenDecimals": 6,
+        "chainId": 421614,
+        "state": "Open",
+        "totalDeposited": "0",
+        "totalReleased": "0",
+        "totalRefunded": "0",
+        "outstandingBalance": "0",
+        "fundingTarget": "50000000000",
+        "expiresAt": "1798600141",
+        "upfrontReleased": false,
+        "finalReleased": false,
+        "active": true,
+        "blockNumber": 2705,
+        "currentTranche": 0,
+        "fundingBlockReason": "Open funding is deposited by its owner into the grant pool. Use the grant workflow for this proposal."
+      },
+      "ownerApproval": false,
+      "researcherApproval": false,
+      "milestones": [
+        {
+          "bps": 5000,
+          "reviewWindow": "604800",
+          "descriptionHash": "0xf95ad5eac0bce6495bd0adee1e24d23254cd82af6af01d48ec9d36dce2655867",
+          "grossAmount": "25000000000",
+          "evidenceHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "fee": "0",
+          "paid": false
+        },
+        {
+          "bps": 5000,
+          "reviewWindow": "604800",
+          "descriptionHash": "0x289fde26b51acae89e5b38a96a557c7f3179d868abfb60b550717d8f868caaa3",
+          "grossAmount": "25000000000",
+          "evidenceHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "fee": "0",
+          "paid": false
+        }
+      ],
+      "escrowTokenBalanceBaseUnits": "0",
+      "ownerContributionBaseUnits": "0",
+      "escrowEvents": []
+    },
+    {
+      "id": "viLgFKGtCvWx0Lzcr369",
+      "title": "Wallet E2E B: quantum demand scheduling",
+      "status": "submitted",
+      "amount": 50000,
+      "researcherId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e",
+      "audit": {
+        "schemaVersion": 1,
+        "chainId": 421614,
+        "entityId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+        "contentHash": "0x7fb855dee0eee9ee51c8b55a3548ef9eea3b4f841a7bf6408d308044e7ec2699",
+        "status": "confirmed",
+        "transactionHash": "0x6d2c5d2907748ed0c50a302ec4daa920e6ffb23742556c92d9281c823a9c7fc9",
+        "blockNumber": 2397,
+        "attemptCount": 1,
+        "lastError": ""
+      },
+      "proof": {
+        "receiptStatus": "success",
+        "blockNumber": "2397",
+        "confirmed": true,
+        "registryMatches": true,
+        "canonicalContentAndCustodyVerified": true
+      },
+      "escrow": {
+        "proposalId": "viLgFKGtCvWx0Lzcr369",
+        "problemId": "18pRxgm3gDlYCHLl02Mf",
+        "title": "Wallet E2E B: quantum demand scheduling",
+        "postingTitle": "Wallet E2E: 100k multi-proposal grant",
+        "postingOwnerId": "0x5c6688532a27492da6c534a37cede11a86823152",
+        "researcherId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e",
+        "registryAddress": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+        "escrowAddress": "0x29f77c1f6da21a6c4dc2efd5de58faec584e55d2",
+        "tokenAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+        "tokenSymbol": "USDC",
+        "tokenDecimals": 6,
+        "chainId": 421614,
+        "state": "Open",
+        "totalDeposited": "0",
+        "totalReleased": "0",
+        "totalRefunded": "0",
+        "outstandingBalance": "0",
+        "fundingTarget": "50000000000",
+        "expiresAt": "1798600141",
+        "upfrontReleased": false,
+        "finalReleased": false,
+        "active": true,
+        "blockNumber": 2705,
+        "currentTranche": 0,
+        "fundingBlockReason": "Open funding is deposited by its owner into the grant pool. Use the grant workflow for this proposal."
+      },
+      "ownerApproval": false,
+      "researcherApproval": false,
+      "milestones": [
+        {
+          "bps": 5000,
+          "reviewWindow": "604800",
+          "descriptionHash": "0xcdc816a52fd4b8461df4ad2dd78c717dcc68316e15a9908cfc5f635c670d4b66",
+          "grossAmount": "25000000000",
+          "evidenceHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "fee": "0",
+          "paid": false
+        },
+        {
+          "bps": 5000,
+          "reviewWindow": "604800",
+          "descriptionHash": "0x52efe186049c67df476546b4cef07b68d9461d60f2b0bcc734d2e9e0458d50b9",
+          "grossAmount": "25000000000",
+          "evidenceHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "fee": "0",
+          "paid": false
+        }
+      ],
+      "escrowTokenBalanceBaseUnits": "0",
+      "ownerContributionBaseUnits": "0",
+      "escrowEvents": []
+    }
+  ],
+  "factoryEvents": [
+    {
+      "event": "OwnershipTransferred",
+      "args": {
+        "previousOwner": "0x0000000000000000000000000000000000000000",
+        "newOwner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "blockNumber": "97",
+      "blockTimestamp": "1790823519",
+      "transactionHash": "0x21f527d7f98eaa37ef354b474231b4e149aeafdbb23a307c84214f69863e5e5d"
+    },
+    {
+      "event": "TokenListingChanged",
+      "args": {
+        "token": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "allowed": true,
+        "decimals": 6
+      },
+      "blockNumber": "97",
+      "blockTimestamp": "1790823519",
+      "transactionHash": "0x21f527d7f98eaa37ef354b474231b4e149aeafdbb23a307c84214f69863e5e5d"
+    },
+    {
+      "event": "OpenFundingPoolCreated",
+      "args": {
+        "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "pool": "0xEc3287708fF5439F31A1E2610D0E408D33A76f85",
+        "owner": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+        "token": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+      },
+      "blockNumber": "1189",
+      "blockTimestamp": "1790875014",
+      "transactionHash": "0xff643c45de8e600f9e4a1985026c6b0d198a9d0cc699079c2804e449ce0dbe4b"
+    },
+    {
+      "event": "EscrowCreated",
+      "args": {
+        "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "proposalId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+        "escrow": "0x98A01f8FF48B849CcaF4d8D987eE200683a1a11e",
+        "problemOwner": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+        "token": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "fundingTarget": "50000000000",
+        "expiresAt": "1798600141",
+        "feeRecipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "feeBps": 0
+      },
+      "blockNumber": "1849",
+      "blockTimestamp": "1790875675",
+      "transactionHash": "0x9e1d4586619a58c1b96f0beeb52c33f539404be4933c6eac189b415f31d6755c"
+    },
+    {
+      "event": "EscrowCreated",
+      "args": {
+        "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "proposalId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+        "escrow": "0x29f77C1f6da21a6c4DC2Efd5DE58FAec584e55D2",
+        "problemOwner": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+        "token": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "fundingTarget": "50000000000",
+        "expiresAt": "1798600141",
+        "feeRecipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "feeBps": 0
+      },
+      "blockNumber": "2397",
+      "blockTimestamp": "1790876224",
+      "transactionHash": "0x6d2c5d2907748ed0c50a302ec4daa920e6ffb23742556c92d9281c823a9c7fc9"
+    }
+  ],
+  "registryEvents": [
+    {
+      "event": "OwnershipTransferred",
+      "args": {
+        "previousOwner": "0x0000000000000000000000000000000000000000",
+        "newOwner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "blockNumber": "95",
+      "blockTimestamp": "1790823517",
+      "transactionHash": "0x39d1e00a006363b44079030caa54b8e0706aa9e5661ca50394c8d8cd5852f2f9"
+    },
+    {
+      "event": "FundingFactoryConfigured",
+      "args": {
+        "factory": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+      },
+      "blockNumber": "98",
+      "blockTimestamp": "1790823520",
+      "transactionHash": "0xac82eba7f3afa49fd7ab71594bab4cf4a3c0fed86fe90e781fb785c8d4795e0e"
+    },
+    {
+      "event": "EventAnchored",
+      "args": {
+        "entityId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "entityType": 0,
+        "eventType": 0,
+        "contentHash": "0x3d88ce7a7f67ebd83fcb1700403d97206d4780259ac48be3044eae2bf29a6a62",
+        "actorRole": 1,
+        "actor": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+        "timestamp": "1790874577"
+      },
+      "blockNumber": "753",
+      "blockTimestamp": "1790874577",
+      "transactionHash": "0xb36b7551bb1e6828e6a0fb357b89cf30001f7f5e849ac1946ec28f0532753d0c"
+    },
+    {
+      "event": "OpportunityCommitted",
+      "args": {
+        "opportunityId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "owner": "0x5c6688532A27492DA6C534a37cedE11A86823152",
+        "kind": 1,
+        "contentHash": "0x3d88ce7a7f67ebd83fcb1700403d97206d4780259ac48be3044eae2bf29a6a62",
+        "expiresAt": "1798600141"
+      },
+      "blockNumber": "753",
+      "blockTimestamp": "1790874577",
+      "transactionHash": "0xb36b7551bb1e6828e6a0fb357b89cf30001f7f5e849ac1946ec28f0532753d0c"
+    },
+    {
+      "event": "EventAnchored",
+      "args": {
+        "entityId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+        "entityType": 1,
+        "eventType": 3,
+        "contentHash": "0xb6516389b680d742367cfd41ba56e4a86e479c4cd1fb57e52fe77c077a7cd7de",
+        "actorRole": 2,
+        "actor": "0x56BC54Ad0A2470336220E4204f14B512766b5410",
+        "timestamp": "1790875675"
+      },
+      "blockNumber": "1849",
+      "blockTimestamp": "1790875675",
+      "transactionHash": "0x9e1d4586619a58c1b96f0beeb52c33f539404be4933c6eac189b415f31d6755c"
+    },
+    {
+      "event": "ProposalCommitted",
+      "args": {
+        "proposalId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+        "opportunityId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "researcher": "0x56BC54Ad0A2470336220E4204f14B512766b5410",
+        "proposalHash": "0xca6622e6222caa4d4c362185ff92c31f97d13574fbdd439eedd40f5247067212",
+        "solutionHash": "0x39d76ef7c83b5425ce518fa19e73ae432dd1590ffd4b3bd6f8108a2d2046e1d7",
+        "opportunityRevisionIndex": 0,
+        "opportunityRevisionDigest": "0x3d88ce7a7f67ebd83fcb1700403d97206d4780259ac48be3044eae2bf29a6a62"
+      },
+      "blockNumber": "1849",
+      "blockTimestamp": "1790875675",
+      "transactionHash": "0x9e1d4586619a58c1b96f0beeb52c33f539404be4933c6eac189b415f31d6755c"
+    },
+    {
+      "event": "FundingEventAnchored",
+      "args": {
+        "proposalId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+        "escrow": "0x98A01f8FF48B849CcaF4d8D987eE200683a1a11e",
+        "eventType": 0,
+        "digest": "0x5e1b5849d81f72d4040cedc06426f641c2d644bb3ba7a7d80facd57b882d9824",
+        "actor": "0x56BC54Ad0A2470336220E4204f14B512766b5410",
+        "timestamp": "1790875675"
+      },
+      "blockNumber": "1849",
+      "blockTimestamp": "1790875675",
+      "transactionHash": "0x9e1d4586619a58c1b96f0beeb52c33f539404be4933c6eac189b415f31d6755c"
+    },
+    {
+      "event": "ProposalEscrowLinked",
+      "args": {
+        "proposalId": "0x56bc54ad0a2470336220e4204f14b512766b54103a3993d9c8eb94799c8d0f00",
+        "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "escrow": "0x98A01f8FF48B849CcaF4d8D987eE200683a1a11e",
+        "termsHash": "0x5e1b5849d81f72d4040cedc06426f641c2d644bb3ba7a7d80facd57b882d9824"
+      },
+      "blockNumber": "1849",
+      "blockTimestamp": "1790875675",
+      "transactionHash": "0x9e1d4586619a58c1b96f0beeb52c33f539404be4933c6eac189b415f31d6755c"
+    },
+    {
+      "event": "EventAnchored",
+      "args": {
+        "entityId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+        "entityType": 1,
+        "eventType": 3,
+        "contentHash": "0xfad53e8eef46e856772a344eaad3b5f73ebf545a7c8e64f0e3eb00f94462ed81",
+        "actorRole": 2,
+        "actor": "0x66c24a632e4D0F777b88E8DaD1dDea514a57cA0e",
+        "timestamp": "1790876224"
+      },
+      "blockNumber": "2397",
+      "blockTimestamp": "1790876224",
+      "transactionHash": "0x6d2c5d2907748ed0c50a302ec4daa920e6ffb23742556c92d9281c823a9c7fc9"
+    },
+    {
+      "event": "ProposalCommitted",
+      "args": {
+        "proposalId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+        "opportunityId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "researcher": "0x66c24a632e4D0F777b88E8DaD1dDea514a57cA0e",
+        "proposalHash": "0x7fb855dee0eee9ee51c8b55a3548ef9eea3b4f841a7bf6408d308044e7ec2699",
+        "solutionHash": "0x8177c050d3da2396c00e531063d4d5aad78cbf9235b9bfc874d854405c5468f8",
+        "opportunityRevisionIndex": 0,
+        "opportunityRevisionDigest": "0x3d88ce7a7f67ebd83fcb1700403d97206d4780259ac48be3044eae2bf29a6a62"
+      },
+      "blockNumber": "2397",
+      "blockTimestamp": "1790876224",
+      "transactionHash": "0x6d2c5d2907748ed0c50a302ec4daa920e6ffb23742556c92d9281c823a9c7fc9"
+    },
+    {
+      "event": "FundingEventAnchored",
+      "args": {
+        "proposalId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+        "escrow": "0x29f77C1f6da21a6c4DC2Efd5DE58FAec584e55D2",
+        "eventType": 0,
+        "digest": "0x49b123f4d07d228cf45256595acec3482a6dbce852e425828692b92944463e76",
+        "actor": "0x66c24a632e4D0F777b88E8DaD1dDea514a57cA0e",
+        "timestamp": "1790876224"
+      },
+      "blockNumber": "2397",
+      "blockTimestamp": "1790876224",
+      "transactionHash": "0x6d2c5d2907748ed0c50a302ec4daa920e6ffb23742556c92d9281c823a9c7fc9"
+    },
+    {
+      "event": "ProposalEscrowLinked",
+      "args": {
+        "proposalId": "0x66c24a632e4d0f777b88e8dad1ddea514a57ca0e6ddd1592c36410af6110887f",
+        "postingId": "0x5c6688532a27492da6c534a37cede11a86823152bf831319632875c2d3324eff",
+        "escrow": "0x29f77C1f6da21a6c4DC2Efd5DE58FAec584e55D2",
+        "termsHash": "0x49b123f4d07d228cf45256595acec3482a6dbce852e425828692b92944463e76"
+      },
+      "blockNumber": "2397",
+      "blockTimestamp": "1790876224",
+      "transactionHash": "0x6d2c5d2907748ed0c50a302ec4daa920e6ffb23742556c92d9281c823a9c7fc9"
+    }
+  ]
+}

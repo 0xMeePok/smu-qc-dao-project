@@ -6,6 +6,7 @@
   "description": "Registry-linked per-proposal token escrow with milestones, dual approval, optional funder voting and partial refunds",
   "scripts": {
     "compile": "hardhat compile",
+    "export:abis": "node scripts/export-abis.js",
     "test": "hardhat test mocha && npm run test:scripts",
     "test:scripts": "node --test test-scripts/*.test.mjs",
     "test:verifier": "hardhat test mocha test-verifier/verifyDeployment.test.js",

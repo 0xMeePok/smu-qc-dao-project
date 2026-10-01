@@ -109,7 +109,23 @@ describe("confirmed escrow funding event reconciliation", () => {
     const rows = [log("StateChanged", { previousState, newState: 5 }, 0),
       log("RefundsOpened", { pool: 7000000n, availableAt: timestamp }, 1),
       anchor(6, digest("uint256,uint256,uint256", [1n, deadline, 7000000n]), 2)];
-    assert.equal((await reconcileFundingReceipt(fixture(rows)))[0].type, "Expired");
+    const f = fixture(rows);
+    if (previousState === 1) f.config = { ...f.config, abi: f.config.abi.filter(item => item.name !== "pendingProposalForPosting"),
+      escrow: { ...f.config.escrow, escrowAbi: f.config.escrow.escrowAbi.filter(item => item.name !== "rejectSelection") } };
+    assert.equal((await reconcileFundingReceipt(f))[0].type, "Expired");
+  });
+
+  for (const kind of ["main", "grant"]) it(`reconstructs a current ${kind} locked selection expiry from its seven-day approval deadline`, async () => {
+    const deadline = timestamp - 1n;
+    const rows = [log("StateChanged", { previousState: 1, newState: 5 }, 0),
+      log("RefundsOpened", { pool: 7000000n, availableAt: timestamp }, 1),
+      anchor(6, digest("uint256,uint256,uint256", [1n, deadline, 7000000n]), 2)];
+    const f = fixture(rows, { state: { openFundingPool: kind === "grant" ? address("9") : address("0") } });
+    const legacyRegistry = f.config.abi.filter(item => item.name !== "pendingProposalForPosting");
+    f.config = { ...f.config, abi: kind === "main" ? [...legacyRegistry,
+      { type: "function", name: "pendingProposalForPosting", inputs: [{ type: "bytes32" }], outputs: [{ type: "bytes32" }], stateMutability: "view" }] : legacyRegistry,
+      escrow: { ...f.config.escrow, escrowAbi: f.config.escrow.escrowAbi.filter(item => item.name !== "rejectSelection") } };
+    assert.equal((await reconcileFundingReceipt(f))[0].type, "Expired");
   });
 
   it("rejects unmatched digests, foreign escrow logs, incorrect actors and token identities", async () => {

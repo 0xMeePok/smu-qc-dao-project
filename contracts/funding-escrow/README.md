@@ -23,6 +23,63 @@ and 10 BPS fee are unchanged. Explorer source publication was not requested for 
 replacement; runtime-bytecode verification is complete.
 See [deployment addresses and smoke-test evidence](../../docs/ESCROW_REGISTRY_INTEGRATION.md).
 
+### Open funding grant scope (2026-10-01)
+
+The source now implements open funding as a separate single-owner grant pool.
+This grant version has been tested on local chains; it has **not been deployed**.
+The historical Arbitrum Sepolia addresses above still identify the previous pooled
+workflow. Enabling grants requires a new verified registry/factory deployment and
+an application manifest explicitly declaring the grant capability.
+The main workflow's pending selection, full seven-day handshake and immediate
+rejection refund changes below also apply to this undeployed source version.
+
+1. The funder posts an `OpenFunding` opportunity, then calls
+   `FundingEscrowFactory.createOpenFundingPool(postingId, token)`.
+2. Only the posting owner approves that pool as token spender and calls
+   `deposit(amount)`. Prefunding must occur before a proposal can be submitted.
+   Top ups are allowed after awards and after the submission deadline; a withdrawn
+   posting stops further deposits. Every proposal uses the pool's token.
+3. Each researcher submits their requested target and immutable milestone plan
+   through `commitProposalWithEscrow`. Grant proposal escrows reject ordinary
+   pooled deposits and the main workflow's platform selection operation.
+4. The owner calls `pool.selectProposal(proposalId)` to reserve its full requested
+   target. Several proposals may be selected. A 100,000-unit pool can reserve two
+   50,000-unit proposals; an additional selection must fit the unreserved balance.
+5. The proposal researcher has exactly seven days to call
+   `pool.acceptProposal(proposalId)`. Acceptance is allowed before, but never at,
+   `acceptanceDeadline`, even if the posting's submission deadline has since passed.
+   Acceptance atomically transfers the reserved amount into its canonical escrow.
+   Owner selection and researcher acceptance count as the initial dual approval;
+   the platform may then release its initial tranche using `selectionId = proposalId`.
+   Later milestone submission, dual approval, fees and payment controls are retained.
+6. At or after the deadline, anyone can call `pool.expireProposal(proposalId)` to
+   void the unanswered offer and return its reservation to available custody.
+   A withdrawn or admin-voided proposal can be synchronized sooner. Voided offers
+   cannot be selected again. Separate grant awards never invalidate one another.
+7. After submission closes or the posting is withdrawn, the owner may call
+   `withdrawAvailable(amount)` for unreserved custody. Pending awards remain
+   protected. Once funds enter an accepted escrow, any unpaid escrow refund belongs
+   directly to the posting owner's wallet through `claimRefund()`.
+
+Read `openFundingPoolForPosting(postingId)` for the canonical pool. Pool reads are
+`owner`, `token`, `tokenDecimals`, `totalDeposited`, `totalAllocated`, `totalWithdrawn`,
+`reservedAmount`, `availableBalance`, `getOffer(proposalId)`, `proposalCount` and
+`proposalAt(index)`. `getOffer` returns `(amount, acceptanceDeadline, state)`, with
+states `0=None`, `1=Pending`, `2=Accepted`, `3=Voided`. Deadlines need a transaction
+to synchronize custody; an expired pending offer is never acceptable even before
+that synchronization happens.
+
+`FundingEscrowDeployer` and `OpenFundingPoolDeployer` are created by the canonical
+factory constructor and accept creation calls only from that factory. Keeping
+creation bytecode in those contracts preserves the EVM runtime size limit.
+Runtime verification resolves helper outputs from the factory's exact build-info
+compilation, including their Solidity metadata. Standalone helper compilations may
+have different dependency remappings and metadata hashes.
+Export the current compiled interfaces with `npm run export:abis`; use
+`-- --output /path/to/interfaces.json` for an alternate output location. ABI bundles
+contain no deployment addresses. New deployment records declare `workflowVersion: 2`
+and `open-funding-grants`, and include both creation helper addresses.
+
 ## Run and validation
 
 Use Node 22.13+ from the repository checkout (the local `audit-registry` dependency
@@ -40,6 +97,13 @@ Validated on 2026-09-27: 263 escrow tests and 63 original registry regression te
 passed. Escrow package Solidity coverage: 99.12% lines / 99.31% statements;
 `FundingEscrow.sol` and `TokenDecimals.sol` each reported 100%. Coverage is not a
 proof of all possible execution paths. Tests run on isolated local Hardhat chains.
+
+Validated on 2026-10-01 against the undeployed source version: 305 escrow and grant
+tests, nine deployment-script tests and eight read-only deployment-verifier tests
+passed. Main workflow cases cover exclusive pending selection, both rejection
+roles, immediate refund claims, exact seven-day expiry, completion approvals and
+strict funding-weighted majority. A separate case runs two independent grants
+while a business posting's handshake is pending.
 
 Solidity 0.8.28, Hardhat 3.13, OpenZeppelin 5.6.1; Cancun EVM, optimizer 200 runs.
 The test token in `contracts/test` is only a local regression fixture.
@@ -75,9 +139,15 @@ open refunds; it cannot redirect those refunds or claw back previous payments.
 Only trust addresses from the configured factory's `escrowForProposal` and the
 linked registry's `proposalEscrow`, not contracts claiming similar IDs or names.
 
-The first payout permanently binds the accepted proposal to its posting. Other
-proposals cannot accept deposits or be selected after this point. Their existing
-invalidated-proposal refund path remains available. The platform signer can also
+The main business workflow reserves one canonical pending proposal as soon as its
+selection is locked. Other proposal escrows stop accepting deposits and selections
+while that handshake is pending; their custody remains intact and cannot be refunded
+as invalidated merely because of the temporary lock. Rejection or handshake expiry
+refunds the selected escrow and reopens the other proposals while the posting is open.
+The first payout permanently binds the accepted proposal to its posting. The other
+proposals then remain closed and their invalidated-proposal refund path is available.
+These posting-wide locks do not apply to independent open funding grant awards.
+The platform signer can also
 set a reversible posting funding pause when moderation hides a posting. A pause
 blocks funding and payments but does not itself permanently invalidate the escrow
 or open refunds; removing the pause restores the existing approval deadlines.
@@ -141,8 +211,10 @@ pinned proposal and current parent revision as in the original audit registry.
    add to `contributions(wallet)` and `depositCounts(wallet)`. Funding cannot exceed
    the target. No deposits are accepted after selection or expiry.
 2. At full funding, platform calls `lockSelection(uniqueSelectionId, proposalOwner)`.
-   The recipient must equal the registered proposal owner. First approval deadline
-   is the earliest of posting expiry, seven days, and the configured first window.
+   The recipient must equal the registered proposal owner. The first approval
+   deadline is exactly seven days after selection, independent of posting expiry
+   and the configurable first milestone window. Selection must begin before the
+   posting closes, but its handshake can finish after submission closes.
 3. Both owners call `approveSelection(selectionId)`. Platform calls `release(selectionId)`
    before the deadline. This pays only tranche zero. Funder voting never gates it.
 4. For each later tranche, proposal owner calls `submitMilestone(index, evidenceHash)`.
@@ -168,9 +240,14 @@ At the deadline, anyone can call `expire()`, or a funder can call `claimRefund()
 directly, to refund the unpaid balance. Missed votes or an unavailable owner therefore
 cannot lock the balance forever. Pending approval does not reserve a late payout.
 
-Before the first payout, platform can invalidate a selection (fresh selection ID
-and approvals required; recipient unchanged), or `cancel(reasonHash)`. Ordinary
-cancellation retains the original posting refund deadline. Admin moderation uses
+Before the first payout and strictly before the approval deadline, either main
+workflow owner can call `rejectSelection(selectionId, reasonHash)`. The platform
+can also invalidate a selection. Both make the selected escrow terminal with
+immediate fee-free refunds and clear the posting's pending selection. At or after
+the handshake deadline, permissionless `expire()` or `claimRefund()` opens those
+refunds. Refunding is a wallet claim transaction rather than an automatic transfer.
+Ordinary platform `cancel(reasonHash)` retains the original posting refund deadline.
+Admin moderation uses
 `voidEscrow(reasonHash)` to make refunds available immediately.
 
 ## Fees and partial refunds

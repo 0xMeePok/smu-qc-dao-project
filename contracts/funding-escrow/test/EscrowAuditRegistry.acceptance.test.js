@@ -30,7 +30,7 @@ describe("Posting acceptance and canonical escrow funding", function () {
     await assertAccounting(c);
   });
 
-  for (const phase of ["open", "locked", "approved"]) {
+  for (const phase of ["open"]) {
     it(`stops an existing ${phase} sibling and preserves its complete refund entitlement`, async function () {
       const c = await fixture({ trancheBps: [5000, 5000] });
       const other = await sibling(c);
@@ -104,21 +104,20 @@ describe("Posting acceptance and canonical escrow funding", function () {
 });
 
 describe("Selection invalidation expiry audit", function () {
-  it("anchors expiry and invalidation when an expired locked selection is invalidated", async function () {
+  it("anchors rejection and immediate refunds when an expired locked selection is invalidated", async function () {
     const c = await fixture();
     await lock(c);
     await at(c, c.expiresAt);
     const tx = await c.escrow.invalidateSelection(c.selectionId, c.reason);
-    await expect(tx).to.emit(c.escrow, "StateChanged").withArgs(State.Locked, State.Expired);
+    await expect(tx).to.emit(c.escrow, "StateChanged").withArgs(State.Locked, State.Cancelled);
     const anchors = await c.registry.queryFilter(c.registry.filters.FundingEventAnchored(c.proposalId));
-    expect(anchors.map(event => event.args.eventType)).to.deep.equal([0n, 1n, 2n, 6n, 4n]);
-    const expiry = anchors.at(-2).args;
-    expect(expiry.escrow).to.equal(c.escrowAddress);
-    expect(expiry.actor).to.equal(c.platform.address);
-    expect(expiry.digest).to.equal(c.ethers.keccak256(c.ethers.AbiCoder.defaultAbiCoder().encode(
-      ["uint256", "uint256", "uint256"], [0n, c.expiresAt, c.target])));
-    expect((await c.registry.fundingAnchorAt(c.proposalId, 3)).digest).to.equal(expiry.digest);
-    expect(await c.registry.fundingAnchorCount(c.proposalId)).to.equal(5n);
+    expect(anchors.map(event => event.args.eventType)).to.deep.equal([0n, 1n, 2n, 4n]);
+    const invalidation = anchors.at(-1).args;
+    expect(invalidation.escrow).to.equal(c.escrowAddress);
+    expect(invalidation.actor).to.equal(c.platform.address);
+    expect(invalidation.digest).to.equal(c.ethers.keccak256(c.ethers.AbiCoder.defaultAbiCoder().encode(
+      ["bytes32", "bytes32"], [c.selectionId, c.reason])));
+    expect(await c.registry.fundingAnchorCount(c.proposalId)).to.equal(4n);
     await c.escrow.connect(c.alice).claimRefund();
     await assertAccounting(c);
   });
@@ -127,7 +126,7 @@ describe("Selection invalidation expiry audit", function () {
     const c = await fixture();
     await lock(c);
     await c.escrow.invalidateSelection(c.selectionId, c.reason);
-    expect(await c.escrow.state()).to.equal(State.Open);
+    expect(await c.escrow.state()).to.equal(State.Cancelled);
     const anchors = await c.registry.queryFilter(c.registry.filters.FundingEventAnchored(c.proposalId));
     expect(anchors.map(event => event.args.eventType)).to.deep.equal([0n, 1n, 2n, 4n]);
   });

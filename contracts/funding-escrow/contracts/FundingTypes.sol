@@ -38,6 +38,7 @@ interface IFundingFactory {
     function tokenDecimals(address token) external view returns (uint8);
     function isEscrowAdmin(address actor) external view returns (bool);
     function escrowForProposal(bytes32 proposalId) external view returns (address);
+    function openFundingPoolForPosting(bytes32 postingId) external view returns (address);
     function createEscrow(bytes32 proposalId, FundingTerms calldata terms) external returns (address);
 }
 
@@ -45,8 +46,19 @@ interface IEscrowAuditRegistry {
     function isFundingActive(bytes32 proposalId, address escrow) external view returns (bool);
     function isFundingInvalidated(bytes32 proposalId, address escrow) external view returns (bool);
     function recordFundingEvent(bytes32 proposalId, FundingEvent eventType, bytes32 digest, address actor) external;
+    function recordOpenFundingDeposit(bytes32 postingId) external;
 }
 
 interface IFundedEscrow {
     function totalDeposited() external view returns (uint256);
+    function token() external view returns (address);
+    function fundingTarget() external view returns (uint256);
+    function acceptOpenFunding() external;
+    function voidOpenFunding() external;
+}
+
+interface IOpenFundingPool {
+    function token() external view returns (address);
+    function totalDeposited() external view returns (uint256);
+    function offerState(bytes32 proposalId) external view returns (uint8);
 }

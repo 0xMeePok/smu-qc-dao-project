@@ -102,6 +102,21 @@ if (linked || artifact.contractName === "EscrowAuditRegistry") {
   }
   config.escrow = { factoryAddress, tokens: tokens.map(({ address, symbol, decimals }) => ({ address, symbol, decimals })),
     factoryAbi: loadArtifact("factory-artifact", "FundingEscrowFactory"), escrowAbi: loadArtifact("escrow-artifact", "FundingEscrow") };
+  const grantsDeclared = deployment.capabilities?.includes("open-funding-grants") || Boolean(deployment.openFunding);
+  if (grantsDeclared) {
+    const grant = deployment.openFunding;
+    const validAddress = value => /^0x[0-9a-fA-F]{40}$/.test(value || "") && !/^0x0{40}$/i.test(value);
+    if (deployment.workflowVersion !== 2 || !deployment.capabilities?.includes("open-funding-grants")
+        || grant?.version !== 1 || grant.verified !== true
+        || String(grant.registryAddress).toLowerCase() !== address.toLowerCase()
+        || String(grant.factoryAddress).toLowerCase() !== factoryAddress.toLowerCase()
+        || !validAddress(grant.escrowDeployerAddress) || !validAddress(grant.openFundingPoolDeployerAddress)
+        || String(deployment.escrowDeployer?.address).toLowerCase() !== grant.escrowDeployerAddress.toLowerCase()
+        || String(deployment.openFundingPoolDeployer?.address).toLowerCase() !== grant.openFundingPoolDeployerAddress.toLowerCase()) {
+      throw new Error("Open funding requires a verified grant deployment record bound to this registry, factory and creation helpers.");
+    }
+    config.escrow.openFundingPoolAbi = loadArtifact("open-funding-pool-artifact", "OpenFundingPool");
+  }
 }
 
 fs.mkdirSync(path.dirname(outputFile), { recursive: true });
@@ -111,6 +126,7 @@ if (!option("output")) {
   if (config.escrow) {
     fs.writeFileSync(path.join(repositoryDirectory, "firebase/functions/escrowRegistry.abis.json"), `${JSON.stringify({
       registry: config.abi, factory: config.escrow.factoryAbi, escrow: config.escrow.escrowAbi,
+      ...(config.escrow.openFundingPoolAbi ? { openFundingPool: config.escrow.openFundingPoolAbi } : {}),
     }, null, 2)}\n`);
   }
 }

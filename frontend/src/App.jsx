@@ -847,7 +847,7 @@ function AppContent() {
           Both render the same form; see CreateProposalPage. */}
       {section === "submit-proposal" ? <CreateProposalPage key={`${id}-${user?.id}`} postingId={id} onNavigate={go} />
         : section === "edit-proposal" ? <CreateProposalPage key={`edit-${id}-${user?.id}`} proposalId={id} onNavigate={go} />
-        : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} onNavigate={go} />}
+        : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} initialTab={params.get("tab") === "funding" ? "funding" : "overview"} onNavigate={go} />}
     </RouteGuard>;
   } else if (section === "edit-posting") {
     pageComponent = (
@@ -877,7 +877,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <PostingDetailPage postingId={id} onNavigate={go} />
+        <PostingDetailPage postingId={id} initialTab={params.get("tab") === "funding" ? "funding" : "overview"} onNavigate={go} />
       </RouteGuard>
     );
     } else if (section === "login") {

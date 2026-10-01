@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import hre, { network } from "hardhat";
 import { verifyContract } from "@nomicfoundation/hardhat-verify/verify";
 import { MAX_TOKEN_DECIMALS } from "../lib/tokenAmounts.js";
+import { verifyEscrowDeployment } from "../lib/verifyDeployment.js";
+import { loadEscrowDeploymentArtifacts } from "../lib/deploymentArtifacts.js";
 
 const { ethers, networkName } = await network.create();
 const chain = await ethers.provider.getNetwork();
@@ -54,7 +56,8 @@ if (process.env.ESCROW_NEW_REGISTRY_ACK !== "true") {
 }
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../deployments");
 await fs.mkdir(directory, { recursive: true });
-const record = { contractName: "EscrowAuditRegistry", entityIdScheme: 2, chainId: 421614, owner, platformSigner: platform, feeBps, tokens,
+const record = { contractName: "EscrowAuditRegistry", entityIdScheme: 2, workflowVersion: 2,
+  capabilities: ["pooled-funding", "open-funding-grants"], chainId: 421614, owner, platformSigner: platform, feeBps, tokens,
   status: "started", startedAt: new Date().toISOString(), registry: null, factory: null, wiring: null };
 const file = path.join(directory, `arbitrumSepolia-${Date.now()}.json`);
 const save = () => fs.writeFile(file, JSON.stringify(record, null, 2) + "\n");
@@ -76,6 +79,9 @@ async function deploy(name, constructorArgs, key) {
 }
 const registry = await deploy("EscrowAuditRegistry", [owner], "registry");
 const factory = await deploy("FundingEscrowFactory", [owner, platform, tokens, feeBps, await registry.getAddress()], "factory");
+record.escrowDeployer = { address: await factory.escrowDeployer(), status: "confirmed" };
+record.openFundingPoolDeployer = { address: await factory.openFundingPoolDeployer(), status: "confirmed" };
+await save();
 const wiring = await registry.setFundingFactory(await factory.getAddress());
 record.wiring = { transactionHash: wiring.hash, status: "broadcast" }; await save();
 const wired = await wiring.wait(2, 180000);
@@ -86,6 +92,11 @@ record.status = "ready";
 record.tokenMetadata = await Promise.all(tokens.map(async address => ({ address,
   symbol: await new ethers.Contract(address, ["function symbol() view returns (string)"], ethers.provider).symbol(),
   decimals: Number(await factory.tokenDecimals(address)) })));
+const verification = await verifyEscrowDeployment(ethers.provider, record, await loadEscrowDeploymentArtifacts());
+record.openFunding = { version: 1, verified: verification.openFundingGrants, registryAddress: verification.address,
+  factoryAddress: verification.factoryAddress, escrowDeployerAddress: verification.escrowDeployer,
+  openFundingPoolDeployerAddress: verification.openFundingPoolDeployer };
+record.runtimeVerification = { ...verification, verifiedAt: new Date().toISOString() };
 await save();
 console.log(`Registry: ${await registry.getAddress()}\nFactory: ${await factory.getAddress()}\nDeployment record: ${file}`);
 

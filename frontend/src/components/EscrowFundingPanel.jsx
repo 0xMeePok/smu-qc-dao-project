@@ -10,6 +10,7 @@ import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
 import { getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
 import { EscrowFundingHistory } from "./EscrowFundingHistory.jsx";
+import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 
 const STATE_LABELS = ["Open for funding", "Awaiting upfront approval", "Fully paid", "Refunded", "Cancelled", "Expired", "Delivery in progress", "Voided"];
 const explorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`;
@@ -30,10 +31,13 @@ function saveTransaction(key, hash) {
 
 export function EscrowFundingView({ state, evidence, loading, error, busy, progress, walletReady, walletMessage,
   amount, setAmount, delivery, setDelivery, onAction, onRefresh, onConnect, unresolvedTransaction, onConfirm, moderated,
-  fundingBlockReason, notice, settlement, onSettle, onSync }) {
+  fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason }) {
   const money = units => `${formatUnits(units ?? 0n, state?.decimals ?? 6)} ${state?.symbol ?? ""}`;
   const disabled = busy || !walletReady || loading || Boolean(unresolvedTransaction);
   const evidenceReady = evidence && state?.currentMilestone?.evidenceHash === evidence.hash;
+  const grantWaiting = state?.isGrant && state.state === 0;
+  const grantMessage = "Grant funding moves into this escrow when the researcher accepts the selected offer.";
+  const settlementMessage = grantWaiting && ["waiting", "not_ready", "waiting_approval"].includes(settlement?.status) ? grantMessage : settlement?.message;
   const action = (name, label, extra = {}, allowed = state?.can[name]) => <button type="button" className="primary small"
     disabled={disabled || !allowed || (name === "deposit" && Boolean(fundingBlockReason)) || (moderated && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
   return <section className="card escrow-funding" aria-labelledby="escrow-funding-title">
@@ -50,24 +54,27 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       <button type="button" className="secondary small" disabled={busy} onClick={onConfirm}>Retry confirmation</button></p>}
     {!walletReady && <p className="field-hint">{walletMessage} <button type="button" className="text-button" onClick={onConnect}>Connect wallet</button></p>}
     {moderated && <p className="field-hint">This proposal is moderated. Funding and approval actions are paused here; available refunds can still be claimed.</p>}
-    {fundingBlockReason && <p className="field-hint">{fundingBlockReason}</p>}
-    {settlement && <p role="status">{settlement.message || "Checking confirmed approvals and payment status."}
+    {fundingBlockReason && !state?.isGrant && <p className="field-hint">{fundingBlockReason}</p>}
+    {settlement && <p role="status">{settlementMessage || "Checking confirmed approvals and payment status."}
       {settlement.transactionHash && <> <a href={explorer("tx", settlement.transactionHash)} target="_blank" rel="noreferrer">View payment transaction</a></>}
       {!['confirmed', 'complete', 'released', 'not_ready', 'waiting_approval'].includes(settlement.status) && <>{" "}<button type="button" className="text-button" disabled={busy} onClick={onSync}>Retry payment status</button></>}
     </p>}
     {state && <>
       {state.isHistorical && <p className="field-hint">This escrow belongs to an earlier contract deployment. Its original balances and available refunds remain visible. Create a new posting to use the current funding workflow.</p>}
       {state.workflowPaused && <p className="field-hint">Funding and approvals are paused while this posting is under review. A temporary pause does not open refunds.</p>}
-      <p><strong>{STATE_LABELS[state.state] ?? "Unknown state"}</strong> · <a href={explorer("address", state.address)} target="_blank" rel="noreferrer">View escrow contract</a></p>
+      {state.blockedBySelection && !state.isGrant && <p className="field-hint">Funding and selection are paused while another proposal awaits both owners’ approval. If that selection is rejected or expires, eligible proposals reopen. Once the selected proposal’s upfront payment is processed, other proposals close and their contributions become refundable.</p>}
+      <p><strong>{grantWaiting ? "Waiting for grant funding" : state.isGrant && state.state === 1 && state.ownerApproved && state.solutionApproved
+        ? "Upfront payment pending" : STATE_LABELS[state.state] ?? "Unknown state"}</strong> · <a href={explorer("address", state.address)} target="_blank" rel="noreferrer">View escrow contract</a></p>
       <dl className="settings-group">
         <div className="settings-row"><dt>Funded / target</dt><dd>{money(state.totalDeposited)} / {money(state.fundingTarget)}</dd></div>
         <div className="settings-row"><dt>Released before fees</dt><dd>{money(state.totalReleased)}</dd></div>
         <div className="settings-row"><dt>Held for unpaid work</dt><dd>{money(state.outstandingBalance)}</dd></div>
         <div className="settings-row"><dt>Your contribution</dt><dd>{money(state.wallet.contribution)}</dd></div>
         <div className="settings-row"><dt>Your available refund</dt><dd>{money(state.wallet.depositor?.claimable)}</dd></div>
-        <div className="settings-row"><dt>{state.state === 0 ? "Funding closes" : "Current approval deadline"}</dt><dd>{instant(state.state === 0 ? state.expiresAt : state.approvalDeadline)}</dd></div>
+        <div className="settings-row"><dt>{state.state === 0 ? state.isGrant ? "Posting closes" : "Funding closes" : "Current approval deadline"}</dt><dd>{instant(state.state === 0 ? state.expiresAt : state.approvalDeadline)}</dd></div>
       </dl>
-      {state.state === 0 && state.remaining > 0n && <div className="field-group">
+      {grantWaiting && !settlementMessage && <p className="field-hint">{grantMessage} Manage the offer in the grant funding panel.</p>}
+      {state.state === 0 && state.remaining > 0n && !state.isGrant && <div className="field-group">
         <p><strong>Funding token: {state.symbol}</strong> · This proposal accepts the token fixed in its payment plan.</p>
         <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Wallet balance: ${money(state.wallet.balance)}.`}>
           {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
@@ -75,16 +82,28 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
         <p className="field-hint">1. Approve only the entered token amount if needed. 2. Confirm the deposit. Deposited funds remain locked until an approved payment or an available refund.</p>
         {action("deposit", "Fund escrow", { amount })}
       </div>}
-      {state.state === 0 && state.remaining === 0n && <div className="field-group">
+      {state.state === 0 && state.remaining === 0n && !state.isGrant && <div className="field-group">
         <p>The target is fully funded. The problem owner selects this proposal, then both owners approve the upfront payment.</p>
-        {state.roles.problemOwner ? <button type="button" className="primary small" disabled={disabled || moderated || state.isHistorical} onClick={onSettle}>Select proposal for upfront approval</button>
+        {state.roles.problemOwner ? <button type="button" className="primary small" disabled={disabled || moderated || state.isHistorical || state.workflowActive === false} onClick={onSettle}>Select proposal for upfront approval</button>
           : <p className="field-hint">Waiting for the problem owner to select this proposal.</p>}
       </div>}
       {state.state === 1 && <div className="field-group">
         <h4>Upfront 50%</h4><p>Problem owner: {state.ownerApproved ? "approved" : "pending"}. Proposal owner: {state.solutionApproved ? "approved" : "pending"}.</p>
-        {(state.roles.problemOwner || state.roles.proposalOwner) && action("approveSelection", "Approve upfront payment")}
+        {!state.isGrant && <>
+          <p>{state.supportsSelectionRejection ? "Both owners have seven days from selection to approve, even if the posting closes during that window." : "Both owners must approve before the on-chain deadline."} Funding and selection are paused for every other proposal during this window.</p>
+          <p>Upfront approval time remaining: <ExpiryCountdown expiresAt={new Date(Number(state.approvalDeadline) * 1000)} /></p>
+        </>}
+        {(state.roles.problemOwner || state.roles.proposalOwner) && (!state.isGrant || !state.ownerApproved || !state.solutionApproved) && action("approveSelection", "Approve upfront payment")}
         {state.roles.platform && action("release", "Release upfront 50%")}
-        <p className="field-hint">Once both approvals confirm, the platform processes the upfront payment. If upfront approval lapses, refunds become available at the funding deadline.</p>
+        {!state.isGrant && state.can.rejectSelection && <div className="field-group">
+          <Field label="Reason for rejecting selection" htmlFor="escrow-selection-rejection" hint="10–2,000 characters. Rejecting opens full refunds for this proposal and reopens other eligible proposals.">
+            {({ id, describedBy }) => <textarea id={id} minLength={10} maxLength={2000} value={rejectionReason} disabled={disabled} aria-describedby={describedBy} onChange={event => setRejectionReason?.(event.target.value)} />}
+          </Field>
+          {action("rejectSelection", "Reject selection and refund", { reason: rejectionReason }, state.can.rejectSelection && rejectionReason.trim().normalize("NFC").length >= 10)}
+        </div>}
+        <p className="field-hint">Once both approvals confirm, the platform processes the upfront payment. {state.supportsSelectionRejection && !state.isGrant
+          ? "If either owner rejects or the approval deadline passes, this proposal’s full contribution balance becomes refundable and other eligible proposals reopen."
+          : "If upfront approval lapses, refunds become available at the funding deadline."}</p>
       </div>}
       {state.state === 6 && <>
         <div className="field-group"><h4>Delivery evidence</h4>
@@ -115,7 +134,9 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
         {state.can.refundInvalidated && action("refundInvalidated", "Open withdrawal refunds")}
         {state.can.expire && action("expire", "Open expired escrow refunds")}
         {state.can.claimRefund && action("claimRefund", "Claim my refund")}
-        <p className="field-hint">Refunds return only the unpaid balance. Earlier payouts remain paid.</p>
+        <p className="field-hint">{state.supportsSelectionRejection && !state.isGrant && [1, 4, 5].includes(state.state) && state.totalReleased === 0n
+          ? "This proposal’s full contribution balance is refundable after rejection or expiry. Other eligible proposals can be funded or selected again while the posting remains open."
+          : "Refunds return only the unpaid balance. Earlier payouts remain paid."}</p>
       </div>}
     </>}
   </section>;
@@ -130,6 +151,7 @@ export function EscrowFundingPanel({ proposal, onStateChange }) {
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [progress, setProgress] = useState(null), [unresolvedTransaction, setUnresolvedTransaction] = useState(() => savedTransaction(storageKey));
   const [amount, setAmount] = useState(""), [delivery, setDelivery] = useState({ summary: "", url: "" });
+  const [rejectionReason, setRejectionReason] = useState("");
   const [connect, setConnect] = useState(false);
   const [history, setHistory] = useState(null), [historyError, setHistoryError] = useState("");
   const [syncError, setSyncError] = useState(""), [settlement, setSettlement] = useState(null);
@@ -198,6 +220,7 @@ export function EscrowFundingPanel({ proposal, onStateChange }) {
       } else if (action === "lockSelection") payload.selectionId = keccak256(stringToHex(crypto.randomUUID()));
       const result = await writeEscrowAction(payload);
       if (action === "deposit") setNotice("Deposit confirmed. Your tokens are held in escrow until an approved payment or an available refund.");
+      if (action === "rejectSelection") { setNotice("Selection rejected. This proposal’s full contribution balance is refundable; other eligible proposals reopen."); setRejectionReason(""); }
       try { if (!state?.isHistorical) {
         const synchronized = await syncEscrowFunding({ proposalId: proposal.id, ...(result?.transactionHash ? { transactionHash: result.transactionHash } : {}) });
         setHistory(synchronized); setSettlement(synchronized.settlement); setSyncError("");
@@ -237,7 +260,7 @@ export function EscrowFundingPanel({ proposal, onStateChange }) {
     } catch (err) { setSyncError(err.message || "Funding status could not be updated. Retry when ready."); }
     finally { writing.current = false; setBusy(false); }
   };
-  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, unresolvedTransaction, moderated, fundingBlockReason, notice }}
+  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize(true)} onSync={() => synchronize()}
     onAction={act} onRefresh={refresh} onConnect={() => setConnect(true)} onConfirm={confirmPending} />
     {user?.id && !state?.isHistorical && <EscrowFundingHistory data={history} error={syncError || historyError} busy={busy || loading} onSync={() => synchronize()} />}

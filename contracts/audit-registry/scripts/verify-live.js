@@ -10,9 +10,8 @@ const rpc = new JsonRpcProvider(process.env.ARBITRUM_SEPOLIA_RPC_URL);
 try {
   if (deployment.registry || deployment.contractName === "EscrowAuditRegistry") {
     const { verifyEscrowDeployment } = await import("../../funding-escrow/lib/verifyDeployment.js");
-    const load = name => JSON.parse(fs.readFileSync(new URL(`../../funding-escrow/artifacts/contracts/${name}.sol/${name}.json`, import.meta.url)));
-    console.log(JSON.stringify(await verifyEscrowDeployment(rpc, deployment,
-      { registry: load("EscrowAuditRegistry"), factory: load("FundingEscrowFactory") })));
+    const { loadEscrowDeploymentArtifacts } = await import("../../funding-escrow/lib/deploymentArtifacts.js");
+    console.log(JSON.stringify(await verifyEscrowDeployment(rpc, deployment, await loadEscrowDeploymentArtifacts())));
   } else {
     const artifact = JSON.parse(fs.readFileSync(new URL("../artifacts/contracts/AuditRegistry.sol/AuditRegistry.json", import.meta.url)));
     if (Number((await rpc.getNetwork()).chainId) !== 421614) throw new Error("Wrong network");

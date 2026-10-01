@@ -47,6 +47,22 @@ describe("FundingEscrowFactory: configuration and proposal isolation", function 
     expect(await c.factory.escrowForProposal(next)).to.equal(c.ethers.ZeroAddress);
   });
 
+  it("keeps creation-helper authority separate from the canonical escrow factory", async function () {
+    const c = await fixture();
+    const factoryAddress = await c.factory.getAddress();
+    const helper = await c.ethers.getContractAt("FundingEscrowDeployer", await c.factory.escrowDeployer());
+    const init = { postingId: c.postingId, proposalId: scopedId(c, c.solution, "helper-bypass"), token: c.tokenAddress,
+      platformSigner: c.platform.address, problemOwner: c.owner.address, proposalOwner: c.solution.address,
+      target: c.target, expiresAt: c.expiresAt, feeRecipient: c.admin.address, feeBps: 0,
+      factory: factoryAddress, auditRegistry: c.registryAddress, funderVoting: false };
+    await expect(helper.connect(c.other).deploy(init, terms(c))).to.be.revertedWithCustomError(helper, "AccessDenied");
+    expect(await helper.factory()).to.equal(factoryAddress);
+    expect(await c.escrow.tokenRegistry()).to.equal(factoryAddress);
+    expect(await c.escrow.auditRegistry()).to.equal(c.registryAddress);
+    expect(await c.escrow.feeRecipient()).to.equal(c.admin.address);
+    expect(await c.factory.escrowForProposal(c.proposalId)).to.equal(c.escrowAddress);
+  });
+
   it("does not reserve a proposal ID if creation fails", async function () {
     const c = await fixture();
     const next = scopedId(c, c.solution, "proposal-2");
