@@ -4,6 +4,7 @@ import { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding, suppo
 import { prepareEscrowDeposit, startEscrowSettlement, fundingBlockReason, settlementAction } from "../escrowFunding.js";
 import { getFunderDashboard } from "../funderDashboard.js";
 import { readVerifiedFunding } from "../escrowFunding.js";
+import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { fundMockProposal, selectMockProposal, confirmMockProposal } from "../matching.js";
 import { openFundingFixture, owner, researcher, otherResearcher, poolAddress, zeroAddress } from "./fixtures/openFundingFixture.js";
@@ -217,11 +218,74 @@ describe("funder dashboard verified accounting", () => {
     assert.deepEqual(result.decisions.map(row => row.selection.status), ["pending", "voided"]);
     assert.deepEqual(result.totals, []); assert.equal(result.commitments.length, 0);
   });
+  it("shows the confirmed posting deadline even before the expiry worker changes stored status", async () => {
+    const f = openFundingFixture(); f.state.timestamp = 2000000001n;
+    const result = await getFunderDashboard(f);
+    assert.equal(result.opportunities[0].status, "expired");
+    assert.equal(result.opportunities[0].recordStatus, "submitted");
+    assert.equal(result.opportunities[0].pool.closed, true);
+    assert.equal(f.db.records.get(`problems/${f.problemId}`).status, "submitted");
+  });
   it("lists open grants even when more than fifty main-workflow postings are owned", async () => {
     const f = openFundingFixture(); f.db.records.delete(`problems/${f.problemId}`);
     for (let i = 0; i < 60; i++) f.db.records.set(`problems/main-${i}`, { ownerId: owner, opportunityType: "business-problem", status: "submitted" });
     f.db.records.set(`problems/${f.problemId}`, f.posting);
     assert.equal((await getFunderDashboard(f)).opportunities.length, 1);
+  });
+  it("does not let unfunded grant approaches crowd accepted commitments out of the page", async () => {
+    const f = openFundingFixture();
+    for (const row of f.proposals) f.db.records.delete(`proposals/${row.id}`);
+    for (let i = 0; i < 60; i++) f.db.records.set(`proposals/unfunded-${i}`, { ...f.proposals[0], id: `unfunded-${i}` });
+    for (const row of f.proposals) f.db.records.set(`proposals/${row.id}`, row);
+    f.select(1, 2);
+    const result = await getFunderDashboard(f);
+    assert.equal(result.approaches.length, 62);
+    assert.deepEqual(result.commitments.map(row => row.proposalId), [f.proposals[1].id]);
+    assert.equal(result.totals[0].committed, "50000000000");
+    assert.equal(result.truncated.commitments, false); assert.equal(result.totalsPartial, false);
+  });
+  it("uses a fresh confirmed head and never counts duplicate or foreign-chain deposit discovery twice", async () => {
+    const f = openFundingFixture(); f.select(0, 2);
+    f.client.getBlockNumber = async options => { assert.equal(options.cacheTime, 0); return 103n; };
+    for (let i = 0; i < 3; i++) f.db.records.set(`escrowFundingEvents/deposit-${i}`, {
+      actor: owner, registryAddress: f.config.address, eventType: "Deposit", verified: true,
+      chainId: f.config.chainId, proposalId: f.proposals[0].id,
+    });
+    f.db.records.set("escrowFundingEvents/foreign", { actor: owner, registryAddress: f.config.address,
+      eventType: "Deposit", verified: true, chainId: 1, proposalId: "missing-foreign-proposal" });
+    const result = await getFunderDashboard(f);
+    assert.equal(result.commitments.length, 1); assert.equal(result.totals[0].committed, "50000000000");
+    assert.equal(result.blockNumber, 102); assert(f.calls.every(row => row.blockNumber === 102n));
+  });
+  it("keeps different canonical tokens separate and explicitly marks limited discovery totals", async () => {
+    const f = openFundingFixture(), tokenAddress = `0x${"9".repeat(40)}`;
+    f.config.escrow.tokens = [...f.config.escrow.tokens, { address: tokenAddress, symbol: "XSGD", decimals: 6 }];
+    const row = f.proposals[1];
+    row.opportunityType = "business-problem"; row.problemId = "xsgd-main"; row.currency = "XSGD";
+    row.fundingTerms = { ...row.fundingTerms, token: tokenAddress };
+    f.expected[1] = prepareStoredProposal(row, { registryConfig: f.config });
+    f.db.records.set("problems/xsgd-main", { ownerId: owner, opportunityType: "business-problem", title: "XSGD challenge", status: "submitted" });
+    f.select(0, 2); f.state.escrowDeposits[1] = 50000000000n;
+    const read = f.client.readContract;
+    f.client.readContract = async request => {
+      if (request.address === f.addresses[1] && request.functionName === "postingId") return f.expected[1].opportunityId;
+      if (request.address === f.addresses[1] && request.functionName === "token") return tokenAddress;
+      return read(request);
+    };
+    for (let i = 0; i < 201; i++) f.db.records.set(`escrowFundingEvents/main-${i}`, {
+      actor: owner, registryAddress: f.config.address, eventType: "Deposit", verified: true,
+      chainId: f.config.chainId, proposalId: row.id,
+    });
+    const result = await getFunderDashboard(f);
+    assert.equal(result.commitments.length, 2); assert.equal(result.totals.length, 2);
+    assert.deepEqual(result.totals.map(item => [item.tokenSymbol, item.committed]).sort(), [["USDC", "50000000000"], ["XSGD", "50000000000"]]);
+    assert.equal(result.totalsPartial, true); assert.equal(result.truncated.commitments, true);
+  });
+  it("does not invent a grant decision from stale accepted status or a legacy single-winner field", async () => {
+    const f = openFundingFixture(); f.proposals[0].status = "accepted";
+    f.posting.acceptedProposalId = f.proposals[0].id;
+    const result = await getFunderDashboard(f);
+    assert.equal(result.decisions.length, 0); assert.equal(result.commitments.length, 0);
   });
   it("lists posted grants and approaches, discovers accepted owner-funded escrows, and totals exact own units", async () => {
     const f = openFundingFixture(); f.select(0, 2); f.select(1, 2);
@@ -241,6 +305,7 @@ describe("funder dashboard verified accounting", () => {
     const result = await getFunderDashboard(f);
     assert.equal(result.opportunities.length, 1); assert.deepEqual(result.totals, []);
     assert.equal(result.opportunities[0].poolUnavailable, true);
-    assert.equal(result.commitments.length, 0); assert.equal(result.unavailableCommitments, 2);
+    assert.equal(result.commitments.length, 0); assert.equal(result.unavailableCommitments, 0);
+    assert.equal(result.unavailableDecisions, 2); assert.equal(result.totalsPartial, true);
   });
 });

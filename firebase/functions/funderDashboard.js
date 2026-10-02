@@ -6,6 +6,7 @@ import { FUNDING_EVENTS, loadFundingContext, readVerifiedFunding } from "./escro
 import { readOpenFunding, supportsOpenFunding } from "./openFunding.js";
 import { same } from "./escrowFundingEvents.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
+import { readEscrowQueueActions } from "./escrowQueueMetadata.js";
 
 const CAP = 50, APPROACH_CAP = 200;
 const iso = value => value?.toDate?.().toISOString?.() ?? null;
@@ -30,7 +31,8 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   let safeTimestamp;
   try {
     if (await client.getChainId() !== config.chainId) throw new Error("Incorrect chain");
-    safeBlock = await client.getBlockNumber() - 1n;
+    safeBlock = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
+    if (safeBlock < 0n) throw new Error("No confirmed block");
     safeTimestamp = (await client.getBlock({ blockNumber: safeBlock })).timestamp;
   } catch { /* Business records remain usable when RPC reads are unavailable. */ }
   for (const doc of owned.docs.slice(0, CAP)) {
@@ -44,12 +46,15 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
       }
       catch { unavailablePools++; poolUnavailable = true; }
     }
-    opportunities.push({ id: doc.id, title: data.title || "Open funding", status: data.status, amount: data.amount ?? 0,
+    opportunities.push({ id: doc.id, title: data.title || "Open funding", recordStatus: data.status,
+      status: pool?.withdrawn ? "cancelled" : pool?.closed ? "expired" : data.status, amount: data.amount ?? 0,
       currency: data.currency || "", createdAt: iso(data.createdAt), updatedAt: iso(data.updatedAt), pool, poolUnavailable,
       grantSupported: supportsOpenFunding(config) });
   }
+  const poolsByProblem = new Map(opportunities.map(item => [item.id, item.pool]));
   const approaches = [], decisions = [], commitmentIds = new Set(deposits.docs.slice(0, APPROACH_CAP)
-    .filter(doc => doc.data().verified === true).map(doc => doc.data().proposalId));
+    .filter(doc => doc.data().verified === true && doc.data().chainId === config.chainId).map(doc => doc.data().proposalId));
+  let unavailableDecisions = 0;
   for (const doc of approachesPage.docs.slice(0, APPROACH_CAP)) {
     const data = doc.data();
     if (data.status === "draft" || hidden(data)) continue;
@@ -61,13 +66,42 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
     }
     const row = { proposalId: doc.id, problemId: data.problemId, title: data.title || "Proposal", researcherId: data.researcherId,
       postingTitle: parent.title || "Posting", opportunityType: parent.opportunityType || "business-problem", amount: data.amount ?? 0,
-      currency: data.currency || "", status: data.status, createdAt: iso(data.createdAt) };
+      currency: data.currency || "", status: data.status, recordStatus: data.status, createdAt: iso(data.createdAt) };
     const review = await db.collection(`proposals/${doc.id}/ownerReviewLatest`).doc("current").get();
     const ownerReview = ownerReviewSummary(review.data());
     approaches.push(row);
-    let selection = parent.escrowSelection?.proposalId === doc.id
-      ? { status: "pending", requestedAt: iso(parent.escrowSelection.requestedAt) } : data.status === "accepted" ? { status: "accepted" } : null;
-    const pool = opportunities.find(item => item.id === data.problemId)?.pool;
+    let selection = parent.opportunityType === "open-funding" ? null
+      : parent.acceptedProposalId === doc.id || data.status === "accepted" ? { status: "accepted" }
+        : parent.escrowSelection?.proposalId === doc.id ? { status: "pending", requestedAt: iso(parent.escrowSelection.requestedAt) } : null;
+    if (parent.opportunityType !== "open-funding" && data.fundingTerms && data.audit?.status === "confirmed") {
+      const canonical = await readEscrowQueueActions({ db, client, config, uid, docs: [doc], blockNumber: safeBlock });
+      const escrow = canonical.states.get(doc.id);
+      if (escrow) {
+        row.escrow = escrow;
+        // The pending Firestore request is retained after upfront release.
+        // Confirmed escrow state, rather than that request, describes the decision.
+        selection = escrow.state === "Open"
+          ? parent.escrowSelection?.proposalId === doc.id ? { status: "pending", requestedAt: iso(parent.escrowSelection.requestedAt) } : null
+          : { status: ["Active", "Released"].includes(escrow.state) ? "accepted"
+            : escrow.state === "Locked" ? "pending" : escrow.state.toLowerCase(), escrowState: escrow.state };
+      } else if (canonical.unavailable.has(doc.id)) {
+        row.escrowUnavailable = true;
+        selection = null;
+        unavailableDecisions++;
+      }
+    }
+    // A listing page limit must not hide an accepted grant on another owned
+    // posting. Read its pool once, using the same confirmed block as the page.
+    if (parent.opportunityType === "open-funding" && !poolsByProblem.has(data.problemId)) {
+      let pool = null;
+      if (supportsOpenFunding(config) && safeBlock !== undefined && safeBlock >= 0n) {
+        try { pool = await readOpenFunding({ db, client, config, uid, problemId: data.problemId, blockNumber: safeBlock, includeSelections: false }); }
+        catch { unavailablePools++; }
+      }
+      poolsByProblem.set(data.problemId, pool);
+    }
+    const pool = poolsByProblem.get(data.problemId);
+    let grantAccepted = false;
     if (pool?.exists && data.audit?.status === "confirmed" && data.fundingTerms) {
       try {
         const expected = prepareStoredProposal({ ...data, id: doc.id }, { registryConfig: config });
@@ -76,14 +110,21 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
         const state = Number(at(offer, "state", 2)), deadline = BigInt(at(offer, "acceptanceDeadline", 1));
         if ([1, 2, 3].includes(state)) selection = { status: state === 1 && deadline <= safeTimestamp ? "expired" : ["none", "pending", "accepted", "voided"][state],
           amountBaseUnits: String(at(offer, "amount", 0)), acceptanceDeadline: deadline.toString() };
-      } catch { /* Pool totals retain their verified state; this decision remains unavailable. */ }
+        grantAccepted = state === 2;
+      } catch { unavailableDecisions++; selection = null; }
+    } else if (parent.opportunityType === "open-funding" && data.audit?.status === "confirmed" && data.fundingTerms && supportsOpenFunding(config) && !pool) {
+      unavailableDecisions++;
+      selection = null;
     }
-    if (ownerReview || selection || parent.acceptedProposalId === doc.id) {
+    if (ownerReview || selection || (parent.opportunityType !== "open-funding" && parent.acceptedProposalId === doc.id)) {
       decisions.push({ ...row, ownerReview, selection });
     }
     // Accepted grant escrows credit the owner's wallet, even if the escrow
     // event index has not yet ingested the acceptance transaction.
-    if (parent.opportunityType === "open-funding" && data.fundingTerms && data.audit?.status === "confirmed") commitmentIds.add(doc.id);
+    // Prospective or pending offers have no escrow commitment. Including them
+    // in this bounded candidate set can crowd actual accepted grants out.
+    if (grantAccepted || (parent.opportunityType === "open-funding" && !pool && data.status === "accepted"
+        && data.fundingTerms && data.audit?.status === "confirmed")) commitmentIds.add(doc.id);
   }
   const commitments = [], totals = new Map();
   let unavailableCommitments = 0;
@@ -119,7 +160,9 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   return { opportunities, commitments, approaches, decisions,
     totals: [...totals.values()].map(row => ({ ...row, committed: row.committed.toString(), locked: row.locked.toString(),
       released: row.released.toString(), refunded: row.refunded.toString() })),
-    truncated: { opportunities: owned.size > CAP, commitments: commitmentIds.size > CAP || deposits.size > APPROACH_CAP,
+    truncated: { opportunities: owned.size > CAP, commitments: commitmentIds.size > CAP || deposits.size > APPROACH_CAP || approachesPage.size > APPROACH_CAP,
       approaches: approachesPage.size > APPROACH_CAP, decisions: approachesPage.size > APPROACH_CAP },
-    unavailableCommitments, unavailablePools, updatedAt: now.toDate().toISOString() };
+    totalsPartial: unavailableCommitments > 0 || unavailablePools > 0 || unavailableDecisions > 0 || commitmentIds.size > CAP || deposits.size > APPROACH_CAP || approachesPage.size > APPROACH_CAP,
+    unavailableCommitments, unavailablePools, unavailableDecisions, blockNumber: safeBlock !== undefined && safeBlock >= 0n ? Number(safeBlock) : null,
+    updatedAt: now.toDate().toISOString() };
 }

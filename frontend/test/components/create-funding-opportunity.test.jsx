@@ -123,6 +123,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("[QCDAO-51] create open funding", () => {
+  it("removes the validation summary after every reported field is corrected", () => {
+    render(<CreateFundingOpportunityPage onNavigate={() => {}} />);
+    fireEvent.submit(document.querySelector("form"));
+    expect(screen.getByText(/field\(s\) need attention/)).toBeTruthy();
+    fillForm();
+    expect(screen.queryByText(/field\(s\) need attention/)).toBeNull();
+  });
   it("generates discovery tags from selected technology areas", () => {
     render(<CreateFundingOpportunityPage onNavigate={() => {}} />);
 

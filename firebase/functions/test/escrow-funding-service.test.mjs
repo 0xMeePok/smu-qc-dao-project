@@ -122,10 +122,45 @@ describe("escrow funding service", () => {
     const [path, notice] = notices[0]; f.db.records.set(path, { ...notice, readAt: now });
     await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: researcher });
     assert.equal(f.db.records.get(path).readAt, now);
-    const dashboard = await getEscrowFundingSummary({ db: f.db, config, uid: owner });
+    const dashboard = await getEscrowFundingSummary({ ...f, uid: owner });
     assert.equal(dashboard.items.length, 1); assert.equal(dashboard.items[0].upfrontReleased, true);
     assert.equal(f.db.records.get(`problems/${f.record.problemId}`).acceptedProposalId, f.record.id);
     assert.equal(f.db.records.get(`proposals/${f.record.id}`).status, "accepted");
+  });
+
+  it("refreshes payment balances from a confirmed block without rewriting a stale cache or submitting funds", async () => {
+    const f = fixture({ release: true });
+    await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+    const cachePath = `escrowFundingSummaries/${key(f.record.id)}`;
+    const cached = f.db.records.get(cachePath);
+    f.state.totalReleased = f.state.totalDeposited;
+    f.state.state = 2; f.state.currentTranche = 2n;
+    const read = f.client.readContract;
+    f.client.readContract = async request => request.functionName === "milestoneAt"
+      ? { ...await read(request), paid: true } : read(request);
+    f.client.getBlockNumber = async options => { assert.equal(options.cacheTime, 0); return 103n; };
+    const result = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.equal(result.items[0].totalReleased, f.state.totalDeposited.toString());
+    assert.equal(result.items[0].outstandingBalance, "0");
+    assert.equal(result.items[0].finalReleased, true); assert.equal(result.blockNumber, 102);
+    assert.equal(result.unavailableItems, 0); assert.equal(f.db.records.get(cachePath), cached);
+  });
+
+  it("excludes unverifiable payment balances instead of displaying a stale confirmed cache", async () => {
+    const f = fixture({ release: true });
+    await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+    f.client.readContract = async () => { throw new Error("RPC unavailable"); };
+    const result = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.equal(result.items.length, 0); assert.equal(result.unavailableItems, 1);
+  });
+  it("deduplicates payment discovery and excludes projections from another chain", async () => {
+    const f = fixture({ release: true });
+    await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+    const cached = f.db.records.get(`escrowFundingSummaries/${key(f.record.id)}`);
+    f.db.records.set("escrowFundingSummaries/duplicate", { ...cached });
+    f.db.records.set("escrowFundingSummaries/foreign", { ...cached, chainId: 1, proposalId: "foreign" });
+    const result = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.equal(result.items.length, 1); assert.equal(result.unavailableItems, 0);
   });
 
   it("rejects mismatched proposal content and never saves a confirmed projection on failed reconciliation", async () => {

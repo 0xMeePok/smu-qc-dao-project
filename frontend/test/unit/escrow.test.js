@@ -176,6 +176,8 @@ describe("Canonical escrow wallet integration", () => {
     assert.equal(f.writes[0].address, f.proposal.fundingTerms.token);
     assert.equal(f.writes[1].address, escrowAddress);
     assert(f.writes.every(write => write.account === funder && write.chainId === 421614));
+    assert.equal(f.waits.length, 2);
+    assert(f.waits.every(request => request.confirmations === 2));
     assert.deepEqual(progress.map(update => `${update.action}:${update.status}`), ["approve:awaiting_signature", "approve:pending", "approve:confirmed", "deposit:awaiting_signature", "deposit:pending", "deposit:confirmed"]);
     assert.equal(result.transactionHash, txHash);
   });
@@ -217,7 +219,8 @@ describe("Canonical escrow wallet integration", () => {
     const confirmed = await confirmEscrowTransaction(txHash, f);
     assert.equal(confirmed.receipt.status, "success");
     assert.equal(f.writes.length, 1);
-    assert.ok(f.waits.every(request => request.confirmations === 1));
+    assert.equal(f.waits.length, 2);
+    assert.ok(f.waits.every(request => request.confirmations === 2));
   });
 
   for (const outcome of ["cancelled", "replaced", "reverted"]) it(`does not deposit after a ${outcome} token approval`, async () => {

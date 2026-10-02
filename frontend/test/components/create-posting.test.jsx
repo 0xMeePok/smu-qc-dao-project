@@ -388,6 +388,11 @@ describe("wizard navigation while an attachment is uploading", () => {
 });
 
 describe("[QCDAO-91] wizard step indicator", () => {
+  it("does not count cleared validation keys as fields needing attention", () => {
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    expect(screen.queryByText(/field\(s\) need attention/)).toBeNull();
+  });
   it("ticks a step only when its fields are complete, and marks a visited unfinished step as incomplete", async () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     const step = (name) => screen.getByRole("button", { name: new RegExp(`^${name}`) });

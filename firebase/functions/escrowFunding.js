@@ -470,18 +470,33 @@ export async function startEscrowSettlement(options) {
   return syncEscrowFunding({ ...options, now });
 }
 
-export async function getEscrowFundingSummary({ db, config, uid }) {
+export async function getEscrowFundingSummary({ db, client, config, uid }) {
   const sets = await Promise.all(["postingOwnerId", "researcherId"].map(field => db.collection(FUNDING_SUMMARIES)
     .where(field, "==", uid).where("registryAddress", "==", config.address.toLowerCase()).limit(50).get()));
-  const unique = new Map(sets.flatMap(set => set.docs).map(doc => [doc.id, doc.data()]));
+  const unique = new Map(sets.flatMap(set => set.docs).map(doc => doc.data())
+    .filter(item => item.chainId === config.chainId).map(item => [item.proposalId, item]));
   const items = [];
-  for (const item of unique.values()) {
-    try {
-      const context = await loadFundingContext({ db, uid, proposalId: item.proposalId });
-      items.push({ ...item, fundingBlockReason: fundingBlockReason(context.record, context.parent, item, Date.now(), { deposit: true }) });
-    } catch { /* Removed or no longer visible; do not expose a stale projection. */ }
+  if (!unique.size) return { items, truncated: false, unavailableItems: 0, blockNumber: null };
+  if (config.contractName !== "EscrowAuditRegistry" || await client.getChainId() !== config.chainId) {
+    fail("failed-precondition", "Payment summaries require the configured escrow chain.");
   }
-  return { items, truncated: sets.some(set => set.size === 50) };
+  const blockNumber = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
+  if (blockNumber < 0n) fail("unavailable", "No confirmed escrow block is available yet.");
+  let unavailableItems = 0;
+  for (const item of unique.values()) {
+    let context;
+    try {
+      context = await loadFundingContext({ db, uid, proposalId: item.proposalId });
+    } catch { /* Removed or no longer visible; do not expose a stale projection. */ }
+    if (!context) continue;
+    try {
+      // The cache discovers authorized records. Financial values always come
+      // from a fresh confirmed block; reading a dashboard never settles funds.
+      const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
+      items.push({ ...verified.summary });
+    } catch { unavailableItems++; }
+  }
+  return { items, truncated: sets.some(set => set.size === 50), unavailableItems, blockNumber: Number(blockNumber) };
 }
 
 export async function queuePostingFundingPause({ db, config, problemId, record, now = Timestamp.now() }) {

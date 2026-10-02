@@ -766,8 +766,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
               {submitError} Nothing you typed has been lost — fix the problem and submit again.
             </p>
           ) : null}
-          {Object.keys(errors).length > 0 ? (
-            <p className="field-hint" role="status">{Object.keys(errors).length} field(s) need attention. Steps marked ! have the details.</p>
+          {Object.values(errors).filter(Boolean).length > 0 ? (
+            <p className="field-hint" role="status">{Object.values(errors).filter(Boolean).length} field(s) need attention. Steps marked ! have the details.</p>
           ) : null}
         </form>
 

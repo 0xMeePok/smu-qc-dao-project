@@ -36,6 +36,14 @@ it("keeps different tokens in separate totals and reports missing verification",
   expect(await screen.findByText(/2 commitments could not be verified/)).toBeTruthy();
   expect(screen.getAllByText("1 XSGD")).toHaveLength(2);
 });
+it("labels partial totals and unavailable grant decisions instead of claiming no decisions exist", async () => {
+  mocks.fetch.mockResolvedValue({ ...fixture, totalsPartial: true, unavailableDecisions: 2 });
+  render(<FunderDashboard onNavigate={() => {}} />);
+  expect(await screen.findByText(/Funding totals are partial/)).toBeTruthy();
+  expect(screen.getByText(/2 grant decisions could not be verified/)).toBeTruthy();
+  expect(screen.getByText("Verified funding decisions are temporarily unavailable.")).toBeTruthy();
+  expect(screen.queryByText("No funding decisions recorded yet.")).toBeNull();
+});
 it("shows a retryable error instead of zero commitments when the service fails", async () => {
   mocks.fetch.mockRejectedValue(new Error("Service unavailable")); render(<FunderDashboard onNavigate={() => {}} />);
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Service unavailable");

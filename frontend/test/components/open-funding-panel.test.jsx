@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), supported: true, account: null, user: null }));
 vi.mock("wagmi", () => ({ useAccount: () => mocks.account }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
@@ -8,11 +9,16 @@ vi.mock("../../src/lib/openFunding.js", () => ({ getOpenFundingSummary: (...args
 vi.mock("../../src/lib/escrow.js", () => ({ confirmEscrowTransaction: (...args) => mocks.confirm(...args), escrowErrorMessage: error => error.message }));
 vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet connection dialog</p> }));
 import { OpenFundingPanel, OpenFundingView } from "../../src/components/OpenFundingPanel.jsx";
+import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`;
 const proposal = { proposalId: "solution", title: "Quantum solution", amountBaseUnits: "50000000000", status: "none", canSelect: true };
 const model = (extra = {}) => ({ supported: true, poolAddress: `0x${"b".repeat(40)}`, tokenAddress: `0x${"c".repeat(40)}`,
   tokenDecimals: 6, tokenSymbol: "USDC", totalDeposited: "100000000000", totalAllocated: "0", totalReserved: "0", available: "100000000000",
   canDeposit: true, canSelect: true, selections: [proposal], ...extra });
+function ActionCount({ read }) {
+  const { data } = useQuery({ queryKey: [...ACTION_ITEMS_KEY, account], queryFn: read, staleTime: 60_000 });
+  return <p>Verified action count: {data?.total ?? "loading"}</p>;
+}
 beforeEach(() => {
   sessionStorage.clear(); vi.clearAllMocks(); mocks.supported = true;
   mocks.account = { isConnected: true, address: account, chainId: 421614 }; mocks.user = { id: account };
@@ -21,6 +27,25 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("open funding grant workflow UI", () => {
+  it.each([false, true])("refreshes an active action count after grant acceptance confirmation (recovery=%s)", async recovery => {
+    let total = 1;
+    mocks.read.mockResolvedValue(model({ canDeposit: false, selections: [{ ...proposal, status: "pending", canAccept: true }] }));
+    if (recovery) {
+      mocks.write.mockImplementation(async input => {
+        input.onProgress({ status: "pending", action: "accept", transactionHash: hash });
+        throw new Error("Confirmation unavailable");
+      });
+      mocks.confirm.mockImplementation(async () => { total = 0; return { transactionHash: hash }; });
+    } else mocks.write.mockImplementation(async () => { total = 0; return { transactionHash: hash }; });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    render(<QueryClientProvider client={client}><ActionCount read={async () => ({ total })} /><OpenFundingPanel problemId="grant" /></QueryClientProvider>);
+    await screen.findByText("Verified action count: 1");
+    fireEvent.click(await screen.findByRole("button", { name: "Accept grant" }));
+    if (recovery) fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
+    await screen.findByText("Verified action count: 0");
+    expect(mocks.write).toHaveBeenCalledTimes(1);
+    client.clear();
+  });
   it("routes grant selection through the grant API with a proposal reference", async () => {
     render(<OpenFundingPanel problemId="grant" />);
     fireEvent.click(await screen.findByRole("button", { name: "Select for funding" }));

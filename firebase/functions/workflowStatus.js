@@ -8,6 +8,8 @@ export const WORKFLOW_STATUS = Object.freeze({
   SELECTED: "selected",
   PENDING_APPROVAL: "pending_approval",
   ACCEPTED: "accepted",
+  COMPLETED: "completed",
+  CANCELLED: "cancelled",
   DECISION_RECORDED: "decision_recorded",
   INVALIDATED: "invalidated",
   DECLINED: "declined",
@@ -44,6 +46,12 @@ export const WORKFLOW_STATUS_DETAILS = Object.freeze({
   [S.ACCEPTED]: { label: "Accepted", tone: "success", icon: "check",
     description: "Both parties approved the match and its funding is locked.",
     next: "Work proceeds against the proposal's milestones." },
+  [S.COMPLETED]: { label: "Completed", tone: "success", icon: "check",
+    description: "Every escrow milestone payment is confirmed.",
+    next: "The funded work and its payments are complete." },
+  [S.CANCELLED]: { label: "Cancelled", tone: "danger", icon: "declined",
+    description: "The escrow is cancelled and no further milestone payment can be released.",
+    next: "Funders may claim any outstanding refundable balance from the escrow." },
   [S.DECISION_RECORDED]: { label: "Decision recorded", tone: "success", icon: "record",
     description: "The match is final and written to the decision record.",
     next: "No further selection happens. Other proposals close and their funders are refunded." },
@@ -124,6 +132,10 @@ export function opportunityWorkflowStatus(problem = {}, now = new Date()) {
   const status = key(problem?.status);
   const matching = key(problem?.matching?.status);
   if (status === "draft") return S.DRAFT;
+  // Main escrow sync records these together after confirmed upfront release.
+  // A pending selection request proves no payment; grants may fund many awards.
+  if (problem?.opportunityType !== "open-funding" && problem?.hasAcceptedSolution === true
+      && typeof problem?.acceptedProposalId === "string" && problem.acceptedProposalId.trim()) return S.DECISION_RECORDED;
   if (matching === "invalidated") return S.INVALIDATED;
   if (matching === "confirmed" || ["matched", "funded", "completed"].includes(status)) return S.DECISION_RECORDED;
   if (matching === "awaiting_confirmation") return S.PENDING_APPROVAL;

@@ -107,6 +107,25 @@ describe("drafts on the owner's workspace", () => {
     expect(onNavigate).toHaveBeenCalledWith("edit-posting/live1");
   });
 
+  it("closes a confirmed main winner's posting timer while keeping grant and pending-request timers open", async () => {
+    const expiry = "2099-10-09T00:00:00.000Z";
+    mocks.postings = [
+      { ...PUBLISHED, id: "confirmed", title: "Confirmed main winner", expiresAt: expiry, hasAcceptedSolution: true, acceptedProposalId: "winner" },
+      { ...PUBLISHED, id: "grant", title: "Grant with an award", expiresAt: expiry, opportunityType: "open-funding", hasAcceptedSolution: true, acceptedProposalId: "grant-winner" },
+      { ...PUBLISHED, id: "requested", title: "Pending main request", expiresAt: expiry, escrowSelection: { proposalId: "candidate" } },
+    ];
+    render(<MyProblems onNavigate={() => {}} />);
+    const confirmed = (await screen.findByText("Confirmed main winner")).closest(".table-row");
+    expect(within(confirmed).getByText("Decision recorded")).toBeTruthy();
+    expect(confirmed.querySelector(".expiry-countdown")).toBeNull();
+    expect(within(confirmed).queryByRole("button", { name: "Edit" })).toBeNull();
+    for (const title of ["Grant with an award", "Pending main request"]) {
+      const item = screen.getByText(title).closest(".table-row");
+      expect(within(item).getByText("Submitted")).toBeTruthy();
+      expect(item.querySelector(".expiry-countdown")).toBeTruthy();
+    }
+  });
+
   it("[FIT-P50-17] offers delete on drafts only", async () => {
     render(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Cold-chain routing")).toBeTruthy());
@@ -367,5 +386,51 @@ describe("[QCDAO-91] the shared Action Needed tab", () => {
     expect(queues.navigated).toEqual(["proposal/escrow1"]);
     expect(screen.queryByRole("button", { name: "Record review…" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens verified grant acceptance at its funding tab without a mock acceptance dialog", async () => {
+    queues.actions = { ...empty, total: 1, researcher: { selectionToAccept: [], grantSelectionsToAccept: [item("grant1", {
+      fundingTerms: {}, grant: { status: "pending", canAccept: true, deadlineAt: "2099-10-09T00:00:00.000Z" },
+      posting: { title: "Closed grant call", status: "expired", expiresAt: SOON },
+    })] } };
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept grant" }));
+    expect(queues.navigated).toEqual(["proposal/grant1?tab=funding"]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Accept…" })).toBeNull();
+    expect(queues.confirmed).toEqual([]);
+  });
+
+  it.each([["select", "Select proposal", "submitted", "Submitted"], ["approve_upfront", "Approve upfront payment", "pending_approval", "Pending approval"],
+    ["submit_delivery", "Submit delivery evidence", "accepted", "Accepted"], ["approve_delivery", "Approve delivery", "accepted", "Accepted"]])("routes the verified %s escrow action directly to funding", async (action, label, workflowStatus, badge) => {
+    queues.actions = { ...empty, total: 1, escrowActions: [item("escrow1", { action, escrowState: "Locked", workflowStatus, deadlineAt: LATER })] };
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: label }));
+    expect(screen.getByText("Proposal escrow1").closest(".table-row").querySelector(".workflow-badge").textContent).toBe(badge);
+    expect(screen.getByText("Proposal escrow1").closest(".table-row").textContent).toContain(action === "select" ? "Funding closes" : "Approval ends");
+    expect(queues.navigated).toEqual(["proposal/escrow1?tab=funding"]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(queues.selected).toEqual([]);
+    expect(queues.confirmed).toEqual([]);
+  });
+
+  it("retains unavailable verification warnings in an empty action queue and supports refresh", async () => {
+    queues.actions = { ...empty, unavailableGrantOffers: 1, unavailableEscrows: 2 };
+    renderTab();
+    expect(await screen.findByText(/1 grant offer records could not be verified/)).toBeTruthy();
+    expect(screen.getByText(/2 escrow records could not be verified/)).toBeTruthy();
+    expect(screen.getByText(/No verified actions are available yet/)).toBeTruthy();
+    expect(screen.queryByText("Nothing needs your attention right now.")).toBeNull();
+    queues.actions = empty;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh actions" }));
+    await screen.findByText("Nothing needs your attention right now.");
+    expect(screen.queryByText(/could not be verified/)).toBeNull();
+  });
+  it("labels a limited empty action queue as partial instead of claiming no attention is needed", async () => {
+    queues.actions = { ...empty, truncated: true };
+    renderTab();
+    expect(await screen.findByText(/action count is partial/)).toBeTruthy();
+    expect(screen.getByText(/No actions are shown in this limited result/)).toBeTruthy();
+    expect(screen.queryByText("Nothing needs your attention right now.")).toBeNull();
   });
 });

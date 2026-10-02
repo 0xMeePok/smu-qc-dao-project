@@ -5,6 +5,7 @@ import { correctionPathOpen, ownerReviewSummary, reviewStillOpen } from "./owner
 import { mockSelectionState } from "./matching.js";
 import { problemIsMemberBrowsable } from "./moderation.js";
 import { WORKFLOW_STATUS, proposalWorkflowStatus, recommendationCounts, recommendationEntries } from "./workflowStatus.js";
+import { readEscrowQueueActions, readGrantQueueMetadata } from "./escrowQueueMetadata.js";
 
 // QCDAO-62/63 read the queues out of the records that already exist: proposals,
 // their parent problems and the comments collection. Nothing new is stored.
@@ -86,7 +87,7 @@ async function activeProfile(db, uid) {
  * QCDAO-62. Every proposal this member has authored, with its parent posting,
  * evaluator-feedback progress and comment count.
  */
-export async function listMyProposals({ db, uid }) {
+export async function listMyProposals({ db, uid, client, config }) {
   await activeProfile(db, uid);
   const rows = await db.collection("proposals").where("researcherId", "==", uid).limit(MINE_CAP + 1).get();
   const docs = rows.docs.slice(0, MINE_CAP);
@@ -98,6 +99,8 @@ export async function listMyProposals({ db, uid }) {
       : [],
   ]);
   const latestByProposal = new Map(latestReviews.filter((snap) => snap.exists).map((snap) => [snap.ref.path.split("/")[1], snap.data()]));
+  const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs, parents: problems });
+  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs, blockNumber: grantState.blockNumber });
   const items = docs.map((doc) => {
     const data = doc.data();
     const counts = feedback.get(doc.id) ?? { comments: 0, qualifying: 0, recommendations: [] };
@@ -105,6 +108,7 @@ export async function listMyProposals({ db, uid }) {
       id: doc.id,
       title: data.title ?? "",
       status: data.status ?? "",
+      recordStatus: data.status ?? "",
       amount: data.amount ?? 0,
       currency: data.currency ?? "",
       createdAt: iso(data.createdAt),
@@ -115,13 +119,18 @@ export async function listMyProposals({ db, uid }) {
       posting: postingView(data.problemId, problems.get(data.problemId)),
       evaluationComplete: data.matching?.evaluationComplete === true,
       matchingStatus: data.matching?.status ?? null,
-      workflowStatus: proposalWorkflowStatus(data, problems.get(data.problemId)?.matching),
+      workflowStatus: escrowState.states.get(doc.id)?.workflowStatus ?? proposalWorkflowStatus(data, problems.get(data.problemId)?.matching),
       ownerReview: ownerReviewSummary(latestByProposal.get(doc.id)),
+      ...(grantState.grants.has(doc.id) ? { grant: grantState.grants.get(doc.id) } : {}),
+      ...(grantState.unavailable.has(doc.id) ? { grantUnavailable: true } : {}),
+      ...(escrowState.states.has(doc.id) ? { escrow: escrowState.states.get(doc.id) } : {}),
+      ...(escrowState.unavailable.has(doc.id) ? { escrowUnavailable: true } : {}),
       ...counts,
     };
   });
   items.sort((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
-  return { items, truncated: rows.size > MINE_CAP };
+  return { items, truncated: rows.size > MINE_CAP, unavailableGrantOffers: grantState.unavailable.size,
+    unavailableEscrows: escrowState.unavailable.size };
 }
 
 /**
@@ -193,11 +202,12 @@ function actionView(doc, data, problemId, problem, extra = {}) {
  * QCDAO-91. What this member can act on now, across every role they hold:
  * owners select or review, researchers answer a selection, evaluators recommend.
  */
-export async function listActionItems({ db, uid, now = Timestamp.now() }) {
+export async function listActionItems({ db, uid, client, config, now = Timestamp.now() }) {
   const profile = await activeProfile(db, uid);
-  const [owned, mine] = await Promise.all([
+  const [owned, mine, receivedEscrows] = await Promise.all([
     db.collection("problems").where("ownerId", "==", uid).limit(OWNED_CAP).get(),
     db.collection("proposals").where("researcherId", "==", uid).limit(MINE_CAP).get(),
+    db.collection("proposals").where("postingOwnerId", "==", uid).limit(MINE_CAP).get(),
   ]);
   // Only postings still taking decisions; the rest have nothing left to act on.
   const live = owned.docs.filter((doc) => LIVE_PROBLEM.includes(doc.data().status)
@@ -238,13 +248,26 @@ export async function listActionItems({ db, uid, now = Timestamp.now() }) {
     .map((doc) => actionView(doc, doc.data(), doc.data().problemId, parents.get(doc.data().problemId),
       { deadlineAt: iso(doc.data().matching.deadlineAt) })));
 
+  const grantParents = await problemsById(db, [...new Set(mine.docs.map(doc => doc.data().problemId).filter(Boolean))]);
+  const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs: mine.docs, parents: grantParents });
+  const grantSelectionsToAccept = newestFirst(mine.docs.filter(doc => grantState.grants.get(doc.id)?.canAccept)
+    .map(doc => actionView(doc, doc.data(), doc.data().problemId, grantParents.get(doc.data().problemId),
+      { grant: grantState.grants.get(doc.id), deadlineAt: grantState.grants.get(doc.id).deadlineAt })));
+  const escrowDocs = [...new Map([...mine.docs, ...receivedEscrows.docs].map(doc => [doc.id, doc])).values()];
+  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs: escrowDocs, blockNumber: grantState.blockNumber });
+  const escrowActionIds = new Set(escrowState.actions.map(item => item.id));
+  const displayedAwaitingReview = awaitingReview.filter(item => !escrowActionIds.has(item.id)
+    && (!escrowState.states.has(item.id) || escrowState.states.get(item.id).state === "Open"));
+
   let evaluator = null;
   if (profile.role === ROLE_EVALUATOR) {
     const queue = await listEvaluatorQueue({ db, uid, filter: "pending" });
     evaluator = { awaitingRecommendation: newestFirst(queue.items), more: Boolean(queue.nextCursor) };
   }
-  const total = readyToSelect.length + awaitingReview.length + selectionToAccept.length
+  const total = readyToSelect.length + displayedAwaitingReview.length + selectionToAccept.length + grantSelectionsToAccept.length + escrowState.actions.length
     + (evaluator?.awaitingRecommendation.length ?? 0);
-  return { owner: { readyToSelect, awaitingReview }, researcher: { selectionToAccept }, evaluator, total,
-    truncated: owned.size === OWNED_CAP || reviewable.length > REVIEW_CAP };
+  return { owner: { readyToSelect, awaitingReview: displayedAwaitingReview }, researcher: { selectionToAccept, grantSelectionsToAccept }, evaluator, total,
+    escrowActions: escrowState.actions, unavailableEscrows: escrowState.unavailable.size, unavailableGrantOffers: grantState.unavailable.size,
+    truncated: owned.size === OWNED_CAP || mine.size === MINE_CAP || receivedEscrows.size === MINE_CAP
+      || pages.some(page => page.size === QUEUE_CAP) || reviewable.length > REVIEW_CAP };
 }
