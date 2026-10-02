@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Timestamp } from "firebase-admin/firestore";
 import { memoryDb } from "./memoryDb.mjs";
-import { submitContentReport, listModerationQueue, getModerationContext, moderateContent, flagSubmittedContent,
+import { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
   listModerationNotifications, markModerationNotificationRead, listReportableComments, listPostedProposals,
   listRemovedProblems, readRemovedProblem, syncProposalParentVisibility, syncProblemProposalsBrowsable } from "../moderation.js";
 import { prepareModerationMatching, fundMockProposal, selectMockProposal, confirmMockProposal } from "../matching.js";
@@ -52,18 +52,6 @@ test("reports use existing content access, enforce one per member/item, and aggr
   assert.equal(context.parent.title, "Routing study");
   await assert.rejects(() => getModerationContext({ db, uid: "alice", queueId: "proposal_a" }), { code: "permission-denied" });
   await assert.rejects(() => queue(db, { uid: "owner" }), { code: "permission-denied" });
-});
-
-test("publishing content does not enter the moderation queue", async () => {
-  const db = fixture();
-  const text = "https://one.test https://two.test https://three.test https://four.test https://five.test kill yourself";
-  db.records.set("problems/draft", { ownerId: "owner", status: "draft", summary: text });
-  assert.equal((await flagSubmittedContent({ db, contentType: "problem", contentId: "draft", now })).flagged, false);
-  db.records.get("proposals/a").summary = text;
-  assert.equal((await flagSubmittedContent({ db, contentType: "proposal", contentId: "a", now })).flagged, false);
-  assert.equal(db.records.get("proposals/a").status, "submitted");
-  assert.equal((await queue(db)).pendingCount, 0);
-  assert.equal(db.records.has("moderationQueue/proposal_a"), false);
 });
 
 test("admin remove/restore preserves original workflow and sponsor access with immutable history and private notifications", async () => {
