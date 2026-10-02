@@ -26,6 +26,8 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
     mapping(bytes32 postingId => bytes32) public acceptedProposalForPosting;
     mapping(bytes32 postingId => bytes32) public pendingProposalForPosting;
     mapping(bytes32 proposalId => FundingAnchor[]) private _fundingAnchors;
+    mapping(bytes32 moderationId => bytes32 recordHash) public moderationRecordHash;
+    mapping(address admin => bool) private _moderationAdmins;
 
     event FundingFactoryConfigured(address indexed factory);
     event ProposalEscrowLinked(bytes32 indexed proposalId, bytes32 indexed postingId, address indexed escrow, bytes32 termsHash);
@@ -33,6 +35,9 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
     event PostingFundingPauseChanged(bytes32 indexed postingId, bool paused, address indexed actor);
     event FundingEventAnchored(bytes32 indexed proposalId, address indexed escrow, FundingEvent eventType,
         bytes32 digest, address actor, uint64 timestamp);
+    event ModerationAnchored(bytes32 indexed moderationId, bytes32 indexed recordHash,
+        address indexed anchoredBy, uint64 anchoredAt);
+    event ModerationAdminChanged(address indexed admin, bool enabled);
 
     constructor(address initialOwner) Ownable(initialOwner) {}
 
@@ -40,7 +45,12 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
     function setFundingFactory(address factory) external onlyOwner {
         if (address(fundingFactory) != address(0) || factory.code.length == 0) revert InvalidInput();
         if (IFundingFactory(factory).auditRegistry() != address(this)) revert InvalidInput();
+        address platform = IFundingFactory(factory).platformSigner();
+        if (platform == address(0)) revert InvalidInput();
         fundingFactory = IFundingFactory(factory);
+        // Keep the service signer authorized by default, with the same revocable role as other moderators.
+        _moderationAdmins[platform] = true;
+        emit ModerationAdminChanged(platform, true);
         emit FundingFactoryConfigured(factory);
     }
 
@@ -50,6 +60,32 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
         getOpportunity(postingId);
         postingFundingPaused[postingId] = paused;
         emit PostingFundingPauseChanged(postingId, paused, msg.sender);
+    }
+
+    /// @notice Grant or revoke the moderation anchoring role; only the registry owner manages it.
+    function setModerationAdmin(address admin, bool enabled) external onlyOwner {
+        if (admin == address(0)) revert InvalidInput();
+        _moderationAdmins[admin] = enabled;
+        emit ModerationAdminChanged(admin, enabled);
+    }
+
+    /// @notice The current owner is always a moderation admin, alongside explicitly allowed wallets.
+    function isModerationAdmin(address actor) public view returns (bool) {
+        return actor != address(0) && (actor == owner() || _moderationAdmins[actor]);
+    }
+
+    /// @notice Permanently commit one private moderation decision without publishing its contents.
+    /// @dev Use an opaque decision ID and hash a versioned canonical record containing the actual moderator,
+    /// action, content type/reference, reason and decision timestamp, plus private random salt.
+    /// The full record and salt remain restricted to the content author and administrators off-chain.
+    /// anchoredBy identifies the submitting admin; anchoredAt is the anchoring block time.
+    /// This audit commitment does not change content visibility or escrow custody.
+    function anchorModeration(bytes32 moderationId, bytes32 recordHash) external {
+        if (!isModerationAdmin(msg.sender)) revert AccessDenied();
+        if (moderationId == bytes32(0) || recordHash == bytes32(0)) revert InvalidInput();
+        if (moderationRecordHash[moderationId] != bytes32(0)) revert InvalidState();
+        moderationRecordHash[moderationId] = recordHash;
+        emit ModerationAnchored(moderationId, recordHash, msg.sender, uint64(block.timestamp));
     }
 
     /// @dev Deliberately disable the old entry point on this linked deployment.
