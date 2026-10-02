@@ -17,7 +17,8 @@ import {
 } from "../moderation.js";
 import { listIndependentListings } from "../independentProposalCatalog.js";
 import { listActionItems, listEvaluatorQueue, listMyProposals } from "../proposalQueues.js";
-import { fundMockProposal } from "../matching.js";
+import { fundMockProposal, prepareModerationMatching } from "../matching.js";
+import { enqueueModerationVoidJobs } from "../escrowModerationVoid.js";
 import { recordOwnerReview } from "../ownerReviews.js";
 
 /** Independent listing publish, correction, queues, moderation, and expiry across callables. */
@@ -405,13 +406,18 @@ describe("independent listing backend integration", () => {
       db, uid: MEMBER, contentType: "proposal", contentId: "indie",
       reason: "misleading", details: "Please check the claimed result.", now,
     });
-    await moderateContent({
-      db, uid: "admin", queueId: "proposal_indie", action: "hide", reason: "misleading", now,
+    const removed = await moderateContent({
+      db, uid: "admin", queueId: "proposal_indie", action: "remove", reason: "misleading", now,
+      prepareMatching: prepareModerationMatching,
     });
+    assert.equal((await enqueueModerationVoidJobs({
+      db, contentType: "proposal", contentId: "indie", eventId: removed.eventId, reason: "misleading", now,
+    })).enqueued, 0);
+    assert.equal([...db.records.keys()].some((path) => path.startsWith("mockFunding/") || path.startsWith("escrowModerationVoidJobs/")), false);
 
     const hidden = db.records.get("proposals/indie");
-    assert.equal(hidden.moderationStatus, "hidden");
-    assert.equal(hidden.status, "moderated_hidden");
+    assert.equal(hidden.moderationStatus, "removed");
+    assert.equal(hidden.status, "moderated_removed");
     assert.equal(await db.runTransaction((tx) => canReadContent(tx, db, "proposal", hidden, MEMBER, { role: 0 })), false);
     assert.equal(await db.runTransaction((tx) => canReadContent(tx, db, "proposal", hidden, UID, { role: 0 })), true);
     assert.deepEqual((await listIndependentListings({ db, now })).items.map((item) => item.id), []);

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
 import { Timestamp } from "firebase-admin/firestore";
+import { isIndependentProposal } from "./independentProposal.js";
 
 export const CONFIRMATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_PROPOSALS = 200;
@@ -499,13 +500,19 @@ export async function prepareModerationMatching({ tx, db, contentType, contentId
   if (!proposalScope && !problemScope) return empty;
   const proposal = proposalScope ? await tx.get(db.collection("proposals").doc(contentId)) : null;
   if (proposalScope && !proposal.exists) return empty;
+  if (proposalScope && (!proposal.data().problemId || isIndependentProposal(proposal.data()))) return empty;
   const problemId = proposalScope ? proposal.data().problemId : contentId;
   const ctx = await readContext({ db, tx, problemId, proposalId: proposalScope ? contentId : undefined });
   const affected = doc => !proposalScope || doc.data().proposalId === contentId;
-  const refunds = ctx.funding.filter(doc => affected(doc) && doc.data().status === "pledged");
+  const refunds = ctx.funding.filter((doc) => {
+    if (!affected(doc)) return false;
+    const status = doc.data().status;
+    return status === "pledged" || (action === "remove" && status === "locked");
+  });
   const refundedMinor = refunds.reduce((total, doc) => total + doc.data().amountMinor, 0);
   const matching = ctx.problem.matching || {};
-  const selectedAffected = matching.status === "awaiting_confirmation" && (!proposalScope || matching.proposalId === contentId);
+  const selectionOpen = matching.status === "awaiting_confirmation" || (action === "remove" && matching.status === "confirmed");
+  const selectedAffected = selectionOpen && (!proposalScope || matching.proposalId === contentId);
   const at = now || Timestamp.now();
   return { summary: { refundedAmount: action === "restore" ? 0 : refundedMinor / 100,
     refundedCount: action === "restore" ? 0 : refunds.length, currency: ctx.problem.currency || null },
@@ -527,7 +534,9 @@ export async function prepareModerationMatching({ tx, db, contentType, contentId
         return;
       }
       if (!["hide", "remove"].includes(action)) return;
-      settleFunding(tx, refunds, null, at, `moderation_${action}`);
+      for (const doc of refunds) {
+        tx.update(doc.ref, { status: "refunded", settledAt: at, refundReason: `moderation_${action}` });
+      }
       const affectedIds = new Set(refunds.map(doc => doc.data().proposalId));
       if (selectedAffected) affectedIds.add(matching.proposalId);
       for (const doc of ctx.proposals) {

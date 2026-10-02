@@ -25,6 +25,7 @@ import { ROLE_LABELS } from "../config/roles.js";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 import { EscrowReleaseSummary } from "./EscrowReleaseSummary.jsx";
 import { escrowEventLabel, escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
+import { moderationReasonLabel } from "../lib/moderation.js";
 
 function RoleBadge({ role }) {
   return <span className="role-chip">{ROLE_LABELS[role] || role}</span>;
@@ -99,7 +100,8 @@ export function MyProblems({ onNavigate }) {
   };
 
   function Row({ item, isDraft }) {
-    const live = !isDraft && ["submitted", "open"].includes(item.status);
+    const removed = item.moderationStatus === "removed" || item.status === "moderated_removed";
+    const live = !isDraft && !removed && ["submitted", "open"].includes(item.status);
     const workflowStatus = opportunityWorkflowStatus(item);
     const decided = workflowStatus === WORKFLOW_STATUS.DECISION_RECORDED;
     // A selection or committed funding freezes the posting (the dual lock), so
@@ -110,10 +112,11 @@ export function MyProblems({ onNavigate }) {
         <div>
           <strong>{item.title || "Untitled draft"}</strong>
           <small className="table-row-meta">
-            {isDraft ? "Last saved " : "Submitted "}
-            {formatInstant(item.updatedAt)}
+            {removed
+              ? `Removed due to: ${moderationReasonLabel(item.moderation?.reason)}${item.moderation?.details ? ` — ${item.moderation.details}` : ""}`
+              : `${isDraft ? "Last saved " : "Submitted "}${formatInstant(item.updatedAt)}`}
           </small>
-          <StatusBadge status={workflowStatus} />
+          {!removed && <StatusBadge status={workflowStatus} />}
           {live && !decided && (
             <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} />
           )}

@@ -27,3 +27,30 @@ export function toOpportunityListItem(opportunity) {
       : 0,
   };
 }
+
+/** A removed problem stays on Discover as its title and removal reason. */
+export function toRemovedOpportunityListItem(item) {
+  const openFunding = item.opportunityType === OPEN_FUNDING_TYPE;
+  return {
+    id: item.id,
+    removed: true,
+    title: item.title || "Untitled opportunity",
+    reason: item.reason || "",
+    reasonLabel: item.reasonLabel || item.reason || "",
+    details: item.details || "",
+    opportunityType: openFunding ? OPEN_FUNDING_TYPE : "business-problem",
+    route: "posting",
+    type: openFunding ? "Open funding" : "Business problem",
+    owner: "",
+    organisation: "",
+    amount: "—",
+    amountValue: null,
+    deadline: "",
+    categories: [],
+    tags: [],
+    proposalCount: 0,
+    fundingProgressPercent: 0,
+    createdAt: item.createdAt || null,
+    status: "removed",
+  };
+}

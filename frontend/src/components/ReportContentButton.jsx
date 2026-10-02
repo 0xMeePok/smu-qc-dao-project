@@ -22,8 +22,13 @@ export function ReportContentButton({ contentType, contentId }) {
     const version = generation.current;
     inFlight.current = true; setBusy(true); setError("");
     try {
-      await submitContentReport({ contentType, contentId, reason, details: details.trim() });
-      if (version === generation.current) { setDone(true); setOpen(false); }
+      const result = await submitContentReport({ contentType, contentId, reason, details: details.trim() });
+      if (version !== generation.current) return;
+      if (result?.alreadyReported) {
+        setError("You have already reported this item. Each member can submit one report.");
+        return;
+      }
+      setDone(true); setOpen(false);
     } catch (err) { if (version === generation.current) setError(moderationError(err)); }
     finally { inFlight.current = false; setBusy(false); }
   };

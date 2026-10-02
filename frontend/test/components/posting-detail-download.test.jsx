@@ -35,9 +35,22 @@ vi.mock("../../src/lib/firebase.js", () => ({
   isStorageConfigured: true, storageNeedsEmulator: false, app: {},
 }));
 vi.mock("../../src/lib/postings.js", () => ({
-  findPosting: async () => mocks.posting,
+  findPosting: async () => {
+    if (mocks.postingError) throw mocks.postingError;
+    return mocks.posting;
+  },
   listOpportunityRevisions: async () => [],
 }));
+vi.mock("../../src/lib/moderation.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    readRemovedProblem: async () => {
+      if (mocks.removedError) throw mocks.removedError;
+      return mocks.removedProblem;
+    },
+  };
+});
 vi.mock("../../src/lib/attachments.js", () => ({
   formatBytes: (n) => `${n} B`,
   messageForStorageError: (error) => error?.message ?? "download failed",
@@ -95,6 +108,9 @@ beforeEach(() => {
   mocks.saved = [];
   mocks.downloadShouldFail = null;
   mocks.posting = publishedPosting();
+  mocks.postingError = null;
+  mocks.removedError = null;
+  mocks.removedProblem = null;
   mocks.user = { id: VIEWER };
 });
 afterEach(cleanup);
@@ -221,6 +237,44 @@ describe("proposal funding on a problem detail page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review proposals" }));
     expect(screen.getByRole("tab", { name: "Proposals (2)" }).getAttribute("aria-selected")).toBe("true");
     expect(panel.scrollIntoView).toHaveBeenCalled();
+  });
+});
+
+describe("a removed problem statement", () => {
+  it("[FIT-ACM-070] keeps the title and the removal reason, and hides the brief", async () => {
+    mocks.user = { id: VIEWER };
+    mocks.posting = publishedPosting({
+      moderationStatus: "removed",
+      status: "moderated_removed",
+      moderation: { reason: "abusive", details: "Copied from another brief." },
+      summary: "Secret brief",
+      businessContext: "Secret context",
+    });
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    expect(await screen.findByRole("heading", { name: "Cold-chain route optimisation" })).toBeTruthy();
+    expect(screen.getByText("Removed due to: Abusive content — Copied from another brief.")).toBeTruthy();
+    expect(screen.queryByText("Secret brief")).toBeNull();
+    expect(screen.queryByText("Secret context")).toBeNull();
+    expect(screen.queryByText("spec.pdf")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Proposals" })).toBeTruthy();
+  });
+
+  it("[FIT-ACM-071] opens the redacted problem when the full record is not readable", async () => {
+    const denied = new Error("Missing or insufficient permissions.");
+    denied.code = "permission-denied";
+    mocks.postingError = denied;
+    mocks.removedProblem = {
+      id: "posting777",
+      removed: true,
+      title: "Cold-chain route optimisation",
+      reason: "misleading",
+      details: "",
+      opportunityType: "business-problem",
+    };
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    expect(await screen.findByRole("heading", { name: "Cold-chain route optimisation" })).toBeTruthy();
+    expect(screen.getByText("Removed due to: Misleading information")).toBeTruthy();
+    expect(screen.queryByText("Routing degrades under demand spikes.")).toBeNull();
   });
 });
 

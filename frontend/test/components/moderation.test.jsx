@@ -22,7 +22,7 @@ import { ReportContentButton, ContentModerationNotice } from "../../src/componen
 import { ModerationQueue } from "../../src/components/ModerationQueue.jsx";
 import { ModerationNotifications } from "../../src/components/ModerationNotifications.jsx";
 import { ReportableComments } from "../../src/components/ReportableComments.jsx";
-const row = { id: "proposal_proposal1", contentType: "proposal", status: "pending", title: "Routing proposal", excerpt: "Short summary", authorId: "author1", authorName: "Researcher", organisation: "Research Lab", reportCount: 2, reasons: ["misleading"], createdAt: "2026-09-15T00:00:00Z" };
+const row = { id: "proposal_proposal1", contentType: "proposal", status: "pending", title: "Routing proposal", excerpt: "Short summary", authorId: "author1", authorName: "Researcher", organisation: "Research Lab", reportCount: 2, reasons: ["misleading"], reportSummaries: [{ reason: "misleading", details: "The claimed result does not match the source." }], createdAt: "2026-09-15T00:00:00Z" };
 const notice = { id: "notice1", message: "Your proposal was hidden by a moderator.", contentType: "proposal", contentId: "proposal1", reason: "misleading", read: false, createdAt: "2026-09-15T00:00:00Z" };
 const submitDialog = () => fireEvent.submit(screen.getByRole("dialog").querySelector("form"));
 beforeEach(() => {
@@ -55,11 +55,22 @@ describe("private content reports", () => {
     submitDialog(); submitDialog();
     expect(mocks.report).toHaveBeenCalledTimes(1);
     expect(mocks.report).toHaveBeenCalledWith({ contentType: "proposal", contentId: "proposal1", reason: "misleading", details: "Please inspect the accuracy claim." });
-    await act(async () => { finish({ ok: true }); });
+    await act(async () => { finish({ ok: true, alreadyReported: false }); });
     expect(screen.getByRole("status").textContent).toContain("Report received");
     expect(screen.queryByRole("button", { name: "Report this proposal" })).toBeNull();
     expect(screen.queryByText("reporter-private-id")).toBeNull();
     expect(screen.queryByText(/\d+ reports/)).toBeNull();
+  });
+
+  it("[FUT-ACM-191] shows an error when the member has already reported the item", async () => {
+    mocks.report.mockResolvedValue({ ok: true, alreadyReported: true });
+    render(<ReportContentButton contentType="proposal" contentId="proposal1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Report this proposal" }));
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "abusive" } });
+    submitDialog();
+    expect((await screen.findByRole("alert")).textContent).toContain("already reported this item");
+    expect(screen.queryByText(/Report received/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Report this proposal" })).toBeTruthy();
   });
 
   it("offers retry after a report error and does not claim success", async () => {
@@ -96,6 +107,8 @@ describe("administrator moderation queue", () => {
     mocks.queue.mockResolvedValue({ items: [row], pendingCount: 2, nextCursor: cursor });
     render(<ModerationQueue onCountChange={count} />);
     await screen.findByRole("heading", { name: "Routing proposal" });
+    expect(screen.getByText(/The claimed result does not match the source/)).toBeTruthy();
+    expect(screen.queryByText("Short summary")).toBeNull();
     expect(count).toHaveBeenCalledWith(2);
     expect(screen.getByText(/2 reports/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Content type"), { target: { value: "proposal" } });
@@ -120,11 +133,13 @@ describe("administrator moderation queue", () => {
     expect(mocks.context).toHaveBeenCalledWith(row.id);
   });
 
-  it.each(["hide", "remove", "restore"])("requires a reason for %s and records the exact confirmed decision", async (action) => {
+  it.each(["remove", "restore"])("requires a reason for %s and records the exact confirmed decision", async (action) => {
     render(<ModerationQueue />);
     fireEvent.click(await screen.findByRole("button", { name: "Review content" }));
     await screen.findByLabelText("Action");
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: action } });
+    const reasonOptions = [...screen.getByLabelText("Reason").options].map((option) => option.value);
+    expect(reasonOptions).toEqual(action === "restore" ? ["", "no_violation", "appeal_accepted"] : ["", "off_topic", "abusive", "misleading", "duplicate", "spam", "policy_violation", "other"]);
     submitDialog();
     expect(screen.getByRole("alert").textContent).toContain("Choose an action and its reason");
     expect(mocks.moderate).not.toHaveBeenCalled();
@@ -237,6 +252,21 @@ describe("author notices and reportable comments", () => {
     expect(mocks.create.mock.calls[0][0].recommendation).toBeUndefined();
     fireEvent.click(screen.getByRole("button", { name: "Hide replies" }));
     expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
+  });
+
+  it("[FUT-ACM-192] replaces the poster's actions when an administrator has removed the comment", async () => {
+    mocks.user = { id: "author1" };
+    mocks.comments.mockResolvedValue({ items: [{
+      id: "comment1", body: "The claim needs a source.", authorId: "author1", authorName: "Author",
+      createdAt: row.createdAt, proposalId: "proposal1", parentId: null, moderationStatus: "removed",
+    }] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
+    expect(await screen.findByText("The claim needs a source.")).toBeTruthy();
+    expect(screen.getByText("This comment was removed by an administrator")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit comment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete comment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Report this comment" })).toBeNull();
   });
 
   it("keeps a removed parent placeholder so replies stay reachable", async () => {

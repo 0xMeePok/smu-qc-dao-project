@@ -10,6 +10,7 @@ import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTe
 import { fundingOpportunityAuditPayload, postingAuditPayload } from "../../../firebase/functions/opportunityAuditPayload.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { assertActiveAuditDeployment, isActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
+import { prepareRemovedProposalClaim } from "./escrowFunding.js";
 
 export const ESCROW_STATE = Object.freeze({ Open: 0, Locked: 1, Released: 2, Refunded: 3, Cancelled: 4, Expired: 5, Active: 6, Voided: 7 });
 const ZERO_HASH = `0x${"0".repeat(64)}`;
@@ -236,6 +237,20 @@ export async function confirmEscrowTransaction(transactionHash, { adapters = cre
     error.outcome = cause.outcome ?? (cause.code === "AUDIT_TRANSACTION_CANCELLED" ? "cancelled" : "unknown");
     throw error;
   }
+}
+
+/** Claim the connected wallet's unpaid balance after a proposal is removed. */
+export async function claimRemovedProposalFunds({ proposalId, account }) {
+  const prepared = await prepareRemovedProposalClaim({ proposalId });
+  if (!prepared?.claimable || !prepared.escrowAddress) {
+    throw new Error(prepared?.message || "This wallet has no refund to claim yet.");
+  }
+  const adapters = createWagmiEscrowAdapters();
+  const transactionHash = await adapters.writeContract({
+    address: prepared.escrowAddress, abi: AUDIT_REGISTRY_CONFIG.escrow.escrowAbi,
+    functionName: "claimRefund", args: [], account, chainId: prepared.chainId,
+  });
+  return confirmEscrowTransaction(transactionHash);
 }
 
 /** Called only from a user action. Never retries a write or signs with a server key. */

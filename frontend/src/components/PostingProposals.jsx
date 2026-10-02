@@ -1,13 +1,56 @@
 import { useEffect, useState } from "react";
+import { useAccount } from "wagmi";
 import { formatInstant } from "../lib/datetime.js";
 import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
+import { claimRemovedProposalFunds, escrowErrorMessage } from "../lib/escrow.js";
+import { moderationReasonLabel } from "../lib/moderation.js";
+import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
+import { useAuth } from "../context/AuthContext.jsx";
 import { FundingMeta } from "./FundingMeta.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 import { StatusBadge } from "./StatusBadge.jsx";
+import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
+const reasonLabel = moderationReasonLabel;
+
+function RemovedProposalRow({ item }) {
+  const { user } = useAuth();
+  const { address, isConnected, chainId } = useAccount();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [connect, setConnect] = useState(false);
+  const ready = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
+  const claim = async () => {
+    if (!ready) { setConnect(true); return; }
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await claimRemovedProposalFunds({ proposalId: item.id, account: address });
+      setNotice("Refund claimed. The tokens are in the wallet that deposited them.");
+    } catch (err) {
+      setError(escrowErrorMessage(err));
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="table-row removed-proposal">
+      <div>
+        <strong>{item.title || "Untitled proposal"}</strong>
+        <small className="table-row-meta">Removed due to: {reasonLabel(item.reason)}{item.details ? ` — ${item.details}` : ""}</small>
+        {error && <p role="alert" className="field-hint">{error}</p>}
+        {notice && <p role="status" className="field-hint">{notice}</p>}
+      </div>
+      {item.claimFunds && <div className="table-row-actions">
+        <button className="secondary" type="button" disabled={busy} onClick={claim}>{busy ? "Claiming…" : "Claim funds"}</button>
+      </div>}
+      {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}
+    </div>
+  );
+}
+
 function Row({ item, onNavigate, problemMatching }) {
+  if (item.removed) return <RemovedProposalRow item={item} />;
   const isDraft = item.status === PROPOSAL_STATUS_DRAFT;
   return (
     <div className="table-row">
@@ -64,7 +107,7 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
   return (
     <div className="detail-section">
       <h2>Proposals</h2>
-      <p>{countLabel}.</p>
+      {!posting?.removed && <p>{countLabel}.</p>}
       {loading ? (
         <p className="table-empty" role="status">Loading proposals…</p>
       ) : error ? (
@@ -75,9 +118,11 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
         </div>
       ) : (
         <p className="table-empty">
-          {isPoster
-            ? "No proposals received yet."
-            : "No submitted proposals on this opportunity yet."}
+          {posting?.removed
+            ? "No funded proposals are waiting for a refund."
+            : isPoster
+              ? "No proposals received yet."
+              : "No submitted proposals on this opportunity yet."}
         </p>
       )}
     </div>

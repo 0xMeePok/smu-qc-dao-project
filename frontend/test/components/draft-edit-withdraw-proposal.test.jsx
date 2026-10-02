@@ -196,6 +196,17 @@ describe("correcting a proposal before it is evaluated", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("proposals");
   });
 
+  it("[FIT-ACM-072] shows a dash for time remaining after an independent listing is removed", async () => {
+    mocks.find.mockResolvedValue({
+      ...submittedProposal, proposalKind: "independent", problemId: null, moderationStatus: "removed",
+      status: "moderated_removed", expiresAt: new Date("2099-01-01"),
+    });
+    render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+    expect(await screen.findByText("Time remaining")).toBeTruthy();
+    expect(screen.getByLabelText("No time remaining").textContent).toBe("—");
+    expect(document.querySelector(".expiry-countdown")).toBeNull();
+  });
+
   it("offers the edit only while the proposal is still submitted", async () => {
     render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
     expect(await screen.findByRole("button", { name: "Edit proposal" })).toBeTruthy();

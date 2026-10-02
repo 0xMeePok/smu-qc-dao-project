@@ -270,7 +270,7 @@ test('force-expiry is admin-only and records actor/time and refunds all sibling 
   assert.equal(state.history.find(e => e.type === 'admin_force_expired').actorId, 'admin');
 });
 
-test('moderation settlement refunds selected scope, restores eligibility and never refunds a confirmed lock', async () => {
+test('moderation settlement refunds selected scope, restores eligibility and refunds a confirmed mock lock on remove', async () => {
   const db = fixture(); await fund(db); await fund(db, 'b', 100, 'request_second_1234'); await select(db);
   const moderate = (contentType, contentId, action) => db.runTransaction(async tx => {
     const plan = await prepareModerationMatching({ tx, db, contentType, contentId, action, now, actorId: 'admin' });
@@ -283,8 +283,8 @@ test('moderation settlement refunds selected scope, restores eligibility and nev
   const restored = (await get(db, 'funder')).proposals.find(p => p.id === 'a');
   assert.equal(restored.fundedAmount, 0); assert.equal(restored.matching.evaluationComplete, true);
   await select(db, 'b'); await confirm(db, 'b', 'bob');
-  assert.equal((await moderate('problem', 'problem', 'remove')).refundedAmount, 0);
-  assert.equal((await get(db, 'funder')).contributions.find(c => c.proposalId === 'b').status, 'locked');
+  assert.equal((await moderate('problem', 'problem', 'remove')).refundedAmount, 100);
+  assert.equal((await get(db, 'funder')).contributions.find(c => c.proposalId === 'b').status, 'refunded');
 });
 
 test('a concurrent moderation refund and creator confirmation conserve every contribution', async () => {

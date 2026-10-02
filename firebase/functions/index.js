@@ -41,7 +41,7 @@ import { getMockMatching as readMockMatching, fundMockProposal as contributeMock
   declineMockProposal as rejectMockProposal, completeMockEvaluation as finishMockEvaluation, forceExpireMockMatch as forceExpireMockWindow } from "./matching.js";
 import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
-import { listPostedProposals as listPostedProposalsForProblem } from "./moderation.js";
+import { listPostedProposals as listPostedProposalsForProblem, listRemovedProblems as listRemovedProblemsForMember, readRemovedProblem as readRemovedProblemForMember } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
 import { listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
 import { listIndependentListings as independentListings } from "./independentProposalCatalog.js";
@@ -188,7 +188,7 @@ async function requireMember(request) {
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
 
-export const { prepareEscrowDeposit, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
+export const { prepareEscrowDeposit, prepareRemovedProposalClaim, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
   startEscrowSettlement, queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
   db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
 });
@@ -206,6 +206,16 @@ export const { submitContentReport, listModerationQueue, getModerationContext, m
 export const listPostedProposals = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return listPostedProposalsForProblem({ db, uid, problemId: request.data?.problemId });
+});
+
+export const listRemovedProblems = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return listRemovedProblemsForMember({ db, uid });
+});
+
+export const readRemovedProblem = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return readRemovedProblemForMember({ db, uid, problemId: request.data?.problemId });
 });
 
 export const listIndependentListings = onCall(MEMBER_CALL_OPTIONS, async (request) => {

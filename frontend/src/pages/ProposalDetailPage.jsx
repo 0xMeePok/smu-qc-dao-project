@@ -326,7 +326,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       <div><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd></div>
       {independent && <div><dt>Maturity</dt><dd>{PROPOSAL_MATURITY_LEVELS.find((item) => item.value === proposal.maturity)?.label || "—"}</dd></div>}
       <div><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></div>
-      {independent && proposal.status !== "withdrawn" && <div><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={proposal.expiresAt} status={proposal.status} showInstant={false} /></dd></div>}
+      {independent && proposal.status !== "withdrawn" && <div><dt>Time remaining</dt><dd>{isModerated(proposal) ? <span aria-label="No time remaining">—</span> : <ExpiryCountdown expiresAt={proposal.expiresAt} status={proposal.status} showInstant={false} />}</dd></div>}
     </dl>
       <div className="context-panel-actions">
       {!independent && <button type="button" className="secondary" onClick={() => onNavigate(`posting/${proposal.problemId}`)}>View opportunity</button>}

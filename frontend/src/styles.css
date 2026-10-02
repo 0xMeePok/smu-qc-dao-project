@@ -2987,6 +2987,12 @@ footer > p { margin: 0 auto 0 0; }
   margin-left: auto;
 }
 
+.posting-proposals .removed-proposal { align-items: center; }
+.posting-proposals .removed-proposal > div:first-child { flex: 1; min-width: 12rem; }
+.posting-proposals .removed-proposal .table-row-meta { font-size: 12px; }
+.posting-proposals .removed-proposal .field-hint { margin-top: 8px; max-width: 40rem; }
+.removed-reason { margin: 8px 0 0; font-size: 14px; max-width: 40rem; }
+
 .proposal-tracker .table-row-actions .expiry-countdown strong {
   font-size: 16px;
   font-weight: 600;

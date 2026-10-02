@@ -143,6 +143,36 @@ describe("[QCDAO-52] unified opportunity ordering and pagination", () => {
     assert.equal(result.items.length, 6);
   });
 
+  it("[FUT-ACM-190] keeps a removed problem searchable by title and reason, and drops it when other filters are set", () => {
+    const removed = {
+      id: "removed-one",
+      removed: true,
+      title: "Cold-chain routing",
+      reason: "abusive",
+      reasonLabel: "Abusive content",
+      details: "Copied brief",
+      opportunityType: "business-problem",
+      type: "Business problem",
+      status: "removed",
+      createdAt: new Date("2026-09-02T00:00:00Z"),
+    };
+    const items = [...OPPORTUNITIES, removed];
+    assert.deepEqual(
+      filterOpportunities(items, { ...DEFAULT_DISCOVERY_FILTERS, query: "abusive content" }, NOW).map(({ id }) => id),
+      ["removed-one"],
+    );
+    assert.equal(
+      filterOpportunities(items, { ...DEFAULT_DISCOVERY_FILTERS, category: "quantum" }, NOW)
+        .some((item) => item.id === "removed-one"),
+      false,
+    );
+    assert.equal(
+      filterOpportunities(items, { ...DEFAULT_DISCOVERY_FILTERS, query: "secret brief" }, NOW)
+        .some((item) => item.id === "removed-one"),
+      false,
+    );
+  });
+
   it("keeps an over-filtered result distinct from an empty dataset", () => {
     const result = discoverOpportunities(OPPORTUNITIES, {
       ...DEFAULT_DISCOVERY_FILTERS,

@@ -209,8 +209,10 @@ export async function seed({ db, bucket, logger = console }) {
     const attachments = [];
 
     for (const [index, fixture] of posting.attachments.entries()) {
+      const fixturePath = path.join(FIXTURES, fixture);
+      if (!existsSync(fixturePath)) continue;
       const objectPath = storagePath(posting.id, index);
-      const bytes = readFileSync(path.join(FIXTURES, fixture));
+      const bytes = readFileSync(fixturePath);
 
       await bucket.file(objectPath).save(bytes, {
         contentType: "application/pdf",
@@ -255,13 +257,10 @@ export async function seed({ db, bucket, logger = console }) {
 async function main() {
   const missing = missingFixtures();
   if (missing.length > 0) {
-    console.error(
-      `Missing PDF fixture(s) in ${FIXTURES}:\n`
-      + missing.map((name) => `  - ${name}`).join("\n")
-      + "\n\nThese are deliberately not committed. Drop any PDF in with these "
-      + "names and re-run.",
+    console.warn(
+      `PDF fixture(s) not found in ${FIXTURES}; seeding postings without files:\n`
+      + missing.map((name) => `  - ${name}`).join("\n"),
     );
-    process.exit(1);
   }
 
   const target = process.env.MOCK_TARGET ?? "emulator";

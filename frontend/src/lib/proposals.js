@@ -375,9 +375,16 @@ export async function listProposalsForPosting({ problemId, viewerId }) {
     getDocs(query(collection(db, "proposals"), where("problemId", "==", problemId), where("researcherId", "==", uid))),
     httpsCallable(functions, "listPostedProposals")({ problemId }),
   ]);
+  if (posted.data?.removedParent) {
+    return [...(posted.data.items ?? [])].sort((left, right) => proposalTime(right.createdAt) - proposalTime(left.createdAt));
+  }
 
   const byId = new Map();
-  for (const item of own.docs) byId.set(item.id, { id: item.id, ...item.data() });
+  for (const item of own.docs) {
+    const data = { id: item.id, ...item.data() };
+    if (data.moderationStatus === "removed" || data.status === "moderated_removed") continue;
+    byId.set(item.id, data);
+  }
   for (const item of posted.data?.items ?? []) byId.set(item.id, item);
   return withMatchingState([...byId.values()].sort((left, right) => proposalTime(right.createdAt) - proposalTime(left.createdAt)));
 }

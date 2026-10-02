@@ -40,7 +40,8 @@ import OpportunityEditPage from "./pages/OpportunityEditPage.jsx";
 import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { listPublishedPostings } from "./lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
-import { toOpportunityListItem } from "./lib/opportunityPresentation.js";
+import { toOpportunityListItem, toRemovedOpportunityListItem } from "./lib/opportunityPresentation.js";
+import { listRemovedProblems, moderationReasonLabel } from "./lib/moderation.js";
 import { VerifiedBadge } from "./components/VerifiedBadge.jsx";
 import { opportunityWorkflowStatus, workflowStatusLabel } from "./config/workflowStatus.js";
 import { StatusBadge } from "./components/StatusBadge.jsx";
@@ -424,17 +425,31 @@ function OpportunityTable({ items }) {
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={item.id}>
-              <td>
-                <button className="opportunity-table-link" type="button" onClick={() => openOpportunity(item)}>{item.title}</button>
-                <small>{item.type}</small>
-              </td>
-              <td>{item.owner}</td>
-              <td><OpportunityTrust item={item} /></td>
-              <td className="numeric">{item.amount}</td>
-              <td className="numeric">{item.proposalCount}</td>
-              <td className="numeric">{item.deadline}</td>
-            </tr>
+            item.removed ? (
+              <tr key={item.id}>
+                <td>
+                  <button className="opportunity-table-link" type="button" onClick={() => openOpportunity(item)}>{item.title}</button>
+                  <small>Removed due to: {item.reasonLabel}{item.details ? ` — ${item.details}` : ""}</small>
+                </td>
+                <td>—</td>
+                <td>—</td>
+                <td className="numeric">—</td>
+                <td className="numeric">—</td>
+                <td className="numeric">—</td>
+              </tr>
+            ) : (
+              <tr key={item.id}>
+                <td>
+                  <button className="opportunity-table-link" type="button" onClick={() => openOpportunity(item)}>{item.title}</button>
+                  <small>{item.type}</small>
+                </td>
+                <td>{item.owner}</td>
+                <td><OpportunityTrust item={item} /></td>
+                <td className="numeric">{item.amount}</td>
+                <td className="numeric">{item.proposalCount}</td>
+                <td className="numeric">{item.deadline}</td>
+              </tr>
+            )
           ))}
         </tbody>
       </table>
@@ -538,8 +553,43 @@ function syncDiscoverUrl(filters) {
   }
 }
 
+function useRemovedProblems(isAuthenticated) {
+  const [items, setItems] = useState([]);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setItems([]);
+      setReady(true);
+      return undefined;
+    }
+    let cancelled = false;
+    setReady(false);
+    listRemovedProblems()
+      .then((result) => {
+        if (!cancelled) {
+          setItems((result.items ?? []).map((item) => toRemovedOpportunityListItem({
+            ...item,
+            reasonLabel: moderationReasonLabel(item.reason),
+          })));
+        }
+      })
+      .catch(() => { if (!cancelled) setItems([]); })
+      .finally(() => { if (!cancelled) setReady(true); });
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
+
+  return { items, ready };
+}
+
 function Discover({ params }) {
-  const { postings, loading, loadError, isAuthenticated, hasMore, loadMore } = usePublishedPostings();
+  const { postings, loading: liveLoading, loadError, isAuthenticated, hasMore, loadMore } = usePublishedPostings();
+  const { items: removedProblems, ready: removedReady } = useRemovedProblems(isAuthenticated);
+  const loading = liveLoading || (isAuthenticated && !removedReady);
+  const listed = useMemo(() => {
+    const seen = new Set(postings.map((item) => item.id));
+    return [...postings, ...removedProblems.filter((item) => !seen.has(item.id))];
+  }, [postings, removedProblems]);
   const { roles } = useAuth();
   const canBrowseSolutions = Boolean(roles?.some((role) => [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER].includes(role)));
   const paramsKey = params.toString();
@@ -550,15 +600,15 @@ function Discover({ params }) {
   }, [paramsKey]);
 
   const organisations = useMemo(() => (
-    [...new Set(postings.map((item) => item.organisation || item.owner).filter(Boolean))]
+    [...new Set(listed.map((item) => item.organisation || item.owner).filter(Boolean))]
       .sort((left, right) => left.localeCompare(right))
-  ), [postings]);
+  ), [listed]);
   const statuses = useMemo(() => (
-    [...new Set(postings.map((item) => opportunityWorkflowStatus(item)))].sort()
-  ), [postings]);
+    [...new Set(listed.filter((item) => !item.removed).map((item) => opportunityWorkflowStatus(item)))].sort()
+  ), [listed]);
   const results = useMemo(
-    () => discoverOpportunities(postings, filters),
-    [postings, filters],
+    () => discoverOpportunities(listed, filters),
+    [listed, filters],
   );
   const activeFilters = hasActiveDiscoveryFilters(filters);
   const panelFilterCount = ["category", "status", "organisation", "timeRemaining", "minimumFunding", "maximumFunding"]
@@ -717,7 +767,7 @@ function Discover({ params }) {
           ))}
         </div>
         <div className="discover-toolbar-end">
-          {!loading && !loadError && postings.length > 0 && (
+          {!loading && !loadError && listed.length > 0 && (
             <span className="discover-results-summary" aria-live="polite">
               {results.totalResults} {results.totalResults === 1 ? "opportunity" : "opportunities"}
               {results.totalPages > 1 && ` · showing ${results.firstResult}–${results.lastResult}`}
@@ -734,14 +784,14 @@ function Discover({ params }) {
           We could not load published opportunities. Please refresh and try again.
         </p>
       )}
-      {!loading && !loadError && isAuthenticated && postings.length === 0 && (
+      {!loading && !loadError && isAuthenticated && listed.length === 0 && (
         <div className="discover-empty" role="status">
           <span className="empty-icon-wrapper" aria-hidden="true"><OpportunityIcon /></span>
           <h2>No open opportunities yet</h2>
           <p>New problem statements and funding opportunities will appear here once published.</p>
         </div>
       )}
-      {!loading && !loadError && postings.length > 0 && (
+      {!loading && !loadError && listed.length > 0 && (
         <>
           {results.totalResults === 0 ? (
             <div className="discover-empty discover-no-results" role="status">

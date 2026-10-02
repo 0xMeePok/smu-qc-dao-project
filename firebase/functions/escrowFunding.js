@@ -7,6 +7,8 @@ import { opportunityEntityId } from "./auditCanonical.js";
 import { verifyProposalEscrow } from "./escrowAudit.js";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
 import { ESCROW_STATES, milestoneValue, reconcileFundingReceipt, same } from "./escrowFundingEvents.js";
+import { VOID_JOBS, voidDecision } from "./escrowModerationVoid.js";
+import { isIndependentProposal } from "./independentProposal.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
 export const FUNDING_EVENTS = "escrowFundingEvents", PLATFORM_OUTBOX = "escrowPlatformOutbox", PAUSE_JOBS = "escrowPostingPauseJobs";
@@ -35,6 +37,49 @@ export async function assertFundingChain(client, config) {
   if (required.some(name => !config.abi?.some(item => item.type === "function" && item.name === name))) {
     fail("failed-precondition", "Redeploy the current escrow contracts and update the deployment manifest before enabling automatic settlement.");
   }
+}
+
+/** A depositor claims a removed proposal from the problem page without receiving its content. */
+export async function prepareRemovedProposalClaim({ db, client, config, uid, proposalId }) {
+  validId(proposalId);
+  const profile = await db.collection("users").doc(uid).get();
+  if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+  const proposal = await db.collection("proposals").doc(proposalId).get();
+  if (!proposal.exists) fail("not-found", "This proposal is no longer available.");
+  const stored = proposal.data();
+  const parentSnap = stored.problemId ? await db.collection("problems").doc(stored.problemId).get() : null;
+  const parentRemoved = Boolean(parentSnap?.exists && parentSnap.data().moderationStatus === "removed");
+  if (stored.moderationStatus !== "removed" && !parentRemoved) fail("failed-precondition", "Open this proposal to use its escrow.");
+  if (!stored.problemId || isIndependentProposal(stored) || !stored.fundingTerms) {
+    return { claimable: false, message: "This removed proposal has no escrow deposit to claim." };
+  }
+  if (!parentSnap?.exists || (!parentRemoved && !await canReadContent({ get: ref => ref.get() }, db, "problem", parentSnap.data(), uid, profile.data()))) {
+    fail("permission-denied", "This opportunity is not available.");
+  }
+  const record = { ...stored, id: proposalId };
+  if (!record.postingOwnerId) record.postingOwnerId = record.moderation?.originalPostingOwnerId || parentSnap.data().ownerId || "";
+  const parent = { ...parentSnap.data(), id: parentSnap.id };
+  let verified, own;
+  try {
+    const blockNumber = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
+    verified = await readVerifiedFunding({ client, config, record, parent, blockNumber });
+    own = await client.readContract({ address: verified.escrow.address, abi: config.escrow.escrowAbi,
+      functionName: "depositorSummary", args: [uid], blockNumber });
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    fail("unavailable", "The escrow refund could not be read. Try again shortly.");
+  }
+  const claimable = BigInt(at(own, "claimable", 3) || 0);
+  if (claimable <= 0n) {
+    const deposited = BigInt(at(own, "deposited", 0) || 0);
+    return { claimable: false, message: deposited > 0n
+      ? "The refund is not open for this wallet yet. It becomes claimable after the removal is confirmed on chain. Amounts already paid stay paid."
+      : "This wallet has no deposit to claim from this escrow." };
+  }
+  return {
+    claimable: true, amount: claimable.toString(), escrowAddress: verified.escrow.address,
+    chainId: config.chainId, tokenSymbol: verified.summary.tokenSymbol, tokenDecimals: verified.summary.tokenDecimals,
+  };
 }
 
 export async function loadFundingContext({ db, proposalId, uid }) {
@@ -211,6 +256,7 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
     if (old.transactionHash) return { existing: old };
     if (millis(old.leaseUntil) > now.toMillis()) return { busy: true };
     tx.set(ref, { ...old, problemId: action.problemId || null, proposalId: action.proposalId || null,
+      voidJobId: action.voidJobId || null,
       actionKey: action.key, leaseToken: token, leaseUntil: timestamp(now.toMillis() + 120_000), status: "preparing" });
     return { acquired: true };
   });
@@ -238,6 +284,7 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
       const row = await tx.get(ref);
       if (row.data()?.leaseToken !== token || row.data()?.transactionHash) fail("aborted", "The signer lease changed. Retry the same action.");
       tx.set(ref, { proposalId: action.proposalId || null, problemId: action.problemId || null, actionKey: action.key,
+        voidJobId: action.voidJobId || null,
         functionName: action.functionName, transactionHash, serializedTransaction, nonce,
         signerAddress: wallet.account.address.toLowerCase(), status: "pending", createdAt: now,
         registryAddress: config.address.toLowerCase(), leaseUntil: timestamp(0) });
@@ -284,9 +331,17 @@ export async function resumePlatformTransaction({ db, client, config, now = Time
     const current = await tx.get(ref);
     if (current.data()?.transactionHash !== pending.transactionHash) return;
     const jobRef = pending.proposalId ? db.collection(FUNDING_JOBS).doc(jobKey(config, pending.proposalId)) : null;
-    const job = jobRef ? await tx.get(jobRef) : null;
+    const voidRef = pending.voidJobId && receipt.status === "success" ? db.collection(VOID_JOBS).doc(pending.voidJobId) : null;
+    const [job, voidJob] = await Promise.all([jobRef ? tx.get(jobRef) : null, voidRef ? tx.get(voidRef) : null]);
+    const eventRef = voidJob?.exists && voidJob.data().eventId ? db.collection("moderationEvents").doc(voidJob.data().eventId) : null;
+    const event = eventRef ? await tx.get(eventRef) : null;
     tx.set(ref, { status: "idle", lastTransactionHash: pending.transactionHash,
       lastActionKey: pending.actionKey, lastOutcome: receipt.status, updatedAt: now, leaseUntil: timestamp(0) });
+    if (voidJob?.exists) {
+      const proposalId = voidJob.data().proposalId;
+      tx.set(voidRef, { ...voidJob.data(), status: "complete", transactionHash: pending.transactionHash, updatedAt: now });
+      if (event?.exists) tx.set(eventRef, { ...event.data(), escrowVoids: { ...(event.data().escrowVoids || {}), [proposalId]: { status: "complete", transactionHash: pending.transactionHash } } });
+    }
     if (job?.exists) tx.set(jobRef, { ...job.data(), nextAttemptAt: now, updatedAt: now, settlement: {
       status: receipt.status === "success" ? "confirmed" : "failed", transactionHash: pending.transactionHash,
       message: receipt.status === "success" ? "Platform transaction confirmed; reconciling funding events." : "The platform transaction reverted; the confirmed escrow state will be checked again.",
@@ -561,11 +616,66 @@ export async function reconcilePostingFundingPause({ db, client, config, getWall
   await updatePauseJob({ db, config, job, changes: { nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now } });
 }
 
+export async function reconcileModerationVoids({ db, client, config, getWallet, now = Timestamp.now() }) {
+  const rows = await db.collection(VOID_JOBS).where("status", "==", "pending").where("nextAttemptAt", "<=", now)
+    .orderBy("nextAttemptAt").limit(3).get();
+  for (const row of rows.docs) {
+    try { await reconcileModerationVoid({ db, client, config, getWallet, ref: row.ref, job: { id: row.id, ...row.data() }, now }); }
+    catch { await row.ref.update({ nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now }); }
+  }
+}
+
+async function reconcileModerationVoid({ db, client, config, getWallet, ref, job, now }) {
+  const proposal = await db.collection("proposals").doc(job.proposalId).get();
+  const stored = proposal.exists ? proposal.data() : null;
+  if (!stored?.fundingTerms || !stored.problemId || isIndependentProposal(stored)) {
+    await ref.update({ status: "skipped", skipReason: "no-escrow", updatedAt: now });
+    return;
+  }
+  const record = { ...stored, id: job.proposalId };
+  if (!record.postingOwnerId) record.postingOwnerId = record.moderation?.originalPostingOwnerId || "";
+  const parentSnap = await db.collection("problems").doc(record.problemId).get();
+  if (!parentSnap.exists) {
+    await ref.update({ status: "skipped", skipReason: "no-posting", updatedAt: now });
+    return;
+  }
+  let verified;
+  try {
+    const blockNumber = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
+    verified = await readVerifiedFunding({ client, config, record, parent: { ...parentSnap.data(), id: parentSnap.id }, blockNumber });
+  } catch {
+    await ref.update({ nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now, blockedReason: "Escrow state could not be read." });
+    return;
+  }
+  const wallet = await getWallet();
+  const isAdmin = await client.readContract({
+    address: config.escrow.factoryAddress, abi: config.escrow.factoryAbi, functionName: "isEscrowAdmin", args: [wallet.account.address],
+  });
+  const decision = voidDecision(verified.summary.state, Boolean(isAdmin));
+  if (decision.outcome === "awaiting-admin") {
+    await ref.update({ nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now, blockedReason: "The platform signer is not an escrow admin." });
+    return;
+  }
+  if (decision.outcome === "skipped") {
+    await ref.update({ status: "skipped", skipReason: decision.skipReason, updatedAt: now });
+    return;
+  }
+  await submitPlatformAction({
+    db, client, config, getWallet, now, action: {
+      address: verified.escrow.address, abi: config.escrow.escrowAbi, functionName: "voidEscrow", args: [job.reasonHash],
+      problemId: job.problemId, key: `void:${job.proposalId}:${job.reasonHash}`, voidJobId: job.id,
+    },
+  });
+  await ref.update({ nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now });
+}
+
 export async function sweepEscrowFunding({ db, client, config, getWallet, now = Timestamp.now() }) {
   await assertFundingChain(client, config);
   const maintenance = await db.collection("maintenanceState").doc("registryCutover").get();
   if (maintenance.data()?.active) return { maintenance: true };
   await resumePlatformTransaction({ db, client, config, now });
+  try { await reconcileModerationVoids({ db, client, config, getWallet, now }); }
+  catch { /* A void job stays pending and retries on the next sweep. */ }
   const pauses = await db.collection(PAUSE_JOBS).where("registryAddress", "==", config.address.toLowerCase()).where("status", "==", "pending").where("nextAttemptAt", "<=", now)
     .orderBy("nextAttemptAt").limit(5).get();
   for (const row of pauses.docs) {

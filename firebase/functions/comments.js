@@ -473,8 +473,16 @@ export async function prepareCommentEvaluationGate({ tx, db, contentId, data, ac
   const gateNotices = await queueEvaluationGateNotices(tx, db, { proposal: gate.proposal, complete: gate.complete, now });
   const summaryDocs = await feedbackSummaryReads(tx, db, data.proposalId);
   const next = { ...data, moderationStatus, qualifying };
+  const beforeComplete = gate.proposal?.exists ? gate.proposal.data().matching?.evaluationComplete === true : null;
+  const afterComplete = gate.proposal?.exists
+    ? Boolean(gate.complete || isMockEvaluation(gate.proposal.data().matching || {}))
+    : null;
+  const readiness = beforeComplete !== null && beforeComplete !== afterComplete
+    ? { proposalId: gate.proposal.id, before: beforeComplete, after: afterComplete }
+    : null;
   return {
     qualifying,
+    readiness,
     apply() {
       applyEvaluationComplete(tx, gate.proposal, { complete: gate.complete, now, recommendations: gate.recommendations });
       applyQueuedNotices(tx, gateNotices);

@@ -6,7 +6,7 @@ import { createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import { enqueueEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary, prepareEscrowDeposit,
-  queuePostingFundingPause, startEscrowSettlement, sweepEscrowFunding, syncEscrowFunding } from "./escrowFunding.js";
+  prepareRemovedProposalClaim, queuePostingFundingPause, startEscrowSettlement, sweepEscrowFunding, syncEscrowFunding } from "./escrowFunding.js";
 
 export const escrowPlatformKey = defineSecret("ESCROW_PLATFORM_PRIVATE_KEY");
 
@@ -32,6 +32,7 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
   });
   return {
     prepareEscrowDeposit: callable(prepareEscrowDeposit),
+    prepareRemovedProposalClaim: callable(prepareRemovedProposalClaim),
     syncEscrowFunding: callable(syncEscrowFunding, true),
     getEscrowFundingHistory: callable(getEscrowFundingHistory),
     getEscrowFundingSummary: callable(getEscrowFundingSummary),

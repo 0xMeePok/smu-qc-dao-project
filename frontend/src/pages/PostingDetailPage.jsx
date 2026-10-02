@@ -23,7 +23,7 @@ import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { readPostingFundingStarted } from "../lib/escrow.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
-import { isModerated } from "../lib/moderation.js";
+import { isModerated, moderationReasonLabel, readRemovedProblem } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
 import { ReportableComments } from "../components/ReportableComments.jsx";
 import { Modal } from "../components/Modal.jsx";
@@ -65,6 +65,51 @@ import { ConsolidatedAuditTrail } from "../components/ConsolidatedAuditTrail.jsx
  * readable by any active member, and so are its PDFs (firebase/storage.rules).
  * A draft stays private to its owner.
  */
+
+function isRemovedProblem(record) {
+  return record?.removed === true || record?.moderationStatus === "removed" || record?.status === "moderated_removed";
+}
+
+function removedProblemShell(record) {
+  return {
+    id: record.id,
+    removed: true,
+    moderationStatus: "removed",
+    status: "moderated_removed",
+    title: record.title || "Untitled opportunity",
+    reason: record.moderation?.reason || record.reason || "",
+    details: record.moderation?.details || record.details || "",
+    opportunityType: record.opportunityType || "business-problem",
+    ownerId: record.ownerId || "",
+  };
+}
+
+function accessDenied(error) {
+  const code = String(error?.code || "");
+  return code === "permission-denied" || code.endsWith("/permission-denied");
+}
+
+function RemovedProblemView({ posting, onNavigate, viewerId }) {
+  const ownsPosting = viewerId?.toLowerCase() === posting.ownerId?.toLowerCase();
+  const label = moderationReasonLabel(posting.reason);
+  return (
+    <section className="page detail-page blotter-posting">
+      <button className="back" type="button" onClick={() => onNavigate(ownsPosting ? "my-problems" : "discover")}>
+        {ownsPosting ? "Back to my problems" : "Back to opportunities"}
+      </button>
+      <article className="detail-main">
+        <div className="blotter-title">
+          <div>
+            <span className="eyebrow">{posting.opportunityType === OPEN_FUNDING_TYPE ? "Open funding opportunity" : "Problem statement"}</span>
+            <h1>{posting.title}</h1>
+            <p className="removed-reason">Removed due to: {label}{posting.details ? ` — ${posting.details}` : ""}</p>
+          </div>
+        </div>
+        <PostingProposals posting={posting} viewerId={viewerId} isPoster={ownsPosting} proposalCount={0} onNavigate={onNavigate} />
+      </article>
+    </section>
+  );
+}
 
 function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
   const actions = postingActions(posting, user, { isAuthenticated });
@@ -157,8 +202,26 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
     setTab(initialTab);
 
     findPosting(postingId)
-      .then((found) => { if (!cancelled) setPosting(found); })
-      .catch((lookupError) => { if (!cancelled) setError(messageForFirebaseError(lookupError)); })
+      .then((found) => {
+        if (cancelled) return;
+        setPosting(found && isRemovedProblem(found) ? removedProblemShell(found) : found);
+      })
+      .catch(async (lookupError) => {
+        if (cancelled) return;
+        if (!accessDenied(lookupError)) {
+          setError(messageForFirebaseError(lookupError));
+          return;
+        }
+        try {
+          const shell = await readRemovedProblem(postingId);
+          if (!cancelled) setPosting(shell);
+        } catch (removedError) {
+          if (cancelled) return;
+          const code = String(removedError?.code || "");
+          if (code === "not-found" || code.endsWith("/not-found")) setPosting(null);
+          else setError(messageForFirebaseError(removedError));
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
@@ -324,6 +387,10 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
         </button>
       </section>
     );
+  }
+
+  if (posting.removed) {
+    return <RemovedProblemView posting={posting} onNavigate={onNavigate} viewerId={user?.id} />;
   }
 
   const expired = isResponseWindowClosed(posting);

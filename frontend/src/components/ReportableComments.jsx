@@ -215,7 +215,8 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
     }
   };
   const removed = Boolean(item.deleted || item.deletedAt);
-  const mine = !removed && sameAuthor(user, item);
+  const withdrawn = item.moderationStatus === "removed" || item.moderationStatus === "hidden";
+  const mine = !removed && !withdrawn && sameAuthor(user, item);
   const editable = mine && canEditComment(item);
   const replies = [...(item.replies || []), ...extraReplies];
   const count = replyCount(item);
@@ -229,7 +230,7 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
   const role = roleText(item.authorRole);
   const outcome = !removed && item.qualifying ? item.recommendation : null;
   return <article id={`comment-${item.id}`} className={nested ? "matching-candidate comment-reply" : "matching-candidate"}>
-    {editing && !removed ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
+    {editing && !removed && !withdrawn ? <CommentComposer proposalId={item.proposalId} evaluator={isEvaluator(user)} initial={item}
       allowRecommendations={allowRecommendations} onPosted={onChanged} onCancel={onCancel} /> : <>
       {outcome && <p className="comment-recommendation"><StatusBadge status={outcome} prefix="Evaluator · " /></p>}
       <p className={removed ? "proposal-text comment-removed" : "proposal-text"}>
@@ -241,12 +242,14 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
       </div>}
       {error && <p role="alert" className="field-hint">{error}</p>}
       <div className="comment-actions">
-        {editable && <button type="button" className="text-button" disabled={busy} onClick={() => onEdit(item.id)}>Edit comment</button>}
-        {mine && <button type="button" className="text-button" disabled={busy} onClick={remove}>{busy ? "Deleting…" : "Delete comment"}</button>}
-        {parent && canReply && <button type="button" className="text-button" onClick={onReply}>Reply</button>}
+        {withdrawn ? <p>This comment was removed by an administrator</p> : <>
+          {editable && <button type="button" className="text-button" disabled={busy} onClick={() => onEdit(item.id)}>Edit comment</button>}
+          {mine && <button type="button" className="text-button" disabled={busy} onClick={remove}>{busy ? "Deleting…" : "Delete comment"}</button>}
+          {parent && canReply && <button type="button" className="text-button" onClick={onReply}>Reply</button>}
+          {!removed && <ReportContentButton contentType="comment" contentId={item.id} />}
+        </>}
         {parent && count > 0 && <button type="button" className="text-button" aria-expanded={expanded}
           onClick={onToggle}>{expanded ? "Hide replies" : count === 1 ? "Show 1 reply" : `Show ${count} replies`}</button>}
-        {!removed && <ReportContentButton contentType="comment" contentId={item.id} />}
       </div>
     </>}
     {parent && expanded && <div className="comment-replies">
@@ -255,7 +258,7 @@ function CommentItem({ item, user, editing, editingId, canReply, expanded, onTog
       {replyCursor && <button type="button" className="text-button" disabled={loadingReplies} onClick={loadMoreReplies}>
         {loadingReplies ? "Loading…" : "Load more replies"}
       </button>}
-      {canReply && !editingId && <CommentComposer proposalId={item.proposalId} parentId={item.id} evaluator={isEvaluator(user)}
+      {canReply && !editingId && !withdrawn && <CommentComposer proposalId={item.proposalId} parentId={item.id} evaluator={isEvaluator(user)}
         allowRecommendations={allowRecommendations} onPosted={onChanged} />}
     </div>}
   </article>;

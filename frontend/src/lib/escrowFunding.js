@@ -9,6 +9,7 @@ async function call(name, payload = {}) {
 }
 
 export const prepareEscrowDeposit = payload => call("prepareEscrowDeposit", payload);
+export const prepareRemovedProposalClaim = payload => call("prepareRemovedProposalClaim", payload);
 export const syncEscrowFunding = payload => call("syncEscrowFunding", payload);
 export const getEscrowFundingHistory = payload => call("getEscrowFundingHistory", payload);
 export const getEscrowFundingSummary = () => call("getEscrowFundingSummary");
