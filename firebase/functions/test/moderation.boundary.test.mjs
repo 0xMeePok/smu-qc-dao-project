@@ -19,7 +19,7 @@ function fixture() {
   });
 }
 const report = (db, patch = {}) => submitContentReport({ db, uid: "member", contentType: "problem", contentId: "p", reason: "other", now, ...patch });
-const act = (db, patch = {}) => moderateContent({ db, uid: "admin", queueId: "problem_p", action: "hide", reason: "other", now, prepareMatching: prepareModerationMatching, ...patch });
+const act = (db, patch = {}) => moderateContent({ db, uid: "admin", queueId: "problem_p", action: "remove", reason: "other", now, prepareMatching: prepareModerationMatching, ...patch });
 const rows = (db, prefix) => [...db.records.entries()].filter(([key]) => key.startsWith(prefix + "/")).map(([, row]) => row);
 
 test("report20 succeeds, report21 fails atomically, retries are free, exact UTC midnight resets limit", async () => {
@@ -117,8 +117,10 @@ test("history/reports cap100 and queues/author notifications never expose report
   const context = await getModerationContext({ db, uid: "admin", queueId: "problem_p" });
   assert.equal(context.reports.length, 100); assert.equal(context.history.length, 100);
   assert.equal(context.reportsTruncated, true); assert.equal(context.historyTruncated, true);
-  assert.doesNotMatch(JSON.stringify([await listModerationQueue({ db, uid: "admin", status: "all" }),
-    await listModerationNotifications({ db, uid: "owner" })]), /reporterId|Private reporter details|private99/);
+  const listed = await listModerationQueue({ db, uid: "admin", status: "all" });
+  assert.equal(listed.items[0].reportSummaries[0].details, "Private reporter details");
+  assert.doesNotMatch(JSON.stringify(listed), /reporterId|private99/);
+  assert.doesNotMatch(JSON.stringify(await listModerationNotifications({ db, uid: "owner" })), /reporterId|Private reporter details|private99/);
 });
 
 test("notifications cap50, isolate recipients and preserve first acknowledgement timestamp", async () => {
@@ -155,7 +157,7 @@ test("hide/remove/restore refunds each funder once, conserves sibling funds and 
   assert.equal(db.records.get("proposals/a").matching.fundedMinor, 0);
   assert.equal(db.records.get("proposals/a").postingOwnerId, "owner");
   assert.equal(db.records.get("proposals/a").status, "submitted");
-  assert.deepEqual(rows(db, "moderationEvents").map(row => row.action), ["hide", "remove", "restore"]);
+  assert.deepEqual(rows(db, "moderationEvents").map(row => row.action), ["remove", "restore"]);
 });
 
 test("automatic triage has exact external-link and repeated-word thresholds", () => {

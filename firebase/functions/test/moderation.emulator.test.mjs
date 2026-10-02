@@ -20,10 +20,10 @@ test("real Firestore moderation atomically hides selected content, refunds escro
     const reports = await Promise.all([1, 2].map(() => submitContentReport({ db, uid: owner, contentType: "proposal", contentId: id, reason: "misleading", now })));
     assert.equal(reports.filter((report) => report.alreadyReported).length, 1);
     const args = { db, uid: admin, queueId: `proposal_${id}`, reason: "misleading", prepareMatching: prepareModerationMatching, now };
-    await moderateContent({ ...args, action: "hide" });
+    await moderateContent({ ...args, action: "remove" });
     const hidden = (await db.collection("proposals").doc(id).get()).data();
     const parent = (await db.collection("problems").doc(id).get()).data();
-    assert.equal(hidden.status, "moderated_hidden");
+    assert.equal(hidden.status, "moderated_removed");
     assert.equal(hidden.postingOwnerId, "");
     assert.equal(parent.matching.status, "open");
     assert.equal(parent.matching.totalFundedMinor, 0);

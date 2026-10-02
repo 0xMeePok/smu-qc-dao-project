@@ -265,12 +265,20 @@ function moderationEvent(row, titles) {
   if (!at || !row.contentId) return null;
   const action = row.action === "hide" ? "hidden" : row.action === "remove" ? "removed" : row.action === "restore" ? "restored" : "updated";
   const kind = row.contentType === "proposal" ? "proposal" : row.contentType === "comment" ? "comment" : "problem";
+  const readiness = row.evaluationReadiness;
+  const readinessText = readiness
+    ? ` Evaluator-feedback readiness changed from ${readiness.before ? "ready" : "not ready"} to ${readiness.after ? "ready" : "not ready"}. The evaluator badge and recommendation were left unchanged.`
+    : "";
+  const voidHash = row.escrowVoid?.transactionHash || row.escrowVoids && Object.values(row.escrowVoids).find((item) => item?.transactionHash)?.transactionHash;
+  const voidText = voidHash
+    ? ` Escrow void ${voidHash} opened claimable refunds of the unpaid balance.`
+    : "";
   return publish({
     id: `moderation_${row.id}`,
     eventType: "moderation",
     types: ["moderation"],
     label: "Moderation action",
-    description: `A moderator ${action} this ${kind}. Recorded off-chain. This action is not an on-chain verification.`,
+    description: `A moderator ${action} this ${kind}. The decision is stored in Firestore and is eligible to anchor.${readinessText}${voidText}`,
     at,
     actorRole: "admin",
     actorLabel: "Administrator",

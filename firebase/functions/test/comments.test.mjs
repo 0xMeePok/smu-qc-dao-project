@@ -451,7 +451,7 @@ test("admin mock evaluationComplete survives deleting the last qualifying commen
   );
 });
 
-test("hiding the last qualifying comment clears the gate; restore revalidates it", async () => {
+test("removing the last qualifying comment clears the gate and records readiness without changing the recommendation", async () => {
   const db = fixture();
   const created = await create(db, {
     uid: "evaluator",
@@ -472,12 +472,18 @@ test("hiding the last qualifying comment clears the gate; restore revalidates it
       now,
       prepareCommentGate: prepareCommentEvaluationGate,
     });
-  await act("hide", "off_topic");
-  assert.equal(db.records.get(`comments/${created.id}`).qualifying, false);
+  const before = db.records.get(`comments/${created.id}`);
+  await act("remove", "off_topic");
+  const stored = db.records.get(`comments/${created.id}`);
+  assert.equal(stored.qualifying, false);
+  assert.equal(stored.recommendation, before.recommendation);
+  assert.equal(stored.badge, before.badge);
   assert.equal(
     db.records.get("proposals/a").matching.evaluationComplete,
     false,
   );
+  const event = [...db.records.entries()].find(([path]) => path.startsWith("moderationEvents/"))?.[1];
+  assert.deepEqual(event.evaluationReadiness, { proposalId: "a", before: true, after: false });
   await act("restore", "no_violation");
   assert.equal(db.records.get(`comments/${created.id}`).qualifying, true);
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);

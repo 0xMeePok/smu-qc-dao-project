@@ -157,6 +157,17 @@ export function filterOpportunities(items, filters, now = new Date()) {
     : Number(filters.maximumFunding);
 
   return items.filter((item) => {
+    if (item.removed) {
+      const text = [item.title, item.reasonLabel, item.reason, item.details].map(clean).join(" ").toLocaleLowerCase();
+      return (!query || text.includes(query))
+        && (!filters.type || opportunityTypeValue(item) === filters.type)
+        && !filters.category
+        && !filters.status
+        && !filters.organisation
+        && !filters.timeRemaining
+        && minimum === null
+        && maximum === null;
+    }
     const categories = Array.isArray(item.categories) ? item.categories : [];
     const amount = fundingAmount(item);
     return (!query || searchableText(item).includes(query))

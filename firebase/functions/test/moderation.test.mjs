@@ -4,7 +4,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { memoryDb } from "./memoryDb.mjs";
 import { submitContentReport, listModerationQueue, getModerationContext, moderateContent, flagSubmittedContent,
   listModerationNotifications, markModerationNotificationRead, listReportableComments, listPostedProposals,
-  syncProposalParentVisibility, syncProblemProposalsBrowsable } from "../moderation.js";
+  listRemovedProblems, readRemovedProblem, syncProposalParentVisibility, syncProblemProposalsBrowsable } from "../moderation.js";
 import { prepareModerationMatching, fundMockProposal, selectMockProposal, confirmMockProposal } from "../matching.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
@@ -24,7 +24,7 @@ function fixture() {
 }
 const report = (db, patch = {}) => submitContentReport({ db, uid: "owner", contentType: "proposal", contentId: "a", reason: "misleading", details: "Please check the claimed result.", now, ...patch });
 const queue = (db, patch = {}) => listModerationQueue({ db, uid: "admin", ...patch });
-const act = (db, action = "hide", patch = {}) => moderateContent({ db, uid: "admin", queueId: "proposal_a", action, reason: "misleading", now, prepareMatching: prepareModerationMatching, ...patch });
+const act = (db, action = "remove", patch = {}) => moderateContent({ db, uid: "admin", queueId: "proposal_a", action, reason: "misleading", now, prepareMatching: prepareModerationMatching, ...patch });
 const fund = (db, proposalId, amount = 100) => fundMockProposal({ db, uid: "funder", problemId: "problem", proposalId, amount, requestId: `fund_request_${proposalId}_1234567`, now });
 const select = (db) => selectMockProposal({ db, uid: "owner", problemId: "problem", proposalId: "a", rationale: "The strongest evaluated approach.", now });
 
@@ -40,6 +40,10 @@ test("reports use existing content access, enforce one per member/item, and aggr
   assert.equal(state.pendingCount, 1);
   assert.equal(state.items[0].reportCount, 2);
   assert.deepEqual(state.items[0].reportReasons, { misleading: 1, duplicate: 1 });
+  assert.deepEqual(state.items[0].reportSummaries, [
+    { reason: "misleading", details: "Please check the claimed result." },
+    { reason: "duplicate", details: "Please check the claimed result." },
+  ]);
   assert.equal(state.items[0].organisation, "University");
   assert.equal(state.items[0].authorName, "Alice");
   assert.equal(Object.hasOwn(state.items[0], "reporterId"), false);
@@ -50,49 +54,44 @@ test("reports use existing content access, enforce one per member/item, and aggr
   await assert.rejects(() => queue(db, { uid: "owner" }), { code: "permission-denied" });
 });
 
-test("automatic screening skips drafts, is idempotent, and never changes content visibility", async () => {
+test("publishing content does not enter the moderation queue", async () => {
   const db = fixture();
-  const text = "https://one.test https://two.test https://three.test https://four.test https://five.test";
+  const text = "https://one.test https://two.test https://three.test https://four.test https://five.test kill yourself";
   db.records.set("problems/draft", { ownerId: "owner", status: "draft", summary: text });
   assert.equal((await flagSubmittedContent({ db, contentType: "problem", contentId: "draft", now })).flagged, false);
   db.records.get("proposals/a").summary = text;
-  assert.equal((await flagSubmittedContent({ db, contentType: "proposal", contentId: "a", now })).flagged, true);
   assert.equal((await flagSubmittedContent({ db, contentType: "proposal", contentId: "a", now })).flagged, false);
   assert.equal(db.records.get("proposals/a").status, "submitted");
-  assert.equal((await queue(db)).pendingCount, 1);
-  await act(db, "restore", { reason: "no_violation" });
   assert.equal((await queue(db)).pendingCount, 0);
-  await flagSubmittedContent({ db, contentType: "proposal", contentId: "a", now });
-  assert.equal((await queue(db)).pendingCount, 0); // retried trigger cannot reopen a reviewed item
-  db.records.get("proposals/a").title = "Changed spam content";
-  await flagSubmittedContent({ db, contentType: "proposal", contentId: "a", now: later(1000) });
-  assert.equal((await queue(db)).items[0].title, "Changed spam content");
+  assert.equal(db.records.has("moderationQueue/proposal_a"), false);
 });
 
-test("admin hide/remove/restore preserves original workflow and sponsor access with immutable history and private notifications", async () => {
+test("admin remove/restore preserves original workflow and sponsor access with immutable history and private notifications", async () => {
   const db = fixture();
   await report(db);
-  await assert.rejects(() => act(db, "hide", { uid: "alice" }), { code: "permission-denied" });
-  await assert.rejects(() => act(db, "hide", { uid: "suspended" }), { code: "permission-denied" });
-  await assert.rejects(() => act(db, "hide", { reason: "" }), { code: "invalid-argument" });
+  await assert.rejects(() => act(db, "hide"), { code: "invalid-argument" });
+  await assert.rejects(() => act(db, "remove", { uid: "alice" }), { code: "permission-denied" });
+  await assert.rejects(() => act(db, "remove", { uid: "suspended" }), { code: "permission-denied" });
+  await assert.rejects(() => act(db, "remove", { reason: "" }), { code: "invalid-argument" });
+  await assert.rejects(() => act(db, "remove", { reason: "no_violation" }), { code: "invalid-argument" });
+  await assert.rejects(() => act(db, "restore", { reason: "misleading" }), { code: "invalid-argument" });
   await act(db);
-  assert.equal(db.records.get("proposals/a").status, "moderated_hidden");
+  assert.equal(db.records.get("proposals/a").status, "moderated_removed");
   assert.equal(db.records.get("proposals/a").postingOwnerId, "");
   assert.equal(db.records.get("proposals/a").moderation.originalPostingOwnerId, "owner");
   assert.equal(Object.hasOwn(db.records.get("proposals/a"), "problemBrowsable"), false);
   assert.equal(Object.hasOwn(db.records.get("proposals/b"), "problemBrowsable"), false);
   assert.equal((await queue(db)).pendingCount, 0);
   assert.equal((await act(db)).unchanged, true);
-  await act(db, "remove", { now: later(1000) });
   await act(db, "restore", { reason: "appeal_accepted", now: later(2000) });
   assert.equal(db.records.get("proposals/a").status, "submitted");
   assert.equal(db.records.get("proposals/a").postingOwnerId, "owner");
   assert.equal(db.records.get("proposals/a").moderationStatus, "visible");
   const context = await getModerationContext({ db, uid: "admin", queueId: "proposal_a" });
-  assert.deepEqual(context.history.map((item) => item.action), ["hide", "remove", "restore"]);
+  assert.deepEqual(context.history.map((item) => item.action), ["remove", "restore"]);
   assert.ok(context.history.every((item) => item.chainStatus === "pending"));
   const notifications = await listModerationNotifications({ db, uid: "alice" });
-  assert.equal(notifications.items.length, 3);
+  assert.equal(notifications.items.length, 2);
   assert.match(notifications.items[0].message, /proposal/);
   assert.equal((await listModerationNotifications({ db, uid: "owner" })).items.length, 0);
   await assert.rejects(() => markModerationNotificationRead({ db, uid: "bob", notificationId: notifications.items[0].id, now }), { code: "permission-denied" });
@@ -100,7 +99,7 @@ test("admin hide/remove/restore preserves original workflow and sponsor access w
   assert.equal((await listModerationNotifications({ db, uid: "alice" })).items[0].read, true);
 });
 
-test("hiding a selected proposal refunds only its funders atomically and restoration permits evaluated re-funding", async () => {
+test("removing a selected proposal refunds only its funders atomically and restoration permits evaluated re-funding", async () => {
   const db = fixture();
   await fund(db, "a"); await fund(db, "b", 40); await select(db); await report(db);
   await act(db);
@@ -118,11 +117,11 @@ test("hiding a selected proposal refunds only its funders atomically and restora
   assert.equal(db.records.get("problems/problem").matching.totalFundedMinor, 14000);
 });
 
-test("hiding a whole problem refunds all pledged funds but never releases confirmed locked funds", async () => {
+test("removing a problem refunds pledged and confirmed mock pledges without touching a sibling lock", async () => {
   const db = fixture();
   await fund(db, "a"); await fund(db, "b"); await select(db);
   await report(db, { contentType: "problem", contentId: "problem", uid: "funder" });
-  await act(db, "hide", { queueId: "problem_problem" });
+  await act(db, "remove", { queueId: "problem_problem" });
   assert.equal(db.records.get("problems/problem").matching.totalFundedMinor, 0);
   assert.equal(db.records.get("proposals/a").problemBrowsable, false);
   assert.equal(db.records.get("proposals/b").problemBrowsable, false);
@@ -132,13 +131,16 @@ test("hiding a whole problem refunds all pledged funds but never releases confir
   assert.equal(db.records.get("proposals/a").problemBrowsable, true);
   assert.equal(db.records.get("proposals/b").problemBrowsable, true);
   const locked = fixture();
-  await fund(locked, "a"); await select(locked);
+  await fund(locked, "a"); await fund(locked, "b", 40); await select(locked);
   await confirmMockProposal({ db: locked, uid: "alice", problemId: "problem", proposalId: "a", now });
+  const sibling = [...locked.records.entries()].find(([path, row]) => path.startsWith("mockFunding/") && row.proposalId === "b");
+  locked.records.set(sibling[0], { ...sibling[1], status: "locked" });
   await report(locked);
   await act(locked);
-  assert.equal(locked.records.get("problems/problem").matching.status, "confirmed");
-  assert.equal(locked.records.get("proposals/a").matching.status, "confirmed");
-  assert.ok([...locked.records.entries()].filter(([path]) => path.startsWith("mockFunding/")).every(([, row]) => row.status === "locked"));
+  const ledger = [...locked.records.entries()].filter(([path]) => path.startsWith("mockFunding/")).map(([, row]) => row);
+  assert.equal(ledger.find((row) => row.proposalId === "a").status, "refunded");
+  assert.equal(ledger.find((row) => row.proposalId === "b").status, "locked");
+  assert.equal(locked.records.get("proposals/a").matching.evaluationComplete, true);
 });
 
 test("comments inherit parent access and support report/hide/restore without a commenting write API", async () => {
@@ -150,7 +152,7 @@ test("comments inherit parent access and support report/hide/restore without a c
   assert.equal((await listReportableComments({ db, uid: "owner", problemId: "problem", proposalId: "a" })).items[0].body, "Private proposal comment");
   await report(db, { uid: "funder", contentType: "comment", contentId: "comment", reason: "off_topic" });
   assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem" })).items.length, 1);
-  await act(db, "hide", { queueId: "comment_comment", reason: "off_topic" });
+  await act(db, "remove", { queueId: "comment_comment", reason: "off_topic" });
   assert.equal((await listReportableComments({ db, uid: "funder", problemId: "problem" })).items.length, 0);
   assert.equal((await listReportableComments({ db, uid: "alice", problemId: "problem" })).items.length, 1);
   await assert.rejects(() => report(db, { uid: "bob", contentType: "comment", contentId: "comment" }), { code: "permission-denied" });
@@ -168,7 +170,7 @@ test("queue type/status filters, report-count ordering and cursor paging stay bo
   assert.equal((await queue(db, { sort: "most_reported" })).items[0].contentType, "problem");
   assert.equal((await queue(db, { contentType: "proposal" })).items.length, 1);
   await act(db);
-  assert.equal((await queue(db, { status: "hidden" })).items.length, 1);
+  assert.equal((await queue(db, { status: "removed" })).items.length, 1);
   for (let i = 0; i < 55; i++) db.records.set(`moderationQueue/comment_c${String(i).padStart(2, "0")}`, {
     contentType: "comment", status: "pending", createdAt: later(i), sortReports: 0, reportCount: 0,
   });
@@ -192,6 +194,62 @@ test("report validation and daily limit bound distinct-report abuse without pena
   await assert.rejects(() => report(db, { uid: "funder", contentType: "problem", contentId: "problem" }), { code: "resource-exhausted" });
   assert.equal((await report(db, { uid: "funder", contentType: "problem", contentId: "p0" })).alreadyReported, true);
   assert.equal((await report(db, { uid: "funder", contentType: "problem", contentId: "problem", now: later(86400000) })).ok, true);
+});
+
+test("a removed proposal stays on its problem as a reason without its content", async () => {
+  const db = fixture();
+  db.records.get("proposals/a").fundingTerms = { target: "1" };
+  await report(db);
+  await act(db);
+  const listed = await listPostedProposals({ db, uid: "funder", problemId: "problem" });
+  const removed = listed.items.find((item) => item.id === "a");
+  assert.equal(removed.removed, true);
+  assert.equal(removed.reason, "misleading");
+  assert.equal(removed.details, "");
+  assert.equal(removed.claimFunds, true);
+  assert.equal(removed.title, "Proposal A");
+  for (const field of ["summary", "amount", "researcherId", "fundingTerms", "organisation"]) {
+    assert.equal(Object.hasOwn(removed, field), false);
+  }
+  assert.equal(listed.items.find((item) => item.id === "b").title, "Proposal B");
+});
+
+test("a removed problem stays viewable as its title and reason, and funded proposals stay claimable", async () => {
+  const db = fixture();
+  db.records.get("proposals/a").fundingTerms = { target: "1" };
+  db.records.get("problems/problem").summary = "Secret brief";
+  db.records.get("problems/problem").businessContext = "Secret context";
+  db.records.get("problems/problem").organisation = "Secret org";
+  db.records.set("moderationQueue/problem_problem", { status: "pending", contentType: "problem", contentId: "problem" });
+  await moderateContent({
+    db, uid: "admin", queueId: "problem_problem", action: "remove", reason: "abusive",
+    details: "Copied from another brief.", now, prepareMatching: prepareModerationMatching,
+  });
+  const listed = await listPostedProposals({ db, uid: "funder", problemId: "problem" });
+  assert.equal(listed.removedParent, true);
+  assert.deepEqual(listed.items.map((item) => item.id), ["a"]);
+  const claim = listed.items[0];
+  assert.equal(claim.title, "Proposal A");
+  assert.equal(claim.reason, "abusive");
+  assert.equal(claim.details, "Copied from another brief.");
+  assert.equal(claim.claimFunds, true);
+  for (const field of ["summary", "amount", "researcherId", "fundingTerms", "organisation"]) {
+    assert.equal(Object.hasOwn(claim, field), false);
+  }
+  const shell = await readRemovedProblem({ db, uid: "funder", problemId: "problem" });
+  assert.equal(shell.title, "Routing study");
+  assert.equal(shell.reason, "abusive");
+  assert.equal(shell.details, "Copied from another brief.");
+  assert.equal(shell.removed, true);
+  for (const field of ["summary", "amount", "businessContext", "ownerId", "organisation"]) {
+    assert.equal(Object.hasOwn(shell, field), false);
+  }
+  const catalog = await listRemovedProblems({ db, uid: "funder" });
+  assert.equal(catalog.items.length, 1);
+  assert.equal(catalog.items[0].id, "problem");
+  assert.equal(catalog.items[0].title, "Routing study");
+  assert.equal(Object.hasOwn(catalog.items[0], "summary"), false);
+  await assert.rejects(() => readRemovedProblem({ db, uid: "funder", problemId: "missing" }), { code: "not-found" });
 });
 
 test("posted proposal lists are scoped to a readable parent and omit other problems", async () => {

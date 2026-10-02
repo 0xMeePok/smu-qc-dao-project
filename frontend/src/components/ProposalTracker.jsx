@@ -3,6 +3,7 @@ import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
+import { isModerated } from "../lib/moderation.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { recommendationCounts, workflowStatusLabel } from "../config/workflowStatus.js";
 import {
@@ -107,7 +108,9 @@ export function ProposalTracker({ onNavigate }) {
           {item.escrowUnavailable && <small className="table-row-meta">Escrow status is temporarily unavailable.</small>}
         </div>
         <div className="table-row-actions">
-          {item.grant?.status === "pending" || item.grant?.status === "expired" ? (
+          {isModerated(item) || item.status === "moderated_removed" || item.status === "moderated_hidden" ? (
+            <span aria-label="No time remaining">—</span>
+          ) : item.grant?.status === "pending" || item.grant?.status === "expired" ? (
             <span className="table-row-meta">Grant acceptance: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} showInstant={false} /></span>
           ) : item.escrow ? (proposalQueueDeadline(item) && <span className="table-row-meta">
             {item.escrow.state === "Open" ? "Funding closes" : "Escrow approval"}: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} showInstant={false} />
