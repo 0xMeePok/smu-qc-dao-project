@@ -884,9 +884,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           <SubmissionError message={submitError}>
             {" "}Nothing you typed has been lost — you can submit again when ready.
           </SubmissionError>
-          {Object.keys(errors).length > 0 && (
+          {Object.values(errors).filter(Boolean).length > 0 && (
             <p className="field-hint" role="status">
-              {Object.keys(errors).length} field(s) need attention. Steps marked ! have the details.
+              {Object.values(errors).filter(Boolean).length} field(s) need attention. Steps marked ! have the details.
             </p>
           )}
         </form>

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
@@ -8,6 +9,7 @@ import { escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
 import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
+import { ACTION_ITEMS_KEY } from "../lib/proposalQueues.js";
 
 const same = (a, b) => Boolean(a && b && a.toLowerCase() === b.toLowerCase());
 const storageKey = (id, account) => `qcdao:grant-pending:${AUDIT_REGISTRY_CONFIG.chainId}:${AUDIT_REGISTRY_CONFIG.address}:${id}:${account?.toLowerCase()}`;
@@ -86,8 +88,9 @@ export function OpenFundingView({ data, loading, error, notice, busy, walletRead
   </section>;
 }
 
-export function OpenFundingPanel({ problemId, proposalId, onNavigate }) {
+export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange }) {
   const { user } = useAuth();
+  const queryClient = useContext(QueryClientContext);
   const { address, isConnected, chainId } = useAccount();
   const [data, setData] = useState(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
@@ -126,7 +129,9 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate }) {
           if (progress.status === "confirmed") remember(null);
         } });
       remember({ transactionHash: result.transactionHash, action, proposalId: selectedProposalId });
-      await syncOpenFunding({ problemId, proposalId: selectedProposalId, transactionHash: result.transactionHash });
+      void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
+      try { await syncOpenFunding({ problemId, proposalId: selectedProposalId, transactionHash: result.transactionHash }); }
+      finally { if (activeKey.current === key) onChange?.({ proposalId: selectedProposalId, action, transactionHash: result.transactionHash }); }
       remember(null);
       if (activeKey.current === key) { setAmount(""); setWithdrawalAmount(""); setNotice(action === "select" ? "Offer recorded. The researcher has seven days to accept." : action === "accept" ? "Grant accepted. The requested funds are now in proposal escrow." : action === "withdraw" ? "Withdrawal confirmed. Unreserved funds have returned to your wallet." : "Grant pool updated."); }
       await refresh();
@@ -140,7 +145,9 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate }) {
     actionBusy.current = true; setBusy(true); setError("");
     try {
       const result = await confirmEscrowTransaction(pending.transactionHash, { confirmations: 2 });
-      await syncOpenFunding({ problemId, proposalId: pending.proposalId, transactionHash: result.transactionHash });
+      void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
+      try { await syncOpenFunding({ problemId, proposalId: pending.proposalId, transactionHash: result.transactionHash }); }
+      finally { if (activeKey.current === key) onChange?.({ proposalId: pending.proposalId, action: pending.action, transactionHash: result.transactionHash }); }
       remember(null); setNotice("Transaction confirmed. The grant pool has been refreshed."); await refresh();
     } catch (err) { if (err.terminal) remember(null); setError(escrowErrorMessage(err)); }
     finally { actionBusy.current = false; setBusy(false); }

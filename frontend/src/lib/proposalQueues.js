@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
+import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
 /** QCDAO-62/63 workspace queues. Both read records that already exist. */
 // Each evaluator files their own recommendation, so "pending" means not yet by me.
@@ -33,11 +34,32 @@ export function commentCountLabel(row) {
 
 const time = (value) => (value ? Date.parse(value) : NaN);
 
+export function proposalQueueDeadline(row) {
+  if (row?.grantUnavailable || row?.escrowUnavailable) return null;
+  if (["pending", "expired"].includes(row?.grant?.status)) {
+    if (row.grant.deadlineAt) return row.grant.deadlineAt;
+    const seconds = Number(row.grant.acceptanceDeadline);
+    const deadline = new Date(seconds * 1000);
+    return seconds > 0 && Number.isFinite(deadline.getTime()) ? deadline.toISOString() : null;
+  }
+  if (row?.escrow) return row.escrow.deadlineAt ?? null;
+  if (["accepted", "voided"].includes(row?.grant?.status)) return null;
+  return row?.expiresAt ?? row?.posting?.expiresAt;
+}
+
+export function proposalQueueWorkflowStatus(row) {
+  if (row?.grantUnavailable || row?.escrowUnavailable) return undefined;
+  if (row?.grant?.status === "accepted") return row?.escrow?.workflowStatus ?? WORKFLOW_STATUS.ACCEPTED;
+  const grantStatuses = { pending: WORKFLOW_STATUS.SELECTED,
+    expired: WORKFLOW_STATUS.EXPIRED, voided: WORKFLOW_STATUS.INVALIDATED };
+  return grantStatuses[row?.grant?.status] ?? row?.escrow?.workflowStatus ?? row?.workflowStatus ?? row?.status;
+}
+
 export function sortProposalRows(rows, sort = "closing") {
   return [...(rows ?? [])].sort((a, b) => {
     if (sort === "submitted") return (time(b.createdAt ?? b.submittedAt) || 0) - (time(a.createdAt ?? a.submittedAt) || 0);
     // Earliest deadline first, with postings that carry no deadline last.
-    const left = time(a.expiresAt ?? a.posting?.expiresAt), right = time(b.expiresAt ?? b.posting?.expiresAt);
+    const left = time(proposalQueueDeadline(a)), right = time(proposalQueueDeadline(b));
     if (Number.isNaN(left) && Number.isNaN(right)) return 0;
     if (Number.isNaN(left)) return 1;
     if (Number.isNaN(right)) return -1;
@@ -46,7 +68,7 @@ export function sortProposalRows(rows, sort = "closing") {
 }
 
 // Rows filter on the shared QCDAO-91 status, not the stored field.
-const statusOf = (row) => row?.workflowStatus || row?.status;
+const statusOf = proposalQueueWorkflowStatus;
 
 export function filterProposalRows(rows, status = "all") {
   return status === "all" ? [...(rows ?? [])] : (rows ?? []).filter((row) => statusOf(row) === status);

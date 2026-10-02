@@ -219,9 +219,9 @@ export const getProposalComparison = onCall(MEMBER_CALL_OPTIONS, async (request)
 });
 
 // QCDAO-62 and QCDAO-63 read existing proposal, problem and comment records.
-export const listMyProposalQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+export const listMyProposalQueue = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180 }, async (request) => {
   const uid = await requireMember(request);
-  return listMyProposals({ db, uid });
+  return listMyProposals({ db, uid, client: publicClient, config: auditRegistryConfig });
 });
 
 export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) => {
@@ -230,9 +230,9 @@ export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) =>
 });
 
 // QCDAO-91 shared "Action Needed" workspace tab.
-export const listActionItems = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+export const listActionItems = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180 }, async (request) => {
   const uid = await requireMember(request);
-  return actionItems({ db, uid });
+  return actionItems({ db, uid, client: publicClient, config: auditRegistryConfig });
 });
 
 export const recordOwnerReview = onCall(MEMBER_CALL_OPTIONS, async (request) => {

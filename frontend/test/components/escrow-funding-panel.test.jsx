@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(), load: vi.fn(), save: vi.fn(), prepare: vi.fn(), sync: vi.fn(), history: vi.fn(), start: vi.fn(), account: null, user: null }));
 vi.mock("../../src/lib/escrowFunding.js", async importOriginal => ({ ...await importOriginal(),
   prepareEscrowDeposit: (...args) => mocks.prepare(...args), syncEscrowFunding: (...args) => mocks.sync(...args),
@@ -12,6 +13,7 @@ vi.mock("../../src/lib/escrow.js", () => ({ readEscrow: (...args) => mocks.read(
 vi.mock("../../src/lib/escrowEvidence.js", () => ({ loadEscrowEvidence: (...args) => mocks.load(...args), saveEscrowEvidence: (...args) => mocks.save(...args) }));
 vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet connection dialog</p> }));
 import { EscrowFundingPanel, EscrowFundingView } from "../../src/components/EscrowFundingPanel.jsx";
+import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`, selectionId = `0x${"3".repeat(64)}`;
 const proposal = { id: "proposal1", researcherId: account, fundingTerms: { trancheBps: [5000, 5000] } };
 const model = (overrides = {}) => ({ address: `0x${"b".repeat(40)}`, state: 0, decimals: 6, symbol: "USDC", selectionId,
@@ -31,8 +33,24 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 const ready = async () => { render(<EscrowFundingPanel proposal={proposal} />); await screen.findByText("Open for funding"); };
+function ActionCount({ read }) {
+  const { data } = useQuery({ queryKey: [...ACTION_ITEMS_KEY, account], queryFn: read, staleTime: 60_000 });
+  return <p>Verified action count: {data?.total ?? "loading"}</p>;
+}
 
 describe("wallet escrow funding panel", () => {
+  it("refreshes an active action count after the owner confirms upfront approval", async () => {
+    let total = 1;
+    mocks.read.mockResolvedValue(model({ state: 1, roles: { problemOwner: true }, can: { approveSelection: true } }));
+    mocks.write.mockImplementation(async () => { total = 0; return { transactionHash: hash }; });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    render(<QueryClientProvider client={client}><ActionCount read={async () => ({ total })} /><EscrowFundingPanel proposal={proposal} /></QueryClientProvider>);
+    await screen.findByText("Verified action count: 1");
+    fireEvent.click(await screen.findByRole("button", { name: "Approve upfront payment" }));
+    await screen.findByText("Verified action count: 0");
+    expect(mocks.write).toHaveBeenCalledTimes(1);
+    client.clear();
+  });
   it("shows grant acceptance status without pooled contribution controls before acceptance", () => {
     render(<EscrowFundingView state={model({ isGrant: true })} walletReady amount="" delivery={{ summary: "", url: "" }}
       fundingBlockReason="Sign in with a funder or problem owner account to deposit."

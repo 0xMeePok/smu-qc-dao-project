@@ -232,7 +232,8 @@ async function retryRead(operation, maxRetries, onRetry) {
 export async function waitForAuditReceipt({
   transactionHash,
   adapters,
-  confirmations = 1,
+  // Publication attestation verifies the receipt block and its successor.
+  confirmations = 2,
   timeout = 120_000,
   maxRetries = 2,
   onRetry,
@@ -278,7 +279,7 @@ export async function executePreparedAudit(preparedAudit, {
   address,
   account,
   adapters,
-  confirmations = 1,
+  confirmations = 2,
   timeout = 120_000,
   maxReceiptRetries = 2,
   onStatus,

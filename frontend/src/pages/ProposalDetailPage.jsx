@@ -55,6 +55,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
   const [tab, setTab] = useState(initialTab);
   const [escrowState, setEscrowState] = useState(null);
+  const [fundingRefreshVersion, setFundingRefreshVersion] = useState(0);
   useEffect(() => {
     const fundingStarted = proposal?.fundingTerms ? escrowState?.totalDeposited > 0n : proposalMatchingLocked(proposal)
       || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status);
@@ -303,8 +304,9 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
-        {isOpenFunding && <OpenFundingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} />}
-        {proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} /> : !isOpenFunding && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
+        {isOpenFunding && <OpenFundingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate}
+          onChange={(change) => { if (activeProposalId.current === change.proposalId) setFundingRefreshVersion(previous => previous + 1); }} />}
+        {proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} refreshVersion={fundingRefreshVersion} /> : !isOpenFunding && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
           if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...current.matching, ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
         }} />}

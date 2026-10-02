@@ -213,7 +213,7 @@ export function escrowErrorMessage(error) {
 }
 
 /** Retry confirmation of one known hash without submitting another transaction. */
-export async function confirmEscrowTransaction(transactionHash, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG, confirmations = 1 } = {}) {
+export async function confirmEscrowTransaction(transactionHash, { adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG, confirmations = 2 } = {}) {
   deployment(config);
   const hash = assertBytes32(transactionHash, "Transaction hash");
   try {

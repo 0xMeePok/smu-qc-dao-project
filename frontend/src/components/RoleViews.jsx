@@ -1,6 +1,6 @@
 import { ProposalList } from "./ProposalList.jsx";
 import { ProposalTracker } from "./ProposalTracker.jsx";
-import { ACTION_ITEMS_KEY, QUEUE_FILTERS, listActionItems, listEvaluatorQueue, queueError, sortProposalRows } from "../lib/proposalQueues.js";
+import { ACTION_ITEMS_KEY, QUEUE_FILTERS, listActionItems, listEvaluatorQueue, proposalQueueDeadline, proposalQueueWorkflowStatus, queueError, sortProposalRows } from "../lib/proposalQueues.js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SelectProposalDialog } from "./ProposalComparison.jsx";
 import { SelectionResponseDialog } from "./MatchingPanel.jsx";
@@ -18,7 +18,7 @@ import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditRecei
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
-import { eventWorkflowStatus, expiryReasonLabel, opportunityWorkflowStatus } from "../config/workflowStatus.js";
+import { eventWorkflowStatus, expiryReasonLabel, opportunityWorkflowStatus, WORKFLOW_STATUS } from "../config/workflowStatus.js";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { problemMatchingLocked } from "../lib/matching.js";
 import { ROLE_LABELS } from "../config/roles.js";
@@ -100,9 +100,11 @@ export function MyProblems({ onNavigate }) {
 
   function Row({ item, isDraft }) {
     const live = !isDraft && ["submitted", "open"].includes(item.status);
+    const workflowStatus = opportunityWorkflowStatus(item);
+    const decided = workflowStatus === WORKFLOW_STATUS.DECISION_RECORDED;
     // A selection or committed funding freezes the posting (the dual lock), so
     // the row says so instead of "Open", and editing is withdrawn.
-    const locked = live && problemMatchingLocked(item);
+    const locked = live && (decided || problemMatchingLocked(item));
     return (
       <div className="table-row">
         <div>
@@ -111,8 +113,8 @@ export function MyProblems({ onNavigate }) {
             {isDraft ? "Last saved " : "Submitted "}
             {formatInstant(item.updatedAt)}
           </small>
-          <StatusBadge status={opportunityWorkflowStatus(item)} />
-          {live && (
+          <StatusBadge status={workflowStatus} />
+          {live && !decided && (
             <ExpiryCountdown expiresAt={item.expiresAt} status={item.status} matching={item.matching} />
           )}
         </div>
@@ -238,7 +240,7 @@ export function MyProblems({ onNavigate }) {
 export function useActionItems() {
   const { user } = useAuth();
   return useQuery({ queryKey: [...ACTION_ITEMS_KEY, user?.id], queryFn: listActionItems,
-    enabled: Boolean(user?.id), staleTime: 30_000 });
+    enabled: Boolean(user?.id), staleTime: 30_000, refetchInterval: 30_000 });
 }
 
 const money = (currency, amount) => `${currency || ""} ${Number(amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`.trim();
@@ -250,13 +252,16 @@ const NOTICES = {
   review: "Review recorded. The developer can see it on their proposal.",
 };
 
+const ESCROW_ACTION_LABELS = { select: "Select proposal", approve_upfront: "Approve upfront payment",
+  submit_delivery: "Submit delivery evidence", approve_delivery: "Approve delivery" };
+
 function ActionRow({ item, meta, children, onNavigate }) {
   return <div className="table-row">
     <div>
       <strong>{item.title || "Untitled proposal"}</strong>
       <small className="table-row-meta">Proposal for: {item.posting?.title || "Untitled opportunity"}</small>
       <span className="status-badges">
-        <StatusBadge status={item.workflowStatus} />
+        <StatusBadge status={proposalQueueWorkflowStatus(item)} />
         {item.recommendations && <EvaluationBadges counts={item.recommendations} />}
       </span>
       {meta && <small className="table-row-meta">{meta}</small>}
@@ -296,18 +301,24 @@ export function ActionNeeded({ onNavigate }) {
     <div className="page-heading">
       <h1>Action Needed</h1>
       <p>Everything waiting on you, across every role you hold. Act here, or open the proposal for the full context.</p>
+      <button className="secondary small" type="button" disabled={isPending || isFetching} onClick={() => refetch()}>Refresh actions</button>
     </div>
     {notice && <p className="proposal-success" role="status">{notice}</p>}
+    {!isPending && !error && data?.unavailableGrantOffers > 0 && <p className="field-hint" role="status">{data.unavailableGrantOffers} grant offer records could not be verified and are excluded from these actions. Refresh to retry.</p>}
+    {!isPending && !error && data?.unavailableEscrows > 0 && <p className="field-hint" role="status">{data.unavailableEscrows} escrow records could not be verified and are excluded from these actions. Refresh to retry.</p>}
+    {!isPending && !error && data?.truncated && <p className="field-hint" role="status">The action count is partial because this list is limited. Open individual opportunities for the remaining proposals.</p>}
     {isPending ? <p className="table-empty" role="status">Loading your actions…</p>
       : error ? <div className="card-table"><p className="error-banner" role="alert">{queueError(error)}</p>
         <button className="secondary" type="button" onClick={() => refetch()}>Retry</button></div>
-      : !data?.total ? <div className="card-table"><p className="table-empty">Nothing needs your attention right now.</p></div>
+      : !data?.total ? <div className="card-table"><p className="table-empty">{data?.unavailableGrantOffers > 0 || data?.unavailableEscrows > 0 ? "No verified actions are available yet. Some grant or escrow records could not be checked." : data?.truncated ? "No actions are shown in this limited result. Open individual opportunities to check the remaining proposals." : "Nothing needs your attention right now."}</p></div>
       : <>
         <ActionGroup title="Ready to select" items={owner.readyToSelect}
           hint="Fully funded proposals on your problems. Selecting records your acceptance and starts the creator's acceptance window."
           render={(item) => <ActionRow key={`select-${item.id}`} item={item} onNavigate={onNavigate}
             meta={`Submitted ${formatInstant(item.submittedAt)} · Funded ${money(item.currency, item.fundedAmount)} of ${money(item.currency, item.amount)}`}>
-            <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>
+            {Object.hasOwn(item, "fundingTerms")
+              ? <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Select proposal</button>
+              : <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>}
           </ActionRow>} />
         <ActionGroup title="Awaiting my review" items={owner.awaitingReview}
           hint="Submitted proposals on your problems with no owner review yet. A review is feedback only; it does not select a winner."
@@ -316,14 +327,30 @@ export function ActionNeeded({ onNavigate }) {
             {Object.hasOwn(item, "fundingTerms")
               ? <button className="secondary" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>Review proposal</button>
               : <button className="secondary" type="button" disabled={isFetching} onClick={() => open("review", item)}>Record review…</button>}
-            {item.canSelect && <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>}
+            {item.canSelect && (Object.hasOwn(item, "fundingTerms")
+              ? <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Select proposal</button>
+              : <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>)}
           </ActionRow>} />
         <ActionGroup title="Selection to accept" items={data.researcher?.selectionToAccept}
           hint="An owner selected your proposal. Accept or reject it before the deadline, or the posting is invalidated."
           render={(item) => <ActionRow key={`accept-${item.id}`} item={item} onNavigate={onNavigate}
             meta={<>Submitted {formatInstant(item.submittedAt)} · Respond by <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} /></>}>
-            <button className="primary" type="button" disabled={isFetching} onClick={() => open("confirm", item)}>Accept…</button>
-            <button className="secondary" type="button" disabled={isFetching} onClick={() => open("decline", item)}>Reject…</button>
+            {Object.hasOwn(item, "fundingTerms")
+              ? <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Open upfront approval</button>
+              : <><button className="primary" type="button" disabled={isFetching} onClick={() => open("confirm", item)}>Accept…</button>
+                <button className="secondary" type="button" disabled={isFetching} onClick={() => open("decline", item)}>Reject…</button></>}
+          </ActionRow>} />
+        <ActionGroup title="Grant offers to accept" items={data.researcher?.grantSelectionsToAccept}
+          hint="The grant owner reserved funding for your proposal. Open grant funding to accept within its seven-day window."
+          render={(item) => <ActionRow key={`grant-${item.id}`} item={item} onNavigate={onNavigate}
+            meta={<>Grant acceptance ends <ExpiryCountdown expiresAt={proposalQueueDeadline(item) ?? item.deadlineAt} showInstant={false} /></>}>
+            <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Accept grant</button>
+          </ActionRow>} />
+        <ActionGroup title="Escrow actions" items={data.escrowActions}
+          hint="Open the proposal’s verified escrow to select it, approve payment or submit delivery evidence."
+          render={(item) => <ActionRow key={`escrow-${item.id}`} item={item} onNavigate={onNavigate}
+            meta={item.deadlineAt ? <>{item.action === "select" ? "Funding closes" : "Approval ends"} <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} /></> : undefined}>
+            <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>{ESCROW_ACTION_LABELS[item.action] ?? "Open escrow"}</button>
           </ActionRow>} />
         <ActionGroup title="Awaiting my recommendation" items={evaluator?.awaitingRecommendation}
           hint="Proposals you have not recommended yet. Each evaluator files their own recommendation on the proposal page."
@@ -332,7 +359,6 @@ export function ActionNeeded({ onNavigate }) {
             <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>Recommend</button>
           </ActionRow>} />
         {evaluator?.more && <p className="field-hint">More proposals are waiting. <button className="text-button" type="button" onClick={() => onNavigate("evaluations")}>Open the evaluation queue</button></p>}
-        {data.truncated && <p className="field-hint">Showing the first 200 records. Open a problem from My Problems for the rest.</p>}
       </>}
 
     {dialog?.kind === "select" && <SelectProposalDialog problemId={dialog.item.problemId} proposal={dialog.item}

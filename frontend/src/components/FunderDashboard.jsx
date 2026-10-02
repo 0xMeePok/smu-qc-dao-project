@@ -57,8 +57,10 @@ export function FunderDashboard({ onNavigate }) {
         </div>)}
       </div>
       <p className="field-hint">Totals are shown per token. Available grant pool funds are shown separately below; amounts count as commitments when transferred into proposal escrow.</p>
+      {data?.totalsPartial && <p role="status" className="field-hint">Funding totals are partial. Some records could not be verified or the result is limited. Refresh or open individual proposals for their current balances.</p>}
       {data?.unavailableCommitments > 0 && <p role="status" className="field-hint">{data.unavailableCommitments} commitments could not be verified and are excluded from these totals. Refresh to retry.</p>}
       {data?.unavailablePools > 0 && <p role="status" className="field-hint">{data.unavailablePools} grant pools could not be verified. Open the opportunity or refresh to retry.</p>}
+      {data?.unavailableDecisions > 0 && <p role="status" className="field-hint">{data.unavailableDecisions} grant decisions could not be verified and are excluded below. Refresh to retry.</p>}
       {group("opportunities", "My open funding opportunities", "No open funding calls yet. Post a call, then deposit funds to start selecting proposals.", item => <div className="table-row" key={item.id}>
         <div><strong>{item.title || "Untitled funding call"}</strong><small className="table-row-meta">{stateLabel(item.status)} · Indicative budget {item.currency} {Number(item.amount ?? 0).toLocaleString()}</small>
           {item.pool?.poolAddress ? <small className="table-row-meta">Deposited {money(item.pool, "totalDeposited")} · Available {money(item.pool, "available")} · Reserved {money(item.pool, "totalReserved")}</small>
@@ -75,7 +77,7 @@ export function FunderDashboard({ onNavigate }) {
       {group("approaches", "Funding approaches", "No funding approaches received yet.", item => <div className="table-row" key={item.proposalId}>
         <div><strong>{item.title}</strong><small className="table-row-meta">{item.currency} {Number(item.amount ?? 0).toLocaleString()} requested · {stateLabel(item.status)}</small></div>{links(item)}
       </div>)}
-      {group("decisions", "Recorded decisions", "No funding decisions recorded yet.", item => <div className="table-row" key={item.proposalId}>
+      {group("decisions", "Recorded decisions", data?.unavailableDecisions > 0 ? "Verified funding decisions are temporarily unavailable." : "No funding decisions recorded yet.", item => <div className="table-row" key={item.proposalId}>
         <div><strong>{item.title}</strong><small className="table-row-meta">{stateLabel(item.selection?.status ?? item.status)}</small>
           {item.ownerReview?.rationale && <p>{item.ownerReview.rationale}</p>}
           {item.selection?.acceptanceDeadline && <small className="table-row-meta">Acceptance deadline: {new Date(Number(item.selection.acceptanceDeadline) * 1000).toLocaleString()}</small>}

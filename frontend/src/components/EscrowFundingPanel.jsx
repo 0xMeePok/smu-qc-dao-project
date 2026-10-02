@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import { formatUnits, keccak256, stringToHex } from "viem";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -11,6 +12,7 @@ import { Field } from "./Field.jsx";
 import { getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
 import { EscrowFundingHistory } from "./EscrowFundingHistory.jsx";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
+import { ACTION_ITEMS_KEY } from "../lib/proposalQueues.js";
 
 const STATE_LABELS = ["Open for funding", "Awaiting upfront approval", "Fully paid", "Refunded", "Cancelled", "Expired", "Delivery in progress", "Voided"];
 const explorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`;
@@ -142,8 +144,9 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   </section>;
 }
 
-export function EscrowFundingPanel({ proposal, onStateChange }) {
+export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0 }) {
   const { user } = useAuth();
+  const queryClient = useContext(QueryClientContext);
   const { address, isConnected, chainId } = useAccount();
   const storageKey = pendingKey(proposal.id, address);
   const moderated = isModerated(proposal);
@@ -197,7 +200,7 @@ export function EscrowFundingPanel({ proposal, onStateChange }) {
     refresh();
     const timer = setInterval(() => { if (!writing.current) refresh(); }, 30_000);
     return () => { generation.current += 1; clearInterval(timer); };
-  }, [refresh]);
+  }, [refresh, refreshVersion]);
   const act = async (action, extra = {}) => {
     if (!walletReady || writing.current || unresolvedTransaction || (action === "deposit" && fundingBlockReason) || (moderated && !refundActions.has(action))) return;
     writing.current = true; setBusy(true); setError(""); setProgress(null); setNotice("");
@@ -219,6 +222,7 @@ export function EscrowFundingPanel({ proposal, onStateChange }) {
         payload.evidenceHash = evidence.hash;
       } else if (action === "lockSelection") payload.selectionId = keccak256(stringToHex(crypto.randomUUID()));
       const result = await writeEscrowAction(payload);
+      void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
       if (action === "deposit") setNotice("Deposit confirmed. Your tokens are held in escrow until an approved payment or an available refund.");
       if (action === "rejectSelection") { setNotice("Selection rejected. This proposal’s full contribution balance is refundable; other eligible proposals reopen."); setRejectionReason(""); }
       try { if (!state?.isHistorical) {
@@ -239,6 +243,7 @@ export function EscrowFundingPanel({ proposal, onStateChange }) {
     const settled = () => { saveTransaction(storageKey, null); if (currentStorageKey.current === storageKey) { setUnresolvedTransaction(null); setProgress(null); } };
     try {
       await confirmEscrowTransaction(unresolvedTransaction); settled();
+      void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
       try { if (!state?.isHistorical) {
         // A recovered hash can belong to the ERC20 approval step rather than the deposit.
         // Reconcile the canonical proposal stream instead of treating that token receipt as an escrow event.
@@ -256,6 +261,7 @@ export function EscrowFundingPanel({ proposal, onStateChange }) {
     writing.current = true; setBusy(true); setSyncError("");
     try {
       const result = await (select ? startEscrowSettlement : syncEscrowFunding)({ proposalId: proposal.id });
+      void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
       setHistory(result); setSettlement(result.settlement); await refresh();
     } catch (err) { setSyncError(err.message || "Funding status could not be updated. Retry when ready."); }
     finally { writing.current = false; setBusy(false); }

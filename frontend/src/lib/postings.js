@@ -181,15 +181,6 @@ export async function updatePostingAudit({ postingId, audit }) {
   });
 }
 
-function normalisePosting(id, data) {
-  return {
-    id,
-    ...data,
-    categories: Array.isArray(data.categories) ? data.categories : [],
-    attachments: Array.isArray(data.attachments) ? data.attachments : [],
-  };
-}
-
 export async function findPosting(postingId, { fromServer = false } = {}) {
   requireFirebase();
   const snapshot = await (fromServer ? getDocFromServer : getDoc)(postingRef(postingId));
@@ -349,7 +340,10 @@ export async function listOwnPostings(ownerId, { cursor = null } = {}) {
     ...(cursor ? [startAfter(cursor)] : []),
     limit(50),
   ));
-  return { items: snapshot.docs.map((item) => normalisePosting(item.id, item.data())),
+  const items = await Promise.all(snapshot.docs.map(async (item) => postingFromSnapshot(
+    item, await findOpportunityMetrics(item.id, item.data()),
+  )));
+  return { items,
     cursor: snapshot.docs.at(-1) ?? null, hasMore: snapshot.size === 50 };
 }
 

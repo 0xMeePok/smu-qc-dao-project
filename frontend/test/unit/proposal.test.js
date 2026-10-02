@@ -10,6 +10,8 @@ import {
   ownerReviewStatus,
   filterProposalRows,
   queueError,
+  proposalQueueDeadline,
+  proposalQueueWorkflowStatus,
   sortProposalRows,
   statusOptions,
 } from "../../src/lib/proposalQueues.js";
@@ -109,6 +111,45 @@ describe("QCDAO-62/63 proposal queues", () => {
     assert.deepEqual(filterProposalRows(rows, "submitted").map((row) => row.id), ["p1", "p3"]);
     assert.equal(filterProposalRows(rows, "all").length, 3);
     assert.deepEqual(statusOptions(rows), ["declined", "submitted"]);
+  });
+
+  it("sorts and filters grant offers by verified acceptance rather than an expired posting", () => {
+    const posting = { expiresAt: "2020-01-01T00:00:00.000Z" };
+    const pending = { id: "grant", posting, workflowStatus: "expired", grant: { status: "pending",
+      acceptanceDeadline: String(Date.parse("2099-10-09T00:00:00.000Z") / 1000) } };
+    const accepted = { id: "accepted", posting, workflowStatus: "expired", grant: { status: "accepted" } };
+    const unavailable = { id: "unknown", posting, workflowStatus: "selected", grantUnavailable: true };
+    const business = { id: "business", workflowStatus: "submitted", posting: { expiresAt: "2099-10-02T00:00:00.000Z" } };
+    const offers = [pending, accepted, unavailable, business];
+    assert.equal(proposalQueueDeadline(pending), "2099-10-09T00:00:00.000Z");
+    assert.equal(proposalQueueDeadline(accepted), null);
+    assert.equal(proposalQueueWorkflowStatus(accepted), "accepted");
+    assert.equal(proposalQueueWorkflowStatus(unavailable), undefined);
+    assert.deepEqual(sortProposalRows(offers).map(item => item.id), ["business", "grant", "accepted", "unknown"]);
+    assert.deepEqual(filterProposalRows(offers, "selected").map(item => item.id), ["grant"]);
+  });
+
+  it("uses canonical escrow statuses and deadlines instead of stored submission and posting expiry", () => {
+    const posting = { expiresAt: "2020-01-01T00:00:00.000Z" };
+    const rows = [
+      { id: "pending", status: "submitted", workflowStatus: "submitted", posting,
+        escrow: { state: "Locked", workflowStatus: "pending_approval", deadlineAt: "2099-10-09T00:00:00.000Z" } },
+      { id: "cancelled", status: "submitted", workflowStatus: "submitted", posting,
+        escrow: { state: "Cancelled", workflowStatus: "cancelled", deadlineAt: null } },
+      { id: "completed", status: "submitted", workflowStatus: "submitted", posting,
+        escrow: { state: "Released", workflowStatus: "completed", deadlineAt: null }, grant: { status: "accepted" } },
+      { id: "unknown", status: "submitted", workflowStatus: "accepted", posting, escrowUnavailable: true },
+    ];
+    assert.equal(proposalQueueDeadline(rows[0]), "2099-10-09T00:00:00.000Z");
+    assert.equal(proposalQueueDeadline(rows[1]), null);
+    assert.equal(proposalQueueWorkflowStatus(rows[1]), "cancelled");
+    assert.equal(proposalQueueWorkflowStatus(rows[2]), "completed");
+    assert.equal(proposalQueueWorkflowStatus(rows[3]), undefined);
+    assert.equal(proposalQueueDeadline(rows[3]), null);
+    assert.deepEqual(filterProposalRows(rows, "submitted"), []);
+    assert.deepEqual(filterProposalRows(rows, "cancelled").map(item => item.id), ["cancelled"]);
+    assert.deepEqual(statusOptions(rows), ["cancelled", "completed", "pending_approval"]);
+    assert.deepEqual(sortProposalRows(rows).map(item => item.id), ["pending", "cancelled", "completed", "unknown"]);
   });
 
   it("reports feedback progress as evaluator recommendations, never scores", () => {

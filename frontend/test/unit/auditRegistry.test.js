@@ -317,7 +317,8 @@ describe("AuditRegistry transaction lifecycle", () => {
         calls.writes.push(request);
         return TX_HASH;
       },
-      waitForTransactionReceipt: async () => {
+      waitForTransactionReceipt: async ({ confirmations }) => {
+        assert.equal(confirmations, 2, "publication must wait for the successor block required by attestation");
         calls.waits += 1;
         if (calls.waits < 3) throw new Error("HTTP timeout while polling receipt");
         return { status: "success", blockNumber: 99n };
