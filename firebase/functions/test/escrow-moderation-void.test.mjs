@@ -9,7 +9,7 @@ import { prepareModerationMatching } from "../matching.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
 
-test("void decisions skip finished escrows and wait when the signer is not an admin", () => {
+test("[BUT-ACM-74] void decisions skip finished escrows and wait when the signer is not an admin", () => {
   assert.equal(voidDecision("Open", true).outcome, "void");
   assert.equal(voidDecision("Locked", true).outcome, "void");
   assert.equal(voidDecision("Active", true).outcome, "void");
@@ -20,7 +20,7 @@ test("void decisions skip finished escrows and wait when the signer is not an ad
   assert.notEqual(moderationVoidReasonHash("proposal_a_1", "misleading"), `0x${"0".repeat(64)}`);
 });
 
-test("remove enqueues a void for the affected escrow only", async () => {
+test("[BUT-ACM-75] remove enqueues a void for the affected escrow only", async () => {
   const db = memoryDb({
     "users/admin": { role: 1, fullName: "Moderator" },
     "users/owner": { role: 0, fullName: "Owner", organisation: "Lab" },
@@ -58,7 +58,7 @@ test("remove enqueues a void for the affected escrow only", async () => {
   assert.deepEqual(proposalIds, ["a", "a", "b"]);
 });
 
-test("a funded proposal can be claimed after its problem is removed", async () => {
+test("[BUT-ACM-76] a funded proposal can be claimed after its problem is removed", async () => {
   const db = memoryDb({
     "users/funder": { role: 0 },
     "problems/problem": { ownerId: "owner", title: "Study", summary: "Secret", status: "moderated_removed", moderationStatus: "removed" },

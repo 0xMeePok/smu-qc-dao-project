@@ -196,7 +196,7 @@ test("report validation and daily limit bound distinct-report abuse without pena
   assert.equal((await report(db, { uid: "funder", contentType: "problem", contentId: "problem", now: later(86400000) })).ok, true);
 });
 
-test("a removed proposal stays on its problem as a reason without its content", async () => {
+test("[BUT-ACM-77] a removed proposal stays on its problem as a reason without its content", async () => {
   const db = fixture();
   db.records.get("proposals/a").fundingTerms = { target: "1" };
   await report(db);
@@ -214,7 +214,7 @@ test("a removed proposal stays on its problem as a reason without its content", 
   assert.equal(listed.items.find((item) => item.id === "b").title, "Proposal B");
 });
 
-test("a removed problem stays viewable as its title and reason, and funded proposals stay claimable", async () => {
+test("[BUT-ACM-78] a removed problem stays viewable as its title and reason, and funded proposals stay claimable", async () => {
   const db = fixture();
   db.records.get("proposals/a").fundingTerms = { target: "1" };
   db.records.get("problems/problem").summary = "Secret brief";

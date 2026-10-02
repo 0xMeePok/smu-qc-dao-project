@@ -196,7 +196,7 @@ describe("correcting a proposal before it is evaluated", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("proposals");
   });
 
-  it("shows a dash for time remaining after an independent listing is removed", async () => {
+  it("[FIT-ACM-072] shows a dash for time remaining after an independent listing is removed", async () => {
     mocks.find.mockResolvedValue({
       ...submittedProposal, proposalKind: "independent", problemId: null, moderationStatus: "removed",
       status: "moderated_removed", expiresAt: new Date("2099-01-01"),

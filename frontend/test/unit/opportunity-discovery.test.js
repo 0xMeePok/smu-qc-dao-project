@@ -143,7 +143,7 @@ describe("[QCDAO-52] unified opportunity ordering and pagination", () => {
     assert.equal(result.items.length, 6);
   });
 
-  it("keeps a removed problem searchable by title and reason, and drops it when other filters are set", () => {
+  it("[FUT-ACM-190] keeps a removed problem searchable by title and reason, and drops it when other filters are set", () => {
     const removed = {
       id: "removed-one",
       removed: true,

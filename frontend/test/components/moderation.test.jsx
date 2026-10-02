@@ -62,7 +62,7 @@ describe("private content reports", () => {
     expect(screen.queryByText(/\d+ reports/)).toBeNull();
   });
 
-  it("shows an error when the member has already reported the item", async () => {
+  it("[FUT-ACM-191] shows an error when the member has already reported the item", async () => {
     mocks.report.mockResolvedValue({ ok: true, alreadyReported: true });
     render(<ReportContentButton contentType="proposal" contentId="proposal1" />);
     fireEvent.click(screen.getByRole("button", { name: "Report this proposal" }));
@@ -254,7 +254,7 @@ describe("author notices and reportable comments", () => {
     expect(screen.queryByText("Agree on the benchmark.")).toBeNull();
   });
 
-  it("replaces the poster's actions when an administrator has removed the comment", async () => {
+  it("[FUT-ACM-192] replaces the poster's actions when an administrator has removed the comment", async () => {
     mocks.user = { id: "author1" };
     mocks.comments.mockResolvedValue({ items: [{
       id: "comment1", body: "The claim needs a source.", authorId: "author1", authorName: "Author",

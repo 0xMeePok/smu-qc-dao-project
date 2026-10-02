@@ -16,7 +16,7 @@ import { PostingProposals } from "../../src/components/PostingProposals.jsx";
 
 afterEach(cleanup);
 
-it("shows a removed proposal as its reason and a claim button", async () => {
+it("[FUT-ACM-193] shows a removed proposal as its reason and a claim button", async () => {
   rows.items = [{ id: "p1", removed: true, title: "Routing study", reason: "off_topic", details: "The result does not match the source.", claimFunds: true, summary: "Secret summary" }];
   render(<PostingProposals posting={{ id: "post1", matching: { status: "open" } }} viewerId="0xabc" proposalCount={1} onNavigate={vi.fn()} />);
   expect(await screen.findByRole("heading", { level: 2, name: "Proposals" })).toBeTruthy();

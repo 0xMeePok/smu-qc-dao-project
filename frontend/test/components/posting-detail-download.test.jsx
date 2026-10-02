@@ -241,7 +241,7 @@ describe("proposal funding on a problem detail page", () => {
 });
 
 describe("a removed problem statement", () => {
-  it("keeps the title and the removal reason, and hides the brief", async () => {
+  it("[FIT-ACM-070] keeps the title and the removal reason, and hides the brief", async () => {
     mocks.user = { id: VIEWER };
     mocks.posting = publishedPosting({
       moderationStatus: "removed",
@@ -259,7 +259,7 @@ describe("a removed problem statement", () => {
     expect(screen.getByRole("heading", { name: "Proposals" })).toBeTruthy();
   });
 
-  it("opens the redacted problem when the full record is not readable", async () => {
+  it("[FIT-ACM-071] opens the redacted problem when the full record is not readable", async () => {
     const denied = new Error("Missing or insufficient permissions.");
     denied.code = "permission-denied";
     mocks.postingError = denied;

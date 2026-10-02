@@ -112,7 +112,7 @@ it("keeps an unavailable main escrow out of stored-status filters and posting ex
   expect(screen.getByLabelText("Status").options).toHaveLength(1);
 });
 
-it("replaces the countdown with a dash when the proposal was removed", async () => {
+it("[FUT-ACM-194] replaces the countdown with a dash when the proposal was removed", async () => {
   mocks.fetch.mockResolvedValue({ items: [{
     id: "removed", title: "Removed listing", proposalKind: "independent", status: "moderated_removed",
     moderationStatus: "removed", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z",
