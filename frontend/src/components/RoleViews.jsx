@@ -18,14 +18,24 @@ import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditRecei
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
-import { eventWorkflowStatus, expiryReasonLabel, opportunityWorkflowStatus, WORKFLOW_STATUS } from "../config/workflowStatus.js";
+import { eventWorkflowStatus, expiryReasonLabel, opportunityWorkflowStatus, workflowStatusLabel, WORKFLOW_STATUS } from "../config/workflowStatus.js";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { problemMatchingLocked } from "../lib/matching.js";
 import { ROLE_LABELS } from "../config/roles.js";
+
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 import { EscrowReleaseSummary } from "./EscrowReleaseSummary.jsx";
 import { escrowEventLabel, escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
 import { moderationReasonLabel } from "../lib/moderation.js";
+
+// Why a filed recommendation stopped counting, phrased for the evaluator who
+// filed it rather than for the moderator who acted on it.
+const ATTENTION_LABELS = {
+  hidden: "Your recommendation was hidden by moderation",
+  removed: "Your recommendation was removed by moderation",
+  deleted: "You deleted your recommendation",
+  not_qualifying: "Your recommendation no longer qualifies",
+};
 
 function RoleBadge({ role }) {
   return <span className="role-chip">{ROLE_LABELS[role] || role}</span>;
@@ -431,6 +441,10 @@ export function EvaluatorQueue({ onNavigate }) {
         </div>
         <h1>Evaluation queue</h1>
         <p>Open a solution with its posting for context, then leave your recommendation. Each evaluator files their own.</p>
+        <p className="field-hint">
+          A recommendation is a visible comment carrying your Evaluator badge and exactly one outcome:
+          Recommend, Recommend with revisions, or Do not recommend. A reply does not count.
+        </p>
       </div>
 
       <div className="admin-tabs-nav" role="tablist" aria-label="Recommendation status">
@@ -450,7 +464,7 @@ export function EvaluatorQueue({ onNavigate }) {
           : !visible.length ? <p className="table-empty">
               {filter === "submitted" ? "You have not recommended a solution yet." : "No solution is waiting for a recommendation."}
             </p>
-          : visible.map((item) => <div className="table-row" key={item.id}>
+          : visible.map((item) => <div className={`table-row${item.needsAttention ? " table-row-attention" : ""}`} key={item.id}>
             <div>
               <strong>{item.title || "Untitled proposal"}</strong>
               <small className="table-row-meta">Proposal for: {item.posting?.title || "Untitled posting"} · Submitted {formatInstant(item.submittedAt)}</small>
@@ -460,6 +474,17 @@ export function EvaluatorQueue({ onNavigate }) {
                   ? <StatusBadge status={item.recommendation} prefix="My recommendation · " />
                   : <EvaluationBadges counts={item.recommendations ?? {}} />}
               </span>
+              {item.needsAttention
+                ? <p className="queue-note queue-note-attention" role="status">
+                    <strong>{ATTENTION_LABELS[item.attentionReason] ?? "No longer counts"}.</strong>{" "}
+                    Your {workflowStatusLabel(item.filedRecommendation).toLowerCase()} filing is not counted, so this
+                    solution is waiting on a recommendation again. File a new one to replace it.
+                  </p>
+                : item.recommendationStatus === "pending" && item.gatesSelection
+                  ? <p className="queue-note queue-note-gate">
+                      No recommendation has been filed yet, so the owner cannot take this solution to a decision.
+                    </p>
+                  : null}
             </div>
             <div className="table-row-actions">
               <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
