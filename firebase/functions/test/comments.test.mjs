@@ -918,3 +918,53 @@ test("escrow action items retain their funding mode and never offer legacy selec
   const author = await listActionItems({ db, uid: "alice", now });
   assert.equal(author.researcher.selectionToAccept.some((item) => item.id === "escrow-picked"), false);
 });
+
+test("[QCDAO-95] names the solutions whose missing feedback is holding a selection shut", async () => {
+  const db = queueFixture();
+  const pending = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" })).items;
+  // Nobody has filed on either solution, so the owner cannot take either to a
+  // decision. That is what the evaluator needs to see first.
+  assert.ok(pending.every((item) => item.gatesSelection === true));
+  assert.ok(pending.every((item) => item.needsAttention === false));
+
+  await createComment({ db, uid: "evaluator", proposalId: "soon-a", body: "Sound approach", recommendation: "recommend", now });
+  const after = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" })).items;
+  assert.ok(!after.some((item) => item.id === "soon-a"), "a solution I have recommended leaves my pending queue");
+  // Another evaluator's filing already opened this gate, so a later evaluator is
+  // not told their own view is blocking anything.
+  const mine = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "submitted" })).items;
+  assert.equal(mine.find((item) => item.id === "soon-a").gatesSelection, false);
+});
+
+test("[QCDAO-95] surfaces a moderated-away recommendation as needing attention, not as filed", async () => {
+  // `hide` was retired from moderation; `removed` is the live outcome. The
+  // hidden branch stays in the reason map for records written before that.
+  const db = queueFixture({ "users/admin": { role: 1, fullName: "Moderator" } });
+  const created = await createComment({
+    db, uid: "evaluator", proposalId: "soon-a", body: "Sound approach", recommendation: "recommend", now,
+  });
+  const filed = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "submitted" })).items;
+  assert.equal(filed.find((item) => item.id === "soon-a").recommendation, "recommend");
+
+  db.records.set(`moderationQueue/comment_${created.id}`, {
+    contentType: "comment", contentId: created.id, status: "pending",
+  });
+  await moderateContent({
+    db, uid: "admin", queueId: `comment_${created.id}`,
+    action: "remove", reason: "off_topic", now: later(1000),
+    prepareCommentGate: prepareCommentEvaluationGate,
+  });
+
+  // Rebuilding the gate drops the filing from the solution record, so without
+  // this the row would quietly reappear as untouched work.
+  const stillFiled = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "submitted" })).items;
+  assert.ok(!stillFiled.some((item) => item.id === "soon-a"), "a hidden recommendation is not a completed one");
+
+  const back = (await listEvaluatorQueue({ db, uid: "evaluator", filter: "pending" })).items;
+  const row = back.find((item) => item.id === "soon-a");
+  assert.equal(row.needsAttention, true);
+  assert.equal(row.attentionReason, "removed");
+  // The outcome that was filed is kept, so the evaluator knows what was taken down.
+  assert.equal(row.filedRecommendation, "recommend");
+  assert.equal(row.gatesSelection, true);
+});

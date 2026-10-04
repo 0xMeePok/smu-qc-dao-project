@@ -16,11 +16,12 @@ import { listModerationQueue } from "../lib/moderation.js";
 import { ExpiryAdminUtility } from "../components/ExpiryAdminUtility.jsx";
 import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
 import { PlatformStatusPanel } from "../components/PlatformStatusPanel.jsx";
+import { AdminActivityPanel } from "../components/AdminActivityPanel.jsx";
 
 export default function AdminPage({ onNavigate }) {
   const { isSignedIn, isChecking, profile, address } = useSession();
 
-  const [activeTab, setActiveTab] = useState("users"); // "moderation" | "users" | "proposals" | "postings" | "funding" | "audits" | "status"
+  const [activeTab, setActiveTab] = useState("overview"); // "overview" | "moderation" | "users" | "proposals" | "postings" | "funding" | "audits" | "status"
   const [users, setUsers] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -155,6 +156,7 @@ export default function AdminPage({ onNavigate }) {
       )}
 
       <div className="admin-tabs-nav" role="tablist" aria-label="Administrator sections">
+        <button type="button" id="admin-tab-overview" role="tab" aria-selected={activeTab === "overview"} aria-controls="admin-panel-overview" className={`admin-tab-btn ${activeTab === "overview" ? "active" : ""}`} onClick={() => chooseTab("overview")}>Platform activity</button>
         <button type="button" id="admin-tab-moderation" role="tab" aria-selected={activeTab === "moderation"} aria-controls="admin-panel-moderation" className={`admin-tab-btn ${activeTab === "moderation" ? "active" : ""}`} onClick={() => chooseTab("moderation")}>Content moderation{pendingModeration !== null ? ` (${pendingModeration})` : ""}</button>
         <button
           type="button"
@@ -225,6 +227,7 @@ export default function AdminPage({ onNavigate }) {
       </div>
 
       <div className="admin-tab-content">
+        {activeTab === "overview" && <div id="admin-panel-overview" role="tabpanel" aria-labelledby="admin-tab-overview"><AdminActivityPanel onOpenTab={chooseTab} /></div>}
         {activeTab === "moderation" && <div id="admin-panel-moderation" role="tabpanel" aria-labelledby="admin-tab-moderation"><ModerationQueue onCountChange={setPendingModeration} /></div>}
         {activeTab === "users" && (
           <div

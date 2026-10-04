@@ -4748,3 +4748,96 @@ h1, h2, h3 { font-weight: 500; }
 @media (prefers-reduced-motion: reduce) {
   .is-referenced { animation: none; outline: 2px solid var(--brand); }
 }
+
+/* QCDAO-140 - administrator platform activity overview. */
+.admin-activity-panel .audit-trail-heading { margin-bottom: 8px; }
+
+.admin-activity-group {
+  margin-top: 28px;
+}
+
+.admin-activity-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.admin-activity-group-head h3 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.admin-activity-group-head p {
+  margin: 4px 0 0;
+  max-width: 68ch;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Narrower than the funder totals: these are counts, not currency strings. */
+.admin-activity-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 0;
+}
+
+.admin-activity-grid .stat-card { padding: 18px; }
+.admin-activity-grid .stat-num { font-size: 24px; }
+
+.stat-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Tone is carried by a left rule and the label, never by colour alone: the
+   number itself stays in the default ink so it is legible without colour. */
+.stat-card-warn {
+  border-left: 3px solid var(--warning-line);
+  background: var(--warning-soft);
+}
+
+.stat-card-warn .stat-label { color: var(--warning); }
+
+.stat-card-alert {
+  border-left: 3px solid var(--danger-line);
+  background: var(--danger-soft);
+}
+
+.stat-card-alert .stat-label { color: var(--danger); }
+
+@media (max-width: 540px) {
+  .admin-activity-grid { grid-template-columns: 1fr; }
+}
+
+/* QCDAO-95 - why a solution is still in the evaluator's queue. */
+.queue-note {
+  margin: 8px 0 0;
+  max-width: 72ch;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.queue-note-gate {
+  padding-left: 10px;
+  border-left: 3px solid var(--warning-line);
+  color: var(--warning);
+}
+
+.queue-note-attention {
+  padding-left: 10px;
+  border-left: 3px solid var(--danger-line);
+  color: var(--danger);
+}
+
+/* Not colour alone: the row also carries a rule, so the distinction survives a
+   greyscale print and a colour-vision difference. */
+.table-row-attention {
+  border-left: 3px solid var(--danger-line);
+  background: var(--danger-soft);
+}

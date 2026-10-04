@@ -26,6 +26,7 @@ import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
+import { collectAdminActivity } from "./adminActivity.js";
 import auditRegistryConfig from "./auditRegistry.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { recordProposalRevision } from "./proposalRevisions.js";
@@ -1025,6 +1026,16 @@ const statusClient = createPublicClient({
     timeout: STATUS_THRESHOLDS.rpcTimeoutMs,
     retryCount: 0,
   }),
+});
+
+/**
+ * QCDAO-140 - what is on the platform right now, counted from existing records.
+ * Separate from adminGetPlatformStatus, which answers whether the dependencies
+ * are healthy. An outage and an empty marketplace need different responses.
+ */
+export const adminGetActivitySummary = onCall({ region: REGION, maxInstances: 3, timeoutSeconds: 30 }, async (request) => {
+  await requireAdmin(request);
+  return collectAdminActivity({ db });
 });
 
 /** Admin-only pre-demo health snapshot: RPC, AuditRegistry, anchoring queue, Alchemy and Firestore. */

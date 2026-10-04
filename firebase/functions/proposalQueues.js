@@ -52,6 +52,50 @@ async function feedbackByProposal(db, proposalIds) {
   return summary;
 }
 
+/**
+ * QCDAO-95 - this evaluator's own recommendation comments on the given
+ * solutions, qualifying or not.
+ *
+ * Needed because moderation rebuilds `matching.recommendations` from the
+ * qualifying comments only. A hidden or removed recommendation therefore
+ * vanishes from the solution record, and without this lookup the row would
+ * silently reappear as "awaiting recommendation" with no trace of the filing
+ * the evaluator actually made.
+ */
+async function myRecommendationComments(db, proposalIds, uid) {
+  const found = new Map();
+  if (!proposalIds.length) return found;
+  const pages = await Promise.all(chunks(proposalIds).map((ids) =>
+    db.collection("comments").where("proposalId", "in", ids).where("authorId", "==", uid).get()));
+  for (const page of pages) {
+    for (const doc of page.docs) {
+      const data = doc.data();
+      // Replies carry no recommendation; only a top-level filing counts.
+      if ((data.parentId ?? null) != null || !data.recommendation) continue;
+      const existing = found.get(data.proposalId);
+      // Keep the qualifying one if there is any, so a later visible filing wins.
+      if (existing?.qualifying) continue;
+      found.set(data.proposalId, {
+        commentId: doc.id,
+        recommendation: data.recommendation,
+        qualifying: data.qualifying === true,
+        deleted: Boolean(data.deletedAt),
+        moderationStatus: data.moderationStatus || "visible",
+      });
+    }
+  }
+  return found;
+}
+
+/** Why a filed recommendation stopped counting, in the evaluator's terms. */
+function attentionReason(comment) {
+  if (!comment || comment.qualifying) return null;
+  if (comment.deleted) return "deleted";
+  if (comment.moderationStatus === "removed") return "removed";
+  if (comment.moderationStatus === "hidden") return "hidden";
+  return "not_qualifying";
+}
+
 async function problemsById(db, ids) {
   if (!ids.length) return new Map();
   const docs = await db.getAll(...ids.map((id) => db.collection("problems").doc(id)));
@@ -172,9 +216,26 @@ export async function listEvaluatorQueue({ db, uid, cursor = null, filter = "pen
     recommendation: mine?.recommendation ?? null,
     recommendedAt: mine ? iso(mine.at) : null,
     recommendations: recommendationCounts(data),
+    // QCDAO-95. The owner cannot take a solution to a decision until at least
+    // one qualifying recommendation exists, so a pending row with this unset is
+    // the outstanding feedback holding that gate shut.
+    gatesSelection: data.matching?.evaluationComplete !== true,
   })).filter((item) => item.recommendationStatus === wanted
     // A decided or closed proposal is no longer waiting on anyone's view; my history keeps it.
     && (wanted === "submitted" || !CLOSED_WORKFLOW.has(item.workflowStatus)));
+  // Looked up for the returned page only. Doing it across every candidate would
+  // chunk thousands of ids into dozens of queries for a single screen.
+  const mineByProposal = await myRecommendationComments(db, items.map((item) => item.id), uid);
+  for (const item of items) {
+    const comment = mineByProposal.get(item.id);
+    const reason = attentionReason(comment);
+    item.myCommentId = comment?.commentId ?? null;
+    item.needsAttention = Boolean(reason);
+    item.attentionReason = reason;
+    // A filing that no longer qualifies still had an outcome; showing it is what
+    // separates "your recommendation was taken down" from "you never filed one".
+    if (reason) item.filedRecommendation = comment.recommendation;
+  }
   const last = problems.docs.at(-1);
   return {
     items,
