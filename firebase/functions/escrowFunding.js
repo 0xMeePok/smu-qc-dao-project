@@ -8,6 +8,7 @@ import { verifyProposalEscrow } from "./escrowAudit.js";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
 import { ESCROW_STATES, milestoneValue, reconcileFundingReceipt, same } from "./escrowFundingEvents.js";
 import { VOID_JOBS, voidDecision } from "./escrowModerationVoid.js";
+import { ANCHOR_JOBS } from "./moderationAnchor.js";
 import { isIndependentProposal } from "./independentProposal.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
@@ -256,7 +257,7 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
     if (old.transactionHash) return { existing: old };
     if (millis(old.leaseUntil) > now.toMillis()) return { busy: true };
     tx.set(ref, { ...old, problemId: action.problemId || null, proposalId: action.proposalId || null,
-      voidJobId: action.voidJobId || null,
+      voidJobId: action.voidJobId || null, anchorJobId: action.anchorJobId || null,
       actionKey: action.key, leaseToken: token, leaseUntil: timestamp(now.toMillis() + 120_000), status: "preparing" });
     return { acquired: true };
   });
@@ -284,7 +285,7 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
       const row = await tx.get(ref);
       if (row.data()?.leaseToken !== token || row.data()?.transactionHash) fail("aborted", "The signer lease changed. Retry the same action.");
       tx.set(ref, { proposalId: action.proposalId || null, problemId: action.problemId || null, actionKey: action.key,
-        voidJobId: action.voidJobId || null,
+        voidJobId: action.voidJobId || null, anchorJobId: action.anchorJobId || null,
         functionName: action.functionName, transactionHash, serializedTransaction, nonce,
         signerAddress: wallet.account.address.toLowerCase(), status: "pending", createdAt: now,
         registryAddress: config.address.toLowerCase(), leaseUntil: timestamp(0) });
@@ -332,15 +333,32 @@ export async function resumePlatformTransaction({ db, client, config, now = Time
     if (current.data()?.transactionHash !== pending.transactionHash) return;
     const jobRef = pending.proposalId ? db.collection(FUNDING_JOBS).doc(jobKey(config, pending.proposalId)) : null;
     const voidRef = pending.voidJobId && receipt.status === "success" ? db.collection(VOID_JOBS).doc(pending.voidJobId) : null;
-    const [job, voidJob] = await Promise.all([jobRef ? tx.get(jobRef) : null, voidRef ? tx.get(voidRef) : null]);
+    const anchorRef = pending.anchorJobId ? db.collection(ANCHOR_JOBS).doc(pending.anchorJobId) : null;
+    const [job, voidJob, anchorJob] = await Promise.all([
+      jobRef ? tx.get(jobRef) : null, voidRef ? tx.get(voidRef) : null, anchorRef ? tx.get(anchorRef) : null,
+    ]);
     const eventRef = voidJob?.exists && voidJob.data().eventId ? db.collection("moderationEvents").doc(voidJob.data().eventId) : null;
     const event = eventRef ? await tx.get(eventRef) : null;
+    const anchorEventRef = anchorJob?.exists && anchorJob.data().eventId ? db.collection("moderationEvents").doc(anchorJob.data().eventId) : null;
+    const anchorEvent = anchorEventRef ? await tx.get(anchorEventRef) : null;
     tx.set(ref, { status: "idle", lastTransactionHash: pending.transactionHash,
       lastActionKey: pending.actionKey, lastOutcome: receipt.status, updatedAt: now, leaseUntil: timestamp(0) });
     if (voidJob?.exists) {
       const proposalId = voidJob.data().proposalId;
       tx.set(voidRef, { ...voidJob.data(), status: "complete", transactionHash: pending.transactionHash, updatedAt: now });
       if (event?.exists) tx.set(eventRef, { ...event.data(), escrowVoids: { ...(event.data().escrowVoids || {}), [proposalId]: { status: "complete", transactionHash: pending.transactionHash } } });
+    }
+    if (anchorJob?.exists && receipt.status === "success") {
+      tx.set(anchorRef, { ...anchorJob.data(), status: "complete", transactionHash: pending.transactionHash, updatedAt: now });
+      if (anchorEvent?.exists) tx.set(anchorEventRef, {
+        ...anchorEvent.data(), chainStatus: "anchored", transactionHash: pending.transactionHash, updatedAt: now,
+      });
+    }
+    if (anchorJob?.exists && receipt.status !== "success") {
+      tx.set(anchorRef, {
+        ...anchorJob.data(), blockedReason: "The moderation anchor transaction reverted.",
+        nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now,
+      });
     }
     if (job?.exists) tx.set(jobRef, { ...job.data(), nextAttemptAt: now, updatedAt: now, settlement: {
       status: receipt.status === "success" ? "confirmed" : "failed", transactionHash: pending.transactionHash,
@@ -669,6 +687,64 @@ async function reconcileModerationVoid({ db, client, config, getWallet, ref, job
   await ref.update({ nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now });
 }
 
+/** Broadcast one moderation digest through the platform outbox. The registry
+ * rejects a second write for the same id, so a stored receipt or an existing
+ * hash is never signed again. The signer must be a moderation admin, which is
+ * not the same role as an escrow admin. */
+export async function reconcileModerationAnchors({ db, client, config, getWallet, now = Timestamp.now() }) {
+  const due = await db.collection(ANCHOR_JOBS).where("status", "==", "pending").where("nextAttemptAt", "<=", now).limit(5).get();
+  for (const row of due.docs) {
+    try { await anchorModerationJob({ db, client, config, getWallet, now, ref: row.ref, job: { id: row.id, ...row.data() } }); }
+    catch {
+      await row.ref.update({
+        nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now,
+        blockedReason: "The moderation anchor will be retried.",
+      });
+    }
+  }
+}
+
+async function anchorModerationJob({ db, client, config, getWallet, now, ref, job }) {
+  const eventRef = db.collection("moderationEvents").doc(job.eventId);
+  const event = await eventRef.get();
+  const record = event.data() || {};
+  if (record.chainStatus === "anchored" && record.transactionHash) {
+    await ref.update({ status: "complete", transactionHash: record.transactionHash, updatedAt: now, blockedReason: null });
+    return;
+  }
+  const existing = await client.readContract({
+    address: config.address, abi: config.abi, functionName: "moderationRecordHash", args: [job.moderationId],
+  });
+  if (existing && String(existing).toLowerCase() === String(job.recordHash).toLowerCase()) {
+    await ref.update({ status: "complete", updatedAt: now, blockedReason: "The digest is already on the registry." });
+    return;
+  }
+  if (existing && String(existing).toLowerCase() !== ZERO) {
+    await ref.update({ status: "skipped", updatedAt: now, blockedReason: "A different moderation digest is already anchored." });
+    return;
+  }
+  const wallet = await getWallet();
+  const allowed = await client.readContract({
+    address: config.address, abi: config.abi, functionName: "isModerationAdmin", args: [wallet.account.address],
+  });
+  if (!allowed) {
+    await ref.update({
+      nextAttemptAt: timestamp(now.toMillis() + 3_600_000), updatedAt: now,
+      blockedReason: "The platform signer is not a moderation admin on the audit registry.",
+    });
+    return;
+  }
+  const result = await submitPlatformAction({
+    db, client, config, getWallet, now, action: {
+      address: config.address, abi: config.abi, functionName: "anchorModeration",
+      args: [job.moderationId, job.recordHash], key: `moderation:${job.moderationId}`, anchorJobId: job.id,
+    },
+  });
+  if (result.status === "pending" || result.status === "queued") {
+    await ref.update({ nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now, blockedReason: null });
+  }
+}
+
 export async function sweepEscrowFunding({ db, client, config, getWallet, now = Timestamp.now() }) {
   await assertFundingChain(client, config);
   const maintenance = await db.collection("maintenanceState").doc("registryCutover").get();
@@ -676,6 +752,8 @@ export async function sweepEscrowFunding({ db, client, config, getWallet, now = 
   await resumePlatformTransaction({ db, client, config, now });
   try { await reconcileModerationVoids({ db, client, config, getWallet, now }); }
   catch { /* A void job stays pending and retries on the next sweep. */ }
+  try { await reconcileModerationAnchors({ db, client, config, getWallet, now }); }
+  catch { /* An anchor job stays pending and retries on the next sweep. */ }
   const pauses = await db.collection(PAUSE_JOBS).where("registryAddress", "==", config.address.toLowerCase()).where("status", "==", "pending").where("nextAttemptAt", "<=", now)
     .orderBy("nextAttemptAt").limit(5).get();
   for (const row of pauses.docs) {

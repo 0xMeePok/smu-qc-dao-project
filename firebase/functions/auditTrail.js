@@ -58,6 +58,24 @@ const EXPIRY_LABELS = Object.freeze({
   no_solution_selected: "No solution was selected",
 });
 
+const REASON_LABELS = Object.freeze({
+  off_topic: "Off topic",
+  abusive: "Abusive content",
+  misleading: "Misleading information",
+  duplicate: "Suspected duplicate",
+  spam: "Spam",
+  policy_violation: "Policy violation",
+  other: "Other",
+  no_violation: "No violation found",
+  appeal_accepted: "Decision reversed after review",
+});
+
+const CONTENT_LABELS = Object.freeze({
+  problem: "Problem statement",
+  proposal: "Proposal",
+  comment: "Comment",
+});
+
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const iso = (value) => value?.toDate?.().toISOString?.()
   ?? (value instanceof Date ? value.toISOString() : (typeof value === "string" ? value : null));
@@ -123,7 +141,7 @@ function parseFilters(input) {
 }
 
 function publish(fields) {
-  return {
+  const event = {
     id: fields.id,
     eventType: fields.eventType,
     types: fields.types,
@@ -147,6 +165,10 @@ function publish(fields) {
     badge: fields.badge || null,
     workflowStatus: fields.workflowStatus || null,
   };
+  for (const key of ["moderationAction", "contentType", "contentId", "reason", "reasonLabel", "transactionHash", "salt", "recordHash", "moderationId"]) {
+    if (fields[key]) event[key] = fields[key];
+  }
+  return event;
 }
 
 function proposalVerification(audit) {
@@ -260,34 +282,41 @@ function submissionEvent(row) {
   });
 }
 
-function moderationEvent(row, titles) {
+function moderationEvent(row) {
   const at = iso(row.createdAt);
   if (!at || !row.contentId) return null;
   const action = row.action === "hide" ? "hidden" : row.action === "remove" ? "removed" : row.action === "restore" ? "restored" : "updated";
   const kind = row.contentType === "proposal" ? "proposal" : row.contentType === "comment" ? "comment" : "problem";
-  const readiness = row.evaluationReadiness;
-  const readinessText = readiness
-    ? ` Evaluator-feedback readiness changed from ${readiness.before ? "ready" : "not ready"} to ${readiness.after ? "ready" : "not ready"}. The evaluator badge and recommendation were left unchanged.`
-    : "";
-  const voidHash = row.escrowVoid?.transactionHash || row.escrowVoids && Object.values(row.escrowVoids).find((item) => item?.transactionHash)?.transactionHash;
-  const voidText = voidHash
-    ? ` Escrow void ${voidHash} opened claimable refunds of the unpaid balance.`
-    : "";
+  const parentProposalId = row.parentProposalId || (kind === "proposal" ? row.contentId : "");
+  const parentProblemId = row.parentProblemId || (kind === "problem" ? row.contentId : "");
+  const anchored = row.chainStatus === "anchored" && Boolean(row.transactionHash);
+  const reasonLabel = REASON_LABELS[row.reason] || "Reason not recorded";
+  const kindLabel = CONTENT_LABELS[kind];
+  const anchorText = anchored ? ` On-chain anchor ${row.transactionHash}.` : "";
   return publish({
     id: `moderation_${row.id}`,
     eventType: "moderation",
     types: ["moderation"],
     label: "Moderation action",
-    description: `A moderator ${action} this ${kind}. The decision is stored in Firestore and is eligible to anchor.${readinessText}${voidText}`,
+    description: `Moderation action: ${action}. Reason: ${reasonLabel}. Content reference ${row.contentId}.${anchorText}`,
     at,
     actorRole: "admin",
-    actorLabel: "Administrator",
-    entityType: kind === "comment" ? "proposal" : kind,
-    entityId: row.contentId,
-    entityLabel: titles.proposal.get(row.contentId) || titles.problem.get(row.contentId) || kind,
-    problemId: kind === "problem" ? row.contentId : null,
-    proposalId: kind === "proposal" ? row.contentId : null,
-    verification: "off_chain",
+    actorLabel: shortActor(row.actorId, "admin"),
+    entityType: parentProposalId ? "proposal" : "problem",
+    entityId: parentProposalId || parentProblemId || row.contentId,
+    entityLabel: kindLabel,
+    problemId: parentProblemId || null,
+    proposalId: parentProposalId || null,
+    verification: anchored ? "anchored" : "pending",
+    moderationAction: action,
+    contentType: kind,
+    contentId: row.contentId,
+    reason: row.reason || "",
+    reasonLabel,
+    transactionHash: row.transactionHash || "",
+    salt: row.salt || "",
+    recordHash: row.recordHash || "",
+    moderationId: row.moderationId || "",
   });
 }
 
@@ -408,6 +437,7 @@ async function collect(db, scope, filters, uid) {
     run(recent(db, "matchingEvents", "createdAt", { equals: [["proposalId", id]], start, end }));
     run(recent(db, "comments", "createdAt", { equals: [["proposalId", id]], start, end }));
     run(recent(db, "moderationEvents", "createdAt", { equals: [["contentId", id]], start, end }));
+    run(recent(db, "moderationEvents", "createdAt", { equals: [["parentProposalId", id]], start, end }));
     run(recent(db, "audits", "timestamp", { equals: [["proposalId", id]], start, end }));
   } else if (scope.problem) {
     const id = scope.problem.id;
@@ -415,6 +445,7 @@ async function collect(db, scope, filters, uid) {
     run(recent(db, "comments", "createdAt", { equals: [["problemId", id]], start, end }));
     run(recent(db, "proposals", "createdAt", { equals: [["problemId", id]], start, end }));
     run(recent(db, "moderationEvents", "createdAt", { equals: [["contentId", id]], start, end }));
+    run(recent(db, "moderationEvents", "createdAt", { equals: [["parentProblemId", id]], start, end }));
     run(recent(db, "audits", "timestamp", { equals: [["problemId", id]], start, end }));
     run(recent(db, "audits", "timestamp", { equals: [["targetId", id]], start, end }));
   } else {
@@ -457,7 +488,7 @@ async function collect(db, scope, filters, uid) {
   const push = (event) => {
     if (!event || seen.has(event.id) || !within(event.at, start, end)) return;
     seen.add(event.id);
-    if (event.entityType === "proposal" && titles.proposal.has(event.entityId)) {
+    if (event.eventType !== "moderation" && event.entityType === "proposal" && titles.proposal.has(event.entityId)) {
       event.entityLabel = titles.proposal.get(event.entityId);
     }
     events.push(event);
@@ -469,7 +500,9 @@ async function collect(db, scope, filters, uid) {
       if (!row.deletedAt && (!hidden || scope.isAdmin || row.authorId === uid)) push(recommendationEvent(row));
     } else if (row.researcherId && row.status) {
       if (visibleProposal(row, uid, scope.isAdmin)) push(submissionEvent(row));
-    } else if (row.contentType && row.action) push(moderationEvent(row, titles));
+    } else if (row.contentType && row.action) {
+      if (scope.isAdmin || (row.authorId && row.authorId === uid)) push(moderationEvent(row));
+    }
     else if (row.type) push(auditEvent(row, { isAdmin: scope.isAdmin }));
   }
   if (scope.proposal && visibleProposal(scope.proposal, uid, scope.isAdmin)) push(submissionEvent(scope.proposal));
