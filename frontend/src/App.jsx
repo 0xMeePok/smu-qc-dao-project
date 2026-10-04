@@ -29,8 +29,8 @@ import {
   ResearcherProposals,
   EvaluatorQueue,
   FundingPortfolio,
-  useActionItems,
 } from "./components/RoleViews.jsx";
+import { useActionItems } from "./lib/actionItems.js";
 import AdminPage from "./pages/AdminPage.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import ArchitectureHelpPage from "./pages/ArchitectureHelpPage.jsx";
@@ -99,6 +99,13 @@ function useRoute() {
 
 function go(route) {
   window.location.hash = route.startsWith("/") ? route : `/${route}`;
+}
+
+// QCDAO-92/93 dashboards deep-link into a record's tabs. An unknown value falls
+// back to overview, so a stale link still opens the page.
+function initialTab(params, allowed) {
+  const requested = params.get("tab");
+  return allowed.includes(requested) ? requested : "overview";
 }
 
 const LAST_WORKSPACE_KEY = "qcdao-last-workspace";
@@ -897,7 +904,7 @@ function AppContent() {
           Both render the same form; see CreateProposalPage. */}
       {section === "submit-proposal" ? <CreateProposalPage key={`${id}-${user?.id}`} postingId={id} onNavigate={go} />
         : section === "edit-proposal" ? <CreateProposalPage key={`edit-${id}-${user?.id}`} proposalId={id} onNavigate={go} />
-        : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} initialTab={params.get("tab") === "funding" ? "funding" : "overview"} onNavigate={go} />}
+        : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} initialTab={initialTab(params, ["funding", "feedback", "record"])} onNavigate={go} />}
     </RouteGuard>;
   } else if (section === "edit-posting") {
     pageComponent = (
@@ -927,7 +934,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <PostingDetailPage postingId={id} initialTab={params.get("tab") === "funding" ? "funding" : "overview"} onNavigate={go} />
+        <PostingDetailPage postingId={id} initialTab={initialTab(params, ["proposals", "funding", "record"])} onNavigate={go} />
       </RouteGuard>
     );
     } else if (section === "login") {

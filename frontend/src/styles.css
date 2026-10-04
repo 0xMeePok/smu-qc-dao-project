@@ -4841,3 +4841,143 @@ h1, h2, h3 { font-weight: 500; }
   border-left: 3px solid var(--danger-line);
   background: var(--danger-soft);
 }
+
+/* QCDAO-92/93 - the problem owner and solution developer dashboards. Built on
+   the audit-trail and platform-activity primitives above so a member moving
+   between the three screens is reading the same shapes. */
+.role-dashboard-panel { margin-bottom: 36px; }
+.role-dashboard-panel .audit-trail-heading { margin-bottom: 8px; }
+.role-dashboard-panel .dashboard-stats-grid { margin: 28px 0 0; }
+.role-dashboard-panel .card-table { margin-top: 20px; }
+.role-dashboard-panel .audit-trail-empty { margin-top: 24px; }
+
+.dashboard-attention { margin-top: 28px; }
+.dashboard-attention-list { margin: 0; padding: 0; list-style: none; }
+
+.dashboard-attention-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.dashboard-attention-item + .dashboard-attention-item { margin-top: 10px; }
+.dashboard-attention-item > div:first-child { min-width: 0; }
+.dashboard-attention-item strong { display: block; overflow-wrap: anywhere; }
+
+.dashboard-attention-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+/* A dual approval is the one step where doing nothing costs the other party
+   their funding, so it carries a rule as well as a word. */
+.dashboard-attention-item.is-dual { border-left: 3px solid var(--warning-line); background: var(--warning-soft); }
+.dashboard-attention-item.is-dual .dashboard-attention-heading { color: var(--warning); }
+
+.dashboard-attention-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-pill);
+  letter-spacing: 0.04em;
+}
+
+.dashboard-blockers { margin-top: 20px; }
+.dashboard-blockers h4 { margin: 0 0 4px; font-size: 14px; }
+.dashboard-blockers ul { margin: 10px 0 0; padding: 0; list-style: none; }
+.dashboard-blockers li + li { margin-top: 8px; }
+.dashboard-blockers .text-button { display: block; margin-top: 4px; }
+
+.queue-note-ready {
+  padding-left: 10px;
+  border-left: 3px solid var(--success-line);
+  color: var(--success);
+}
+
+.rollup-list { display: grid; gap: 14px; margin-top: 24px; }
+
+.rollup-card {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.rollup-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rollup-head > div:first-child { min-width: 0; }
+.rollup-head strong { display: block; overflow-wrap: anywhere; }
+
+/* Counts read as a row of labelled figures, not a table: there is one posting
+   per card, so column headings would repeat on every one. */
+.rollup-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.rollup-stats > div { min-width: 0; }
+.rollup-stats dt { font-size: 12px; color: var(--muted); }
+.rollup-stats dd { margin: 2px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+
+.rollup-meter { margin-top: 16px; }
+.rollup-meter small { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+
+/* accent-color alone leaves the track and the fill the same shade here, so a
+   part-funded posting reads as fully funded. The parts are coloured explicitly,
+   as .attachment-progress already does. */
+.rollup-meter progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  appearance: none;
+}
+
+.rollup-meter progress::-webkit-progress-bar { background: var(--line); border-radius: var(--radius-pill); }
+.rollup-meter progress::-webkit-progress-value { background: var(--brand); border-radius: var(--radius-pill); }
+.rollup-meter progress::-moz-progress-bar { background: var(--brand); border-radius: var(--radius-pill); }
+
+.rollup-blockers { margin: 12px 0 0; padding: 0; list-style: none; }
+.rollup-blockers li + li { margin-top: 8px; }
+
+.rollup-recommendations { margin-top: 14px; }
+.rollup-recommendations h4 { margin: 0 0 8px; font-size: 13px; }
+.rollup-recommendations ul { margin: 0; padding: 0; list-style: none; }
+
+.rollup-recommendations li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.rollup-recommendations li + li { margin-top: 6px; }
+
+@media (max-width: 540px) {
+  .rollup-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-attention-item, .rollup-head { flex-direction: column; }
+}

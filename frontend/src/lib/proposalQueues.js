@@ -25,6 +25,10 @@ export const listEvaluatorQueue = (payload = {}) => call("listEvaluatorQueue", p
 export const listActionItems = () => call("listActionItems");
 export const ACTION_ITEMS_KEY = ["actionItems"];
 
+/** QCDAO-92 owner roll-up: postings, solution counts, funding and feedback. */
+export const listOwnerDashboard = () => call("listOwnerDashboard");
+export const OWNER_DASHBOARD_KEY = ["ownerDashboard"];
+
 export { ownerReviewStatus } from "./ownerReviews.js";
 
 export function commentCountLabel(row) {
