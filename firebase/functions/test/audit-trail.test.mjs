@@ -90,7 +90,14 @@ function fixture() {
     },
     "moderationEvents/mod-1": {
       contentType: "problem", contentId: "problem-1", action: "hide", actorId: admin,
-      createdAt: at("2026-09-15T00:00:00Z"),
+      authorId: owner, reason: "abusive", details: "do not quote this brief", title: "Route medicines",
+      salt: `0x${"ab".repeat(32)}`, createdAt: at("2026-09-15T00:00:00Z"), chainStatus: "pending",
+    },
+    "moderationEvents/mod-comment": {
+      contentType: "comment", contentId: "comment-9", parentProblemId: "problem-1",
+      action: "remove", actorId: admin, authorId: creator, reason: "spam",
+      details: "quoted comment text", title: "Route medicines",
+      createdAt: at("2026-09-15T01:00:00Z"), chainStatus: "anchored", transactionHash: tx,
     },
     "audits/escrow-1": {
       type: "escrow", problemId: "problem-1", proposalId: "proposal-1", title: "Cold chain",
@@ -115,7 +122,7 @@ describe("QCDAO-96 and QCDAO-97 consolidated audit trail", () => {
     assert.ok(kinds.includes("evaluator_recommendation"));
     assert.ok(kinds.includes("selection"));
     assert.ok(kinds.includes("funding_status"));
-    assert.ok(kinds.includes("moderation"));
+    assert.equal(kinds.includes("moderation"), false);
     assert.equal(kinds.includes("governance"), false);
     assert.equal(items.some((item) => /mock evaluation|evaluation complete/i.test(item.label + item.description)), false);
 
@@ -173,6 +180,53 @@ describe("QCDAO-96 and QCDAO-97 consolidated audit trail", () => {
       () => readAuditTrail({ db: fixture(), uid: member, profile: profile(0), input: {} }),
       (error) => error instanceof HttpsError && error.code === "permission-denied",
     );
+  });
+
+  it("[BUT-ACM-82] shows a moderation decision to the content author and administrators only", async () => {
+    const db = fixture();
+    const salt = `0x${"ab".repeat(32)}`;
+    const memberView = await problemTrail(db, member, 0);
+    assert.equal(memberView.items.some((item) => item.eventType === "moderation"), false);
+    assert.equal(JSON.stringify(memberView.items).includes(salt), false);
+    assert.equal((await problemTrail(db, member, 0, { eventTypes: ["moderation"] })).count, 0);
+
+    const ownerView = await problemTrail(db, owner, 0);
+    const decision = ownerView.items.find((item) => item.id === "moderation_mod-1");
+    assert.ok(decision);
+    assert.equal(decision.moderationAction, "hidden");
+    assert.equal(decision.contentType, "problem");
+    assert.equal(decision.contentId, "problem-1");
+    assert.equal(decision.reason, "abusive");
+    assert.equal(decision.reasonLabel, "Abusive content");
+    assert.match(decision.actorLabel, /^0xcccc/);
+    assert.equal(decision.entityLabel, "Problem statement");
+    assert.equal(decision.verification, "pending");
+    assert.equal(decision.salt, salt);
+    const packed = JSON.stringify(decision);
+    assert.equal(packed.includes("do not quote"), false);
+    assert.equal(packed.includes("Route medicines"), false);
+    assert.equal(packed.includes("title"), false);
+    assert.equal(packed.includes("body"), false);
+    assert.equal(ownerView.items.some((item) => item.id === "moderation_mod-comment"), false);
+    const filtered = await problemTrail(db, owner, 0, { eventTypes: ["moderation"] });
+    assert.deepEqual(filtered.items.map((item) => item.id), ["moderation_mod-1"]);
+
+    const authorView = await problemTrail(db, creator, 0);
+    const comment = authorView.items.find((item) => item.id === "moderation_mod-comment");
+    assert.ok(comment);
+    assert.equal(comment.contentType, "comment");
+    assert.equal(comment.contentId, "comment-9");
+    assert.equal(comment.moderationAction, "removed");
+    assert.equal(comment.reason, "spam");
+    assert.equal(comment.entityLabel, "Comment");
+    assert.equal(comment.verification, "anchored");
+    assert.equal(comment.transactionHash, tx);
+    assert.equal(JSON.stringify(comment).includes("quoted comment"), false);
+    assert.equal(authorView.items.some((item) => item.id === "moderation_mod-1"), false);
+
+    const adminView = await readAuditTrail({ db, uid: admin, profile: profile(1), input: {} });
+    assert.ok(adminView.items.some((item) => item.id === "moderation_mod-1"));
+    assert.ok(adminView.items.some((item) => item.id === "moderation_mod-comment"));
   });
 
   it("does not label events with titles of drafts or hidden proposals", async () => {

@@ -106,6 +106,7 @@ function RemovedProblemView({ posting, onNavigate, viewerId }) {
           </div>
         </div>
         <PostingProposals posting={posting} viewerId={viewerId} isPoster={ownsPosting} proposalCount={0} onNavigate={onNavigate} />
+        {ownsPosting ? <ConsolidatedAuditTrail scope="problem" entityId={posting.id} onNavigate={onNavigate} /> : null}
       </article>
     </section>
   );

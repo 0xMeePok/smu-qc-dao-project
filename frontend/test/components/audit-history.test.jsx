@@ -49,45 +49,46 @@ beforeEach(() => {
   mocks.saved = [];
 });
 
-describe("Historical audit reads after escrow deployment cutover", () => {
-  it("keeps the old proposal receipt visible and verifies without requiring escrow terms", async () => {
+describe("Retired audit deployments after registry history removal", () => {
+  it("keeps the saved receipt visible but rejects verification against a retired registry", async () => {
     expect(AUDIT_REGISTRY_CONFIG.contractName).toBe("EscrowAuditRegistry");
     expect(proposalAuditReceipt(mocks.proposal)).toEqual(audit);
     const adapters = adaptersFor(prepared);
-    expect((await readProposalAudit(mocks.proposal, { adapters })).verified).toBe(true);
-    expect(adapters.readContract.mock.calls.some(([request]) => request.functionName === "fundingFactory")).toBe(false);
+    await expect(readProposalAudit(mocks.proposal, { adapters })).rejects.toThrow(/known AuditRegistry/);
+    expect(adapters.readContract).not.toHaveBeenCalled();
     expect(adapters.writeContract).not.toHaveBeenCalled();
   });
 
-  it("recomputes historical hashes from the latest server document", async () => {
+  it("rejects retired receipts even when the latest server document has changed", async () => {
     const pageRecord = mocks.proposal;
     mocks.proposal = { ...mocks.proposal, title: "Changed after anchoring" };
-    const result = await readProposalAudit(pageRecord, { adapters: adaptersFor(prepared) });
-    expect(result.verified).toBe(false);
-    expect(result.mismatches.map(item => item.field)).toContain("proposalHash");
+    const adapters = adaptersFor(prepared);
+    await expect(readProposalAudit(pageRecord, { adapters })).rejects.toThrow(/known AuditRegistry/);
+    expect(adapters.readContract).not.toHaveBeenCalled();
   });
 
-  it("reads a historical posting on its original registry", async () => {
+  it("rejects posting verification on a retired registry", async () => {
     const posting = { id: proposal.problemId, ownerId: proposal.postingOwnerId, title: "Original posting",
       summary: "Original description", amount: 100, currency: "USDC", attachments: [], expiresAt: new Date("2026-12-01") };
     const expected = preparePostingAudit(posting, { registryConfig: legacy }).prepared;
     mocks.posting = { ...posting, audit: { ...audit, entityId: expected.entityId, contentHash: expected.contentHash } };
-    expect((await readPostingAudit(mocks.posting, { adapters: adaptersFor(expected) })).verified).toBe(true);
+    const adapters = adaptersFor(expected);
+    await expect(readPostingAudit(mocks.posting, { adapters })).rejects.toThrow(/known AuditRegistry/);
+    expect(adapters.readContract).not.toHaveBeenCalled();
   });
 
-  it("recovers an existing historical receipt without rebroadcasting or adding receipt fields", async () => {
+  it("rejects recovery of a retired receipt without rebroadcasting or changing the database", async () => {
     const adapters = adaptersFor(prepared);
-    const result = await anchorProposalAudit({ ...mocks.proposal, audit: { ...audit, status: "pending" } }, { account, adapters });
-    expect(result.status).toBe("confirmed");
-    expect(Object.keys(result)).toHaveLength(9);
+    await expect(anchorProposalAudit({ ...mocks.proposal, audit: { ...audit, status: "pending" } }, { account, adapters }))
+      .rejects.toThrow(/known AuditRegistry/);
     expect(adapters.writeContract).not.toHaveBeenCalled();
-    expect(mocks.saved.at(-1).entityId).toBe(prepared.entityId);
+    expect(mocks.saved).toHaveLength(0);
   });
 
   it("rejects historical edits and withdrawals before opening the wallet", async () => {
     const adapters = adaptersFor(prepared);
-    await expect(anchorProposalBeforeWrite(mocks.proposal, { account, adapters })).rejects.toThrow(/earlier.*read-only/);
-    await expect(anchorProposalWithdrawal(mocks.proposal, { account, adapters, reason: "Changed requirements" })).rejects.toThrow(/earlier.*read-only/);
+    await expect(anchorProposalBeforeWrite(mocks.proposal, { account, adapters })).rejects.toThrow(/known AuditRegistry/);
+    await expect(anchorProposalWithdrawal(mocks.proposal, { account, adapters, reason: "Changed requirements" })).rejects.toThrow(/known AuditRegistry/);
     expect(adapters.writeContract).not.toHaveBeenCalled();
     expect(mocks.saved).toHaveLength(0);
   });
@@ -95,7 +96,7 @@ describe("Historical audit reads after escrow deployment cutover", () => {
   it("does not reanchor a historical edit whose form cleared the old receipt", async () => {
     const adapters = adaptersFor(prepared);
     await expect(anchorProposalBeforeWrite({ ...proposal, title: "Edited proposal" }, { account, adapters }))
-      .rejects.toThrow(/earlier.*read-only/);
+      .rejects.toThrow(/known AuditRegistry/);
     expect(adapters.writeContract).not.toHaveBeenCalled();
     expect(mocks.saved).toHaveLength(0);
   });

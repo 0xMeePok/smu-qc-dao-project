@@ -108,11 +108,9 @@ describe("QCDAO-75 proposal golden vectors", () => {
 });
 
 describe("QCDAO-76/78 trusted proposal confirmation", () => {
-  it("resolves a pre-escrow receipt after the active deployment changes, without inventing funding terms", async () => {
+  it("rejects a retired pre-escrow receipt after its deployment is removed from configuration", async () => {
     const record = fixture();
-    const result = await verifyMined(record, clientFor(record));
-    assert.equal(result.status, "confirmed");
-    assert.equal(result.entityId, prepareStoredProposal(record).entityId);
+    await assert.rejects(verifyMined(record, clientFor(record)), /does not belong to a known/);
     assert.equal(record.fundingTerms, undefined);
   });
   for (const type of ["business-problem", "open-funding"]) it(`confirms a matching ${type} transaction`, async () => {
@@ -211,12 +209,12 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
 });
 
 describe("QCDAO-79 durable recovery", () => {
-  it("recovers an old deployment job using its original preparation rules after cutover", async () => {
+  it("fails an old deployment recovery job after its registry is removed from configuration", async () => {
     const record = fixture(), { db, records } = store(record), now = Timestamp.fromMillis(1000);
     await enqueueProposalAudit({ db, record, now });
-    await recover({ db, client: clientFor(record), proposalId: record.id, now, Timestamp });
-    assert.equal(records.get(`proposals/${record.id}`).audit.status, "confirmed");
-    assert.equal(records.get(`proposalAuditJobs/${record.id}`).status, "confirmed");
+    await assert.rejects(recover({ db, client: clientFor(record), proposalId: record.id, now, Timestamp }), /known AuditRegistry/);
+    assert.equal(records.get(`proposals/${record.id}`).audit.status, "failed");
+    assert.equal(records.get(`proposalAuditJobs/${record.id}`).status, "failed");
     assert.equal(records.get(`proposals/${record.id}`).fundingTerms, undefined);
   });
   it("persists confirmation and makes duplicate enqueue delivery idempotent", async () => {

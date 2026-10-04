@@ -1,8 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { WORKFLOW_STATUS } from "./workflowStatus.js";
 import { isIndependentProposal } from "./independentProposal.js";
+import { moderationDecisionId, moderationRecordHash, queueModerationAnchor } from "./moderationAnchor.js";
 
 export const REPORT_REASONS = ["off_topic", "abusive", "misleading", "duplicate", "other"];
 const REMOVE_REASONS = ["off_topic", "abusive", "misleading", "duplicate", "spam", "policy_violation", "other"];
@@ -363,13 +364,25 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
     tx.update(queueRef, { status: DECISIONS[action], lastAction: action, lastReason: reason, updatedAt: now });
     writeStats(tx, statsRef, stats, pendingDelta(previous, DECISIONS[action]), now);
     const opensEscrowRefund = action === "remove" && contentType !== "comment" && !isIndependentProposal(data);
+    const decisionAt = now.toDate().toISOString();
+    const salt = `0x${randomBytes(32).toString("hex")}`;
+    const parentProblemId = contentType === "problem" ? contentId : (data.problemId || "");
+    const parentProposalId = contentType === "proposal" ? contentId : (data.proposalId || "");
+    const moderationId = moderationDecisionId(eventId);
+    const recordHash = moderationRecordHash({
+      actorId: uid, action, contentType, contentId, reason, createdAt: decisionAt, salt,
+    });
     tx.set(db.collection("moderationEvents").doc(eventId), {
       queueId, contentType, contentId, action, reason, details: note, actorId: uid, authorId: authorId || "",
       previousVisibility: data.moderationStatus || "visible", visibility: action === "restore" ? "visible" : DECISIONS[action],
-      createdAt: now, sequence, chainStatus: "pending", eventVersion: 1, settlement: settlement?.summary || null,
+      createdAt: now, decisionAt, sequence, chainStatus: "pending", eventVersion: 1, settlement: settlement?.summary || null,
       evaluationReadiness: commentGate?.readiness || null,
       escrowVoid: opensEscrowRefund ? { status: "queued" } : null,
+      salt, moderationId, recordHash,
+      ...(parentProblemId ? { parentProblemId } : {}),
+      ...(parentProposalId ? { parentProposalId } : {}),
     });
+    queueModerationAnchor(tx, db, { eventId, moderationId, recordHash, now });
     if (authorId) {
       const proposalId = contentType === "proposal" ? contentId : data.proposalId || null;
       const problemId = contentType === "problem" ? contentId : data.problemId || null;
@@ -383,7 +396,7 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
         ...(navigationTarget ? { navigationTarget, link: `#/${navigationTarget}` } : {}),
       });
     }
-    return { ok: true, eventId, status: DECISIONS[action] };
+    return { ok: true, eventId, status: DECISIONS[action], moderationId, recordHash };
   });
 }
 
