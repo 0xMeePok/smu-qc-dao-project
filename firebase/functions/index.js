@@ -44,7 +44,8 @@ import { createComment as writeComment, editComment as amendComment,
   deleteComment as removeComment } from "./comments.js";
 import { listPostedProposals as listPostedProposalsForProblem, listRemovedProblems as listRemovedProblemsForMember, readRemovedProblem as readRemovedProblemForMember } from "./moderation.js";
 import { getProposalComparison as readProposalComparison } from "./proposalComparison.js";
-import { listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
+import { feedbackByProposal, listActionItems as actionItems, listEvaluatorQueue as evaluatorQueue, listMyProposals } from "./proposalQueues.js";
+import { collectOwnerDashboard } from "./ownerDashboard.js";
 import { listIndependentListings as independentListings } from "./independentProposalCatalog.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
 import { readAuditTrail } from "./auditTrail.js";
@@ -244,6 +245,16 @@ export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) =>
 export const listActionItems = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180 }, async (request) => {
   const uid = await requireMember(request);
   return actionItems({ db, uid, client: publicClient, config: auditRegistryConfig });
+});
+
+/**
+ * QCDAO-92 - the owner's postings with their solution counts, funding progress
+ * and evaluator-feedback readiness. No chain read: listActionItems already pays
+ * for confirmed escrow state, and this answers the Firestore-only questions.
+ */
+export const listOwnerDashboard = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return collectOwnerDashboard({ db, uid, readFeedback: feedbackByProposal });
 });
 
 export const recordOwnerReview = onCall(MEMBER_CALL_OPTIONS, async (request) => {

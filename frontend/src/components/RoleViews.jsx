@@ -1,7 +1,10 @@
 import { ProposalList } from "./ProposalList.jsx";
 import { ProposalTracker } from "./ProposalTracker.jsx";
-import { ACTION_ITEMS_KEY, QUEUE_FILTERS, listActionItems, listEvaluatorQueue, proposalQueueDeadline, proposalQueueWorkflowStatus, queueError, sortProposalRows } from "../lib/proposalQueues.js";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ACTION_ITEMS_KEY, QUEUE_FILTERS, listEvaluatorQueue, proposalQueueDeadline, proposalQueueWorkflowStatus, queueError, sortProposalRows } from "../lib/proposalQueues.js";
+import { useActionItems } from "../lib/actionItems.js";
+import { OwnerDashboardPanel } from "./OwnerDashboardPanel.jsx";
+import { DeveloperDashboardPanel } from "./DeveloperDashboardPanel.jsx";
+import { useQueryClient } from "@tanstack/react-query";
 import { SelectProposalDialog } from "./ProposalComparison.jsx";
 import { SelectionResponseDialog } from "./MatchingPanel.jsx";
 import { OwnerReviewForm } from "./OwnerReviewPanel.jsx";
@@ -41,6 +44,40 @@ function RoleBadge({ role }) {
   return <span className="role-chip">{ROLE_LABELS[role] || role}</span>;
 }
 
+/**
+ * QCDAO-92/93 - the workspace tab strip, in the markup AdminPage already uses.
+ * The overview leads, because it says which record needs looking at first; the
+ * management tables that follow are how an individual record gets handled.
+ */
+function WorkspaceTabs({ id, label, tabs, active, onSelect }) {
+  return (
+    <div className="admin-tabs-nav" role="tablist" aria-label={label}>
+      {tabs.map(([key, text]) => (
+        <button
+          key={key}
+          type="button"
+          id={`${id}-tab-${key}`}
+          role="tab"
+          aria-selected={active === key}
+          aria-controls={`${id}-panel-${key}`}
+          className={`admin-tab-btn ${active === key ? "active" : ""}`}
+          onClick={() => onSelect(key)}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function WorkspacePanel({ id, tab, children }) {
+  return (
+    <div className="admin-tab-content">
+      <div id={`${id}-panel-${tab}`} role="tabpanel" aria-labelledby={`${id}-tab-${tab}`}>{children}</div>
+    </div>
+  );
+}
+
 function ProfileLink({ address, label, onNavigate }) {
   if (!address) return null;
   return (
@@ -54,8 +91,15 @@ function ProfileLink({ address, label, onNavigate }) {
   );
 }
 
+const OWNER_TABS = [["overview", "Posting overview"], ["postings", "My postings"]];
+
 export function MyProblems({ onNavigate }) {
   const { user } = useAuth();
+  const [tab, setTab] = useState("overview");
+  // The postings table reads up to 50 documents the overview has already
+  // counted, so it is fetched when its tab is first opened and not before.
+  const [postingsWanted, setPostingsWanted] = useState(false);
+  const openTab = (next) => { if (next === "postings") setPostingsWanted(true); setTab(next); };
   const [data, setData] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -91,7 +135,11 @@ export function MyProblems({ onNavigate }) {
     }
   }, [user?.id]);
 
-  useEffect(() => { setData([]); setHasMore(false); load(); return () => { generation.current++; }; }, [load]);
+  useEffect(() => {
+    if (!postingsWanted) return undefined;
+    setData([]); setHasMore(false); load();
+    return () => { generation.current++; };
+  }, [load, postingsWanted]);
 
   const drafts = data.filter((item) => item.status === POSTING_STATUS_DRAFT);
   const published = data.filter((item) => item.status !== POSTING_STATUS_DRAFT);
@@ -176,6 +224,10 @@ export function MyProblems({ onNavigate }) {
         <p>Manage your published research challenges, track submission deadlines, and evaluate inbound researcher proposals.</p>
       </div>
 
+      <WorkspaceTabs id="owner" label="Owner workspace sections" tabs={OWNER_TABS} active={tab} onSelect={openTab} />
+
+      <WorkspacePanel id="owner" tab={tab}>
+      {tab === "overview" ? <OwnerDashboardPanel onNavigate={onNavigate} /> : <>
       {error && (
         <div className="error-banner" role="alert" style={{ padding: "1rem" }}>
           <strong>Error:</strong> {error.message}
@@ -219,6 +271,8 @@ export function MyProblems({ onNavigate }) {
       {isEscrowRegistry(AUDIT_REGISTRY_CONFIG)
         ? <p className="field-hint">Open a proposal’s escrow to view your wallet contribution, vote on delivery, or claim an available refund.</p>
         : <MockFundingPortfolio onNavigate={onNavigate} />}
+      </>}
+      </WorkspacePanel>
 
       {pendingDelete && (
         <Modal
@@ -247,13 +301,6 @@ export function MyProblems({ onNavigate }) {
       )}
     </section>
   );
-}
-
-/** QCDAO-91. The member's open actions; shared by the tab count and the page. */
-export function useActionItems() {
-  const { user } = useAuth();
-  return useQuery({ queryKey: [...ACTION_ITEMS_KEY, user?.id], queryFn: listActionItems,
-    enabled: Boolean(user?.id), staleTime: 30_000, refetchInterval: 30_000 });
 }
 
 const money = (currency, amount) => `${currency || ""} ${Number(amount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`.trim();
@@ -390,15 +437,23 @@ export function ActionNeeded({ onNavigate }) {
   </section>;
 }
 
+const DEVELOPER_TABS = [["overview", "Submission overview"], ["submissions", "My submissions"]];
+
 export function ResearcherProposals({ onNavigate }) {
+  const [tab, setTab] = useState("overview");
   return <section className="page dashboard-page">
     <div className="page-heading">
       <h1>My Research Proposals</h1>
-      <p>Track submissions to posted problems and independent listings you have published. Unfinished drafts resume below — independent drafts open the independent form, not a parent opportunity.</p>
+      <p>Track submissions to posted problems and independent listings you have published. Unfinished drafts resume under My submissions — independent drafts open the independent form, not a parent opportunity.</p>
     </div>
-    <ProposalTracker onNavigate={onNavigate} />
-    <ProposalList draftsOnly onNavigate={onNavigate} />
-    {isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && <EscrowReleaseSummary onNavigate={onNavigate} />}
+    <WorkspaceTabs id="developer" label="Solution developer workspace sections" tabs={DEVELOPER_TABS} active={tab} onSelect={setTab} />
+    <WorkspacePanel id="developer" tab={tab}>
+      {tab === "overview" ? <DeveloperDashboardPanel onNavigate={onNavigate} /> : <>
+        <ProposalTracker onNavigate={onNavigate} />
+        <ProposalList draftsOnly onNavigate={onNavigate} />
+        {isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && <EscrowReleaseSummary onNavigate={onNavigate} />}
+      </>}
+    </WorkspacePanel>
   </section>;
 }
 

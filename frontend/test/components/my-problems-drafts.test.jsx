@@ -1,9 +1,24 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render as renderBare, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** QCDAO-50 - drafts on the owner's workspace. */
+
+// Both workspaces read their action items through react-query, so every render
+// here needs a client. Shadowing `render` keeps that one decision in one place.
+const render = (ui) => renderBare(
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>,
+);
+
+// QCDAO-92/93 put the roll-up on the leading tab. These suites assert the
+// management tables, so they open that tab first.
+function openWorkspaceTab(name) {
+  fireEvent.click(screen.getByRole("tab", { name }));
+}
+
+const renderOwner = (ui) => { const result = render(ui); openWorkspaceTab("My postings"); return result; };
+const renderDeveloper = (ui) => { const result = render(ui); openWorkspaceTab("My submissions"); return result; };
 
 const mocks = vi.hoisted(() => ({ postings: [], deleted: [], deleteShouldFail: false }));
 
@@ -58,23 +73,23 @@ afterEach(cleanup);
 
 describe("drafts on the owner's workspace", () => {
   it("[FIT-P50-11] lists drafts separately from published postings", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Half-written idea")).toBeTruthy());
     expect(screen.getByText("Cold-chain routing")).toBeTruthy();
   });
 
   it("[FIT-P50-12] marks every draft with a badge, and nothing else", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getAllByText("Draft")).toHaveLength(2));
   });
 
   it("[FIT-P50-13] labels an untitled draft rather than showing a blank row", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Untitled draft")).toBeTruthy());
   });
 
   it("[FIT-P50-14] shows when each draft was last saved", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     // "Last saved " and the instant are separate text nodes, so match the row.
     await waitFor(() => expect(
       screen.getByText((_, el) => el?.textContent === "Last saved 2026-09-01 10:15:00 UTC"),
@@ -83,7 +98,7 @@ describe("drafts on the owner's workspace", () => {
 
   it("[FIT-P50-15] resumes a draft on the create form, not the detail page", async () => {
     const onNavigate = vi.fn();
-    render(<MyProblems onNavigate={onNavigate} />);
+    renderOwner(<MyProblems onNavigate={onNavigate} />);
     await waitFor(() => expect(screen.getByText("Half-written idea")).toBeTruthy());
 
     fireEvent.click(screen.getAllByText("Resume editing")[0]);
@@ -92,7 +107,7 @@ describe("drafts on the owner's workspace", () => {
 
   it("[FIT-P50-16] opens a published posting on the detail page", async () => {
     const onNavigate = vi.fn();
-    render(<MyProblems onNavigate={onNavigate} />);
+    renderOwner(<MyProblems onNavigate={onNavigate} />);
     await waitFor(() => expect(screen.getByText("Cold-chain routing")).toBeTruthy());
 
     fireEvent.click(screen.getByText("View"));
@@ -101,7 +116,7 @@ describe("drafts on the owner's workspace", () => {
 
   it("opens a published posting on the edit form", async () => {
     const onNavigate = vi.fn();
-    render(<MyProblems onNavigate={onNavigate} />);
+    renderOwner(<MyProblems onNavigate={onNavigate} />);
     await waitFor(() => expect(screen.getByText("Cold-chain routing")).toBeTruthy());
     fireEvent.click(screen.getByText("Edit"));
     expect(onNavigate).toHaveBeenCalledWith("edit-posting/live1");
@@ -114,7 +129,7 @@ describe("drafts on the owner's workspace", () => {
       { ...PUBLISHED, id: "grant", title: "Grant with an award", expiresAt: expiry, opportunityType: "open-funding", hasAcceptedSolution: true, acceptedProposalId: "grant-winner" },
       { ...PUBLISHED, id: "requested", title: "Pending main request", expiresAt: expiry, escrowSelection: { proposalId: "candidate" } },
     ];
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     const confirmed = (await screen.findByText("Confirmed main winner")).closest(".table-row");
     expect(within(confirmed).getByText("Decision recorded")).toBeTruthy();
     expect(confirmed.querySelector(".expiry-countdown")).toBeNull();
@@ -127,14 +142,14 @@ describe("drafts on the owner's workspace", () => {
   });
 
   it("[FIT-P50-17] offers delete on drafts only", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Cold-chain routing")).toBeTruthy());
     // Two drafts, one published posting.
     expect(screen.getAllByText("Delete")).toHaveLength(2);
   });
 
   it("[FIT-P50-18] asks for confirmation before deleting", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Half-written idea")).toBeTruthy());
 
     fireEvent.click(screen.getAllByText("Delete")[0]);
@@ -144,7 +159,7 @@ describe("drafts on the owner's workspace", () => {
   });
 
   it("[FIT-P50-19] keeps the draft when the dialog is dismissed", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Half-written idea")).toBeTruthy());
 
     fireEvent.click(screen.getAllByText("Delete")[0]);
@@ -156,7 +171,7 @@ describe("drafts on the owner's workspace", () => {
   });
 
   it("[FIT-P50-20] deletes only once confirmed, then refreshes the list", async () => {
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Half-written idea")).toBeTruthy());
 
     fireEvent.click(screen.getAllByText("Delete")[0]);
@@ -168,7 +183,7 @@ describe("drafts on the owner's workspace", () => {
 
   it("[FIT-P50-21] tells the owner when there are no drafts yet", async () => {
     mocks.postings = [PUBLISHED];
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText(/no drafts/i)).toBeTruthy());
   });
 });
@@ -177,7 +192,7 @@ describe("drafts on the owner's workspace", () => {
 it("QCDAO-132 can load and resume a draft older than the first 50 postings", async () => {
   mocks.postings = [...Array.from({ length: 50 }, (_, i) => ({ ...PUBLISHED, id: `p${i}`, title: `Published ${i}` })), DRAFT];
   const onNavigate = vi.fn();
-  render(<MyProblems onNavigate={onNavigate} />);
+  renderOwner(<MyProblems onNavigate={onNavigate} />);
   await screen.findByRole("button", { name: "Load older opportunities" });
   expect(screen.queryByText(DRAFT.title)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Load older opportunities" }));
@@ -189,13 +204,17 @@ it("QCDAO-132 can load and resume a draft older than the first 50 postings", asy
 
 /** QCDAO-62/63 - the researcher's tracking list and the evaluator's queue. */
 const queues = vi.hoisted(() => ({ mine: { items: [] }, drafts: [], evaluator: async () => ({ items: [], nextCursor: null }), navigated: [],
-  actions: null, selected: [], confirmed: [] }));
+  actions: null, selected: [], confirmed: [],
+  ownerDashboard: { postings: [], accepted: [], blockers: [], truncated: {}, generatedAt: "2026-10-03T00:00:00.000Z",
+    totals: { postings: 0, drafts: 0, live: 0, closed: 0, proposalsReceived: 0, awaitingFeedback: 0, readyToSelect: 0,
+      blockedPostings: 0, acceptedSolutions: 0 } } }));
 
 vi.mock("../../src/lib/proposalQueues.js", async (importOriginal) => ({
   ...(await importOriginal()),
   listMyProposalQueue: async () => queues.mine,
   listEvaluatorQueue: async (payload) => queues.evaluator(payload),
   listActionItems: async () => queues.actions,
+  listOwnerDashboard: async () => queues.ownerDashboard,
 }));
 
 vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
@@ -232,7 +251,7 @@ describe("QCDAO-62 tracking my own proposals", () => {
   });
 
   it("shows feedback progress, comment count and a deep link into the proposal", async () => {
-    render(<ResearcherProposals onNavigate={navigate} />);
+    renderDeveloper(<ResearcherProposals onNavigate={navigate} />);
     await screen.findByText("Quantum routing");
     // QCDAO-91: lifecycle and evaluator feedback render as shared status badges.
     expect(screen.getByText("Evaluator · Recommend")).toBeTruthy();
@@ -250,7 +269,7 @@ describe("QCDAO-62 tracking my own proposals", () => {
     const deadlineAt = new Date(Date.now() + 2 * 864e5).toISOString();
     queues.mine.items[0].posting = { ...queues.mine.items[0].posting, expiresAt: new Date(Date.now() + 80 * 864e5).toISOString(),
       matching: { status: "awaiting_confirmation", deadlineAt, confirmedAt: null } };
-    const { container } = render(<ResearcherProposals onNavigate={navigate} />);
+    const { container } = renderDeveloper(<ResearcherProposals onNavigate={navigate} />);
     await screen.findByText("Quantum routing");
     const row = screen.getByText("Quantum routing").closest(".table-row");
     expect(row.querySelector(".expiry-urgency").textContent).toBe("Pending approval");
@@ -258,7 +277,7 @@ describe("QCDAO-62 tracking my own proposals", () => {
   });
 
   it("orders by closing soonest and filters by workflow status", async () => {
-    const { container } = render(<ResearcherProposals onNavigate={navigate} />);
+    const { container } = renderDeveloper(<ResearcherProposals onNavigate={navigate} />);
     await screen.findByText("Quantum routing");
     const titles = () => [...container.querySelectorAll(".table-row")].map((row) => row.querySelector("strong")?.textContent);
     expect(titles()).toEqual(["Annealing study", "Quantum routing"]);
@@ -323,7 +342,7 @@ describe("QCDAO-63 the evaluator recommendation queue", () => {
         matching: { status: "awaiting_confirmation", deadlineAt, proposalId: "p1" } },
       { ...PUBLISHED, id: "open1", title: "Still open", expiresAt: new Date(Date.now() + 80 * 864e5) },
     ];
-    render(<MyProblems onNavigate={() => {}} />);
+    renderOwner(<MyProblems onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("Awaiting acceptance")).toBeTruthy());
 
     const locked = screen.getByText("Awaiting acceptance").closest(".table-row");
@@ -344,9 +363,7 @@ describe("[QCDAO-91] the shared Action Needed tab", () => {
     workflowStatus: "submitted", recommendations: { recommend: 1, recommend_with_revisions: 0, do_not_recommend: 0 },
     submittedAt: SOON, ...extra });
   const empty = { total: 0, owner: { readyToSelect: [], awaitingReview: [] }, researcher: { selectionToAccept: [] }, evaluator: null };
-  const renderTab = () => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <ActionNeeded onNavigate={navigate} />
-  </QueryClientProvider>);
+  const renderTab = () => render(<ActionNeeded onNavigate={navigate} />);
   beforeEach(() => { queues.navigated = []; queues.selected = []; queues.confirmed = []; });
 
   it("groups what waits on me by role and selects in place with the comparison's dialog", async () => {

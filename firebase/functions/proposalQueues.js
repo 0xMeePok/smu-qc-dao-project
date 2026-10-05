@@ -21,6 +21,8 @@ const QUEUE_CAP = 100;
 const OWNED_CAP = 200;
 const REVIEW_CAP = 200;
 const IN_CHUNK = 30;
+// Enough recommendations to read at a glance; the proposal page holds them all.
+const LINKED_COMMENT_CAP = 8;
 
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const iso = (value) => value?.toDate?.().toISOString?.() ?? null;
@@ -33,9 +35,19 @@ function visibleComment(data) {
   return !data.deletedAt && !BLOCKED.has(data.moderationStatus);
 }
 
-/** Comment counts and qualifying recommendations, keyed by proposal id. */
-async function feedbackByProposal(db, proposalIds) {
-  const summary = new Map(proposalIds.map((id) => [id, { comments: 0, qualifying: 0, recommendations: [] }]));
+/**
+ * Comment counts and qualifying recommendations, keyed by proposal id.
+ *
+ * QCDAO-93 added `recommendationComments`: the same filings as
+ * `recommendations`, but carrying the comment id so a dashboard can link
+ * straight to the evaluator's words instead of only counting them. The outcome
+ * array is left as plain strings because `recommendationCounts` reads it
+ * directly.
+ */
+export async function feedbackByProposal(db, proposalIds) {
+  const summary = new Map(proposalIds.map((id) => [id,
+    { comments: 0, qualifying: 0, recommendations: [], recommendationComments: [] }]));
+  if (!proposalIds.length) return summary;
   const pages = await Promise.all(chunks(proposalIds).map((ids) =>
     db.collection("comments").where("proposalId", "in", ids).get()));
   for (const page of pages) {
@@ -47,6 +59,12 @@ async function feedbackByProposal(db, proposalIds) {
       if (data.qualifying !== true) continue;
       row.qualifying += 1;
       row.recommendations.push(data.recommendation);
+      // Capped: a dashboard shows a handful and links out for the rest, and an
+      // unbounded array here would grow the payload without being read.
+      if (row.recommendationComments.length < LINKED_COMMENT_CAP) {
+        row.recommendationComments.push({ commentId: doc.id, recommendation: data.recommendation,
+          at: iso(data.createdAt) });
+      }
     }
   }
   return summary;
@@ -147,7 +165,7 @@ export async function listMyProposals({ db, uid, client, config }) {
   const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs, blockNumber: grantState.blockNumber });
   const items = docs.map((doc) => {
     const data = doc.data();
-    const counts = feedback.get(doc.id) ?? { comments: 0, qualifying: 0, recommendations: [] };
+    const counts = feedback.get(doc.id) ?? { comments: 0, qualifying: 0, recommendations: [], recommendationComments: [] };
     return {
       id: doc.id,
       title: data.title ?? "",
