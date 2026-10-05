@@ -9,6 +9,7 @@ export function memoryDb(initial = {}) {
   const reference = (path) => ({ path, id: path.split("/").at(-1),
     get: async () => { reads++; return snapshot(path); },
     set: async (data) => records.set(path, data),
+    update: async (data) => records.set(path, { ...(records.get(path) || {}), ...data }),
     delete: async () => records.delete(path),
   });
   const comparable = (value) => value?.toMillis?.() ?? value;

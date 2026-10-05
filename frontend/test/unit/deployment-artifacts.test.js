@@ -40,7 +40,8 @@ it("the default registry sync preserves the active manifest's address and entity
       for (const [flag, contractName, abi] of [
         ["factory-artifact", "FundingEscrowFactory", configured.escrow.factoryAbi],
         ["escrow-artifact", "FundingEscrow", configured.escrow.escrowAbi],
-      ]) {
+        ["open-funding-pool-artifact", "OpenFundingPool", configured.escrow.openFundingPoolAbi],
+      ].filter(([, , abi]) => Array.isArray(abi) && abi.length)) {
         const file = path.join(directory, `${contractName}.json`);
         await writeFile(file, JSON.stringify({ contractName, abi }));
         extra.push(`--${flag}`, file);

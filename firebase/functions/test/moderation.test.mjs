@@ -6,6 +6,7 @@ import { submitContentReport, listModerationQueue, getModerationContext, moderat
   listModerationNotifications, markModerationNotificationRead, listReportableComments, listPostedProposals,
   listRemovedProblems, readRemovedProblem, syncProposalParentVisibility, syncProblemProposalsBrowsable } from "../moderation.js";
 import { prepareModerationMatching, fundMockProposal, selectMockProposal, confirmMockProposal } from "../matching.js";
+import { canonicalModerationRecord, moderationDecisionId, moderationRecordHash } from "../moderationAnchor.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
 const later = (ms) => Timestamp.fromMillis(now.toMillis() + ms);
@@ -64,6 +65,20 @@ test("admin remove/restore preserves original workflow and sponsor access with i
   await assert.rejects(() => act(db, "remove", { reason: "no_violation" }), { code: "invalid-argument" });
   await assert.rejects(() => act(db, "restore", { reason: "misleading" }), { code: "invalid-argument" });
   await act(db);
+  const decision = db.records.get("moderationEvents/proposal_a_1");
+  assert.equal(decision.parentProposalId, "a");
+  assert.equal(decision.parentProblemId, "problem");
+  assert.equal(decision.authorId, "alice");
+  assert.equal(decision.recordHash, moderationRecordHash({
+    actorId: "admin", action: "remove", contentType: "proposal", contentId: "a",
+    reason: "misleading", createdAt: decision.decisionAt, salt: decision.salt,
+  }));
+  assert.equal(decision.moderationId, moderationDecisionId("proposal_a_1"));
+  assert.equal(canonicalModerationRecord({
+    actorId: "admin", action: "remove", contentType: "proposal", contentId: "a",
+    reason: "misleading", createdAt: decision.decisionAt, salt: decision.salt,
+  }).includes("details"), false);
+  assert.equal(db.records.get("escrowModerationAnchorJobs/proposal_a_1").recordHash, decision.recordHash);
   assert.equal(db.records.get("proposals/a").status, "moderated_removed");
   assert.equal(db.records.get("proposals/a").postingOwnerId, "");
   assert.equal(db.records.get("proposals/a").moderation.originalPostingOwnerId, "owner");
@@ -71,6 +86,7 @@ test("admin remove/restore preserves original workflow and sponsor access with i
   assert.equal(Object.hasOwn(db.records.get("proposals/b"), "problemBrowsable"), false);
   assert.equal((await queue(db)).pendingCount, 0);
   assert.equal((await act(db)).unchanged, true);
+  assert.equal(db.records.has("escrowModerationAnchorJobs/proposal_a_2"), false);
   await act(db, "restore", { reason: "appeal_accepted", now: later(2000) });
   assert.equal(db.records.get("proposals/a").status, "submitted");
   assert.equal(db.records.get("proposals/a").postingOwnerId, "owner");

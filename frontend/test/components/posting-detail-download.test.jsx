@@ -257,6 +257,19 @@ describe("a removed problem statement", () => {
     expect(screen.queryByText("Secret context")).toBeNull();
     expect(screen.queryByText("spec.pdf")).toBeNull();
     expect(screen.getByRole("heading", { name: "Proposals" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Audit trail" })).toBeNull();
+  });
+
+  it("[FIT-ACM-073] shows the audit trail to the owner of a removed problem", async () => {
+    mocks.user = { id: OWNER, roles: ["owner"] };
+    mocks.posting = publishedPosting({
+      moderationStatus: "removed",
+      status: "moderated_removed",
+      moderation: { reason: "abusive", details: "Copied from another brief." },
+    });
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    expect(await screen.findByRole("heading", { name: "Audit trail" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Moderation action" })).toBeTruthy();
   });
 
   it("[FIT-ACM-071] opens the redacted problem when the full record is not readable", async () => {

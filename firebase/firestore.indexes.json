@@ -915,6 +915,20 @@
       ]
     },
     {
+      "collectionGroup": "escrowModerationAnchorJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextAttemptAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "escrowPostingPauseJobs",
       "queryScope": "COLLECTION",
       "fields": [
@@ -961,6 +975,22 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "contentId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "moderationEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentProblemId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "moderationEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentProposalId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },
