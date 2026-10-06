@@ -15,8 +15,7 @@ import { Modal } from "./Modal.jsx";
  * Indicative interest from a client or funder. This does not deposit tokens;
  * the escrow tab remains the place that moves funds.
  *
- * `onSubmit` receives the normalised payload. Until the approach record exists,
- * the page can omit it: a valid form stays open and is not treated as sent.
+ * `onSubmit` receives the normalised payload and resolves once the approach is recorded.
  */
 export function FundingApproachForm({ proposal, onDismiss, onSubmit }) {
   const [form, setForm] = useState(() => emptyFundingApproach(proposal));

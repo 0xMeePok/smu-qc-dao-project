@@ -1,5 +1,8 @@
+import { httpsCallable } from "firebase/functions";
 import { CURRENCIES } from "../config/postingCategories.js";
+import { requireFirebase } from "./authFlow.js";
 import { toDate } from "./datetime.js";
+import { functions } from "./firebase.js";
 
 export const APPROACH_TEXT_MAX = 2000;
 
@@ -78,4 +81,19 @@ export function fundingApproachPayload(form) {
     message: String(form.message).trim(),
     expiresAt: toDate(form.expiresAt).toISOString(),
   };
+}
+
+export function fundingApproachError(error) {
+  const code = String(error?.code || "").split("/").pop();
+  if (code === "unauthenticated") return "Sign in again to continue.";
+  if (["invalid-argument", "permission-denied", "failed-precondition", "not-found", "already-exists"].includes(code)) {
+    return error.message;
+  }
+  return "This approach could not be sent. Please try again.";
+}
+
+/** Server-owned pending record. The browser cannot write the collection itself. */
+export async function createFundingApproach(proposalId, payload) {
+  requireFirebase();
+  return (await httpsCallable(functions, "createFundingApproach")({ proposalId, ...payload })).data;
 }

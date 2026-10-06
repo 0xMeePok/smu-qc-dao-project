@@ -35,6 +35,7 @@ import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 import { PosterIdentity } from "../components/PosterIdentity.jsx";
 import { FundingApproachForm } from "../components/FundingApproachForm.jsx";
+import { createFundingApproach, fundingApproachError } from "../lib/fundingApproach.js";
 import { canApproachIndependentListing } from "../lib/independentFunding.js";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
@@ -359,7 +360,10 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
-    {approachOpen && canApproach && <FundingApproachForm proposal={proposal} onDismiss={() => setApproachOpen(false)} />}
+    {approachOpen && canApproach && <FundingApproachForm proposal={proposal} onDismiss={() => setApproachOpen(false)} onSubmit={async (payload) => {
+      try { await createFundingApproach(proposal.id, payload); }
+      catch (err) { throw new Error(fundingApproachError(err)); }
+    }} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
       <div className="modal-head">
         <div>
