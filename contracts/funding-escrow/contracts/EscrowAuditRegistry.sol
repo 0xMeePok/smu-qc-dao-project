@@ -114,7 +114,7 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
     /// The text stays off-chain. This does not move tokens.
     function anchorFundingApproachDecisions(bytes32[] calldata decisionIds, bytes32[] calldata recordHashes) external {
         if (decisionIds.length == 0 || decisionIds.length != recordHashes.length || decisionIds.length > 100) revert InvalidInput();
-        for (uint256 i = 0; i < decisionIds.length; i++) {
+        for (uint256 i = 0; i < decisionIds.length; ++i) {
             bytes32 decisionId = decisionIds[i];
             bytes32 recordHash = recordHashes[i];
             if (decisionId == bytes32(0) || recordHash == bytes32(0)) revert InvalidInput();
