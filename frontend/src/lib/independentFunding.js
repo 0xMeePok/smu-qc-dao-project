@@ -1,5 +1,5 @@
 import { ROLES } from "../config/roles.js";
-import { independentListingWindowOpen, isIndependentProposal } from "../config/proposal.js";
+import { fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "../config/proposal.js";
 
 /**
  * Deposit is offered to a platform member who is not the author.
@@ -8,6 +8,7 @@ import { independentListingWindowOpen, isIndependentProposal } from "../config/p
  */
 export function canApproachIndependentListing({ proposal, user }) {
   if (!isIndependentProposal(proposal) || !proposal?.fundingTerms) return false;
+  if (fundingApproachAccepted(proposal)) return false;
   if (!independentListingWindowOpen(proposal)) return false;
   const uid = String(user?.id ?? "").toLowerCase();
   if (!uid || uid === String(proposal.researcherId ?? "").toLowerCase()) return false;

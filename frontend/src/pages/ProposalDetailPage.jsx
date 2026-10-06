@@ -22,7 +22,7 @@ import { OwnerReviewPanel } from "../components/OwnerReviewPanel.jsx";
 import { ProposalRevisionTrail } from "../components/ProposalRevisionTrail.jsx";
 import { ConsolidatedAuditTrail } from "../components/ConsolidatedAuditTrail.jsx";
 import { highlightWhenPresent } from "../lib/highlightTarget.js";
-import { PROPOSAL_CATEGORIES, PROPOSAL_MATURITY_LEVELS, independentListingWindowOpen, isIndependentProposal } from "../config/proposal.js";
+import { PROPOSAL_CATEGORIES, PROPOSAL_MATURITY_LEVELS, fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
 import { getMockMatching, mergeMatchingState, proposalFundingStatus, proposalMatchingLocked } from "../lib/matching.js";
@@ -228,7 +228,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const locked = !listingOpen || (proposal.fundingTerms
     ? (independent ? escrowState?.totalDeposited > 0n : !escrowState || escrowState.totalDeposited > 0n)
     : proposalMatchingLocked(proposal) || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal.problemMatching?.status));
-  const canEdit = owns && !locked && !escrowState?.grantOfferState && proposal.status === "submitted";
+  const approachAccepted = independent && fundingApproachAccepted(proposal);
+  const canEdit = owns && !locked && !approachAccepted && !escrowState?.grantOfferState && proposal.status === "submitted";
   const canWithdraw = owns && !locked && ["submitted", "under_review"].includes(proposal.status);
   const funding = proposalFundingStatus(proposal);
   return <section className="page detail-page blotter-posting">
@@ -243,6 +244,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         </div>
         <div className="trust-status-row">
           {proposal.fundingTerms ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}
+          {approachAccepted && <span className="draft-badge">Funded</span>}
           {!independent && funding.detail && <span className="funding-note">{funding.detail}</span>}
           {proposal.status !== "draft" && !independent && <EvaluationBadges counts={recommendationCounts(proposal)} />}
           <VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending />

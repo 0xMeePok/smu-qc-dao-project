@@ -8,6 +8,7 @@ import {
   INDEPENDENT_PROPOSAL_FIELDS,
   PROPOSAL_CATEGORIES,
   PROPOSAL_MATURITY_LEVELS,
+  fundingApproachAccepted,
   independentListingWindowOpen,
   isIndependentProposal,
 } from "../config/proposal.js";
@@ -311,6 +312,9 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         // The listing window and a started deposit are checked here. The escrow
         // proposal is linked from the publish signature, not from this edit.
         const current = await findProposal(proposalId, { fromServer: true });
+        if (fundingApproachAccepted(current)) {
+          throw new Error("A funding approach has been accepted. This listing can no longer be edited.");
+        }
         if (!current || proposalMatchingLocked(current)) {
           throw new Error("Funding or matching has started. This proposal can no longer be edited.");
         }
@@ -360,6 +364,9 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   if (resumeId && !record) {
     return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p>
       <button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
+  }
+  if (resumeId && record && fundingApproachAccepted(record)) {
+    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">A funding approach has been accepted. This listing can no longer be edited.</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View listing</button></section>;
   }
   if (resumeId && record && (proposalMatchingLocked(record)
     || (!["draft", "submitted"].includes(record.status))

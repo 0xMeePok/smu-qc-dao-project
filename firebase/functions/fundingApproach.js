@@ -3,7 +3,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { decodeEventLog } from "viem";
 import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachRecordHash } from "./fundingApproachAnchor.js";
-import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
+import { fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { memberNoticeFields } from "./moderation.js";
 import { instantMs } from "./opportunityExpiry.js";
 
@@ -190,6 +190,7 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
       fail("failed-precondition", "This listing is not open for a funding approach.");
     }
     if (data.moderated || BLOCKED.has(data.moderationStatus)) fail("failed-precondition", "Funding is paused while this content is moderated.");
+    if (fundingApproachAccepted(data)) fail("failed-precondition", "A funding approach has already been accepted for this listing.");
     if (same(data.researcherId, funderId)) fail("permission-denied", "The listing author cannot approach their own listing.");
     if (!independentListingWindowOpen(data, now.toDate())) fail("failed-precondition", "This listing's funding window is closed.");
     const listingMs = instantMs(data.expiresAt);
@@ -265,8 +266,8 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
 
 /**
  * The listing's researcher accepts or declines one still-pending approach.
- * Decline stores a reason. Accept may store a message. The listing's funded state,
- * other approaches, notices, and the on-chain decision are separate steps.
+ * Decline stores a reason. Accept may store a message and marks the listing funded.
+ * Other approaches, notices, and the on-chain decision are separate steps.
  */
 export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now() }) {
   validId(approachId, "approach");
@@ -295,6 +296,9 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
     }
     if (data.status !== "pending") fail("failed-precondition", "This approach has already been decided.");
     if (instantMs(data.expiresAt) <= now.toMillis()) fail("failed-precondition", "This approach has expired.");
+    if (status === "accepted" && fundingApproachAccepted(listing)) {
+      fail("failed-precondition", "A funding approach has already been accepted for this listing.");
+    }
     const slotRef = db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(data.proposalId, data.funderId));
     const slot = await tx.get(slotRef);
     const next = {
@@ -313,6 +317,9 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
         declineReason,
         updatedAt: now,
       });
+    }
+    if (status === "accepted") {
+      tx.update(proposal.ref, { acceptedApproachId: approachId, fundedAt: now, updatedAt: now });
     }
     return view(approachId, { ...data, ...next });
   });

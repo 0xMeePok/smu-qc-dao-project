@@ -31,6 +31,11 @@ export function isIndependentProposal(record) {
   return record?.proposalKind === INDEPENDENT_PROPOSAL_KIND;
 }
 
+/** The researcher has accepted one approach. The listing stays submitted so escrow deposits still apply. */
+export function fundingApproachAccepted(record) {
+  return typeof record?.acceptedApproachId === "string" && record.acceptedApproachId.length > 0;
+}
+
 /** Live listing window for comments and author edits. Uses this record's expiresAt, not a parent posting. */
 export function independentListingWindowOpen(record, now = new Date()) {
   if (!isIndependentProposal(record)) return false;

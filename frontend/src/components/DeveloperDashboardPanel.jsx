@@ -267,7 +267,10 @@ export function DeveloperDashboardPanel({ onNavigate }) {
                 hint="Published by you without a parent opportunity, so no evaluator gate applies. Every one is listed here, including any that also appear above."
                 rows={groups.independent}
               >
-                {(row) => <RowShell key={row.id} row={row} onNavigate={onNavigate} />}
+                {(row) => (
+                  <RowShell key={row.id} row={row} onNavigate={onNavigate}
+                    meta={row.acceptedApproachId ? <small className="table-row-meta">A funding approach has been accepted.</small> : null} />
+                )}
               </Group>
             </>
           )}

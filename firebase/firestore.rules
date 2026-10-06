@@ -942,6 +942,12 @@ service cloud.firestore {
       return data.get('proposalKind', '') == 'independent';
     }
 
+    function fundingApproachAccepted(data) {
+      return data.keys().hasAny(['acceptedApproachId'])
+        && data.acceptedApproachId is string
+        && data.acceptedApproachId.size() > 0;
+    }
+
     function validIndependentProposal(data) {
       return isIndependentProposal(data)
         && !data.keys().hasAny(['problemId', 'postingOwnerId', 'opportunityType'])
@@ -1149,6 +1155,7 @@ service cloud.firestore {
     function validIndependentProposalCorrection(before, after) {
       return isIndependentProposal(before)
         && isIndependentProposal(after)
+        && !fundingApproachAccepted(before)
         && before.status == 'submitted'
         && after.status == 'submitted'
         && independentCorrectionTouchesOnlyContent(before, after)

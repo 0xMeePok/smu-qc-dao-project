@@ -7,6 +7,7 @@ import { deleteAttachment, toPostingRecord } from "./attachments.js";
 import {
   INDEPENDENT_PROPOSAL_FIELDS,
   INDEPENDENT_PROPOSAL_KIND,
+  fundingApproachAccepted,
   isIndependentProposal,
   PROPOSAL_FIELDS,
   PROBLEM_FRAMING_FIELDS,
@@ -304,6 +305,9 @@ export async function updateIndependentProposal({
   });
   const { createdAt, ...record } = built;
   const current = await findProposal(proposalId);
+  if (fundingApproachAccepted(current)) {
+    throw new Error("A funding approach has been accepted. This listing can no longer be edited.");
+  }
   await attestPublication("proposals", proposalId, {
     ...(current ?? {}),
     ...record,

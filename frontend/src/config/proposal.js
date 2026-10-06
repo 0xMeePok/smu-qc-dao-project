@@ -4,6 +4,7 @@ export {
   INDEPENDENT_PROPOSAL_KIND,
   PROPOSAL_MATURITY_LEVELS,
   PROPOSAL_MATURITY_VALUES,
+  fundingApproachAccepted,
   isIndependentProposal,
   independentListingWindowOpen,
 } from "../../../firebase/functions/independentProposal.js";
