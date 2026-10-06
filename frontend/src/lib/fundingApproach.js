@@ -1,7 +1,10 @@
 import { httpsCallable } from "firebase/functions";
+import { FUNDING_APPROACH_ANCHOR_ABI } from "../../../firebase/functions/fundingApproachAnchor.js";
+import { AUDIT_REGISTRY_CHAIN_ID, getAuditRegistryAddress } from "../config/auditRegistry.js";
 import { CURRENCIES } from "../config/postingCategories.js";
 import { requireFirebase } from "./authFlow.js";
 import { toDate } from "./datetime.js";
+import { confirmEscrowTransaction, createWagmiEscrowAdapters, escrowErrorMessage } from "./escrow.js";
 import { functions } from "./firebase.js";
 
 export const APPROACH_TEXT_MAX = 2000;
@@ -108,4 +111,33 @@ export function fundingApproachStatusLabel(status) {
 export async function listFundingApproaches() {
   requireFirebase();
   return (await httpsCallable(functions, "listFundingApproaches")({})).data;
+}
+
+/** The funder's wallet anchors the saved digest. The message is not sent to the chain. */
+export async function submitFundingApproachAnchor(created, { account, adapters = createWagmiEscrowAdapters() } = {}) {
+  if (!/^0x[0-9a-f]{64}$/i.test(created?.approachAnchorId || "") || !/^0x[0-9a-f]{64}$/i.test(created?.recordHash || "")) {
+    throw new Error("This approach has no anchor digest.");
+  }
+  let transactionHash;
+  try {
+    transactionHash = await adapters.writeContract({
+      address: getAuditRegistryAddress(),
+      abi: FUNDING_APPROACH_ANCHOR_ABI,
+      functionName: "anchorFundingApproach",
+      args: [created.approachAnchorId, created.recordHash],
+      account,
+      chainId: AUDIT_REGISTRY_CHAIN_ID,
+    });
+    const receipt = await confirmEscrowTransaction(transactionHash, { adapters, confirmations: 2 });
+    return { transactionHash: receipt.transactionHash ?? transactionHash };
+  } catch (cause) {
+    const error = new Error(escrowErrorMessage(cause));
+    error.transactionHash = cause.transactionHash || transactionHash;
+    throw error;
+  }
+}
+
+export async function recordFundingApproachAnchor(approachId, transactionHash) {
+  requireFirebase();
+  return (await httpsCallable(functions, "recordFundingApproachAnchor")({ approachId, transactionHash })).data;
 }

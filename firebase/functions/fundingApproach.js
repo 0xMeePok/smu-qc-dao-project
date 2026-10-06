@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
+import { decodeEventLog } from "viem";
+import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachRecordHash } from "./fundingApproachAnchor.js";
 import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { memberNoticeFields } from "./moderation.js";
 import { instantMs } from "./opportunityExpiry.js";
@@ -60,6 +62,9 @@ function listItem(id, data, extras) {
     status: data.status || "pending",
     expiresAt: iso(data.expiresAt),
     createdAt: iso(data.createdAt),
+    approachAnchorId: data.anchor?.approachAnchorId ?? null,
+    recordHash: data.anchor?.recordHash ?? null,
+    anchorStatus: data.anchor?.status ?? null,
   };
 }
 
@@ -113,6 +118,9 @@ function view(id, data) {
     status: data.status,
     expiresAt: iso(data.expiresAt),
     createdAt: iso(data.createdAt),
+    approachAnchorId: data.anchor?.approachAnchorId ?? null,
+    recordHash: data.anchor?.recordHash ?? null,
+    anchorStatus: data.anchor?.status ?? null,
   };
 }
 
@@ -136,6 +144,8 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
   const slotRef = db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(proposalId, funderId));
   const approachRef = db.collection(FUNDING_APPROACHES).doc(randomBytes(16).toString("hex"));
   const noticeRef = db.collection("moderationNotifications").doc(`funding_approach_${approachRef.id}`);
+  const expiresAtIso = new Date(expiryMs).toISOString();
+  const approachAnchorId = fundingApproachAnchorId(approachRef.id, funderId);
 
   return db.runTransaction(async (tx) => {
     const [profile, proposal, slot] = await Promise.all([
@@ -175,6 +185,9 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
     const previousPending = previousData?.status === "pending" && instantMs(previousData.expiresAt) > nowMs;
     if (previousPending) fail("already-exists", "You already have a pending approach for this listing.");
 
+    const recordHash = fundingApproachRecordHash({
+      funderId, proposalId, researcherId, amount, currency, scope, message, expiresAt: expiresAtIso,
+    });
     const record = {
       funderId,
       proposalId,
@@ -187,6 +200,15 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
       expiresAt: Timestamp.fromMillis(expiryMs),
       createdAt: now,
       updatedAt: now,
+      anchor: {
+        status: "pending",
+        eventVersion: 1,
+        approachAnchorId,
+        recordHash,
+        transactionHash: null,
+        anchoredAt: null,
+        anchoredBy: null,
+      },
     };
     if (previous?.exists && previousData.status === "pending") {
       tx.update(previousRef, { status: "expired", updatedAt: now });
@@ -211,4 +233,47 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
     });
     return view(approachRef.id, record);
   });
+}
+
+/** Stores the funder's mined anchor once the registry log matches the saved digest. */
+export async function saveFundingApproachAnchor({ db, client, config, uid, approachId, transactionHash, now = Timestamp.now() }) {
+  validId(approachId, "approach");
+  if (!/^0x[0-9a-f]{64}$/i.test(transactionHash || "")) fail("invalid-argument", "A transaction hash is required.");
+  const funderId = String(uid || "").toLowerCase();
+  const ref = db.collection(FUNDING_APPROACHES).doc(approachId);
+  const snap = await ref.get();
+  if (!snap.exists) fail("not-found", "This approach is no longer available.");
+  const data = snap.data();
+  if (!same(data.funderId, funderId)) fail("permission-denied", "Only the funder who sent this approach can anchor it.");
+  const anchor = data.anchor || {};
+  if (anchor.status === "confirmed" && same(anchor.transactionHash, transactionHash)) return view(approachId, data);
+  if (!/^0x[0-9a-f]{64}$/i.test(anchor.approachAnchorId || "") || !/^0x[0-9a-f]{64}$/i.test(anchor.recordHash || "")) {
+    fail("failed-precondition", "This approach has no anchor digest.");
+  }
+  const receipt = await client.getTransactionReceipt({ hash: transactionHash });
+  if (receipt.status !== "success") fail("failed-precondition", "The anchor transaction was not confirmed.");
+  if (!same(receipt.from, funderId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
+  if (!same(receipt.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
+  let matched = null;
+  for (const log of receipt.logs) {
+    if (!same(log.address, config.address)) continue;
+    try {
+      const decoded = decodeEventLog({ abi: FUNDING_APPROACH_ANCHOR_ABI, topics: log.topics, data: log.data, strict: true });
+      if (decoded.eventName === "FundingApproachAnchored") { matched = decoded.args; break; }
+    } catch { /* The receipt can contain other registry logs. */ }
+  }
+  if (!matched) fail("failed-precondition", "The transaction does not anchor this approach.");
+  if (!same(matched.approachId, anchor.approachAnchorId)) fail("failed-precondition", "The transaction anchors a different approach.");
+  if (!same(matched.recordHash, anchor.recordHash)) fail("failed-precondition", "The anchored hash does not match this approach.");
+  if (!same(matched.anchoredBy, funderId)) fail("permission-denied", "The anchor was not signed by this funder.");
+  const confirmed = {
+    ...anchor,
+    status: "confirmed",
+    transactionHash: transactionHash.toLowerCase(),
+    blockNumber: Number(receipt.blockNumber),
+    anchoredAt: new Date(Number(matched.anchoredAt) * 1000).toISOString(),
+    anchoredBy: funderId,
+  };
+  await ref.update({ anchor: confirmed, updatedAt: now });
+  return view(approachId, { ...data, anchor: confirmed });
 }

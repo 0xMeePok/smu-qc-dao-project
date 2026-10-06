@@ -6,6 +6,7 @@ import { readEscrow } from "../lib/escrow.js";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useAccount } from "wagmi";
+import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findProposal, withdrawProposal } from "../lib/proposals.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
@@ -35,7 +36,7 @@ import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 import { PosterIdentity } from "../components/PosterIdentity.jsx";
 import { FundingApproachForm } from "../components/FundingApproachForm.jsx";
-import { createFundingApproach, fundingApproachError } from "../lib/fundingApproach.js";
+import { createFundingApproach, fundingApproachError, recordFundingApproachAnchor, submitFundingApproachAnchor } from "../lib/fundingApproach.js";
 import { canApproachIndependentListing } from "../lib/independentFunding.js";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
@@ -43,7 +44,7 @@ import { canApproachIndependentListing } from "../lib/independentFunding.js";
 // control below is for a receipt that was left in flight.
 export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false, initialTab = "overview" }) {
   const { user } = useAuth();
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chainId } = useAccount();
   const [proposal, setProposal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -63,6 +64,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [fundingRefreshVersion, setFundingRefreshVersion] = useState(0);
   const [author, setAuthor] = useState(null);
   const [approachOpen, setApproachOpen] = useState(false);
+  const [savedApproach, setSavedApproach] = useState(null);
   useEffect(() => {
     const fundingStarted = proposal?.fundingTerms ? escrowState?.totalDeposited > 0n : proposalMatchingLocked(proposal)
       || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status);
@@ -77,7 +79,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setProposal(null); setEscrowState(null); setError(""); setConfirm(false);
-    setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab); setApproachOpen(false);
+    setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab); setApproachOpen(false); setSavedApproach(null);
     setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
@@ -360,9 +362,25 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
-    {approachOpen && canApproach && <FundingApproachForm proposal={proposal} onDismiss={() => setApproachOpen(false)} onSubmit={async (payload) => {
-      try { await createFundingApproach(proposal.id, payload); }
-      catch (err) { throw new Error(fundingApproachError(err)); }
+    {approachOpen && canApproach && <FundingApproachForm proposal={proposal} pendingAnchor={savedApproach} onDismiss={() => setApproachOpen(false)} onSubmit={async (payload) => {
+      if (!isConnected || address?.toLowerCase() !== user?.id?.toLowerCase()) {
+        setWalletPromptOpen(true);
+        throw new Error("Connect the wallet you are signed in with to anchor this approach.");
+      }
+      if (chainId !== AUDIT_REGISTRY_CHAIN_ID) throw new Error("Switch your wallet to Arbitrum Sepolia to anchor this approach.");
+      let created = savedApproach;
+      try {
+        if (!created) {
+          created = await createFundingApproach(proposal.id, payload);
+          setSavedApproach(created);
+        }
+        const { transactionHash } = await submitFundingApproachAnchor(created, { account: address });
+        await recordFundingApproachAnchor(created.id, transactionHash);
+        setSavedApproach(null);
+      } catch (err) {
+        if (err?.code) throw new Error(fundingApproachError(err));
+        throw err instanceof Error ? err : new Error("This approach could not be anchored.");
+      }
     }} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
       <div className="modal-head">

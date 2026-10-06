@@ -15,9 +15,10 @@ import { Modal } from "./Modal.jsx";
  * Indicative interest from a client or funder. This does not deposit tokens;
  * the escrow tab remains the place that moves funds.
  *
- * `onSubmit` receives the normalised payload and resolves once the approach is recorded.
+ * `onSubmit` records the approach, then asks the funder's wallet to anchor its hash.
+ * `pendingAnchor` is a saved approach whose wallet signature has not been stored yet.
  */
-export function FundingApproachForm({ proposal, onDismiss, onSubmit }) {
+export function FundingApproachForm({ proposal, onDismiss, onSubmit, pendingAnchor = null }) {
   const [form, setForm] = useState(() => emptyFundingApproach(proposal));
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -40,12 +41,15 @@ export function FundingApproachForm({ proposal, onDismiss, onSubmit }) {
 
   const submit = async (event) => {
     event.preventDefault();
-    const next = validateFundingApproach(form, { listingExpiresAt: proposal.expiresAt });
-    setErrors(next);
-    if (Object.keys(next).length || typeof onSubmit !== "function") return;
+    if (!pendingAnchor) {
+      const next = validateFundingApproach(form, { listingExpiresAt: proposal.expiresAt });
+      setErrors(next);
+      if (Object.keys(next).length) return;
+    }
+    if (typeof onSubmit !== "function") return;
     setSubmitting(true);
     try {
-      await onSubmit(fundingApproachPayload(form));
+      await onSubmit(pendingAnchor ? null : fundingApproachPayload(form));
       onDismiss();
     } catch (err) {
       setErrors((current) => ({ ...current, form: err?.message || "This approach could not be sent." }));
@@ -60,10 +64,11 @@ export function FundingApproachForm({ proposal, onDismiss, onSubmit }) {
         <div className="modal-head">
           <div>
             <h2 id="funding-approach-title">Approach with funding</h2>
-            <p id="funding-approach-desc">Tell the researcher the funding you have in mind. This does not deposit tokens or start a contract.</p>
+            <p id="funding-approach-desc">Tell the researcher the funding you have in mind. This does not deposit tokens. Your wallet then anchors a hash of this approach so the interest and its time can be verified. The message stays off-chain.</p>
           </div>
         </div>
         <div className="modal-body">
+          {pendingAnchor ? <p>This approach is saved. Sign the anchor so Arbitrum Sepolia records its hash and time. You will not be asked to send it again.</p> : <>
           <Field htmlFor="approach-amount" label="Indicative funding amount" error={errors.amount}>
             {({ id, describedBy, invalid }) => (
               <input id={id} type="number" inputMode="decimal" min="0.000001" max="1000000000" step="any" required
@@ -97,11 +102,12 @@ export function FundingApproachForm({ proposal, onDismiss, onSubmit }) {
                 aria-invalid={invalid} aria-describedby={describedBy} onChange={update("expiresAt")} />
             )}
           </Field>
+          </>}
           {errors.form ? <p className="error-banner" role="alert">{errors.form}</p> : null}
         </div>
         <div className="modal-actions">
           <button className="secondary" type="button" disabled={submitting} onClick={onDismiss}>Cancel</button>
-          <button className="primary" type="submit" disabled={submitting}>{submitting ? "Sending…" : "Send approach"}</button>
+          <button className="primary" type="submit" disabled={submitting}>{submitting ? (pendingAnchor ? "Waiting for your wallet…" : "Sending…") : (pendingAnchor ? "Sign anchor" : "Send approach")}</button>
         </div>
       </form>
     </Modal>
