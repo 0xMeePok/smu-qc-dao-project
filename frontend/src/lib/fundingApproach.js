@@ -105,7 +105,27 @@ export async function createFundingApproach(proposalId, payload) {
 export function fundingApproachStatusLabel(status) {
   if (status === "expired") return workflowStatusLabel(WORKFLOW_STATUS.EXPIRED);
   if (status === "cancelled") return workflowStatusLabel(WORKFLOW_STATUS.CANCELLED);
+  if (status === "accepted") return workflowStatusLabel(WORKFLOW_STATUS.ACCEPTED);
+  if (status === "declined") return workflowStatusLabel(WORKFLOW_STATUS.DECLINED);
   return "Pending";
+}
+
+/** A decline reason is required. An accept message is optional and, when present, uses the same bounds. */
+export function validateApproachDecision(decision, text) {
+  if (decision === "decline") return textError(text, "Reason");
+  if (decision !== "accept") return "Choose accept or decline.";
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return null;
+  return textError(trimmed, "Message");
+}
+
+/** Records the researcher's accept or decline. The listing, other approaches, and notices stay unchanged. */
+export async function decideFundingApproach(approachId, decision, text) {
+  requireFirebase();
+  const payload = { approachId, decision };
+  if (decision === "accept" && String(text ?? "").trim()) payload.message = String(text).trim();
+  if (decision === "decline") payload.reason = String(text ?? "").trim();
+  return (await httpsCallable(functions, "decideFundingApproach")(payload)).data;
 }
 
 /** Incoming approaches for the signed-in researcher, and approaches they have sent. */

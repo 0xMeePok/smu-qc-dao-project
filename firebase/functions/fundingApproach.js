@@ -42,6 +42,18 @@ function textFor(value, label) {
   return text;
 }
 
+/** An accept message may be omitted. A non-empty value uses the same bounds as a required note. */
+function optionalText(value, label) {
+  if (value == null || value === "") return "";
+  if (typeof value !== "string") fail("invalid-argument", `${label} must be 2–${APPROACH_TEXT_MAX} characters.`);
+  const text = value.trim();
+  if (!text) return "";
+  if (text.length < 2 || text.length > APPROACH_TEXT_MAX) {
+    fail("invalid-argument", `${label} must be 2–${APPROACH_TEXT_MAX} characters.`);
+  }
+  return text;
+}
+
 export function fundingApproachSlotId(proposalId, funderId) {
   return `${proposalId}_${String(funderId || "").toLowerCase()}`;
 }
@@ -60,6 +72,8 @@ function listItem(id, data, extras) {
     scope: data.scope || "",
     message: data.message || "",
     status: data.status || "pending",
+    acceptMessage: data.acceptMessage || "",
+    declineReason: data.declineReason || "",
     expiresAt: iso(data.expiresAt),
     createdAt: iso(data.createdAt),
     approachAnchorId: data.anchor?.approachAnchorId ?? null,
@@ -75,7 +89,9 @@ async function lookup(db, collection, ids, pick) {
   return new Map(snaps.map((snap) => [snap.id, snap.exists ? pick(snap.data()) : ""]));
 }
 
-/** Incoming pending approaches for the researcher, and every approach this member sent. */
+const RESEARCHER_LIST_STATUSES = ["pending", "accepted", "declined"];
+
+/** Incoming approaches the researcher can still see, and every approach this member sent. */
 export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) {
   const actorId = String(uid || "").toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(actorId)) fail("unauthenticated", "Sign in with your wallet.");
@@ -83,12 +99,15 @@ export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) 
   if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
   const nowMs = now.toMillis();
   const [incomingPage, sentPage] = await Promise.all([
-    db.collection(FUNDING_APPROACHES).where("researcherId", "==", actorId).where("status", "==", "pending")
+    db.collection(FUNDING_APPROACHES).where("researcherId", "==", actorId).where("status", "in", RESEARCHER_LIST_STATUSES)
       .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
     db.collection(FUNDING_APPROACHES).where("funderId", "==", actorId)
       .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
   ]);
-  const incomingDocs = incomingPage.docs.filter((doc) => instantMs(doc.data().expiresAt) > nowMs).slice(0, LIST_CAP);
+  const incomingDocs = incomingPage.docs.filter((doc) => {
+    const data = doc.data();
+    return data.status !== "pending" || instantMs(data.expiresAt) > nowMs;
+  }).slice(0, LIST_CAP);
   const sentDocs = sentPage.docs.slice(0, LIST_CAP);
   const proposalIds = [...incomingDocs, ...sentDocs].map((doc) => doc.data().proposalId);
   const [proposals, names] = await Promise.all([
@@ -122,6 +141,9 @@ function view(id, data) {
     scope: data.scope,
     message: data.message,
     status: data.status,
+    acceptMessage: data.acceptMessage || "",
+    declineReason: data.declineReason || "",
+    decidedAt: iso(data.decidedAt),
     expiresAt: iso(data.expiresAt),
     createdAt: iso(data.createdAt),
     approachAnchorId: data.anchor?.approachAnchorId ?? null,
@@ -238,6 +260,61 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
       updatedAt: now,
     });
     return view(approachRef.id, record);
+  });
+}
+
+/**
+ * The listing's researcher accepts or declines one still-pending approach.
+ * Decline stores a reason. Accept may store a message. The listing's funded state,
+ * other approaches, notices, and the on-chain decision are separate steps.
+ */
+export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now() }) {
+  validId(approachId, "approach");
+  if (decision !== "accept" && decision !== "decline") fail("invalid-argument", "Choose accept or decline.");
+  const researcherId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(researcherId)) fail("unauthenticated", "Sign in with your wallet.");
+  const acceptMessage = decision === "accept" ? optionalText(message, "Message") : "";
+  const declineReason = decision === "decline" ? textFor(reason, "Reason") : "";
+  const status = decision === "accept" ? "accepted" : "declined";
+  const ref = db.collection(FUNDING_APPROACHES).doc(approachId);
+
+  return db.runTransaction(async (tx) => {
+    const approach = await tx.get(ref);
+    if (!approach.exists) fail("not-found", "This approach is no longer available.");
+    const data = approach.data();
+    if (!same(data.researcherId, researcherId)) fail("permission-denied", "Only the researcher on this listing can respond to this approach.");
+    const [profile, proposal] = await Promise.all([
+      tx.get(db.collection("users").doc(uid)),
+      tx.get(db.collection("proposals").doc(data.proposalId)),
+    ]);
+    if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+    if (!proposal.exists || !isIndependentProposal(proposal.data())) fail("failed-precondition", "Only an independent listing can be responded to this way.");
+    const listing = proposal.data();
+    if (listing.moderated || BLOCKED.has(listing.moderationStatus) || listing.status === "moderated_removed") {
+      fail("failed-precondition", "Funding is paused while this content is moderated.");
+    }
+    if (data.status !== "pending") fail("failed-precondition", "This approach has already been decided.");
+    if (instantMs(data.expiresAt) <= now.toMillis()) fail("failed-precondition", "This approach has expired.");
+    const slotRef = db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(data.proposalId, data.funderId));
+    const slot = await tx.get(slotRef);
+    const next = {
+      status,
+      acceptMessage,
+      declineReason,
+      decidedAt: now,
+      decidedBy: researcherId,
+      updatedAt: now,
+    };
+    tx.update(ref, next);
+    if (slot.exists && slot.data().approachId === approachId && slot.data().status === "pending") {
+      tx.update(slotRef, {
+        status,
+        acceptMessage,
+        declineReason,
+        updatedAt: now,
+      });
+    }
+    return view(approachId, { ...data, ...next });
   });
 }
 
