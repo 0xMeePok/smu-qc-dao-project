@@ -48,6 +48,7 @@ import { feedbackByProposal, listActionItems as actionItems, listEvaluatorQueue 
 import { collectOwnerDashboard } from "./ownerDashboard.js";
 import { listIndependentListings as independentListings } from "./independentProposalCatalog.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
+import { createFundingApproach as writeFundingApproach, decideFundingApproach as writeFundingApproachDecision, listFundingApproaches as readFundingApproaches, saveFundingApproachAnchor, saveFundingApproachDecisionAnchors } from "./fundingApproach.js";
 import { readAuditTrail } from "./auditTrail.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
@@ -255,6 +256,44 @@ export const listActionItems = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 
 export const listOwnerDashboard = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return collectOwnerDashboard({ db, uid, readFeedback: feedbackByProposal });
+});
+
+export const createFundingApproach = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return writeFundingApproach({
+    db, uid, now: Timestamp.now(), proposalId: request.data?.proposalId,
+    amount: request.data?.amount, currency: request.data?.currency,
+    scope: request.data?.scope, message: request.data?.message, expiresAt: request.data?.expiresAt,
+  });
+});
+
+export const listFundingApproaches = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return readFundingApproaches({ db, uid, now: Timestamp.now() });
+});
+
+export const decideFundingApproach = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return writeFundingApproachDecision({
+    db, uid, now: Timestamp.now(), approachId: request.data?.approachId, decision: request.data?.decision,
+    message: request.data?.message, reason: request.data?.reason,
+  });
+});
+
+export const recordFundingApproachAnchor = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return saveFundingApproachAnchor({
+    db, client: publicClient, config: auditRegistryConfig, uid, now: Timestamp.now(),
+    approachId: request.data?.approachId, transactionHash: request.data?.transactionHash,
+  });
+});
+
+export const recordFundingApproachDecisionAnchors = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return saveFundingApproachDecisionAnchors({
+    db, client: publicClient, config: auditRegistryConfig, uid, now: Timestamp.now(),
+    approachIds: request.data?.approachIds, transactionHash: request.data?.transactionHash,
+  });
 });
 
 export const recordOwnerReview = onCall(MEMBER_CALL_OPTIONS, async (request) => {

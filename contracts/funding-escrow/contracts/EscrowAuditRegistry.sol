@@ -27,6 +27,8 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
     mapping(bytes32 postingId => bytes32) public pendingProposalForPosting;
     mapping(bytes32 proposalId => FundingAnchor[]) private _fundingAnchors;
     mapping(bytes32 moderationId => bytes32 recordHash) public moderationRecordHash;
+    mapping(bytes32 approachId => bytes32 recordHash) public fundingApproachRecordHash;
+    mapping(bytes32 decisionId => bytes32 recordHash) public fundingApproachDecisionHash;
     mapping(address admin => bool) private _moderationAdmins;
 
     event FundingFactoryConfigured(address indexed factory);
@@ -36,6 +38,10 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
     event FundingEventAnchored(bytes32 indexed proposalId, address indexed escrow, FundingEvent eventType,
         bytes32 digest, address actor, uint64 timestamp);
     event ModerationAnchored(bytes32 indexed moderationId, bytes32 indexed recordHash,
+        address indexed anchoredBy, uint64 anchoredAt);
+    event FundingApproachAnchored(bytes32 indexed approachId, bytes32 indexed recordHash,
+        address indexed anchoredBy, uint64 anchoredAt);
+    event FundingApproachDecisionAnchored(bytes32 indexed decisionId, bytes32 indexed recordHash,
         address indexed anchoredBy, uint64 anchoredAt);
     event ModerationAdminChanged(address indexed admin, bool enabled);
 
@@ -86,6 +92,37 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
         if (moderationRecordHash[moderationId] != bytes32(0)) revert InvalidState();
         moderationRecordHash[moderationId] = recordHash;
         emit ModerationAnchored(moderationId, recordHash, msg.sender, uint64(block.timestamp));
+    }
+
+    /// @notice Permanently commit one funding approach without publishing its message.
+    /// @dev The first 20 bytes of approachId are the funder, so only that wallet can anchor it.
+    /// recordHash is a versioned canonical digest of the funder, proposal, researcher, amount,
+    /// currency, scope, message and expiry. The message stays off-chain.
+    /// anchoredBy is msg.sender and anchoredAt is the block time. This does not move tokens.
+    function anchorFundingApproach(bytes32 approachId, bytes32 recordHash) external {
+        if (approachId == bytes32(0) || recordHash == bytes32(0)) revert InvalidInput();
+        if (address(bytes20(approachId)) != msg.sender) revert AccessDenied();
+        if (fundingApproachRecordHash[approachId] != bytes32(0)) revert InvalidState();
+        fundingApproachRecordHash[approachId] = recordHash;
+        emit FundingApproachAnchored(approachId, recordHash, msg.sender, uint64(block.timestamp));
+    }
+
+    /// @notice Permanently commit funding-approach decisions without publishing their text.
+    /// @dev The first 20 bytes of each decisionId are the researcher, so only that wallet can anchor them.
+    /// Each recordHash is a versioned digest of the outcome and the accept message or decline reason.
+    /// One call anchors the chosen approach and every approach declined because of it.
+    /// The text stays off-chain. This does not move tokens.
+    function anchorFundingApproachDecisions(bytes32[] calldata decisionIds, bytes32[] calldata recordHashes) external {
+        if (decisionIds.length == 0 || decisionIds.length != recordHashes.length || decisionIds.length > 100) revert InvalidInput();
+        for (uint256 i = 0; i < decisionIds.length; ++i) {
+            bytes32 decisionId = decisionIds[i];
+            bytes32 recordHash = recordHashes[i];
+            if (decisionId == bytes32(0) || recordHash == bytes32(0)) revert InvalidInput();
+            if (address(bytes20(decisionId)) != msg.sender) revert AccessDenied();
+            if (fundingApproachDecisionHash[decisionId] != bytes32(0)) revert InvalidState();
+            fundingApproachDecisionHash[decisionId] = recordHash;
+            emit FundingApproachDecisionAnchored(decisionId, recordHash, msg.sender, uint64(block.timestamp));
+        }
     }
 
     /// @dev Deliberately disable the old entry point on this linked deployment.

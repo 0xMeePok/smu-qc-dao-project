@@ -21,7 +21,7 @@ export function moderationVoidJobId(eventId, proposalId) {
   return `${eventId}_${proposalId}`.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 700);
 }
 
-/** Queue one voidEscrow job per linked proposal escrow. Independent listings have none. */
+/** Queue one voidEscrow job per linked proposal escrow. An independent listing uses its own id as the parent reference. */
 export async function enqueueModerationVoidJobs({ db, contentType, contentId, eventId, reason, now = Timestamp.now() }) {
   if (!eventId || !contentId || (contentType !== "proposal" && contentType !== "problem")) return { enqueued: 0 };
   const reasonHash = moderationVoidReasonHash(eventId, reason);
@@ -29,7 +29,8 @@ export async function enqueueModerationVoidJobs({ db, contentType, contentId, ev
   if (contentType === "proposal") {
     const doc = await db.collection("proposals").doc(contentId).get();
     const data = doc.exists ? doc.data() : null;
-    if (data?.fundingTerms && data.problemId && !isIndependentProposal(data)) targets = [{ id: doc.id, problemId: data.problemId }];
+    if (data?.fundingTerms && isIndependentProposal(data)) targets = [{ id: doc.id, problemId: doc.id }];
+    else if (data?.fundingTerms && data.problemId) targets = [{ id: doc.id, problemId: data.problemId }];
   } else {
     const rows = await db.collection("proposals").where("problemId", "==", contentId).limit(201).get();
     targets = rows.docs.filter((doc) => doc.data()?.fundingTerms && !isIndependentProposal(doc.data()))

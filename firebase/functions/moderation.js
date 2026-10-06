@@ -363,7 +363,9 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
       ...(commentGate ? { qualifying: commentGate.qualifying } : {}), updatedAt: now });
     tx.update(queueRef, { status: DECISIONS[action], lastAction: action, lastReason: reason, updatedAt: now });
     writeStats(tx, statsRef, stats, pendingDelta(previous, DECISIONS[action]), now);
-    const opensEscrowRefund = action === "remove" && contentType !== "comment" && !isIndependentProposal(data);
+    const independentListing = contentType === "proposal" && isIndependentProposal(data);
+    const opensEscrowRefund = action === "remove" && contentType !== "comment"
+      && (independentListing ? Boolean(data.fundingTerms) : true);
     const decisionAt = now.toDate().toISOString();
     const salt = `0x${randomBytes(32).toString("hex")}`;
     const parentProblemId = contentType === "problem" ? contentId : (data.problemId || "");
@@ -391,7 +393,9 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
       tx.set(db.collection("moderationNotifications").doc(`${eventId}_${authorId}`), {
         recipientId: authorId, queueId, contentType, contentId, title: noticeTitle,
         action, reason, details: note, createdAt: now, readAt: null,
-        ...(opensEscrowRefund ? { message: `Your ${contentType} “${noticeTitle}” was removed. Mock pledges on this item are refunded. Linked on-chain escrows open a claim for the unpaid balance. Paid tranches stay paid.` } : {}),
+        ...(opensEscrowRefund ? { message: independentListing
+          ? `Your listing “${noticeTitle}” was removed. Any pending funding approaches are cancelled. The on-chain escrow opens a claim for the unpaid balance. Paid tranches stay paid.`
+          : `Your ${contentType} “${noticeTitle}” was removed. Mock pledges on this item are refunded. Linked on-chain escrows open a claim for the unpaid balance. Paid tranches stay paid.` } : {}),
         ...(problemId ? { problemId } : {}), ...(proposalId ? { proposalId } : {}),
         ...(navigationTarget ? { navigationTarget, link: `#/${navigationTarget}` } : {}),
       });

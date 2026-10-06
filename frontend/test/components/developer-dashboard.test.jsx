@@ -12,6 +12,10 @@ vi.mock("../../src/lib/proposalQueues.js", async (importOriginal) => ({
   listActionItems: mocks.listActionItems,
 }));
 vi.mock("../../src/lib/firebase.js", () => ({ db: {}, functions: {}, auth: null }));
+vi.mock("../../src/lib/fundingApproach.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  listFundingApproaches: vi.fn().mockResolvedValue({ incoming: [], sent: [], truncated: {} }),
+}));
 vi.mock("../../src/context/AuthContext.jsx", () => ({
   useAuth: () => ({ user: { id: `0x${"a".repeat(40)}`, org: "SMU" } }),
 }));

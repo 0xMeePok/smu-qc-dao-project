@@ -7,6 +7,7 @@ import { submitContentReport, listModerationQueue, getModerationContext, moderat
   listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, listReportableComments,
   notifyProposalReceived, syncProposalParentVisibility, syncProblemProposalsBrowsable } from "./moderation.js";
 import { enqueueModerationVoidJobs } from "./escrowModerationVoid.js";
+import { cancelPendingFundingApproaches } from "./fundingApproach.js";
 
 /** Keep moderation transport separate while reusing the application's session checks. */
 export function registerModerationCallables({ db, requireMember, requireAdmin, options, region }) {
@@ -50,6 +51,9 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
         await enqueueModerationVoidJobs({
           db, contentType, contentId, eventId: result.eventId, reason: args.reason, now: args.now,
         });
+        if (contentType === "proposal") {
+          await cancelPendingFundingApproaches({ db, proposalId: contentId, now: args.now });
+        }
       }
       // The matching transaction only reaches the proposals it loaded. Stamp the
       // rest before returning, so no child keeps serving PDFs for a hidden parent.

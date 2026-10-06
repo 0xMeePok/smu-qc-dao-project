@@ -176,6 +176,7 @@ export async function listMyProposals({ db, uid, client, config }) {
       createdAt: iso(data.createdAt),
       updatedAt: iso(data.updatedAt),
       proposalKind: data.proposalKind ?? null,
+      ...(data.acceptedApproachId ? { acceptedApproachId: data.acceptedApproachId } : {}),
       expiresAt: iso(data.expiresAt),
       problemId: data.problemId ?? null,
       posting: postingView(data.problemId, problems.get(data.problemId)),

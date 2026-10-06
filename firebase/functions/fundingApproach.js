@@ -1,0 +1,588 @@
+import { randomBytes } from "node:crypto";
+import { Timestamp } from "firebase-admin/firestore";
+import { HttpsError } from "firebase-functions/v2/https";
+import { decodeEventLog } from "viem";
+import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachDecisionAnchorId, fundingApproachDecisionRecordHash, fundingApproachRecordHash } from "./fundingApproachAnchor.js";
+import { fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
+import { memberNoticeFields } from "./moderation.js";
+import { instantMs } from "./opportunityExpiry.js";
+
+export const FUNDING_APPROACHES = "fundingApproaches";
+export const FUNDING_APPROACH_SLOTS = "fundingApproachSlots";
+export const APPROACH_TEXT_MAX = 2000;
+
+const CURRENCIES = new Set(["USDT", "USDC", "XSGD"]);
+const BLOCKED = new Set(["hidden", "removed"]);
+const fail = (code, message) => { throw new HttpsError(code, message); };
+const same = (left, right) => String(left || "").toLowerCase() === String(right || "").toLowerCase();
+const iso = (value) => value?.toDate?.().toISOString?.() ?? (value instanceof Date ? value.toISOString() : null);
+
+function validId(value, name) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) fail("invalid-argument", `Invalid ${name}.`);
+}
+
+function amountFor(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 1_000_000_000) {
+    fail("invalid-argument", "Enter an indicative amount greater than zero.");
+  }
+  return value;
+}
+
+function currencyFor(value) {
+  if (!CURRENCIES.has(value)) fail("invalid-argument", "Choose a currency.");
+  return value;
+}
+
+function textFor(value, label) {
+  if (typeof value !== "string") fail("invalid-argument", `${label} is required.`);
+  const text = value.trim();
+  if (text.length < 2 || text.length > APPROACH_TEXT_MAX) {
+    fail("invalid-argument", `${label} must be 2–${APPROACH_TEXT_MAX} characters.`);
+  }
+  return text;
+}
+
+/** An accept message may be omitted. A non-empty value uses the same bounds as a required note. */
+function optionalText(value, label) {
+  if (value == null || value === "") return "";
+  if (typeof value !== "string") fail("invalid-argument", `${label} must be 2–${APPROACH_TEXT_MAX} characters.`);
+  const text = value.trim();
+  if (!text) return "";
+  if (text.length < 2 || text.length > APPROACH_TEXT_MAX) {
+    fail("invalid-argument", `${label} must be 2–${APPROACH_TEXT_MAX} characters.`);
+  }
+  return text;
+}
+
+export function fundingApproachSlotId(proposalId, funderId) {
+  return `${proposalId}_${String(funderId || "").toLowerCase()}`;
+}
+
+const LIST_CAP = 50;
+
+function listItem(id, data, extras) {
+  return {
+    id,
+    proposalId: data.proposalId,
+    proposalTitle: extras.proposalTitle || "Independent listing",
+    funderId: data.funderId,
+    funderName: extras.funderName || "",
+    amount: data.amount ?? 0,
+    currency: data.currency || "",
+    scope: data.scope || "",
+    message: data.message || "",
+    status: data.status || "pending",
+    acceptMessage: data.acceptMessage || "",
+    declineReason: data.declineReason || "",
+    expiresAt: iso(data.expiresAt),
+    createdAt: iso(data.createdAt),
+    approachAnchorId: data.anchor?.approachAnchorId ?? null,
+    recordHash: data.anchor?.recordHash ?? null,
+    anchorStatus: data.anchor?.status ?? null,
+    decisionAnchorId: data.decisionAnchor?.decisionAnchorId ?? null,
+    decisionRecordHash: data.decisionAnchor?.recordHash ?? null,
+    decisionAnchorStatus: data.decisionAnchor?.status ?? null,
+    claimFunds: Boolean(extras.claimFunds),
+  };
+}
+
+async function lookup(db, collection, ids, pick) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const snaps = await Promise.all(unique.map((id) => db.collection(collection).doc(id).get()));
+  return new Map(snaps.map((snap) => [snap.id, snap.exists ? pick(snap.data()) : ""]));
+}
+
+const RESEARCHER_LIST_STATUSES = ["pending", "accepted", "declined"];
+
+/** Incoming approaches the researcher can still see, and every approach this member sent. */
+export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) {
+  const actorId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(actorId)) fail("unauthenticated", "Sign in with your wallet.");
+  const profile = await db.collection("users").doc(uid).get();
+  if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+  const nowMs = now.toMillis();
+  const [incomingPage, sentPage] = await Promise.all([
+    db.collection(FUNDING_APPROACHES).where("researcherId", "==", actorId).where("status", "in", RESEARCHER_LIST_STATUSES)
+      .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
+    db.collection(FUNDING_APPROACHES).where("funderId", "==", actorId)
+      .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
+  ]);
+  const incomingDocs = incomingPage.docs.filter((doc) => {
+    const data = doc.data();
+    return data.status !== "pending" || instantMs(data.expiresAt) > nowMs;
+  }).slice(0, LIST_CAP);
+  const sentDocs = sentPage.docs.slice(0, LIST_CAP);
+  const proposalIds = [...incomingDocs, ...sentDocs].map((doc) => doc.data().proposalId);
+  const [proposals, names] = await Promise.all([
+    lookup(db, "proposals", proposalIds, (data) => data),
+    lookup(db, "publicProfiles", incomingDocs.map((doc) => doc.data().funderId), (data) => data.fullName || data.organisation || ""),
+  ]);
+  const item = (doc) => {
+    const proposal = proposals.get(doc.data().proposalId);
+    const removed = proposal?.moderationStatus === "removed" || proposal?.status === "moderated_removed";
+    return listItem(doc.id, doc.data(), {
+      proposalTitle: proposal?.title || "Independent listing",
+      funderName: names.get(doc.data().funderId),
+      claimFunds: removed && Boolean(proposal?.fundingTerms),
+    });
+  };
+  return {
+    incoming: incomingDocs.map(item),
+    sent: sentDocs.map(item),
+    truncated: { incoming: incomingPage.size > LIST_CAP, sent: sentPage.size > LIST_CAP },
+  };
+}
+
+function view(id, data) {
+  return {
+    id,
+    funderId: data.funderId,
+    proposalId: data.proposalId,
+    researcherId: data.researcherId,
+    amount: data.amount,
+    currency: data.currency,
+    scope: data.scope,
+    message: data.message,
+    status: data.status,
+    acceptMessage: data.acceptMessage || "",
+    declineReason: data.declineReason || "",
+    decidedAt: iso(data.decidedAt),
+    expiresAt: iso(data.expiresAt),
+    createdAt: iso(data.createdAt),
+    approachAnchorId: data.anchor?.approachAnchorId ?? null,
+    recordHash: data.anchor?.recordHash ?? null,
+    anchorStatus: data.anchor?.status ?? null,
+    decisionAnchorId: data.decisionAnchor?.decisionAnchorId ?? null,
+    decisionRecordHash: data.decisionAnchor?.recordHash ?? null,
+    decisionAnchorStatus: data.decisionAnchor?.status ?? null,
+  };
+}
+
+function pendingDecisionAnchor(record) {
+  const decisionAnchorId = fundingApproachDecisionAnchorId(record.approachId, record.researcherId);
+  const recordHash = fundingApproachDecisionRecordHash(record);
+  return {
+    anchor: {
+      status: "pending",
+      eventVersion: 1,
+      decisionAnchorId,
+      recordHash,
+      transactionHash: null,
+      anchoredAt: null,
+      anchoredBy: null,
+    },
+    signed: { approachId: record.approachId, decisionAnchorId, recordHash },
+  };
+}
+
+/**
+ * One pending indicative approach per funder per independent listing.
+ * The slot document is the uniqueness lock; older approaches stay as their own records.
+ * Clients cannot write either collection.
+ */
+export async function createFundingApproach({ db, uid, proposalId, amount, currency, scope, message, expiresAt, now = Timestamp.now() }) {
+  validId(proposalId, "proposal");
+  const funderId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(funderId)) fail("unauthenticated", "Sign in with your wallet.");
+  amount = amountFor(amount);
+  currency = currencyFor(currency);
+  scope = textFor(scope, "Intended scope or conditions");
+  message = textFor(message, "Message");
+  const expiryMs = instantMs(expiresAt);
+  if (!Number.isFinite(expiryMs)) fail("invalid-argument", "Choose when this approach expires.");
+
+  const proposalRef = db.collection("proposals").doc(proposalId);
+  const slotRef = db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(proposalId, funderId));
+  const approachRef = db.collection(FUNDING_APPROACHES).doc(randomBytes(16).toString("hex"));
+  const noticeRef = db.collection("moderationNotifications").doc(`funding_approach_${approachRef.id}`);
+  const expiresAtIso = new Date(expiryMs).toISOString();
+  const approachAnchorId = fundingApproachAnchorId(approachRef.id, funderId);
+
+  return db.runTransaction(async (tx) => {
+    const [profile, proposal, slot] = await Promise.all([
+      tx.get(db.collection("users").doc(uid)),
+      tx.get(proposalRef),
+      tx.get(slotRef),
+    ]);
+    if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+    if (profile.data().role !== 0) fail("permission-denied", "Only a client or funder can approach this listing with funding.");
+    if (!proposal.exists) fail("not-found", "This proposal is no longer available.");
+    const data = proposal.data();
+    if (!isIndependentProposal(data)) fail("failed-precondition", "Only an independent listing can be approached this way.");
+    if (!data.fundingTerms || typeof data.fundingTerms !== "object" || Array.isArray(data.fundingTerms)) {
+      fail("failed-precondition", "This listing is not open for a funding approach.");
+    }
+    if (data.moderated || BLOCKED.has(data.moderationStatus)) fail("failed-precondition", "Funding is paused while this content is moderated.");
+    if (fundingApproachAccepted(data)) fail("failed-precondition", "A funding approach has already been accepted for this listing.");
+    if (same(data.researcherId, funderId)) fail("permission-denied", "The listing author cannot approach their own listing.");
+    if (!independentListingWindowOpen(data, now.toDate())) fail("failed-precondition", "This listing's funding window is closed.");
+    const listingMs = instantMs(data.expiresAt);
+    const nowMs = now.toMillis();
+    if (expiryMs <= nowMs) fail("invalid-argument", "Choose an expiry in the future.");
+    if (!Number.isFinite(listingMs) || expiryMs > listingMs) {
+      fail("invalid-argument", "The approach cannot stay open after the listing closes.");
+    }
+    const researcherId = String(data.researcherId || "").toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(researcherId)) fail("failed-precondition", "This listing has no researcher to approach.");
+
+    let previousRef = null;
+    if (slot.exists && slot.data().approachId) {
+      previousRef = db.collection(FUNDING_APPROACHES).doc(slot.data().approachId);
+    }
+    const [previous, notice] = await Promise.all([
+      previousRef ? tx.get(previousRef) : null,
+      tx.get(noticeRef),
+    ]);
+    const previousData = previous?.exists ? previous.data() : null;
+    const previousPending = previousData?.status === "pending" && instantMs(previousData.expiresAt) > nowMs;
+    if (previousPending) fail("already-exists", "You already have a pending approach for this listing.");
+
+    const recordHash = fundingApproachRecordHash({
+      funderId, proposalId, researcherId, amount, currency, scope, message, expiresAt: expiresAtIso,
+    });
+    const record = {
+      funderId,
+      proposalId,
+      researcherId,
+      amount,
+      currency,
+      scope,
+      message,
+      status: "pending",
+      expiresAt: Timestamp.fromMillis(expiryMs),
+      createdAt: now,
+      updatedAt: now,
+      anchor: {
+        status: "pending",
+        eventVersion: 1,
+        approachAnchorId,
+        recordHash,
+        transactionHash: null,
+        anchoredAt: null,
+        anchoredBy: null,
+      },
+    };
+    if (previous?.exists && previousData.status === "pending") {
+      tx.update(previousRef, { status: "expired", updatedAt: now });
+    }
+    tx.create(approachRef, record);
+    if (!notice.exists) {
+      const title = String(data.title || "Independent listing").slice(0, 160);
+      const name = String(profile.data().fullName || profile.data().organisation || "A client or funder").slice(0, 80);
+      tx.create(noticeRef, memberNoticeFields({
+        recipientId: researcherId, now, createdAt: now, kind: "funding_approach",
+        contentType: "proposal", contentId: proposalId, proposalId, title,
+        message: `${name} approached your listing “${title}” with indicative funding of ${currency} ${amount}.`,
+      }));
+    }
+    tx.set(slotRef, {
+      approachId: approachRef.id,
+      funderId,
+      proposalId,
+      researcherId,
+      status: "pending",
+      updatedAt: now,
+    });
+    return view(approachRef.id, record);
+  });
+}
+
+const AUTO_DECLINE_LIMIT = 100;
+
+function autoDeclineReason(title) {
+  return `Another funding approach was accepted for “${title}”. Your approach was declined.`;
+}
+
+/**
+ * The listing's researcher accepts or declines one still-pending approach.
+ * Decline stores a reason. Accept may store a message, marks the listing funded,
+ * and declines every other still-pending approach on that listing.
+ * Both parties to this decision are notified. The researcher anchors the decision afterwards.
+ */
+export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now() }) {
+  validId(approachId, "approach");
+  if (decision !== "accept" && decision !== "decline") fail("invalid-argument", "Choose accept or decline.");
+  const researcherId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(researcherId)) fail("unauthenticated", "Sign in with your wallet.");
+  const acceptMessage = decision === "accept" ? optionalText(message, "Message") : "";
+  const declineReason = decision === "decline" ? textFor(reason, "Reason") : "";
+  const status = decision === "accept" ? "accepted" : "declined";
+  const ref = db.collection(FUNDING_APPROACHES).doc(approachId);
+
+  return db.runTransaction(async (tx) => {
+    const approach = await tx.get(ref);
+    if (!approach.exists) fail("not-found", "This approach is no longer available.");
+    const data = approach.data();
+    if (!same(data.researcherId, researcherId)) fail("permission-denied", "Only the researcher on this listing can respond to this approach.");
+    const [profile, proposal] = await Promise.all([
+      tx.get(db.collection("users").doc(uid)),
+      tx.get(db.collection("proposals").doc(data.proposalId)),
+    ]);
+    if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+    if (!proposal.exists || !isIndependentProposal(proposal.data())) fail("failed-precondition", "Only an independent listing can be responded to this way.");
+    const listing = proposal.data();
+    if (listing.moderated || BLOCKED.has(listing.moderationStatus) || listing.status === "moderated_removed") {
+      fail("failed-precondition", "Funding is paused while this content is moderated.");
+    }
+    if (data.status !== "pending") fail("failed-precondition", "This approach has already been decided.");
+    if (instantMs(data.expiresAt) <= now.toMillis()) fail("failed-precondition", "This approach has expired.");
+    if (status === "accepted" && fundingApproachAccepted(listing)) {
+      fail("failed-precondition", "A funding approach has already been accepted for this listing.");
+    }
+    const slotRef = db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(data.proposalId, data.funderId));
+    const slot = await tx.get(slotRef);
+    let superseded = [];
+    if (status === "accepted") {
+      const page = await tx.get(db.collection(FUNDING_APPROACHES)
+        .where("proposalId", "==", data.proposalId).where("status", "==", "pending").limit(AUTO_DECLINE_LIMIT + 1));
+      if (page.size > AUTO_DECLINE_LIMIT) {
+        fail("failed-precondition", "This listing has too many pending approaches to accept together.");
+      }
+      const nowMs = now.toMillis();
+      const others = page.docs.filter((doc) => doc.id !== approachId && instantMs(doc.data().expiresAt) > nowMs);
+      const [slots, notices] = await Promise.all([
+        Promise.all(others.map((doc) => tx.get(
+          db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(data.proposalId, doc.data().funderId)),
+        ))),
+        Promise.all(others.map((doc) => tx.get(
+          db.collection("moderationNotifications").doc(`funding_approach_auto_${doc.id}`),
+        ))),
+      ]);
+      superseded = others.map((doc, index) => ({ doc, slot: slots[index], notice: notices[index] }));
+    }
+    const funderId = String(data.funderId || "");
+    const funderNoticeRef = db.collection("moderationNotifications").doc(`funding_approach_outcome_${approachId}_funder`);
+    const researcherNoticeRef = db.collection("moderationNotifications").doc(`funding_approach_outcome_${approachId}_researcher`);
+    const [funderNotice, researcherNotice, funderProfile] = await Promise.all([
+      tx.get(funderNoticeRef),
+      tx.get(researcherNoticeRef),
+      /^0x[0-9a-f]{40}$/.test(funderId) ? tx.get(db.collection("publicProfiles").doc(funderId)) : null,
+    ]);
+    const title = String(listing.title || "Independent listing").slice(0, 160);
+    const explanation = status === "accepted" ? autoDeclineReason(title) : "";
+    const decidedAtIso = now.toDate().toISOString();
+    const chosenAnchor = pendingDecisionAnchor({
+      approachId, proposalId: data.proposalId, funderId: data.funderId, researcherId,
+      outcome: status, acceptMessage, declineReason, decidedAt: decidedAtIso,
+    });
+    const siblingAnchors = new Map(superseded.map((item) => {
+      const built = pendingDecisionAnchor({
+        approachId: item.doc.id, proposalId: data.proposalId, funderId: item.doc.data().funderId, researcherId,
+        outcome: "declined", acceptMessage: "", declineReason: explanation, decidedAt: decidedAtIso,
+      });
+      return [item.doc.id, built];
+    }));
+    const decisions = [chosenAnchor.signed, ...[...siblingAnchors.values()].map((item) => item.signed)];
+    const next = {
+      status,
+      acceptMessage,
+      declineReason,
+      decidedAt: now,
+      decidedBy: researcherId,
+      decisionAnchor: chosenAnchor.anchor,
+      updatedAt: now,
+    };
+    tx.update(ref, next);
+    if (slot.exists && slot.data().approachId === approachId && slot.data().status === "pending") {
+      tx.update(slotRef, {
+        status,
+        acceptMessage,
+        declineReason,
+        updatedAt: now,
+      });
+    }
+    const researcherName = String(profile.data().fullName || profile.data().organisation || "The researcher").slice(0, 80);
+    const funderName = String(funderProfile?.exists ? (funderProfile.data().fullName || funderProfile.data().organisation) : "").slice(0, 80) || "A client or funder";
+    const amountLabel = `${data.currency || ""} ${data.amount ?? ""}`.trim();
+    const detail = status === "accepted"
+      ? (acceptMessage ? ` Message: ${acceptMessage}` : "")
+      : ` Reason: ${declineReason}`;
+    const funderMessage = status === "accepted"
+      ? `${researcherName} accepted your funding approach for “${title}” (${amountLabel}).${detail}`
+      : `${researcherName} declined your funding approach for “${title}”.${detail}`;
+    const researcherMessage = status === "accepted"
+      ? `You accepted the funding approach from ${funderName} for “${title}” (${amountLabel}).${detail}`
+      : `You declined the funding approach from ${funderName} for “${title}”.${detail}`;
+    const writeOutcome = (snap, noticeRef, recipientId, message) => {
+      if (!snap || snap.exists || !/^0x[0-9a-f]{40}$/.test(recipientId)) return;
+      tx.create(noticeRef, memberNoticeFields({
+        recipientId, now, createdAt: now,
+        kind: status === "accepted" ? "funding_approach_accepted" : "funding_approach_declined",
+        workflowStatus: status, contentType: "proposal", contentId: data.proposalId, proposalId: data.proposalId, title,
+        message,
+      }));
+    };
+    writeOutcome(funderNotice, funderNoticeRef, funderId, funderMessage);
+    writeOutcome(researcherNotice, researcherNoticeRef, researcherId, researcherMessage);
+    if (status === "accepted") {
+      tx.update(proposal.ref, { acceptedApproachId: approachId, fundedAt: now, updatedAt: now });
+      superseded.forEach((item) => {
+        const sibling = item.doc.data();
+        tx.update(item.doc.ref, {
+          status: "declined", acceptMessage: "", declineReason: explanation, decidedAt: now, decidedBy: researcherId,
+          decisionAnchor: siblingAnchors.get(item.doc.id).anchor, updatedAt: now,
+        });
+        if (item.slot.exists && item.slot.data().approachId === item.doc.id && item.slot.data().status === "pending") {
+          tx.update(item.slot.ref, { status: "declined", acceptMessage: "", declineReason: explanation, updatedAt: now });
+        }
+        if (!item.notice.exists && /^0x[0-9a-f]{40}$/.test(String(sibling.funderId || ""))) {
+          tx.create(item.notice.ref, memberNoticeFields({
+            recipientId: sibling.funderId, now, createdAt: now, kind: "funding_approach_declined",
+            workflowStatus: "declined", contentType: "proposal", contentId: data.proposalId, proposalId: data.proposalId, title,
+            message: explanation,
+          }));
+        }
+      });
+    }
+    return { ...view(approachId, { ...data, ...next }), decisions };
+  });
+}
+
+const REMOVAL_STATUSES = ["pending", "accepted"];
+
+/**
+ * Administrator removal cancels every still-pending approach, and an accepted one, on an independent listing.
+ * Declined and expired approaches stay as they are. Restore does not put any of them back.
+ * The escrow refund claim is unchanged.
+ */
+export async function cancelPendingFundingApproaches({ db, proposalId, now = Timestamp.now() }) {
+  validId(proposalId, "proposal");
+  const proposal = await db.collection("proposals").doc(proposalId).get();
+  if (!proposal.exists || !isIndependentProposal(proposal.data())) return { cancelled: 0 };
+  let cancelled = 0;
+  for (;;) {
+    const page = await db.collection(FUNDING_APPROACHES)
+      .where("proposalId", "==", proposalId).where("status", "in", REMOVAL_STATUSES).limit(40).get();
+    if (page.empty) break;
+    const count = await db.runTransaction(async (tx) => {
+      const approaches = await Promise.all(page.docs.map((doc) => tx.get(doc.ref)));
+      const slots = await Promise.all(page.docs.map((doc) => tx.get(
+        db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(proposalId, doc.data().funderId)),
+      )));
+      let updated = 0;
+      approaches.forEach((snap, index) => {
+        if (!snap.exists || !REMOVAL_STATUSES.includes(snap.data().status)) return;
+        tx.update(snap.ref, { status: "cancelled", updatedAt: now });
+        const slot = slots[index];
+        if (slot.exists && slot.data().approachId === snap.id && REMOVAL_STATUSES.includes(slot.data().status)) {
+          tx.update(slot.ref, { status: "cancelled", updatedAt: now });
+        }
+        updated += 1;
+      });
+      return updated;
+    });
+    cancelled += count;
+    if (count === 0 || page.size < 40) break;
+  }
+  return { cancelled };
+}
+
+/** Stores the funder's mined anchor once the registry log matches the saved digest. */
+export async function saveFundingApproachAnchor({ db, client, config, uid, approachId, transactionHash, now = Timestamp.now() }) {
+  validId(approachId, "approach");
+  if (!/^0x[0-9a-f]{64}$/i.test(transactionHash || "")) fail("invalid-argument", "A transaction hash is required.");
+  const funderId = String(uid || "").toLowerCase();
+  const ref = db.collection(FUNDING_APPROACHES).doc(approachId);
+  const snap = await ref.get();
+  if (!snap.exists) fail("not-found", "This approach is no longer available.");
+  const data = snap.data();
+  if (!same(data.funderId, funderId)) fail("permission-denied", "Only the funder who sent this approach can anchor it.");
+  const anchor = data.anchor || {};
+  if (anchor.status === "confirmed" && same(anchor.transactionHash, transactionHash)) return view(approachId, data);
+  if (!/^0x[0-9a-f]{64}$/i.test(anchor.approachAnchorId || "") || !/^0x[0-9a-f]{64}$/i.test(anchor.recordHash || "")) {
+    fail("failed-precondition", "This approach has no anchor digest.");
+  }
+  const receipt = await client.getTransactionReceipt({ hash: transactionHash });
+  if (receipt.status !== "success") fail("failed-precondition", "The anchor transaction was not confirmed.");
+  if (!same(receipt.from, funderId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
+  if (!same(receipt.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
+  let matched = null;
+  for (const log of receipt.logs) {
+    if (!same(log.address, config.address)) continue;
+    try {
+      const decoded = decodeEventLog({ abi: FUNDING_APPROACH_ANCHOR_ABI, topics: log.topics, data: log.data, strict: true });
+      if (decoded.eventName === "FundingApproachAnchored") { matched = decoded.args; break; }
+    } catch { /* The receipt can contain other registry logs. */ }
+  }
+  if (!matched) fail("failed-precondition", "The transaction does not anchor this approach.");
+  if (!same(matched.approachId, anchor.approachAnchorId)) fail("failed-precondition", "The transaction anchors a different approach.");
+  if (!same(matched.recordHash, anchor.recordHash)) fail("failed-precondition", "The anchored hash does not match this approach.");
+  if (!same(matched.anchoredBy, funderId)) fail("permission-denied", "The anchor was not signed by this funder.");
+  const confirmed = {
+    ...anchor,
+    status: "confirmed",
+    transactionHash: transactionHash.toLowerCase(),
+    blockNumber: Number(receipt.blockNumber),
+    anchoredAt: new Date(Number(matched.anchoredAt) * 1000).toISOString(),
+    anchoredBy: funderId,
+  };
+  await ref.update({ anchor: confirmed, updatedAt: now });
+  return view(approachId, { ...data, anchor: confirmed });
+}
+
+/** Stores the researcher's mined decision anchor once every registry log matches the saved digest. */
+export async function saveFundingApproachDecisionAnchors({ db, client, config, uid, approachIds, transactionHash, now = Timestamp.now() }) {
+  if (!Array.isArray(approachIds) || approachIds.length === 0 || approachIds.length > AUTO_DECLINE_LIMIT) {
+    fail("invalid-argument", "Choose the approaches this decision anchored.");
+  }
+  const ids = [...new Set(approachIds)];
+  ids.forEach((id) => validId(id, "approach"));
+  if (!/^0x[0-9a-f]{64}$/i.test(transactionHash || "")) fail("invalid-argument", "A transaction hash is required.");
+  const researcherId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(researcherId)) fail("unauthenticated", "Sign in with your wallet.");
+  const refs = ids.map((id) => db.collection(FUNDING_APPROACHES).doc(id));
+  const snaps = await Promise.all(refs.map((ref) => ref.get()));
+  snaps.forEach((snap) => {
+    if (!snap.exists) fail("not-found", "This approach is no longer available.");
+    if (!same(snap.data().researcherId, researcherId)) fail("permission-denied", "Only the researcher on this listing can anchor this decision.");
+  });
+  const receipt = await client.getTransactionReceipt({ hash: transactionHash });
+  if (receipt.status !== "success") fail("failed-precondition", "The anchor transaction was not confirmed.");
+  if (!same(receipt.from, researcherId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
+  if (!same(receipt.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
+  const found = new Map();
+  let anchoredAt = null;
+  for (const log of receipt.logs) {
+    if (!same(log.address, config.address)) continue;
+    try {
+      const decoded = decodeEventLog({ abi: FUNDING_APPROACH_ANCHOR_ABI, topics: log.topics, data: log.data, strict: true });
+      if (decoded.eventName !== "FundingApproachDecisionAnchored") continue;
+      if (!same(decoded.args.anchoredBy, researcherId)) fail("permission-denied", "The anchor was not signed by this researcher.");
+      found.set(String(decoded.args.decisionId).toLowerCase(), String(decoded.args.recordHash).toLowerCase());
+      anchoredAt = new Date(Number(decoded.args.anchoredAt) * 1000).toISOString();
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+    }
+  }
+  const expected = new Map(snaps.map((snap) => {
+    const anchor = snap.data().decisionAnchor || {};
+    if (!/^0x[0-9a-f]{64}$/i.test(anchor.decisionAnchorId || "") || !/^0x[0-9a-f]{64}$/i.test(anchor.recordHash || "")) {
+      fail("failed-precondition", "This decision has no anchor digest.");
+    }
+    return [anchor.decisionAnchorId.toLowerCase(), anchor.recordHash.toLowerCase()];
+  }));
+  if (found.size !== expected.size) fail("failed-precondition", "The transaction does not anchor this decision.");
+  for (const [id, hash] of expected) {
+    if (found.get(id) !== hash) fail("failed-precondition", "The anchored hash does not match this decision.");
+  }
+  const confirmedAt = anchoredAt;
+  await db.runTransaction(async (tx) => {
+    const fresh = await Promise.all(refs.map((ref) => tx.get(ref)));
+    fresh.forEach((snap) => {
+      const anchor = snap.data().decisionAnchor || {};
+      if (anchor.status === "confirmed" && same(anchor.transactionHash, transactionHash)) return;
+      tx.update(snap.ref, {
+        decisionAnchor: {
+          ...anchor,
+          status: "confirmed",
+          transactionHash: transactionHash.toLowerCase(),
+          blockNumber: Number(receipt.blockNumber),
+          anchoredAt: confirmedAt,
+          anchoredBy: researcherId,
+        },
+        updatedAt: now,
+      });
+    });
+  });
+  return { anchored: ids.length };
+}

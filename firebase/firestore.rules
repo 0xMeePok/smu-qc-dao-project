@@ -942,6 +942,12 @@ service cloud.firestore {
       return data.get('proposalKind', '') == 'independent';
     }
 
+    function fundingApproachAccepted(data) {
+      return data.keys().hasAny(['acceptedApproachId'])
+        && data.acceptedApproachId is string
+        && data.acceptedApproachId.size() > 0;
+    }
+
     function validIndependentProposal(data) {
       return isIndependentProposal(data)
         && !data.keys().hasAny(['problemId', 'postingOwnerId', 'opportunityType'])
@@ -1149,6 +1155,7 @@ service cloud.firestore {
     function validIndependentProposalCorrection(before, after) {
       return isIndependentProposal(before)
         && isIndependentProposal(after)
+        && !fundingApproachAccepted(before)
         && before.status == 'submitted'
         && after.status == 'submitted'
         && independentCorrectionTouchesOnlyContent(before, after)
@@ -1717,6 +1724,10 @@ service cloud.firestore {
     match /matchingEvents/{id} { allow read, write: if false; }
     match /matchingNotificationJobs/{id} { allow read, write: if false; }
     match /comments/{id} { allow read, write: if false; }
+    // Indicative funding approaches are written by createFundingApproach.
+    // A client must not mint a pending interest or its per-funder lock.
+    match /fundingApproaches/{id} { allow read, write: if false; }
+    match /fundingApproachSlots/{id} { allow read, write: if false; }
     match /proposalFeedbackSummaries/{id} { allow read, write: if false; }
 
     // Public-safe counters derived by Cloud Functions from role-scoped proposal
