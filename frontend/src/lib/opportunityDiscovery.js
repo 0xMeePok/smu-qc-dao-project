@@ -1,4 +1,5 @@
 import { CATEGORY_VALUES } from "../config/postingCategories.js";
+import { PROPOSAL_CATEGORIES, PROPOSAL_MATURITY_LEVELS } from "../config/proposal.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { toDate } from "./datetime.js";
 import { opportunityWorkflowStatus } from "../config/workflowStatus.js";
@@ -193,11 +194,10 @@ export function sortOpportunities(items, sort = DEFAULT_DISCOVERY_FILTERS.sort) 
   });
 }
 
-export function discoverOpportunities(items, filters, { now = new Date(), pageSize = DISCOVERY_PAGE_SIZE } = {}) {
-  const filtered = sortOpportunities(filterOpportunities(items, filters, now), filters.sort);
+function paginate(filtered, pageValue, pageSize) {
   const totalResults = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalResults / pageSize));
-  const page = Math.min(positivePage(filters.page), totalPages);
+  const page = Math.min(positivePage(pageValue), totalPages);
   const start = (page - 1) * pageSize;
 
   return {
@@ -209,4 +209,108 @@ export function discoverOpportunities(items, filters, { now = new Date(), pageSi
     firstResult: totalResults === 0 ? 0 : start + 1,
     lastResult: Math.min(start + pageSize, totalResults),
   };
+}
+
+export function discoverOpportunities(items, filters, { now = new Date(), pageSize = DISCOVERY_PAGE_SIZE } = {}) {
+  const filtered = sortOpportunities(filterOpportunities(items, filters, now), filters.sort);
+  return paginate(filtered, filters.page, pageSize);
+}
+
+const PROPOSAL_CATEGORY_VALUES = new Set(PROPOSAL_CATEGORIES.map((item) => item.value));
+const READINESS_VALUES = new Set(PROPOSAL_MATURITY_LEVELS.map((item) => item.value));
+
+export const DEFAULT_LISTING_FILTERS = Object.freeze({
+  query: "",
+  category: "",
+  readiness: "",
+  minimumFunding: "",
+  maximumFunding: "",
+  organisation: "",
+  timeRemaining: "",
+  page: 1,
+});
+
+const LISTING_FILTER_KEYS = [
+  "category", "readiness", "organisation", "timeRemaining", "minimumFunding", "maximumFunding",
+];
+
+/** Parse and constrain a shareable Solutions query string. */
+export function parseListingParams(input) {
+  const params = input instanceof URLSearchParams
+    ? input
+    : new URLSearchParams(String(input ?? ""));
+  const category = clean(params.get("category"));
+  const readiness = clean(params.get("readiness"));
+  const timeRemaining = clean(params.get("closing"));
+
+  return {
+    query: clean(params.get("q")),
+    category: PROPOSAL_CATEGORY_VALUES.has(category) ? category : "",
+    readiness: READINESS_VALUES.has(readiness) ? readiness : "",
+    minimumFunding: numericFilter(params.get("min")),
+    maximumFunding: numericFilter(params.get("max")),
+    organisation: clean(params.get("org")),
+    timeRemaining: VALID_TIMES.has(timeRemaining) ? timeRemaining : "",
+    page: positivePage(params.get("page")),
+  };
+}
+
+export function listingParams(filters) {
+  const params = new URLSearchParams();
+  const values = { ...DEFAULT_LISTING_FILTERS, ...filters };
+
+  if (clean(values.query)) params.set("q", clean(values.query));
+  if (PROPOSAL_CATEGORY_VALUES.has(values.category)) params.set("category", values.category);
+  if (READINESS_VALUES.has(values.readiness)) params.set("readiness", values.readiness);
+  if (numericFilter(values.minimumFunding)) params.set("min", numericFilter(values.minimumFunding));
+  if (numericFilter(values.maximumFunding)) params.set("max", numericFilter(values.maximumFunding));
+  if (clean(values.organisation)) params.set("org", clean(values.organisation));
+  if (VALID_TIMES.has(values.timeRemaining)) params.set("closing", values.timeRemaining);
+  if (positivePage(values.page) > 1) params.set("page", String(positivePage(values.page)));
+
+  return params;
+}
+
+export function hasActiveListingFilters(filters) {
+  const values = { ...DEFAULT_LISTING_FILTERS, ...filters };
+  return Boolean(
+    clean(values.query)
+    || LISTING_FILTER_KEYS.some((key) => String(values[key] ?? "") !== ""),
+  );
+}
+
+export function listingFilterCount(filters) {
+  const values = { ...DEFAULT_LISTING_FILTERS, ...filters };
+  return LISTING_FILTER_KEYS.filter((key) => String(values[key] ?? "") !== "").length;
+}
+
+function listingSearchText(item) {
+  return [item.title, item.summary, item.organisation].map(clean).join(" ").toLocaleLowerCase();
+}
+
+/** Category, readiness, funding, organisation and time remaining on listings already loaded. */
+export function filterListings(items, filters, now = new Date()) {
+  const query = clean(filters.query).toLocaleLowerCase();
+  const minimum = numericFilter(filters.minimumFunding) === ""
+    ? null
+    : Number(filters.minimumFunding);
+  const maximum = numericFilter(filters.maximumFunding) === ""
+    ? null
+    : Number(filters.maximumFunding);
+
+  return items.filter((item) => {
+    const amount = fundingAmount(item);
+    return (!query || listingSearchText(item).includes(query))
+      && (!filters.category || item.category === filters.category)
+      && (!filters.readiness || item.maturity === filters.readiness)
+      && (minimum === null || (amount !== null && amount >= minimum))
+      && (maximum === null || (amount !== null && amount <= maximum))
+      && (!filters.organisation || clean(item.organisation) === filters.organisation)
+      && filterByTime(item, filters.timeRemaining, now);
+  });
+}
+
+/** Keep catalog order. Closing-soon is already how the catalog is loaded; this is not a rank. */
+export function discoverListings(items, filters, { now = new Date(), pageSize = DISCOVERY_PAGE_SIZE } = {}) {
+  return paginate(filterListings(items, filters, now), filters.page, pageSize);
 }
