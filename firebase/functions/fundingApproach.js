@@ -264,10 +264,17 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
   });
 }
 
+const AUTO_DECLINE_LIMIT = 100;
+
+function autoDeclineReason(title) {
+  return `Another funding approach was accepted for “${title}”. Your approach was declined.`;
+}
+
 /**
  * The listing's researcher accepts or declines one still-pending approach.
- * Decline stores a reason. Accept may store a message and marks the listing funded.
- * Other approaches, notices, and the on-chain decision are separate steps.
+ * Decline stores a reason. Accept may store a message, marks the listing funded,
+ * and declines every other still-pending approach on that listing.
+ * Notices for this decision, and the on-chain record, are separate steps.
  */
 export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now() }) {
   validId(approachId, "approach");
@@ -301,6 +308,25 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
     }
     const slotRef = db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(data.proposalId, data.funderId));
     const slot = await tx.get(slotRef);
+    let superseded = [];
+    if (status === "accepted") {
+      const page = await tx.get(db.collection(FUNDING_APPROACHES)
+        .where("proposalId", "==", data.proposalId).where("status", "==", "pending").limit(AUTO_DECLINE_LIMIT + 1));
+      if (page.size > AUTO_DECLINE_LIMIT) {
+        fail("failed-precondition", "This listing has too many pending approaches to accept together.");
+      }
+      const nowMs = now.toMillis();
+      const others = page.docs.filter((doc) => doc.id !== approachId && instantMs(doc.data().expiresAt) > nowMs);
+      const [slots, notices] = await Promise.all([
+        Promise.all(others.map((doc) => tx.get(
+          db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(data.proposalId, doc.data().funderId)),
+        ))),
+        Promise.all(others.map((doc) => tx.get(
+          db.collection("moderationNotifications").doc(`funding_approach_auto_${doc.id}`),
+        ))),
+      ]);
+      superseded = others.map((doc, index) => ({ doc, slot: slots[index], notice: notices[index] }));
+    }
     const next = {
       status,
       acceptMessage,
@@ -319,7 +345,25 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
       });
     }
     if (status === "accepted") {
+      const title = String(listing.title || "Independent listing").slice(0, 160);
+      const explanation = autoDeclineReason(title);
       tx.update(proposal.ref, { acceptedApproachId: approachId, fundedAt: now, updatedAt: now });
+      superseded.forEach((item) => {
+        const sibling = item.doc.data();
+        tx.update(item.doc.ref, {
+          status: "declined", acceptMessage: "", declineReason: explanation, decidedAt: now, decidedBy: researcherId, updatedAt: now,
+        });
+        if (item.slot.exists && item.slot.data().approachId === item.doc.id && item.slot.data().status === "pending") {
+          tx.update(item.slot.ref, { status: "declined", acceptMessage: "", declineReason: explanation, updatedAt: now });
+        }
+        if (!item.notice.exists && /^0x[0-9a-f]{40}$/.test(String(sibling.funderId || ""))) {
+          tx.create(item.notice.ref, memberNoticeFields({
+            recipientId: sibling.funderId, now, createdAt: now, kind: "funding_approach_declined",
+            workflowStatus: "declined", contentType: "proposal", contentId: data.proposalId, proposalId: data.proposalId, title,
+            message: explanation,
+          }));
+        }
+      });
     }
     return view(approachId, { ...data, ...next });
   });
