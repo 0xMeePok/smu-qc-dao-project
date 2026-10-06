@@ -34,6 +34,7 @@ import { ReportableComments } from "../components/ReportableComments.jsx";
 import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 import { PosterIdentity } from "../components/PosterIdentity.jsx";
+import { canApproachIndependentListing } from "../lib/independentFunding.js";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
@@ -194,6 +195,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const showCollaboration = !independent && proposal.status !== "draft" && !isModerated(proposal);
   const showDiscussion = proposal.status !== "draft" && !isModerated(proposal);
   const showEscrow = proposal.status !== "draft" && Boolean(proposal.fundingTerms);
+  const canApproach = independent && canApproachIndependentListing({ proposal, user });
   const showFunding = showEscrow || showCollaboration;
   const reviewers = owns || (!independent && sponsors);
   const canReview = !independent && sponsors && !owns;
@@ -348,7 +350,9 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
           that point on. Independent listings have no parent posting. */}
       {canEdit && <button type="button" className="secondary" onClick={() => onNavigate(independent ? `create-proposal/${proposal.id}` : `edit-proposal/${proposal.id}`)}>Edit proposal</button>}
       {canWithdraw && <button type="button" className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
-      {showEscrow && <button type="button" className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
+      {independent
+        ? canApproach && <button type="button" className="primary" onClick={() => setTab("funding")}>Approach with funding</button>
+        : showEscrow && <button type="button" className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
       {owns && proposal.status === "withdrawn" && <button type="button" className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
       </div>
     </aside></div>

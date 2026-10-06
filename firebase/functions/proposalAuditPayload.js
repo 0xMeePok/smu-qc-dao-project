@@ -99,3 +99,32 @@ export function prepareStoredProposal(record, { registryConfig = registry } = {}
   });
   return isEscrowRegistry(registryConfig) ? asEscrowProposal(prepared, validateStoredFundingTerms(record, registryConfig)) : prepared;
 }
+
+/**
+ * Child proposal under the listing's own funding-request opportunity.
+ * `prepareStoredProposal` stays an opportunity commit so publication hashes
+ * do not change. The researcher signs this separately to link an escrow.
+ */
+export function prepareIndependentEscrowCommit(record, { registryConfig = registry } = {}) {
+  if (!isIndependentProposal(record)) throw new TypeError("An independent listing is required.");
+  if (!record.fundingTerms) throw new TypeError("Escrow funding terms are required.");
+  if (!isEscrowRegistry(registryConfig)) {
+    throw new Error("Escrow funding terms require the escrow-linked registry deployment.");
+  }
+  const actor = registryConfig.entityIdScheme === 2 ? record.researcherId : undefined;
+  const payload = independentProposalAuditPayload(record);
+  const prepared = prepareProposalCommit({
+    recordId: record.id,
+    opportunityRecordId: record.id,
+    actor,
+    opportunityActor: actor,
+    expectedOpportunityRevisionIndex: 0,
+    hashScheme: INDEPENDENT_PROPOSAL_HASH_SCHEME,
+    proposalPayload: payload,
+    solutionPayload: {
+      ...payload,
+      attachments: [...(record.attachments ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
+    },
+  });
+  return asEscrowProposal(prepared, validateStoredFundingTerms(record, registryConfig));
+}
