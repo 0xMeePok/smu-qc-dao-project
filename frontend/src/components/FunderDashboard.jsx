@@ -96,7 +96,7 @@ export function FunderDashboard({ onNavigate }) {
         </div>{links(item)}
       </div>)}
     </>}
-    <FundingApproachList
+    {!loading && !error && <FundingApproachList
       title="Approaches sent to researchers"
       hint="Indicative interest you have registered on independent listings. This is separate from proposals received on your own postings."
       empty="You have not approached a researcher yet."
@@ -105,7 +105,7 @@ export function FunderDashboard({ onNavigate }) {
       loading={approachesLoading}
       error={approachError}
       onNavigate={onNavigate}
-    />
+    />}
     {audit && <RelatedAuditReceiptPane {...audit} onClose={() => { auditRequest.current++; setAudit(null); }} />}
   </section>;
 }
