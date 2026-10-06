@@ -42,9 +42,16 @@ import { listPublishedPostings } from "./lib/postings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
 import { toOpportunityListItem, toRemovedOpportunityListItem } from "./lib/opportunityPresentation.js";
 import { listRemovedProblems, moderationReasonLabel } from "./lib/moderation.js";
-import { VerifiedBadge } from "./components/VerifiedBadge.jsx";
 import { opportunityWorkflowStatus, workflowStatusLabel } from "./config/workflowStatus.js";
-import { StatusBadge } from "./components/StatusBadge.jsx";
+import {
+  DiscoveryFilterPanel,
+  DiscoveryFundingRange,
+  DiscoveryPagination,
+  DiscoverySearchRow,
+  DiscoverySelectField,
+  OpportunityListSkeleton,
+  OpportunityTable,
+} from "./components/DiscoveryControls.jsx";
 import {
   DEFAULT_DISCOVERY_FILTERS,
   DISCOVERY_SORT_OPTIONS,
@@ -403,84 +410,6 @@ function StakeholderIcon({ type }) {
   );
 }
 
-function openOpportunity(item) {
-  go(`${item.route ?? "opportunity"}/${item.id}`);
-}
-
-function OpportunityTrust({ item }) {
-  return (
-    <span className="trust-status-row">
-      <StatusBadge status={opportunityWorkflowStatus(item)} />
-      <VerifiedBadge audit={item.audit} recordStatus={item.status} hidePending />
-    </span>
-  );
-}
-
-function OpportunityTable({ items }) {
-  return (
-    <div className="opportunity-table-scroll">
-      <table className="opportunity-table">
-        <thead>
-          <tr>
-            <th scope="col">Title</th>
-            <th scope="col">Organisation</th>
-            <th scope="col">Status</th>
-            <th scope="col" className="numeric">Funding</th>
-            <th scope="col" className="numeric">Proposals</th>
-            <th scope="col" className="numeric">Closes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            item.removed ? (
-              <tr key={item.id}>
-                <td>
-                  <button className="opportunity-table-link" type="button" onClick={() => openOpportunity(item)}>{item.title}</button>
-                  <small>Removed due to: {item.reasonLabel}{item.details ? ` — ${item.details}` : ""}</small>
-                </td>
-                <td>—</td>
-                <td>—</td>
-                <td className="numeric">—</td>
-                <td className="numeric">—</td>
-                <td className="numeric">—</td>
-              </tr>
-            ) : (
-              <tr key={item.id}>
-                <td>
-                  <button className="opportunity-table-link" type="button" onClick={() => openOpportunity(item)}>{item.title}</button>
-                  <small>{item.type}</small>
-                </td>
-                <td>{item.owner}</td>
-                <td><OpportunityTrust item={item} /></td>
-                <td className="numeric">{item.amount}</td>
-                <td className="numeric">{item.proposalCount}</td>
-                <td className="numeric">{item.deadline}</td>
-              </tr>
-            )
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function OpportunityList({ items }) {
-  return <OpportunityTable items={items} />;
-}
-
-function OpportunityListSkeleton() {
-  return (
-    <div className="opportunity-list opportunity-list-skeleton" aria-label="Loading opportunities" aria-busy="true">
-      {[0, 1, 2, 3].map((row) => (
-        <div className="opportunity-skeleton-row" key={row}>
-          <span className="skeleton-lines"><i /><i /></span>
-          <span className="skeleton-block" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function Home() {
   const { postings, loading, isAuthenticated } = usePublishedPostings();
   const { roles } = useAuth();
@@ -652,111 +581,60 @@ function Discover({ params }) {
         )}
       </div>
 
-      <div className="discover-search-row">
-        <label className="discover-search">
-          <span className="sr-only">Search opportunities</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <input
-            type="search"
-            value={filters.query}
-            placeholder="Search title, description or tags"
-            onChange={(event) => updateFilters({ query: event.target.value })}
-          />
-        </label>
-        <button
-          className={`filter-toggle${filtersOpen ? " is-open" : ""}`}
-          type="button"
-          aria-expanded={filtersOpen}
-          aria-controls="discover-filter-panel"
-          onClick={() => setFiltersOpen((open) => !open)}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" />
-          </svg>
-          Filters{panelFilterCount > 0 ? ` · ${panelFilterCount}` : ""}
-        </button>
-        <label className="discover-sort">
-          <span className="sr-only">Sort by</span>
-          <select value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}>
-            {DISCOVERY_SORT_OPTIONS.map((option) => (
-              <option value={option.value} key={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <DiscoverySearchRow
+        query={filters.query}
+        onQueryChange={(query) => updateFilters({ query })}
+        searchLabel="Search opportunities"
+        placeholder="Search title, description or tags"
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen((open) => !open)}
+        filterCount={panelFilterCount}
+        panelId="discover-filter-panel"
+        sort={filters.sort}
+        onSortChange={(sort) => updateFilters({ sort })}
+        sortOptions={DISCOVERY_SORT_OPTIONS}
+      />
 
       {filtersOpen && (
-        <div id="discover-filter-panel" className="discover-filter-panel" aria-label="Opportunity filters">
-          <label>
-            <span>Technology area</span>
-            <select value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}>
-              <option value="">All areas</option>
-              {POSTING_CATEGORIES.map((category) => (
-                <option value={category.value} key={category.value}>
-                  {category.value === "quantum" ? "Quantum — gate-based, annealing & quantum-inspired" : category.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Status</span>
-            <select value={filters.status} onChange={(event) => updateFilters({ status: event.target.value })}>
-              <option value="">All statuses</option>
-              {statuses.map((status) => (
-                <option value={status} key={status}>{workflowStatusLabel(status)}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Organisation</span>
-            <select value={filters.organisation} onChange={(event) => updateFilters({ organisation: event.target.value })}>
-              <option value="">All organisations</option>
-              {organisations.map((organisation) => (
-                <option value={organisation} key={organisation}>{organisation}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Closes within</span>
-            <select value={filters.timeRemaining} onChange={(event) => updateFilters({ timeRemaining: event.target.value })}>
-              <option value="">Any closing date</option>
-              {DISCOVERY_TIME_OPTIONS.map((option) => (
-                <option value={option.value} key={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <fieldset className="funding-range">
-            <legend>Funding</legend>
-            <label>
-              <span className="sr-only">Minimum funding</span>
-              <input
-                min="0"
-                inputMode="decimal"
-                type="number"
-                value={filters.minimumFunding}
-                placeholder="Min"
-                onChange={(event) => updateFilters({ minimumFunding: event.target.value })}
-              />
-            </label>
-            <label>
-              <span className="sr-only">Maximum funding</span>
-              <input
-                min="0"
-                inputMode="decimal"
-                type="number"
-                value={filters.maximumFunding}
-                placeholder="Max"
-                onChange={(event) => updateFilters({ maximumFunding: event.target.value })}
-              />
-            </label>
-          </fieldset>
-          {activeFilters && (
-            <button className="text-button discover-clear" type="button" onClick={clearFilters}>Clear filters</button>
-          )}
-        </div>
+        <DiscoveryFilterPanel id="discover-filter-panel" label="Opportunity filters" showClear={activeFilters} onClear={clearFilters}>
+          <DiscoverySelectField
+            label="Technology area"
+            value={filters.category}
+            onChange={(category) => updateFilters({ category })}
+            emptyLabel="All areas"
+            options={POSTING_CATEGORIES.map((category) => ({
+              value: category.value,
+              label: category.value === "quantum" ? "Quantum — gate-based, annealing & quantum-inspired" : category.label,
+            }))}
+          />
+          <DiscoverySelectField
+            label="Status"
+            value={filters.status}
+            onChange={(status) => updateFilters({ status })}
+            emptyLabel="All statuses"
+            options={statuses.map((status) => ({ value: status, label: workflowStatusLabel(status) }))}
+          />
+          <DiscoverySelectField
+            label="Organisation"
+            value={filters.organisation}
+            onChange={(organisation) => updateFilters({ organisation })}
+            emptyLabel="All organisations"
+            options={organisations.map((organisation) => ({ value: organisation, label: organisation }))}
+          />
+          <DiscoverySelectField
+            label="Closes within"
+            value={filters.timeRemaining}
+            onChange={(timeRemaining) => updateFilters({ timeRemaining })}
+            emptyLabel="Any closing date"
+            options={DISCOVERY_TIME_OPTIONS}
+          />
+          <DiscoveryFundingRange
+            minimum={filters.minimumFunding}
+            maximum={filters.maximumFunding}
+            onMinimumChange={(minimumFunding) => updateFilters({ minimumFunding })}
+            onMaximumChange={(maximumFunding) => updateFilters({ maximumFunding })}
+          />
+        </DiscoveryFilterPanel>
       )}
 
       <div className="discover-toolbar">
@@ -807,29 +685,15 @@ function Discover({ params }) {
               <button className="secondary" type="button" onClick={clearFilters}>Clear all filters</button>
             </div>
           ) : (
-            <OpportunityList items={results.items} />
+            <OpportunityTable items={results.items} onOpen={(item) => go(`${item.route ?? "opportunity"}/${item.id}`)} />
           )}
-          {results.totalPages > 1 && (
-            <nav className="discover-pagination" aria-label="Opportunity pages">
-              <button
-                className="secondary small"
-                type="button"
-                disabled={results.page === 1}
-                onClick={() => updateFilters({ page: results.page - 1 })}
-              >
-                Previous
-              </button>
-              <span>Page {results.page} of {results.totalPages}</span>
-              <button
-                className="secondary small"
-                type="button"
-                disabled={results.page === results.totalPages}
-                onClick={() => updateFilters({ page: results.page + 1 })}
-              >
-                Next
-              </button>
-            </nav>
-          )}
+          <DiscoveryPagination
+            label="Opportunity pages"
+            page={results.page}
+            totalPages={results.totalPages}
+            onPrevious={() => updateFilters({ page: results.page - 1 })}
+            onNext={() => updateFilters({ page: results.page + 1 })}
+          />
         </>
       )}
       {hasMore && <div className="discover-load-more">
@@ -876,7 +740,7 @@ function AppContent() {
   } else if (section === "solutions") {
     pageComponent = (
       <RouteGuard targetRoute={section} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
-        <IndependentListingsPage onNavigate={go} />
+        <IndependentListingsPage onNavigate={go} params={params} />
       </RouteGuard>
     );
   } else if (section === "profile") {

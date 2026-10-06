@@ -11,7 +11,8 @@ import { assertBytes32, prepareOpportunityCommit } from "../../../firebase/funct
 import { isEscrowRegistry, requireAddress, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
 import { fundingOpportunityAuditPayload, postingAuditPayload } from "../../../firebase/functions/opportunityAuditPayload.js";
-import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
+import { isIndependentProposal } from "../../../firebase/functions/independentProposal.js";
+import { prepareIndependentEscrowCommit, prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { assertActiveAuditDeployment, isActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 import { prepareRemovedProposalClaim } from "./escrowFunding.js";
 
@@ -83,7 +84,9 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
   if (usingConfiguredDeployment) config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
   deployment(config);
   const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
-  const expected = prepareStoredProposal(proposal, { registryConfig: config });
+  const expected = isIndependentProposal(proposal)
+    ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
+    : prepareStoredProposal(proposal, { registryConfig: config });
   const walletAddress = account ? requireAddress(account, "Wallet address") : null;
   const block = await adapters.getBlock({ chainId: config.chainId, blockTag: "latest" });
   if (typeof block?.number !== "bigint" || typeof block?.timestamp !== "bigint") throw new Error("Could not read the current escrow block. Please refresh.");

@@ -63,10 +63,14 @@ describe("[QCDAO-54] view posting detail page", () => {
 
   it("[FUT-OPD-122] loads the poster's public profile and links to their public profile route", () => {
     const page = source("../../src/pages/PostingDetailPage.jsx");
+    const identity = source("../../src/components/PosterIdentity.jsx");
     assert.match(page, /findPublicProfileByAddress/);
-    assert.match(page, /profile\/\$\{ownerId\}/);
-    assert.match(page, /poster\?\.fullName/);
-    assert.match(page, /shortenAddress\(ownerId\)/);
+    assert.match(page, /<PosterIdentity/);
+    assert.match(page, /ownerId=\{posting\.ownerId\}/);
+    assert.match(page, /poster=\{poster\}/);
+    assert.match(identity, /profile\/\$\{ownerId\}/);
+    assert.match(identity, /poster\?\.fullName/);
+    assert.match(identity, /shortenAddress\(ownerId\)/);
   });
 
   it("[FUT-OPD-123] lets a researcher submit an open posting and asks a visitor to sign in first", () => {

@@ -9,7 +9,7 @@ import { findProposal, updateProposalReceipt } from "./proposals.js";
 import { INDEPENDENT_PROPOSAL_HASH_SCHEME, isIndependentProposal } from "../../../firebase/functions/independentProposal.js";
 
 export { proposalAuditPayload } from "../../../firebase/functions/proposalAuditPayload.js";
-import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
+import { prepareIndependentEscrowCommit, prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { asProposalUpdate, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
 
 async function anchorProposal(prepared, options) {
@@ -82,13 +82,44 @@ export function proposalAuditReceipt(record) {
     catch { return receipt; }
   } catch { return null; }
 }
+async function commitIndependentListingEscrow(record, options) {
+  const prepared = prepareIndependentEscrowCommit(record);
+  const revision = await readOpportunityRevisionIndex(prepared.opportunityId, options);
+  const operation = withOpportunityRevisionIndex(prepared, revision);
+  if (await readProposalIsAnchored(operation.entityId, options)) {
+    try {
+      await assertAmendmentIsNew(operation, options);
+    } catch (error) {
+      if (/already anchored/i.test(error?.message ?? "")) return;
+      throw error;
+    }
+    return updateProposalAudit(asProposalUpdate(operation), options);
+  }
+  return commitProposalAudit(operation, options);
+}
+
+async function anchorIndependentListing(record, options) {
+  let audit;
+  try {
+    audit = await independentFlow.anchor(record, options);
+  } catch (error) {
+    if (!record?.fundingTerms || !/already anchored/i.test(error?.message ?? "")) throw error;
+    if (!record.audit?.transactionHash) throw error;
+    audit = record.audit;
+  }
+  if (record?.fundingTerms) await commitIndependentListingEscrow(record, options);
+  return audit;
+}
+
 export const anchorProposalAudit = (record, options) => (
-  isIndependentProposal(record) ? independentFlow.anchor(record, options) : flow.anchor(record, options)
+  isIndependentProposal(record) ? anchorIndependentListing(record, options) : flow.anchor(record, options)
 );
 
 export function anchorProposalBeforeWrite(record, options = {}) {
-  const active = isIndependentProposal(record) ? independentFlow : flow;
-  return active.anchor(record, { ...options, persistReceipt: false });
+  if (isIndependentProposal(record)) {
+    return anchorIndependentListing(record, { ...options, persistReceipt: false });
+  }
+  return flow.anchor(record, { ...options, persistReceipt: false });
 }
 
 /**
