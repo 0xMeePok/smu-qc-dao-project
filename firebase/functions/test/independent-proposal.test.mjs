@@ -87,6 +87,12 @@ function queryDb(initial = {}) {
     orderBy: (field, direction = "asc") => collection(name, filters, [...orders, { field, direction }], cap, cursor),
     limit: (n) => collection(name, filters, orders, n, cursor),
     startAfter: (...values) => collection(name, filters, orders, cap, values.map(comparable)),
+    doc: (id) => ({
+      get: async () => {
+        const path = `${name}/${id}`;
+        return { exists: records.has(path), id, data: () => records.get(path) };
+      },
+    }),
     get: async () => {
       const depth = name.split("/").length + 1;
       const paths = [...records.keys()].filter((path) => path.startsWith(`${name}/`) && path.split("/").length === depth
@@ -268,6 +274,7 @@ describe("independent listing backend", () => {
   it("[BUT-RPF-72] catalogs only submitted unexpired independent listings for members", async () => {
     const longSummary = `${"x".repeat(450)} should be trimmed`;
     const db = queryDb({
+      [`publicProfiles/${UID}`]: { organisation: "  Meridian Logistics  " },
       "proposals/live-a": listing({ title: "Sooner listing", expiresAt: later(10 * 864e5), createdAt: now }),
       "proposals/live-b": listing({
         title: "Later listing", summary: longSummary, expiresAt: later(40 * 864e5), createdAt: now,
@@ -288,6 +295,8 @@ describe("independent listing backend", () => {
     assert.equal(page.nextCursor, null);
     assert.equal(page.items[0].status, "submitted");
     assert.equal(page.items[0].researcherId, UID);
+    assert.equal(page.items[0].organisation, "Meridian Logistics");
+    assert.equal(page.items[1].organisation, "Meridian Logistics");
     assert.equal(page.items[1].summary.length, 400);
     assert.ok(!page.items.some((item) => item.id === "hidden" || item.id === "attached" || item.id === "old"));
   });

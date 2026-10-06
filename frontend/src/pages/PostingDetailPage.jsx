@@ -50,9 +50,9 @@ import {
 import { StatusBadge } from "../components/StatusBadge.jsx";
 import { postingActions } from "../lib/postingActions.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
+import { PosterIdentity } from "../components/PosterIdentity.jsx";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
-import { shortenAddress } from "../lib/chain.js";
 import { canEditOpportunity } from "../lib/opportunityEdit.js";
 import { OpportunityRevisionTrail } from "../components/OpportunityRevisionTrail.jsx";
 import { ConsolidatedAuditTrail } from "../components/ConsolidatedAuditTrail.jsx";
@@ -142,29 +142,6 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
         <p className="field-hint">Propose a problem and solution to this grant call. The owner can fund multiple proposals from their deposited pool.</p>
       ) : null}
     </>
-  );
-}
-
-function PosterIdentity({ ownerId, organisation, poster, onNavigate }) {
-  if (!ownerId) return null;
-  const name = String(poster?.fullName ?? "").trim();
-  const org = String(poster?.organisation ?? organisation ?? "").trim();
-  const primary = name || org || shortenAddress(ownerId);
-  const secondary = name ? org : org ? shortenAddress(ownerId) : "";
-  return (
-    <div>
-      <dt>Posted by</dt>
-      <dd>
-        <button
-          className="profile-link poster-identity"
-          type="button"
-          onClick={() => onNavigate(`profile/${ownerId}`)}
-        >
-          <span>{primary}</span>
-          {secondary ? <small>{secondary}</small> : null}
-        </button>
-      </dd>
-    </div>
   );
 }
 

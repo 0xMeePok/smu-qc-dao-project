@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { encodeFunctionData, keccak256, stringToHex } from "viem";
-import { prepareStoredProposal } from "./proposalAuditPayload.js";
+import { prepareIndependentEscrowCommit, prepareStoredProposal } from "./proposalAuditPayload.js";
 import { opportunityEntityId } from "./auditCanonical.js";
 import { verifyProposalEscrow } from "./escrowAudit.js";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
 import { ESCROW_STATES, milestoneValue, reconcileFundingReceipt, same } from "./escrowFundingEvents.js";
 import { VOID_JOBS, voidDecision } from "./escrowModerationVoid.js";
 import { ANCHOR_JOBS } from "./moderationAnchor.js";
-import { isIndependentProposal } from "./independentProposal.js";
+import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
 export const FUNDING_EVENTS = "escrowFundingEvents", PLATFORM_OUTBOX = "escrowPlatformOutbox", PAUSE_JOBS = "escrowPostingPauseJobs";
@@ -95,6 +95,18 @@ export async function loadFundingContext({ db, proposalId, uid }) {
       fail("permission-denied", "This proposal is not available to your account.");
     }
   }
+  if (isIndependentProposal(record)) {
+    if (!record.fundingTerms) fail("failed-precondition", "This listing has no escrow funding terms.");
+    return { record, parent: {
+      id: record.id,
+      title: record.title || "Independent listing",
+      ownerId: String(record.researcherId || "").toLowerCase(),
+      status: record.status,
+      expiresAt: record.expiresAt,
+      moderationStatus: record.moderationStatus,
+      moderated: record.moderated,
+    } };
+  }
   validId(record.problemId);
   const parent = await db.collection("problems").doc(record.problemId).get();
   if (!parent.exists || !same(parent.data().ownerId, record.postingOwnerId)) fail("failed-precondition", "The proposal's posting ownership cannot be verified.");
@@ -112,7 +124,9 @@ export function fundingBlockReason(record, parent, chain, now = Date.now(), { de
   if (!isOpenFunding(record, parent) && chain?.pendingProposalEntityId && !same(chain.pendingProposalEntityId, ZERO)
       && !same(chain.pendingProposalEntityId, chain.proposalEntityId)) return "A different proposal is awaiting owner acceptance for this posting.";
   if (chain && !chain.active) return "The on-chain posting or proposal is inactive or paused.";
-  if (deposit && (! ["submitted", "open"].includes(parent.status)
+  const postingOpen = ["submitted", "open"].includes(parent.status)
+    || (isIndependentProposal(record) && parent.status === "under_review");
+  if (deposit && (!postingOpen
       || !["submitted", "under_review"].includes(record.status)
       || (millis(parent.expiresAt) && millis(parent.expiresAt) <= now))) return "This posting's funding window is closed.";
   if (deposit && chain && (chain.state !== "Open" || BigInt(chain.expiresAt) * 1000n <= BigInt(now))) return "The escrow is no longer accepting deposits.";
@@ -122,7 +136,9 @@ export function fundingBlockReason(record, parent, chain, now = Date.now(), { de
 
 /** Every read used in a projection is pinned to one confirmed block. */
 export async function readVerifiedFunding({ client, config, record, parent, blockNumber }) {
-  const expected = prepareStoredProposal(record, { registryConfig: config });
+  const expected = isIndependentProposal(record)
+    ? prepareIndependentEscrowCommit(record, { registryConfig: config })
+    : prepareStoredProposal(record, { registryConfig: config });
   const read = request => client.readContract({ ...request, blockNumber });
   const [proposal, escrow] = await Promise.all([
     read({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
@@ -228,6 +244,12 @@ export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
 export async function prepareEscrowDeposit({ db, client, config, uid, proposalId }) {
   await assertFundingChain(client, config);
   const context = await loadFundingContext({ db, uid, proposalId });
+  if (isIndependentProposal(context.record)) {
+    if (same(context.record.researcherId, uid)) fail("permission-denied", "The listing author cannot deposit on their own listing.");
+    if (!independentListingWindowOpen(context.record)) fail("failed-precondition", "This listing's funding window is closed.");
+    const actor = await db.collection("users").doc(uid).get();
+    if (!actor.exists || actor.data().role !== 0) fail("permission-denied", "Only a client or funder can approach this listing with funding.");
+  }
   if (isOpenFunding(context.record, context.parent)) fail("failed-precondition", "Open funding is deposited by its owner into the grant pool. Use the grant workflow for this proposal.");
   const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
   const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
@@ -474,11 +496,16 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
     await db.runTransaction(async tx => {
       const current = await tx.get(ref);
       if (current.data()?.leaseToken !== leaseToken) fail("aborted", "The funding reconciliation lease changed.");
-      const parentRef = db.collection("problems").doc(context.record.problemId), proposalRef = db.collection("proposals").doc(proposalId);
+      const independent = isIndependentProposal(context.record);
+      const parentRef = independent ? null : db.collection("problems").doc(context.record.problemId);
+      const proposalRef = db.collection("proposals").doc(proposalId);
       const unpaidTerminal = complete && verified.summary.totalReleased === "0"
         && ["Cancelled", "Expired", "Voided", "Refunded"].includes(verified.summary.state);
-      const [parent, proposal] = (complete && verified.summary.upfrontReleased) || invalidatedSelections.size || unpaidTerminal
-        ? await Promise.all([tx.get(parentRef), tx.get(proposalRef)]) : [null, null];
+      const touchProposal = complete && verified.summary.upfrontReleased;
+      const touchParent = Boolean(parentRef) && (touchProposal || invalidatedSelections.size || unpaidTerminal);
+      const [parent, proposal] = touchParent || touchProposal
+        ? await Promise.all([touchParent ? tx.get(parentRef) : null, touchProposal ? tx.get(proposalRef) : null])
+        : [null, null];
       const terminal = ["Released", "Refunded"].includes(verified.summary.state);
       tx.set(ref, { ...current.data(), cursorBlock: Number(cursorBlock), cursorHash: cursor.hash, anchorCount,
         selectionRequested: current.data().selectionRequested === true
@@ -488,13 +515,13 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
       if (complete) tx.set(db.collection(FUNDING_SUMMARIES).doc(jobKey(config, proposalId)), {
         ...verified.summary, transactionHash: lastHash, confirmedAt: now.toDate().toISOString(), reconciliation,
       });
-      if (!isOpenFunding(context.record, context.parent) && complete && verified.summary.upfrontReleased && parent?.exists && parent.data().acceptedProposalId !== proposalId) {
+      if (!independent && !isOpenFunding(context.record, context.parent) && complete && verified.summary.upfrontReleased && parent?.exists && parent.data().acceptedProposalId !== proposalId) {
         tx.update(parentRef, { acceptedProposalId: proposalId, hasAcceptedSolution: true, updatedAt: now });
       }
       if (complete && verified.summary.upfrontReleased && proposal?.exists && ["submitted", "under_review"].includes(proposal.data().status)) {
         tx.update(proposalRef, { status: "accepted", updatedAt: now });
       }
-      if (parent?.exists && !parent.data().acceptedProposalId && verified.summary.totalReleased === "0"
+      if (!independent && parent?.exists && !parent.data().acceptedProposalId && verified.summary.totalReleased === "0"
           && same(parent.data().escrowSelection?.registryAddress, config.address)
           && parent.data().escrowSelection?.proposalId === proposalId
           && (invalidatedSelections.has(parent.data().escrowSelection?.selectionId)
@@ -531,14 +558,19 @@ export async function startEscrowSettlement(options) {
   await enqueueEscrowFunding({ db, config, record: context.record, now });
   const ref = db.collection(FUNDING_JOBS).doc(jobKey(config, proposalId));
   await db.runTransaction(async tx => {
-    const parentRef = db.collection("problems").doc(context.record.problemId), proposalRef = db.collection("proposals").doc(proposalId);
-    const [parent, proposal, job] = await Promise.all([tx.get(parentRef), tx.get(proposalRef), tx.get(ref)]);
+    const independent = isIndependentProposal(context.record);
+    const proposalRef = db.collection("proposals").doc(proposalId);
+    const parentRef = independent ? null : db.collection("problems").doc(context.record.problemId);
+    const [parent, proposal, job] = await Promise.all([
+      parentRef ? tx.get(parentRef) : null, tx.get(proposalRef), tx.get(ref),
+    ]);
     if (!job.exists) fail("failed-precondition", "Confirm the proposal's registry receipt before selecting it.");
-    const blockedReason = fundingBlockReason({ ...proposal.data(), id: proposalId }, parent.data(), verified.summary, verified.summary.timestamp * 1000);
-    if (blockedReason || !same(parent.data().ownerId, uid)) fail("failed-precondition", blockedReason || "Posting ownership changed.");
+    const parentData = independent ? context.parent : parent.data();
+    const blockedReason = fundingBlockReason({ ...proposal.data(), id: proposalId }, parentData, verified.summary, verified.summary.timestamp * 1000);
+    if (blockedReason || !same(parentData?.ownerId, uid)) fail("failed-precondition", blockedReason || "Posting ownership changed.");
     const selectionId = job.data().selectionRequested ? job.data().selectionId : keccak256(stringToHex(`${jobKey(config, proposalId)}:${randomUUID()}`));
     tx.set(ref, { ...job.data(), selectionRequested: true, selectionId, requestedBy: uid, nextAttemptAt: now, updatedAt: now });
-    tx.update(parentRef, { escrowSelection: { proposalId, registryAddress: config.address.toLowerCase(), selectionId, requestedBy: uid, requestedAt: now } });
+    if (!independent) tx.update(parentRef, { escrowSelection: { proposalId, registryAddress: config.address.toLowerCase(), selectionId, requestedBy: uid, requestedAt: now } });
   });
   return syncEscrowFunding({ ...options, now });
 }

@@ -308,9 +308,8 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         if (!independentListingWindowOpen(record) && record.status === PROPOSAL_STATUS_SUBMITTED) {
           throw new Error("The listing window has closed. This proposal can no longer be edited.");
         }
-        // Independent listings are opportunity-kind records, not commitProposalWithEscrow
-        // proposals. readEscrow → verifyProposalEscrow requires canonical fundingTerms on
-        // that payload and throws "Escrow funding terms are required" here.
+        // The listing window and a started deposit are checked here. The escrow
+        // proposal is linked from the publish signature, not from this edit.
         const current = await findProposal(proposalId, { fromServer: true });
         if (!current || proposalMatchingLocked(current)) {
           throw new Error("Funding or matching has started. This proposal can no longer be edited.");

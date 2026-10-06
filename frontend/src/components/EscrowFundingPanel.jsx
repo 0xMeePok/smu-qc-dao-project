@@ -13,6 +13,8 @@ import { getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, s
 import { EscrowFundingHistory } from "./EscrowFundingHistory.jsx";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { ACTION_ITEMS_KEY } from "../lib/proposalQueues.js";
+import { canApproachIndependentListing } from "../lib/independentFunding.js";
+import { isIndependentProposal } from "../config/proposal.js";
 
 const STATE_LABELS = ["Open for funding", "Awaiting upfront approval", "Fully paid", "Refunded", "Cancelled", "Expired", "Delivery in progress", "Voided"];
 const explorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`;
@@ -33,7 +35,7 @@ function saveTransaction(key, hash) {
 
 export function EscrowFundingView({ state, evidence, loading, error, busy, progress, walletReady, walletMessage,
   amount, setAmount, delivery, setDelivery, onAction, onRefresh, onConnect, unresolvedTransaction, onConfirm, moderated,
-  fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason }) {
+  fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason, canDeposit = true }) {
   const money = units => `${formatUnits(units ?? 0n, state?.decimals ?? 6)} ${state?.symbol ?? ""}`;
   const disabled = busy || !walletReady || loading || Boolean(unresolvedTransaction);
   const evidenceReady = evidence && state?.currentMilestone?.evidenceHash === evidence.hash;
@@ -76,7 +78,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
         <div className="settings-row"><dt>{state.state === 0 ? state.isGrant ? "Posting closes" : "Funding closes" : "Current approval deadline"}</dt><dd>{instant(state.state === 0 ? state.expiresAt : state.approvalDeadline)}</dd></div>
       </dl>
       {grantWaiting && !settlementMessage && <p className="field-hint">{grantMessage} Manage the offer in the grant funding panel.</p>}
-      {state.state === 0 && state.remaining > 0n && !state.isGrant && <div className="field-group">
+      {state.state === 0 && state.remaining > 0n && !state.isGrant && canDeposit && <div className="field-group">
         <p><strong>Funding token: {state.symbol}</strong> · This proposal accepts the token fixed in its payment plan.</p>
         <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Wallet balance: ${money(state.wallet.balance)}.`}>
           {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
@@ -165,9 +167,15 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   useEffect(() => { setUnresolvedTransaction(savedTransaction(storageKey)); }, [storageKey]);
   const walletReady = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
   const roles = user?.roles ?? (user?.role ? [user.role] : []);
+  const independent = isIndependentProposal(proposal);
+  const canDeposit = !independent || canApproachIndependentListing({ proposal, user });
+  const authorViewing = independent && user?.id && proposal.researcherId
+    && user.id.toLowerCase() === proposal.researcherId.toLowerCase();
   const fundingBlockReason = user?.isSuspended ? "Deposits are unavailable while this account is suspended."
-    : !roles.some(role => ["funder", "owner"].includes(role)) ? "Sign in with a funder or problem owner account to deposit."
-    : history?.summary?.fundingBlockReason;
+    : independent && !canDeposit
+      ? (authorViewing ? history?.summary?.fundingBlockReason : "Only a client or funder can approach this listing with funding.")
+      : !roles.some(role => ["funder", "owner"].includes(role)) ? "Sign in with a funder or problem owner account to deposit."
+        : history?.summary?.fundingBlockReason;
   const walletMessage = !isConnected ? "Connect your signed-in wallet to fund, approve or claim refunds."
     : address?.toLowerCase() !== user?.id?.toLowerCase() ? "Connect the wallet belonging to your signed-in account."
       : "Switch your wallet to Arbitrum Sepolia to continue.";
@@ -266,7 +274,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
     } catch (err) { setSyncError(err.message || "Funding status could not be updated. Retry when ready."); }
     finally { writing.current = false; setBusy(false); }
   };
-  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice }}
+  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize(true)} onSync={() => synchronize()}
     onAction={act} onRefresh={refresh} onConnect={() => setConnect(true)} onConfirm={confirmPending} />
     {user?.id && !state?.isHistorical && <EscrowFundingHistory data={history} error={syncError || historyError} busy={busy || loading} onSync={() => synchronize()} />}

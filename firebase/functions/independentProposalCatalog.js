@@ -5,8 +5,13 @@ const PAGE = 25;
 const BLOCKED = new Set(["hidden", "removed"]);
 const iso = (value) => value?.toDate?.().toISOString?.() ?? null;
 
-function listingCard(doc) {
+function organisationName(profile) {
+  return String(profile?.organisation ?? "").trim().slice(0, 200);
+}
+
+function listingCard(doc, organisations) {
   const data = doc.data();
+  const researcherId = data.researcherId ?? "";
   return {
     id: doc.id,
     title: data.title ?? "",
@@ -16,9 +21,22 @@ function listingCard(doc) {
     amount: data.amount ?? 0,
     currency: data.currency ?? "",
     expiresAt: iso(data.expiresAt),
-    researcherId: data.researcherId ?? "",
+    researcherId,
+    organisation: organisations.get(String(researcherId).trim().toLowerCase()) ?? "",
     status: data.status ?? "",
   };
+}
+
+/** One public-profile read per author. The proposal document does not store organisation. */
+async function authorOrganisations(db, docs) {
+  const ids = [...new Set(docs
+    .map((doc) => String(doc.data().researcherId ?? "").trim().toLowerCase())
+    .filter(Boolean))];
+  const snaps = await Promise.all(ids.map((id) => db.collection("publicProfiles").doc(id).get()));
+  return new Map(ids.map((id, index) => [
+    id,
+    snaps[index].exists ? organisationName(snaps[index].data()) : "",
+  ]));
 }
 
 /**
@@ -40,8 +58,10 @@ export async function listIndependentListings({ db, cursor = null, now = Timesta
   const rows = await query.get();
   const page = rows.docs.slice(0, PAGE);
   const last = page.at(-1);
+  const visible = page.filter((doc) => !BLOCKED.has(doc.data().moderationStatus));
+  const organisations = await authorOrganisations(db, visible);
   return {
-    items: page.filter((doc) => !BLOCKED.has(doc.data().moderationStatus)).map(listingCard),
+    items: visible.map((doc) => listingCard(doc, organisations)),
     nextCursor: rows.size > PAGE && last
       ? { expiresAt: last.data().expiresAt?.toMillis?.() ?? 0, id: last.id }
       : null,
