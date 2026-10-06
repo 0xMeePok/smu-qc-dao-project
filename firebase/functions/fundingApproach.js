@@ -44,6 +44,62 @@ export function fundingApproachSlotId(proposalId, funderId) {
   return `${proposalId}_${String(funderId || "").toLowerCase()}`;
 }
 
+const LIST_CAP = 50;
+
+function listItem(id, data, extras) {
+  return {
+    id,
+    proposalId: data.proposalId,
+    proposalTitle: extras.proposalTitle || "Independent listing",
+    funderId: data.funderId,
+    funderName: extras.funderName || "",
+    amount: data.amount ?? 0,
+    currency: data.currency || "",
+    scope: data.scope || "",
+    message: data.message || "",
+    status: data.status || "pending",
+    expiresAt: iso(data.expiresAt),
+    createdAt: iso(data.createdAt),
+  };
+}
+
+async function lookup(db, collection, ids, pick) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const snaps = await Promise.all(unique.map((id) => db.collection(collection).doc(id).get()));
+  return new Map(snaps.map((snap) => [snap.id, snap.exists ? pick(snap.data()) : ""]));
+}
+
+/** Incoming pending approaches for the researcher, and every approach this member sent. */
+export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) {
+  const actorId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(actorId)) fail("unauthenticated", "Sign in with your wallet.");
+  const profile = await db.collection("users").doc(uid).get();
+  if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+  const nowMs = now.toMillis();
+  const [incomingPage, sentPage] = await Promise.all([
+    db.collection(FUNDING_APPROACHES).where("researcherId", "==", actorId).where("status", "==", "pending")
+      .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
+    db.collection(FUNDING_APPROACHES).where("funderId", "==", actorId)
+      .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
+  ]);
+  const incomingDocs = incomingPage.docs.filter((doc) => instantMs(doc.data().expiresAt) > nowMs).slice(0, LIST_CAP);
+  const sentDocs = sentPage.docs.slice(0, LIST_CAP);
+  const proposalIds = [...incomingDocs, ...sentDocs].map((doc) => doc.data().proposalId);
+  const [titles, names] = await Promise.all([
+    lookup(db, "proposals", proposalIds, (data) => data.title || "Independent listing"),
+    lookup(db, "publicProfiles", incomingDocs.map((doc) => doc.data().funderId), (data) => data.fullName || data.organisation || ""),
+  ]);
+  const item = (doc) => listItem(doc.id, doc.data(), {
+    proposalTitle: titles.get(doc.data().proposalId),
+    funderName: names.get(doc.data().funderId),
+  });
+  return {
+    incoming: incomingDocs.map(item),
+    sent: sentDocs.map(item),
+    truncated: { incoming: incomingPage.size > LIST_CAP, sent: sentPage.size > LIST_CAP },
+  };
+}
+
 function view(id, data) {
   return {
     id,

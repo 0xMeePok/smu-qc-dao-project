@@ -83,17 +83,29 @@ export function fundingApproachPayload(form) {
   };
 }
 
-export function fundingApproachError(error) {
+export function fundingApproachError(error, fallback = "This approach could not be sent. Please try again.") {
   const code = String(error?.code || "").split("/").pop();
   if (code === "unauthenticated") return "Sign in again to continue.";
   if (["invalid-argument", "permission-denied", "failed-precondition", "not-found", "already-exists"].includes(code)) {
     return error.message;
   }
-  return "This approach could not be sent. Please try again.";
+  return fallback;
 }
 
 /** Server-owned pending record. The browser cannot write the collection itself. */
 export async function createFundingApproach(proposalId, payload) {
   requireFirebase();
   return (await httpsCallable(functions, "createFundingApproach")({ proposalId, ...payload })).data;
+}
+
+export function fundingApproachStatusLabel(status) {
+  if (status === "expired") return "Expired";
+  if (status === "cancelled") return "Cancelled";
+  return "Pending";
+}
+
+/** Incoming approaches for the signed-in researcher, and approaches they have sent. */
+export async function listFundingApproaches() {
+  requireFirebase();
+  return (await httpsCallable(functions, "listFundingApproaches")({})).data;
 }

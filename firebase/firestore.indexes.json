@@ -1049,6 +1049,23 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "fundingApproaches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "researcherId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fundingApproaches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "funderId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

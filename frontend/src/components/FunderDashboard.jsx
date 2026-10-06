@@ -6,6 +6,8 @@ import { findPosting } from "../lib/postings.js";
 import { findProposal } from "../lib/proposals.js";
 import { RelatedAuditReceiptPane, RELATED_AUDIT_KIND } from "./RelatedAuditReceiptPane.jsx";
 import { fundingStateLabel as stateLabel } from "../config/workflowStatus.js";
+import { FundingApproachList } from "./FundingApproachList.jsx";
+import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
 
 const money = (item, key) => escrowFundingAmount(item[key], item.tokenDecimals, item.tokenSymbol);
 
@@ -14,15 +16,22 @@ export function FunderDashboard({ onNavigate }) {
   const [data, setData] = useState(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(true), [revision, setRevision] = useState(0);
   const [audit, setAudit] = useState(null);
+  const [sentApproaches, setSentApproaches] = useState(null);
+  const [approachError, setApproachError] = useState("");
+  const [approachesLoading, setApproachesLoading] = useState(true);
   const auditRequest = useRef(0);
   useEffect(() => {
     let active = true;
     auditRequest.current++;
     setAudit(null); setData(null); setError(""); setLoading(true);
-    if (!user?.id) { setLoading(false); return undefined; }
+    setSentApproaches(null); setApproachError(""); setApproachesLoading(true);
+    if (!user?.id) { setLoading(false); setApproachesLoading(false); return undefined; }
     getFunderDashboard().then(result => { if (active) setData(result); })
       .catch(err => { if (active) setError(err.message || "Your funding dashboard could not be loaded."); })
       .finally(() => { if (active) setLoading(false); });
+    listFundingApproaches().then(result => { if (active) setSentApproaches(result); })
+      .catch(err => { if (active) setApproachError(fundingApproachError(err, "Approaches you sent could not be loaded. Please try again.")); })
+      .finally(() => { if (active) setApproachesLoading(false); });
     return () => { active = false; };
   }, [user?.id, revision]);
   const openAudit = async (kind, id) => {
@@ -84,6 +93,16 @@ export function FunderDashboard({ onNavigate }) {
         </div>{links(item)}
       </div>)}
     </>}
+    <FundingApproachList
+      title="Approaches sent to researchers"
+      hint="Indicative interest you have registered on independent listings. This is separate from proposals received on your own postings."
+      empty="You have not approached a researcher yet."
+      items={sentApproaches?.sent ?? []}
+      truncated={sentApproaches?.truncated?.sent}
+      loading={approachesLoading}
+      error={approachError}
+      onNavigate={onNavigate}
+    />
     {audit && <RelatedAuditReceiptPane {...audit} onClose={() => { auditRequest.current++; setAudit(null); }} />}
   </section>;
 }

@@ -2,7 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { DashboardAttention, DashboardCount } from "./DashboardAttention.jsx";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
+import { FundingApproachList } from "./FundingApproachList.jsx";
 import { useActionItems } from "../lib/actionItems.js";
+import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
 import { developerAttention } from "../lib/dashboardAttention.js";
 import {
   isIndependentQueueRow, listMyProposalQueue, proposalQueueWorkflowStatus, queueError,
@@ -114,6 +116,12 @@ export function DeveloperDashboardPanel({ onNavigate }) {
     enabled: Boolean(user?.id),
     staleTime: 30_000,
   });
+  const approaches = useQuery({
+    queryKey: ["fundingApproaches", user?.id],
+    queryFn: listFundingApproaches,
+    enabled: Boolean(user?.id),
+    staleTime: 30_000,
+  });
   const actions = useActionItems();
   const rows = queue.data?.items ?? [];
 
@@ -159,8 +167,8 @@ export function DeveloperDashboardPanel({ onNavigate }) {
 
       {error && <p className="error-banner" role="alert">{error}</p>}
       {!queue.isPending && (
-        <button type="button" className="secondary small" disabled={queue.isFetching} onClick={() => queue.refetch()}>
-          {queue.isFetching ? "Refreshing…" : "Refresh overview"}
+        <button type="button" className="secondary small" disabled={queue.isFetching || approaches.isFetching} onClick={() => { queue.refetch(); approaches.refetch(); }}>
+          {queue.isFetching || approaches.isFetching ? "Refreshing…" : "Refresh overview"}
         </button>
       )}
       {!queue.isPending && !error && queue.data?.truncated && (
@@ -173,6 +181,19 @@ export function DeveloperDashboardPanel({ onNavigate }) {
         error={actions.error ? queueError(actions.error) : ""}
         onNavigate={onNavigate}
         emptyMessage="Nothing is blocked on you right now."
+      />
+
+      <FundingApproachList
+        heading="h3"
+        title="Funding approaches received"
+        hint="Indicative interest from a client or funder. This does not deposit tokens."
+        empty="No pending funding approaches yet."
+        items={approaches.data?.incoming ?? []}
+        truncated={approaches.data?.truncated?.incoming}
+        loading={approaches.isPending}
+        error={approaches.error ? fundingApproachError(approaches.error, "Funding approaches could not be loaded. Please try again.") : ""}
+        onNavigate={onNavigate}
+        showFunder
       />
 
       {!queue.isPending && !error && (
