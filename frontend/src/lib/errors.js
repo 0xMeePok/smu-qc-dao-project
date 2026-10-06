@@ -72,6 +72,58 @@ export const TRANSACTION_FEE_TOO_LOW_MESSAGE =
 export const MODULE_LOAD_ERROR_MESSAGE =
   "This tab could not load a required app file. Save your work as a draft or copy your edits, then refresh the page and try again.";
 
+export const RPC_QUOTA_MESSAGE =
+  "Arbitrum Sepolia reads are being refused because the project's RPC provider is over its request limit. Nothing was submitted. Ask an administrator to check the provider's plan, then try again.";
+
+export const RPC_UNREACHABLE_MESSAGE =
+  "The browser could not reach Arbitrum Sepolia, so the verification step did not run. Nothing was submitted. This is usually a connection problem or the RPC provider refusing the request. Check your connection and try again; if it keeps failing, ask an administrator to check the RPC provider.";
+
+/**
+ * An RPC URL carries its API key in the path, and viem puts the whole URL in
+ * the message of a transport error. That message used to reach the submit
+ * banner verbatim, which printed the project's key on screen for any member to
+ * copy. Every URL is cut back to its origin before display: the host is the
+ * useful part of a diagnosis, the path never is.
+ */
+export function redactUrlPaths(text) {
+  return String(text ?? "").replace(/\bhttps?:\/\/[^\s"'<>)]+/gi, (url) => {
+    try { return new URL(url).origin; } catch { return "[url]"; }
+  });
+}
+
+function errorChain(error, limit = 16) {
+  const pending = [error], seen = new Set(), found = [];
+  while (pending.length && seen.size < limit) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    found.push(current);
+    pending.push(current.cause, current.data?.originalError);
+  }
+  return found;
+}
+
+const chainText = (error) => errorChain(error)
+  .flatMap((current) => [current.name, current.shortMessage, current.message, current.details])
+  .filter(Boolean).join(" ");
+
+/** The provider is answering, and refusing: out of plan, or rate limited. */
+export function isRpcQuotaExceeded(error) {
+  if (errorChain(error).some((current) => [429, -32005].includes(Number(current.status ?? current.code)))) return true;
+  return /capacity limit exceeded|monthly capacity|compute units|rate ?limit|too many requests|quota/i.test(chainText(error));
+}
+
+/**
+ * The request never produced a readable response. A browser reports a blocked
+ * or CORS-less reply as a bare "Failed to fetch", so a provider answering 429
+ * without CORS headers arrives here rather than above.
+ */
+export function isRpcUnreachable(error) {
+  const text = chainText(error);
+  if (/dynamically imported module/i.test(text)) return false;
+  return /HttpRequestError|HTTP request failed|failed to fetch|networkerror|load failed|fetch failed|err_(?:network|connection|internet)/i.test(text);
+}
+
 export function isModuleLoadError(error) {
   const pending = [error], seen = new Set();
   while (pending.length && seen.size < 16) {
@@ -124,14 +176,18 @@ export function auditErrorMessage(error) {
   if (/already anchored|updateOpportunity, not a second commit|updateHashes, not a second commit|already been withdrawn|cannot be edited|cannot be amended|cannot be withdrawn|cannot be filed|not on the configured AuditRegistry|Connect the wallet that owns/i.test(text)) {
     return text;
   }
+  // Before the revert check: a transport failure wraps the contract call, so its
+  // message still names the function and reads as a revert that never happened.
+  if (isRpcQuotaExceeded(error)) return RPC_QUOTA_MESSAGE;
+  if (isRpcUnreachable(error)) return RPC_UNREACHABLE_MESSAGE;
   if (/revert|invalidstate|invalidinput/i.test(text)) {
     return "The verification transaction reverted. Check the opportunity's status and revision before retrying.";
   }
   // Deliberately the underlying text: a transient RPC or wallet failure is the
   // user's cue to retry, and a generic string leaves them with nothing to act on.
-  // Nothing secret is exposed - the registry address ships in the client bundle
-  // and revert data is public chain state. See create-posting.test.jsx QCDAO-79.
-  return text || "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
+  // Redacted, because viem puts the full RPC URL - API key included - in the
+  // message of any transport error. See create-posting.test.jsx QCDAO-79.
+  return redactUrlPaths(text) || "Arbitrum Sepolia could not confirm the verification anchor. You can retry safely.";
 }
 
 export function messageForPublicationSaveError(error) {
@@ -190,9 +246,11 @@ export function messageForFirebaseError(error) {
   // Surface whatever the wallet/SDK actually said instead of a pure guess - this is
   // what lets a genuinely wallet-specific failure (e.g. a chain switch Backpack
   // itself refuses) be diagnosed from what the user sees, rather than staying invisible.
+  if (isRpcQuotaExceeded(error)) return RPC_QUOTA_MESSAGE;
+  if (isRpcUnreachable(error)) return RPC_UNREACHABLE_MESSAGE;
   const detail = error?.shortMessage || error?.reason || error?.message;
   return detail
-    ? `Something went wrong: ${detail}`
+    ? `Something went wrong: ${redactUrlPaths(detail)}`
     : "Something went wrong. Please try again, and contact the platform team if it keeps happening.";
 }
 

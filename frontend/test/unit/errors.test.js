@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { auditErrorMessage, isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, messageForPublicationSaveError, fieldForFirebaseError, OnboardingError } from "../../src/lib/errors.js";
+import { auditErrorMessage, isModuleLoadError, isRpcQuotaExceeded, isRpcUnreachable, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, messageForPublicationSaveError, fieldForFirebaseError, OnboardingError, redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE } from "../../src/lib/errors.js";
 import { messageForProposalError } from "../../src/lib/proposalValidation.js";
+import { escrowErrorMessage } from "../../src/lib/escrow.js";
 
 describe("publication errors stay separate from sign-in errors", () => {
   it("does not interpret a publication precondition as a missing sign-in nonce", () => {
@@ -57,9 +58,14 @@ describe("App files missing after a deployment", () => {
     const error = new TypeError("Failed to fetch");
     error.cause = { message: "HTTP request failed: Arbitrum RPC unavailable" };
     assert.equal(isModuleLoadError(error), false);
-    assert.equal(auditErrorMessage(error), "Failed to fetch");
-    assert.equal(messageForFirebaseError(error), "Something went wrong: Failed to fetch");
-    assert.equal(messageForProposalError(error), "Failed to fetch");
+    // Refreshing fixes a missing app file, not an RPC that will not answer, so
+    // this says what actually went wrong instead.
+    assert.equal(auditErrorMessage(error), RPC_UNREACHABLE_MESSAGE);
+    assert.equal(messageForFirebaseError(error), RPC_UNREACHABLE_MESSAGE);
+    assert.equal(messageForProposalError(error), RPC_UNREACHABLE_MESSAGE);
+    for (const message of [auditErrorMessage(error), messageForProposalError(error)]) {
+      assert.doesNotMatch(message, /draft or copy your edits|refresh the page/i);
+    }
   });
 
   it("handles cyclic wrappers without losing a module failure in another branch", () => {
@@ -134,5 +140,87 @@ describe("Unit Tests: Error Messages & Mapping", () => {
     const error = { code: 4001, message: "User rejected" };
     const msg = messageForFirebaseError(error);
     assert.ok(typeof msg === "string");
+  });
+});
+
+/**
+ * The real message viem produced when the project's Alchemy plan ran out of
+ * monthly capacity. The provider answered 429 without CORS headers, so the
+ * browser reported only "Failed to fetch" and viem wrapped the whole request -
+ * RPC URL and API key included - into the message shown on the submit banner.
+ */
+const TRANSPORT_FAILURE = Object.assign(
+  new Error([
+    "HTTP request failed.",
+    "URL: https://arb-sepolia.g.alchemy.com/v2/alch_TESTKEY0000000000000000",
+    'Request body: {"method":"eth_call","params":[{"to":"0xca11bde05977b3631167028862be2a173976ca11","data":"0x82ad56cb"}]}',
+    "Raw Call Arguments:",
+    "  to:    0x38BEc81577C0EA78B003F12c6CeBB16896999187",
+    "  data:  0x475d20ac8077982238e31519f3016fa85035cbd0",
+    "Contract Call:",
+    "  function:  opportunityRevisionCount(bytes32 opportunityId)",
+    "Docs: https://viem.sh/docs/contract/readContract",
+    "Details: Failed to fetch",
+    "Version: viem@2.55.19",
+  ].join("\n")),
+  { name: "HttpRequestError", details: "Failed to fetch" },
+);
+
+describe("an RPC provider that cannot be reached", () => {
+  it("names the real problem instead of a revert that never happened", () => {
+    assert.equal(isRpcUnreachable(TRANSPORT_FAILURE), true);
+    assert.equal(auditErrorMessage(TRANSPORT_FAILURE), RPC_UNREACHABLE_MESSAGE);
+    assert.equal(messageForFirebaseError(TRANSPORT_FAILURE), RPC_UNREACHABLE_MESSAGE);
+  });
+
+  it("never prints the RPC URL or its API key on any error banner", () => {
+    for (const message of [auditErrorMessage(TRANSPORT_FAILURE), messageForFirebaseError(TRANSPORT_FAILURE),
+      messageForProposalError(TRANSPORT_FAILURE), escrowErrorMessage(TRANSPORT_FAILURE)]) {
+      assert.doesNotMatch(message, /alch_TESTKEY|\/v2\/|https?:\/\//);
+    }
+  });
+
+  it("says nothing was submitted, because nothing was", () => {
+    assert.match(RPC_UNREACHABLE_MESSAGE, /Nothing was submitted/);
+    assert.match(RPC_QUOTA_MESSAGE, /Nothing was submitted/);
+  });
+
+  it("is not mistaken for a missing app file after a deployment", () => {
+    const moduleFailure = { message: "Failed to fetch dynamically imported module: /assets/ccip-old.js" };
+    assert.equal(isRpcUnreachable(moduleFailure), false);
+    assert.equal(auditErrorMessage(moduleFailure), MODULE_LOAD_ERROR_MESSAGE);
+  });
+
+  it("still reports a genuine revert as a revert", () => {
+    const reverted = new Error("execution reverted: InvalidInput");
+    assert.equal(isRpcUnreachable(reverted), false);
+    assert.match(auditErrorMessage(reverted), /transaction reverted/);
+  });
+});
+
+describe("an RPC provider that is answering and refusing", () => {
+  for (const error of [
+    { message: "Monthly capacity limit exceeded. Visit https://dashboard.alchemy.com/settings/billing to upgrade." },
+    { message: "request failed", cause: { status: 429, message: "Too Many Requests" } },
+    { name: "RpcRequestError", message: "rate limit exceeded", code: -32005 },
+  ]) {
+    it(`reports a quota refusal as a quota refusal: ${String(error.message).slice(0, 32)}`, () => {
+      assert.equal(isRpcQuotaExceeded(error), true);
+      assert.equal(auditErrorMessage(error), RPC_QUOTA_MESSAGE);
+      assert.doesNotMatch(auditErrorMessage(error), /https?:\/\//);
+    });
+  }
+});
+
+describe("URL redaction", () => {
+  it("keeps the host and drops the path that carries the key", () => {
+    assert.equal(
+      redactUrlPaths("URL: https://arb-sepolia.g.alchemy.com/v2/alch_TESTKEY0000000000000000"),
+      "URL: https://arb-sepolia.g.alchemy.com",
+    );
+  });
+
+  it("leaves text with no URL in it alone", () => {
+    assert.equal(redactUrlPaths("The verification transaction reverted."), "The verification transaction reverted.");
   });
 });

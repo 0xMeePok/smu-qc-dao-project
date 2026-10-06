@@ -8,7 +8,10 @@ import {
 import { CURRENCIES } from "../config/postingCategories.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { toDate } from "./datetime.js";
-import { isModuleLoadError, MODULE_LOAD_ERROR_MESSAGE } from "./errors.js";
+import {
+  isModuleLoadError, isRpcQuotaExceeded, isRpcUnreachable, MODULE_LOAD_ERROR_MESSAGE,
+  redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE,
+} from "./errors.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
@@ -89,5 +92,7 @@ export function messageForProposalError(error) {
   if (code === "unauthenticated") return "Your session has expired. Sign in again to continue.";
   if (["unavailable", "deadline-exceeded", "network-request-failed"].includes(code)) return "We could not reach the service. Check your connection and try again. Your form entries are still here.";
   if (code) return "We could not complete this action. Please try again.";
-  return error?.message || "We could not complete this action. Please try again.";
+  if (isRpcQuotaExceeded(error)) return RPC_QUOTA_MESSAGE;
+  if (isRpcUnreachable(error)) return RPC_UNREACHABLE_MESSAGE;
+  return redactUrlPaths(error?.message) || "We could not complete this action. Please try again.";
 }

@@ -2,7 +2,10 @@ import { erc20Abi, keccak256, stringToHex } from "viem";
 import { getConnection } from "wagmi/actions";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG, getAuditRegistryAddress } from "../config/auditRegistry.js";
 import { createWagmiAuditAdapters, waitForAuditReceipt } from "./auditRegistry.js";
-import { isTransactionFeeTooLow, isWalletRejection, TRANSACTION_FEE_TOO_LOW_MESSAGE } from "./errors.js";
+import {
+  isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection,
+  redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE, TRANSACTION_FEE_TOO_LOW_MESSAGE,
+} from "./errors.js";
 import { wagmiConfig } from "./wagmi.js";
 import { assertBytes32, prepareOpportunityCommit } from "../../../firebase/functions/auditCanonical.js";
 import { isEscrowRegistry, requireAddress, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
@@ -210,7 +213,12 @@ export function escrowErrorMessage(error) {
     const name = current.data?.errorName ?? current.auditErrorName;
     if (REVERT_MESSAGES[name]) return REVERT_MESSAGES[name];
   }
-  return error?.shortMessage || error?.message || "The escrow action could not be completed. Refresh and try again.";
+  // Same leak as auditErrorMessage had: a viem transport error carries the RPC
+  // URL, API key included, in its message.
+  if (isRpcQuotaExceeded(error)) return RPC_QUOTA_MESSAGE;
+  if (isRpcUnreachable(error)) return RPC_UNREACHABLE_MESSAGE;
+  return redactUrlPaths(error?.shortMessage || error?.message)
+    || "The escrow action could not be completed. Refresh and try again.";
 }
 
 /** Retry confirmation of one known hash without submitting another transaction. */
