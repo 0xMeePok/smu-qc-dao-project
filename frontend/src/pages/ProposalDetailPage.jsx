@@ -34,6 +34,7 @@ import { ReportableComments } from "../components/ReportableComments.jsx";
 import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 import { PosterIdentity } from "../components/PosterIdentity.jsx";
+import { FundingApproachForm } from "../components/FundingApproachForm.jsx";
 import { canApproachIndependentListing } from "../lib/independentFunding.js";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
@@ -60,6 +61,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [escrowState, setEscrowState] = useState(null);
   const [fundingRefreshVersion, setFundingRefreshVersion] = useState(0);
   const [author, setAuthor] = useState(null);
+  const [approachOpen, setApproachOpen] = useState(false);
   useEffect(() => {
     const fundingStarted = proposal?.fundingTerms ? escrowState?.totalDeposited > 0n : proposalMatchingLocked(proposal)
       || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status);
@@ -74,7 +76,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setProposal(null); setEscrowState(null); setError(""); setConfirm(false);
-    setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab);
+    setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab); setApproachOpen(false);
     setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
@@ -351,12 +353,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       {canEdit && <button type="button" className="secondary" onClick={() => onNavigate(independent ? `create-proposal/${proposal.id}` : `edit-proposal/${proposal.id}`)}>Edit proposal</button>}
       {canWithdraw && <button type="button" className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
       {independent
-        ? canApproach && <button type="button" className="primary" onClick={() => setTab("funding")}>Approach with funding</button>
+        ? canApproach && <button type="button" className="primary" onClick={() => setApproachOpen(true)}>Approach with funding</button>
         : showEscrow && <button type="button" className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
       {owns && proposal.status === "withdrawn" && <button type="button" className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
       </div>
     </aside></div>
     {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
+    {approachOpen && canApproach && <FundingApproachForm proposal={proposal} onDismiss={() => setApproachOpen(false)} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
       <div className="modal-head">
         <div>
