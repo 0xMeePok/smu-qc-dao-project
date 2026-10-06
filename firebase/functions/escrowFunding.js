@@ -48,18 +48,28 @@ export async function prepareRemovedProposalClaim({ db, client, config, uid, pro
   const proposal = await db.collection("proposals").doc(proposalId).get();
   if (!proposal.exists) fail("not-found", "This proposal is no longer available.");
   const stored = proposal.data();
-  const parentSnap = stored.problemId ? await db.collection("problems").doc(stored.problemId).get() : null;
+  const independent = isIndependentProposal(stored);
+  const parentSnap = !independent && stored.problemId ? await db.collection("problems").doc(stored.problemId).get() : null;
   const parentRemoved = Boolean(parentSnap?.exists && parentSnap.data().moderationStatus === "removed");
   if (stored.moderationStatus !== "removed" && !parentRemoved) fail("failed-precondition", "Open this proposal to use its escrow.");
-  if (!stored.problemId || isIndependentProposal(stored) || !stored.fundingTerms) {
+  if (!stored.fundingTerms || (!independent && !stored.problemId)) {
     return { claimable: false, message: "This removed proposal has no escrow deposit to claim." };
   }
-  if (!parentSnap?.exists || (!parentRemoved && !await canReadContent({ get: ref => ref.get() }, db, "problem", parentSnap.data(), uid, profile.data()))) {
-    fail("permission-denied", "This opportunity is not available.");
-  }
   const record = { ...stored, id: proposalId };
-  if (!record.postingOwnerId) record.postingOwnerId = record.moderation?.originalPostingOwnerId || parentSnap.data().ownerId || "";
-  const parent = { ...parentSnap.data(), id: parentSnap.id };
+  let parent;
+  if (independent) {
+    parent = {
+      id: record.id, title: record.title || "Independent listing",
+      ownerId: String(record.researcherId || "").toLowerCase(), status: record.status, expiresAt: record.expiresAt,
+      moderationStatus: record.moderationStatus, moderated: record.moderated,
+    };
+  } else {
+    if (!parentSnap?.exists || (!parentRemoved && !await canReadContent({ get: ref => ref.get() }, db, "problem", parentSnap.data(), uid, profile.data()))) {
+      fail("permission-denied", "This opportunity is not available.");
+    }
+    if (!record.postingOwnerId) record.postingOwnerId = record.moderation?.originalPostingOwnerId || parentSnap.data().ownerId || "";
+    parent = { ...parentSnap.data(), id: parentSnap.id };
+  }
   let verified, own;
   try {
     const blockNumber = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
@@ -678,21 +688,32 @@ export async function reconcileModerationVoids({ db, client, config, getWallet, 
 async function reconcileModerationVoid({ db, client, config, getWallet, ref, job, now }) {
   const proposal = await db.collection("proposals").doc(job.proposalId).get();
   const stored = proposal.exists ? proposal.data() : null;
-  if (!stored?.fundingTerms || !stored.problemId || isIndependentProposal(stored)) {
+  const independent = isIndependentProposal(stored);
+  if (!stored?.fundingTerms || (!independent && !stored.problemId)) {
     await ref.update({ status: "skipped", skipReason: "no-escrow", updatedAt: now });
     return;
   }
   const record = { ...stored, id: job.proposalId };
-  if (!record.postingOwnerId) record.postingOwnerId = record.moderation?.originalPostingOwnerId || "";
-  const parentSnap = await db.collection("problems").doc(record.problemId).get();
-  if (!parentSnap.exists) {
-    await ref.update({ status: "skipped", skipReason: "no-posting", updatedAt: now });
-    return;
+  let parent;
+  if (independent) {
+    parent = {
+      id: record.id, title: record.title || "Independent listing",
+      ownerId: String(record.researcherId || "").toLowerCase(), status: record.status, expiresAt: record.expiresAt,
+      moderationStatus: record.moderationStatus, moderated: record.moderated,
+    };
+  } else {
+    if (!record.postingOwnerId) record.postingOwnerId = record.moderation?.originalPostingOwnerId || "";
+    const parentSnap = await db.collection("problems").doc(record.problemId).get();
+    if (!parentSnap.exists) {
+      await ref.update({ status: "skipped", skipReason: "no-posting", updatedAt: now });
+      return;
+    }
+    parent = { ...parentSnap.data(), id: parentSnap.id };
   }
   let verified;
   try {
     const blockNumber = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
-    verified = await readVerifiedFunding({ client, config, record, parent: { ...parentSnap.data(), id: parentSnap.id }, blockNumber });
+    verified = await readVerifiedFunding({ client, config, record, parent, blockNumber });
   } catch {
     await ref.update({ nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now, blockedReason: "Escrow state could not be read." });
     return;

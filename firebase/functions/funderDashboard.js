@@ -6,6 +6,7 @@ import { FUNDING_EVENTS, loadFundingContext, readVerifiedFunding } from "./escro
 import { readOpenFunding, supportsOpenFunding } from "./openFunding.js";
 import { same } from "./escrowFundingEvents.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
+import { isIndependentProposal } from "./independentProposal.js";
 import { readEscrowQueueActions } from "./escrowQueueMetadata.js";
 
 const CAP = 50, APPROACH_CAP = 200;
@@ -13,6 +14,18 @@ const iso = value => value?.toDate?.().toISOString?.() ?? null;
 const at = (row, name, index) => row?.[name] ?? row?.[index];
 const hidden = row => row?.moderated || ["hidden", "removed"].includes(row?.moderationStatus);
 const fail = (code, message) => { throw new HttpsError(code, message); };
+
+/** A removed independent listing stays claimable without exposing its body. */
+async function removedIndependentClaim(db, proposalId) {
+  const snap = await db.collection("proposals").doc(proposalId).get();
+  if (!snap.exists) return null;
+  const stored = snap.data();
+  if (!isIndependentProposal(stored) || stored.moderationStatus !== "removed" || !stored.fundingTerms) return null;
+  return {
+    proposalId, title: String(stored.title || "Independent listing").slice(0, 160),
+    postingTitle: "Independent listing", claimFunds: true, removed: true,
+  };
+}
 
 /** QCDAO-94: member's opportunities, approaches and verified wallet commitments.
  * Exact token base units are grouped by chain and token; currencies never mix. */
@@ -132,7 +145,11 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   for (const proposalId of ids) {
     let context;
     try { context = await loadFundingContext({ db, uid, proposalId }); }
-    catch { continue; }
+    catch {
+      const removed = await removedIndependentClaim(db, proposalId);
+      if (removed) commitments.push(removed);
+      continue;
+    }
     if (!await canReadContent({ get: ref => ref.get() }, db, "proposal", context.record, uid, profile.data())) continue;
     try {
       if (safeBlock === undefined || safeBlock < 0n) throw new Error("RPC unavailable");

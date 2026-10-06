@@ -65,6 +65,7 @@ function listItem(id, data, extras) {
     approachAnchorId: data.anchor?.approachAnchorId ?? null,
     recordHash: data.anchor?.recordHash ?? null,
     anchorStatus: data.anchor?.status ?? null,
+    claimFunds: Boolean(extras.claimFunds),
   };
 }
 
@@ -90,14 +91,19 @@ export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) 
   const incomingDocs = incomingPage.docs.filter((doc) => instantMs(doc.data().expiresAt) > nowMs).slice(0, LIST_CAP);
   const sentDocs = sentPage.docs.slice(0, LIST_CAP);
   const proposalIds = [...incomingDocs, ...sentDocs].map((doc) => doc.data().proposalId);
-  const [titles, names] = await Promise.all([
-    lookup(db, "proposals", proposalIds, (data) => data.title || "Independent listing"),
+  const [proposals, names] = await Promise.all([
+    lookup(db, "proposals", proposalIds, (data) => data),
     lookup(db, "publicProfiles", incomingDocs.map((doc) => doc.data().funderId), (data) => data.fullName || data.organisation || ""),
   ]);
-  const item = (doc) => listItem(doc.id, doc.data(), {
-    proposalTitle: titles.get(doc.data().proposalId),
-    funderName: names.get(doc.data().funderId),
-  });
+  const item = (doc) => {
+    const proposal = proposals.get(doc.data().proposalId);
+    const removed = proposal?.moderationStatus === "removed" || proposal?.status === "moderated_removed";
+    return listItem(doc.id, doc.data(), {
+      proposalTitle: proposal?.title || "Independent listing",
+      funderName: names.get(doc.data().funderId),
+      claimFunds: removed && Boolean(proposal?.fundingTerms),
+    });
+  };
   return {
     incoming: incomingDocs.map(item),
     sent: sentDocs.map(item),
@@ -233,6 +239,42 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
     });
     return view(approachRef.id, record);
   });
+}
+
+/**
+ * Administrator removal cancels every still-pending approach on an independent listing.
+ * Restore does not put them back. A later approach is a new record.
+ */
+export async function cancelPendingFundingApproaches({ db, proposalId, now = Timestamp.now() }) {
+  validId(proposalId, "proposal");
+  const proposal = await db.collection("proposals").doc(proposalId).get();
+  if (!proposal.exists || !isIndependentProposal(proposal.data())) return { cancelled: 0 };
+  let cancelled = 0;
+  for (;;) {
+    const page = await db.collection(FUNDING_APPROACHES)
+      .where("proposalId", "==", proposalId).where("status", "==", "pending").limit(40).get();
+    if (page.empty) break;
+    const count = await db.runTransaction(async (tx) => {
+      const approaches = await Promise.all(page.docs.map((doc) => tx.get(doc.ref)));
+      const slots = await Promise.all(page.docs.map((doc) => tx.get(
+        db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(proposalId, doc.data().funderId)),
+      )));
+      let updated = 0;
+      approaches.forEach((snap, index) => {
+        if (!snap.exists || snap.data().status !== "pending") return;
+        tx.update(snap.ref, { status: "cancelled", updatedAt: now });
+        const slot = slots[index];
+        if (slot.exists && slot.data().approachId === snap.id && slot.data().status === "pending") {
+          tx.update(slot.ref, { status: "cancelled", updatedAt: now });
+        }
+        updated += 1;
+      });
+      return updated;
+    });
+    cancelled += count;
+    if (count === 0 || page.size < 40) break;
+  }
+  return { cancelled };
 }
 
 /** Stores the funder's mined anchor once the registry log matches the saved digest. */
