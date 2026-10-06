@@ -144,6 +144,37 @@
         {
           "indexed": true,
           "internalType": "bytes32",
+          "name": "decisionId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "recordHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "anchoredBy",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "anchoredAt",
+          "type": "uint64"
+        }
+      ],
+      "name": "FundingApproachDecisionAnchored",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
           "name": "proposalId",
           "type": "bytes32"
         },
@@ -701,6 +732,24 @@
     {
       "inputs": [
         {
+          "internalType": "bytes32[]",
+          "name": "decisionIds",
+          "type": "bytes32[]"
+        },
+        {
+          "internalType": "bytes32[]",
+          "name": "recordHashes",
+          "type": "bytes32[]"
+        }
+      ],
+      "name": "anchorFundingApproachDecisions",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "bytes32",
           "name": "moderationId",
           "type": "bytes32"
@@ -913,6 +962,25 @@
           "internalType": "uint256",
           "name": "",
           "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "decisionId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "fundingApproachDecisionHash",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "recordHash",
+          "type": "bytes32"
         }
       ],
       "stateMutability": "view",

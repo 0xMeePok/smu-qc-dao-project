@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { decodeEventLog } from "viem";
-import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachRecordHash } from "./fundingApproachAnchor.js";
+import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachDecisionAnchorId, fundingApproachDecisionRecordHash, fundingApproachRecordHash } from "./fundingApproachAnchor.js";
 import { fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { memberNoticeFields } from "./moderation.js";
 import { instantMs } from "./opportunityExpiry.js";
@@ -79,6 +79,9 @@ function listItem(id, data, extras) {
     approachAnchorId: data.anchor?.approachAnchorId ?? null,
     recordHash: data.anchor?.recordHash ?? null,
     anchorStatus: data.anchor?.status ?? null,
+    decisionAnchorId: data.decisionAnchor?.decisionAnchorId ?? null,
+    decisionRecordHash: data.decisionAnchor?.recordHash ?? null,
+    decisionAnchorStatus: data.decisionAnchor?.status ?? null,
     claimFunds: Boolean(extras.claimFunds),
   };
 }
@@ -149,6 +152,26 @@ function view(id, data) {
     approachAnchorId: data.anchor?.approachAnchorId ?? null,
     recordHash: data.anchor?.recordHash ?? null,
     anchorStatus: data.anchor?.status ?? null,
+    decisionAnchorId: data.decisionAnchor?.decisionAnchorId ?? null,
+    decisionRecordHash: data.decisionAnchor?.recordHash ?? null,
+    decisionAnchorStatus: data.decisionAnchor?.status ?? null,
+  };
+}
+
+function pendingDecisionAnchor(record) {
+  const decisionAnchorId = fundingApproachDecisionAnchorId(record.approachId, record.researcherId);
+  const recordHash = fundingApproachDecisionRecordHash(record);
+  return {
+    anchor: {
+      status: "pending",
+      eventVersion: 1,
+      decisionAnchorId,
+      recordHash,
+      transactionHash: null,
+      anchoredAt: null,
+      anchoredBy: null,
+    },
+    signed: { approachId: record.approachId, decisionAnchorId, recordHash },
   };
 }
 
@@ -274,7 +297,7 @@ function autoDeclineReason(title) {
  * The listing's researcher accepts or declines one still-pending approach.
  * Decline stores a reason. Accept may store a message, marks the listing funded,
  * and declines every other still-pending approach on that listing.
- * Both parties to this decision are notified. The on-chain record is a separate step.
+ * Both parties to this decision are notified. The researcher anchors the decision afterwards.
  */
 export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now() }) {
   validId(approachId, "approach");
@@ -335,12 +358,28 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
       tx.get(researcherNoticeRef),
       /^0x[0-9a-f]{40}$/.test(funderId) ? tx.get(db.collection("publicProfiles").doc(funderId)) : null,
     ]);
+    const title = String(listing.title || "Independent listing").slice(0, 160);
+    const explanation = status === "accepted" ? autoDeclineReason(title) : "";
+    const decidedAtIso = now.toDate().toISOString();
+    const chosenAnchor = pendingDecisionAnchor({
+      approachId, proposalId: data.proposalId, funderId: data.funderId, researcherId,
+      outcome: status, acceptMessage, declineReason, decidedAt: decidedAtIso,
+    });
+    const siblingAnchors = new Map(superseded.map((item) => {
+      const built = pendingDecisionAnchor({
+        approachId: item.doc.id, proposalId: data.proposalId, funderId: item.doc.data().funderId, researcherId,
+        outcome: "declined", acceptMessage: "", declineReason: explanation, decidedAt: decidedAtIso,
+      });
+      return [item.doc.id, built];
+    }));
+    const decisions = [chosenAnchor.signed, ...[...siblingAnchors.values()].map((item) => item.signed)];
     const next = {
       status,
       acceptMessage,
       declineReason,
       decidedAt: now,
       decidedBy: researcherId,
+      decisionAnchor: chosenAnchor.anchor,
       updatedAt: now,
     };
     tx.update(ref, next);
@@ -352,7 +391,6 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
         updatedAt: now,
       });
     }
-    const title = String(listing.title || "Independent listing").slice(0, 160);
     const researcherName = String(profile.data().fullName || profile.data().organisation || "The researcher").slice(0, 80);
     const funderName = String(funderProfile?.exists ? (funderProfile.data().fullName || funderProfile.data().organisation) : "").slice(0, 80) || "A client or funder";
     const amountLabel = `${data.currency || ""} ${data.amount ?? ""}`.trim();
@@ -377,12 +415,12 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
     writeOutcome(funderNotice, funderNoticeRef, funderId, funderMessage);
     writeOutcome(researcherNotice, researcherNoticeRef, researcherId, researcherMessage);
     if (status === "accepted") {
-      const explanation = autoDeclineReason(title);
       tx.update(proposal.ref, { acceptedApproachId: approachId, fundedAt: now, updatedAt: now });
       superseded.forEach((item) => {
         const sibling = item.doc.data();
         tx.update(item.doc.ref, {
-          status: "declined", acceptMessage: "", declineReason: explanation, decidedAt: now, decidedBy: researcherId, updatedAt: now,
+          status: "declined", acceptMessage: "", declineReason: explanation, decidedAt: now, decidedBy: researcherId,
+          decisionAnchor: siblingAnchors.get(item.doc.id).anchor, updatedAt: now,
         });
         if (item.slot.exists && item.slot.data().approachId === item.doc.id && item.slot.data().status === "pending") {
           tx.update(item.slot.ref, { status: "declined", acceptMessage: "", declineReason: explanation, updatedAt: now });
@@ -396,7 +434,7 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
         }
       });
     }
-    return view(approachId, { ...data, ...next });
+    return { ...view(approachId, { ...data, ...next }), decisions };
   });
 }
 
@@ -477,4 +515,71 @@ export async function saveFundingApproachAnchor({ db, client, config, uid, appro
   };
   await ref.update({ anchor: confirmed, updatedAt: now });
   return view(approachId, { ...data, anchor: confirmed });
+}
+
+/** Stores the researcher's mined decision anchor once every registry log matches the saved digest. */
+export async function saveFundingApproachDecisionAnchors({ db, client, config, uid, approachIds, transactionHash, now = Timestamp.now() }) {
+  if (!Array.isArray(approachIds) || approachIds.length === 0 || approachIds.length > AUTO_DECLINE_LIMIT) {
+    fail("invalid-argument", "Choose the approaches this decision anchored.");
+  }
+  const ids = [...new Set(approachIds)];
+  ids.forEach((id) => validId(id, "approach"));
+  if (!/^0x[0-9a-f]{64}$/i.test(transactionHash || "")) fail("invalid-argument", "A transaction hash is required.");
+  const researcherId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(researcherId)) fail("unauthenticated", "Sign in with your wallet.");
+  const refs = ids.map((id) => db.collection(FUNDING_APPROACHES).doc(id));
+  const snaps = await Promise.all(refs.map((ref) => ref.get()));
+  snaps.forEach((snap) => {
+    if (!snap.exists) fail("not-found", "This approach is no longer available.");
+    if (!same(snap.data().researcherId, researcherId)) fail("permission-denied", "Only the researcher on this listing can anchor this decision.");
+  });
+  const receipt = await client.getTransactionReceipt({ hash: transactionHash });
+  if (receipt.status !== "success") fail("failed-precondition", "The anchor transaction was not confirmed.");
+  if (!same(receipt.from, researcherId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
+  if (!same(receipt.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
+  const found = new Map();
+  let anchoredAt = null;
+  for (const log of receipt.logs) {
+    if (!same(log.address, config.address)) continue;
+    try {
+      const decoded = decodeEventLog({ abi: FUNDING_APPROACH_ANCHOR_ABI, topics: log.topics, data: log.data, strict: true });
+      if (decoded.eventName !== "FundingApproachDecisionAnchored") continue;
+      if (!same(decoded.args.anchoredBy, researcherId)) fail("permission-denied", "The anchor was not signed by this researcher.");
+      found.set(String(decoded.args.decisionId).toLowerCase(), String(decoded.args.recordHash).toLowerCase());
+      anchoredAt = new Date(Number(decoded.args.anchoredAt) * 1000).toISOString();
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+    }
+  }
+  const expected = new Map(snaps.map((snap) => {
+    const anchor = snap.data().decisionAnchor || {};
+    if (!/^0x[0-9a-f]{64}$/i.test(anchor.decisionAnchorId || "") || !/^0x[0-9a-f]{64}$/i.test(anchor.recordHash || "")) {
+      fail("failed-precondition", "This decision has no anchor digest.");
+    }
+    return [anchor.decisionAnchorId.toLowerCase(), anchor.recordHash.toLowerCase()];
+  }));
+  if (found.size !== expected.size) fail("failed-precondition", "The transaction does not anchor this decision.");
+  for (const [id, hash] of expected) {
+    if (found.get(id) !== hash) fail("failed-precondition", "The anchored hash does not match this decision.");
+  }
+  const confirmedAt = anchoredAt;
+  await db.runTransaction(async (tx) => {
+    const fresh = await Promise.all(refs.map((ref) => tx.get(ref)));
+    fresh.forEach((snap) => {
+      const anchor = snap.data().decisionAnchor || {};
+      if (anchor.status === "confirmed" && same(anchor.transactionHash, transactionHash)) return;
+      tx.update(snap.ref, {
+        decisionAnchor: {
+          ...anchor,
+          status: "confirmed",
+          transactionHash: transactionHash.toLowerCase(),
+          blockNumber: Number(receipt.blockNumber),
+          anchoredAt: confirmedAt,
+          anchoredBy: researcherId,
+        },
+        updatedAt: now,
+      });
+    });
+  });
+  return { anchored: ids.length };
 }

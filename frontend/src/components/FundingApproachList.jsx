@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 import { formatInstant } from "../lib/datetime.js";
 import {
-  APPROACH_TEXT_MAX, decideFundingApproach, fundingApproachError, fundingApproachStatusLabel, validateApproachDecision,
+  APPROACH_TEXT_MAX, decideFundingApproach, fundingApproachError, fundingApproachStatusLabel,
+  recordFundingApproachDecisionAnchors, submitFundingApproachDecisions, validateApproachDecision,
 } from "../lib/fundingApproach.js";
 import { claimRemovedProposalFunds, escrowErrorMessage } from "../lib/escrow.js";
 import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
@@ -41,6 +42,118 @@ export function ClaimRemovedFundsButton({ proposalId }) {
   );
 }
 
+function walletReady(user, address, isConnected, chainId) {
+  return isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
+}
+
+async function anchorDecisions(decisions, account) {
+  try {
+    const signed = await submitFundingApproachDecisions(decisions, { account });
+    await recordFundingApproachDecisionAnchors(decisions.map((item) => item.approachId), signed.transactionHash);
+  } catch (err) {
+    if (!err?.transactionHash) throw err;
+    await recordFundingApproachDecisionAnchors(decisions.map((item) => item.approachId), err.transactionHash);
+  }
+}
+
+/** Accept or decline, then ask the researcher's wallet to anchor the decision. */
+function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
+  const { user } = useAuth();
+  const { address, isConnected, chainId } = useAccount();
+  const [connect, setConnect] = useState(false);
+  const declining = draft.decision === "decline";
+  const submit = async (event) => {
+    event.preventDefault();
+    const fieldError = validateApproachDecision(draft.decision, draft.text);
+    if (fieldError) {
+      setDraft((current) => (current?.id === draft.id ? { ...current, error: fieldError } : current));
+      return;
+    }
+    if (!walletReady(user, address, isConnected, chainId)) { setConnect(true); return; }
+    setDraft((current) => (current?.id === draft.id ? { ...current, busy: true, error: "", phase: "saving" } : current));
+    let decided;
+    try {
+      decided = await decideFundingApproach(draft.id, draft.decision, draft.text);
+    } catch (err) {
+      setDraft((current) => (current?.id === draft.id ? {
+        ...current, busy: false, phase: "", error: fundingApproachError(err, "This approach could not be updated. Please try again."),
+      } : current));
+      return;
+    }
+    setDraft((current) => (current?.id === draft.id ? { ...current, phase: "signing" } : current));
+    try {
+      await anchorDecisions(decided.decisions, address);
+    } catch (err) {
+      setDraft(null);
+      onAnchorError?.(err?.message || "The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia.");
+      try { await onUpdated?.(); } catch { /* The list query reports its own load error. */ }
+      return;
+    }
+    setDraft(null);
+    try { await onUpdated?.(); } catch { /* The list query reports its own load error. */ }
+  };
+  return (
+    <form onSubmit={submit}>
+      <Field
+        htmlFor={`approach-response-${draft.id}`}
+        label={declining ? "Reason for declining" : "Message to the funder"}
+        hint={declining ? "Your wallet then anchors this reason. The text stays off-chain." : "Optional. Your wallet then anchors this decision. Any message stays off-chain."}
+        error={draft.error}
+      >
+        {({ id, describedBy, invalid }) => (
+          <textarea
+            id={id}
+            rows={3}
+            maxLength={APPROACH_TEXT_MAX}
+            required={declining}
+            value={draft.text}
+            disabled={draft.busy}
+            aria-invalid={invalid}
+            aria-describedby={describedBy}
+            onChange={(event) => setDraft((current) => (
+              current?.id === draft.id ? { ...current, text: event.target.value, error: "" } : current
+            ))}
+          />
+        )}
+      </Field>
+      <div className="table-row-actions">
+        <button className="secondary" type="button" disabled={draft.busy} onClick={() => setDraft(null)}>Cancel</button>
+        <button className="primary" type="submit" disabled={draft.busy}>
+          {draft.busy ? (draft.phase === "signing" ? "Waiting for your wallet…" : "Saving…") : declining ? "Decline approach" : "Accept approach"}
+        </button>
+      </div>
+      {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}
+    </form>
+  );
+}
+
+/** Signs every still-pending decision digest for one listing. */
+function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
+  const { user } = useAuth();
+  const { address, isConnected, chainId } = useAccount();
+  const [busy, setBusy] = useState(false);
+  const [connect, setConnect] = useState(false);
+  const sign = async () => {
+    if (!walletReady(user, address, isConnected, chainId)) { setConnect(true); return; }
+    const batch = items.filter((item) => item.proposalId === proposalId && item.decisionAnchorStatus === "pending" && item.decisionAnchorId && item.decisionRecordHash)
+      .map((item) => ({ approachId: item.id, decisionAnchorId: item.decisionAnchorId, recordHash: item.decisionRecordHash }));
+    setBusy(true);
+    onError?.("");
+    try {
+      await anchorDecisions(batch, address);
+      await onUpdated?.();
+    } catch (err) {
+      onError?.(err?.message || "The decision anchor could not be saved. Please try again.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button type="button" className="primary" disabled={busy} onClick={sign}>{busy ? "Waiting for your wallet…" : "Sign decision anchor"}</button>
+      {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}
+    </>
+  );
+}
+
 /**
  * One party's funding approaches. `showFunder` is the researcher's incoming list;
  * the funder's sent list names the listing instead. Accept and decline are only
@@ -49,38 +162,21 @@ export function ClaimRemovedFundsButton({ proposalId }) {
 export function FundingApproachList({ title, hint, empty, items = [], truncated = false, loading = false, error = "", onNavigate, onUpdated, showFunder = false, heading = "h2" }) {
   const Heading = heading === "h3" ? "h3" : "h2";
   const [draft, setDraft] = useState(null);
+  const [anchorError, setAnchorError] = useState("");
   const openDraft = draft && items.some((item) => item.id === draft.id && item.status === "pending") ? draft : null;
-  const start = (item, decision) => setDraft({ id: item.id, decision, text: "", error: "", busy: false });
-  const submit = async (event) => {
-    event.preventDefault();
-    if (!openDraft) return;
-    const fieldError = validateApproachDecision(openDraft.decision, openDraft.text);
-    if (fieldError) {
-      setDraft((current) => (current?.id === openDraft.id ? { ...current, error: fieldError } : current));
-      return;
-    }
-    setDraft((current) => (current?.id === openDraft.id ? { ...current, busy: true, error: "" } : current));
-    try {
-      await decideFundingApproach(openDraft.id, openDraft.decision, openDraft.text);
-    } catch (err) {
-      setDraft((current) => (current?.id === openDraft.id ? {
-        ...current, busy: false, error: fundingApproachError(err, "This approach could not be updated. Please try again."),
-      } : current));
-      return;
-    }
-    setDraft(null);
-    try { await onUpdated?.(); } catch { /* The list query reports its own load error. */ }
-  };
+  const start = (item, decision) => setDraft({ id: item.id, decision, text: "", error: "", busy: false, phase: "" });
   return (
     <section className="card-table" aria-label={title}>
       <div className="table-header"><Heading>{title}</Heading></div>
       {hint && <p className="field-hint">{hint}</p>}
       {loading && <p role="status" className="table-empty">Loading funding approaches…</p>}
       {error && <p role="alert" className="error-banner">{error}</p>}
+      {anchorError && <p role="alert" className="error-banner">{anchorError}</p>}
       {!loading && !error && items.length === 0 && <p className="table-empty">{empty}</p>}
       {!loading && !error && items.map((item) => {
         const responding = openDraft?.id === item.id;
-        const declining = responding && openDraft.decision === "decline";
+        const signAnchor = showFunder && item.decisionAnchorStatus === "pending"
+          && items.find((row) => row.proposalId === item.proposalId && row.decisionAnchorStatus === "pending")?.id === item.id;
         return (
           <div className="table-row" key={item.id}>
             <div>
@@ -94,38 +190,8 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
               {item.message && <p>{item.message}</p>}
               {item.status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
               {item.status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
-              {responding && (
-                <form onSubmit={submit}>
-                  <Field
-                    htmlFor={`approach-response-${item.id}`}
-                    label={declining ? "Reason for declining" : "Message to the funder"}
-                    hint={declining ? undefined : "Optional."}
-                    error={openDraft.error}
-                  >
-                    {({ id, describedBy, invalid }) => (
-                      <textarea
-                        id={id}
-                        rows={3}
-                        maxLength={APPROACH_TEXT_MAX}
-                        required={declining}
-                        value={openDraft.text}
-                        disabled={openDraft.busy}
-                        aria-invalid={invalid}
-                        aria-describedby={describedBy}
-                        onChange={(event) => setDraft((current) => (
-                          current?.id === item.id ? { ...current, text: event.target.value, error: "" } : current
-                        ))}
-                      />
-                    )}
-                  </Field>
-                  <div className="table-row-actions">
-                    <button className="secondary" type="button" disabled={openDraft.busy} onClick={() => setDraft(null)}>Cancel</button>
-                    <button className="primary" type="submit" disabled={openDraft.busy}>
-                      {openDraft.busy ? "Saving…" : declining ? "Decline approach" : "Accept approach"}
-                    </button>
-                  </div>
-                </form>
-              )}
+              {signAnchor && <p className="field-hint">The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia. The message and reason stay off-chain.</p>}
+              {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
             </div>
             <div className="table-row-actions">
               {showFunder && item.status === "pending" && !responding && (
@@ -134,6 +200,7 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
                   <button type="button" className="secondary" onClick={() => start(item, "decline")}>Decline</button>
                 </>
               )}
+              {signAnchor && <SignDecisionAnchor items={items} proposalId={item.proposalId} onUpdated={onUpdated} onError={setAnchorError} />}
               {item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
               <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${item.proposalId}`)}>Open listing</button>
             </div>

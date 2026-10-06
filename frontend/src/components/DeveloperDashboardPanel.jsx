@@ -186,7 +186,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
       <FundingApproachList
         heading="h3"
         title="Funding approaches received"
-        hint="Indicative interest from a client or funder. Accept or decline a pending approach. This does not deposit tokens."
+        hint="Indicative interest from a client or funder. Accept or decline a pending approach. Your wallet then anchors that decision. This does not deposit tokens."
         empty="No funding approaches yet."
         items={approaches.data?.incoming ?? []}
         truncated={approaches.data?.truncated?.incoming}

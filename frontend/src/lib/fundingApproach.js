@@ -119,7 +119,7 @@ export function validateApproachDecision(decision, text) {
   return textError(trimmed, "Message");
 }
 
-/** Records the researcher's accept or decline. The listing, other approaches, and notices stay unchanged. */
+/** Records the researcher's accept or decline and returns the digests their wallet must anchor. */
 export async function decideFundingApproach(approachId, decision, text) {
   requireFirebase();
   const payload = { approachId, decision };
@@ -161,4 +161,36 @@ export async function submitFundingApproachAnchor(created, { account, adapters =
 export async function recordFundingApproachAnchor(approachId, transactionHash) {
   requireFirebase();
   return (await httpsCallable(functions, "recordFundingApproachAnchor")({ approachId, transactionHash })).data;
+}
+
+/** The researcher's wallet anchors the decision digest. The message and reason stay off-chain. */
+export async function submitFundingApproachDecisions(decisions, { account, adapters = createWagmiEscrowAdapters() } = {}) {
+  const hex = (value) => /^0x[0-9a-f]{64}$/i.test(value || "");
+  const decisionIds = (decisions ?? []).map((item) => item.decisionAnchorId);
+  const recordHashes = (decisions ?? []).map((item) => item.recordHash);
+  if (!decisionIds.length || decisionIds.some((id) => !hex(id)) || recordHashes.some((hash) => !hex(hash))) {
+    throw new Error("This decision has no anchor digest.");
+  }
+  let transactionHash;
+  try {
+    transactionHash = await adapters.writeContract({
+      address: getAuditRegistryAddress(),
+      abi: FUNDING_APPROACH_ANCHOR_ABI,
+      functionName: "anchorFundingApproachDecisions",
+      args: [decisionIds, recordHashes],
+      account,
+      chainId: AUDIT_REGISTRY_CHAIN_ID,
+    });
+    const receipt = await confirmEscrowTransaction(transactionHash, { adapters, confirmations: 2 });
+    return { transactionHash: receipt.transactionHash ?? transactionHash };
+  } catch (cause) {
+    const error = new Error(escrowErrorMessage(cause));
+    error.transactionHash = cause.transactionHash || transactionHash;
+    throw error;
+  }
+}
+
+export async function recordFundingApproachDecisionAnchors(approachIds, transactionHash) {
+  requireFirebase();
+  return (await httpsCallable(functions, "recordFundingApproachDecisionAnchors")({ approachIds, transactionHash })).data;
 }

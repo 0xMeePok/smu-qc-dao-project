@@ -48,7 +48,7 @@ import { feedbackByProposal, listActionItems as actionItems, listEvaluatorQueue 
 import { collectOwnerDashboard } from "./ownerDashboard.js";
 import { listIndependentListings as independentListings } from "./independentProposalCatalog.js";
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
-import { createFundingApproach as writeFundingApproach, decideFundingApproach as writeFundingApproachDecision, listFundingApproaches as readFundingApproaches, saveFundingApproachAnchor } from "./fundingApproach.js";
+import { createFundingApproach as writeFundingApproach, decideFundingApproach as writeFundingApproachDecision, listFundingApproaches as readFundingApproaches, saveFundingApproachAnchor, saveFundingApproachDecisionAnchors } from "./fundingApproach.js";
 import { readAuditTrail } from "./auditTrail.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
@@ -285,6 +285,14 @@ export const recordFundingApproachAnchor = onCall(MEMBER_CALL_OPTIONS, async (re
   return saveFundingApproachAnchor({
     db, client: publicClient, config: auditRegistryConfig, uid, now: Timestamp.now(),
     approachId: request.data?.approachId, transactionHash: request.data?.transactionHash,
+  });
+});
+
+export const recordFundingApproachDecisionAnchors = onCall(MEMBER_CALL_OPTIONS, async (request) => {
+  const uid = await requireMember(request);
+  return saveFundingApproachDecisionAnchors({
+    db, client: publicClient, config: auditRegistryConfig, uid, now: Timestamp.now(),
+    approachIds: request.data?.approachIds, transactionHash: request.data?.transactionHash,
   });
 });
 
