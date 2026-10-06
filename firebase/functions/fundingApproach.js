@@ -438,9 +438,12 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
   });
 }
 
+const REMOVAL_STATUSES = ["pending", "accepted"];
+
 /**
- * Administrator removal cancels every still-pending approach on an independent listing.
- * Restore does not put them back. A later approach is a new record.
+ * Administrator removal cancels every still-pending approach, and an accepted one, on an independent listing.
+ * Declined and expired approaches stay as they are. Restore does not put any of them back.
+ * The escrow refund claim is unchanged.
  */
 export async function cancelPendingFundingApproaches({ db, proposalId, now = Timestamp.now() }) {
   validId(proposalId, "proposal");
@@ -449,7 +452,7 @@ export async function cancelPendingFundingApproaches({ db, proposalId, now = Tim
   let cancelled = 0;
   for (;;) {
     const page = await db.collection(FUNDING_APPROACHES)
-      .where("proposalId", "==", proposalId).where("status", "==", "pending").limit(40).get();
+      .where("proposalId", "==", proposalId).where("status", "in", REMOVAL_STATUSES).limit(40).get();
     if (page.empty) break;
     const count = await db.runTransaction(async (tx) => {
       const approaches = await Promise.all(page.docs.map((doc) => tx.get(doc.ref)));
@@ -458,10 +461,10 @@ export async function cancelPendingFundingApproaches({ db, proposalId, now = Tim
       )));
       let updated = 0;
       approaches.forEach((snap, index) => {
-        if (!snap.exists || snap.data().status !== "pending") return;
+        if (!snap.exists || !REMOVAL_STATUSES.includes(snap.data().status)) return;
         tx.update(snap.ref, { status: "cancelled", updatedAt: now });
         const slot = slots[index];
-        if (slot.exists && slot.data().approachId === snap.id && slot.data().status === "pending") {
+        if (slot.exists && slot.data().approachId === snap.id && REMOVAL_STATUSES.includes(slot.data().status)) {
           tx.update(slot.ref, { status: "cancelled", updatedAt: now });
         }
         updated += 1;
