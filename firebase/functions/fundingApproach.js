@@ -274,7 +274,7 @@ function autoDeclineReason(title) {
  * The listing's researcher accepts or declines one still-pending approach.
  * Decline stores a reason. Accept may store a message, marks the listing funded,
  * and declines every other still-pending approach on that listing.
- * Notices for this decision, and the on-chain record, are separate steps.
+ * Both parties to this decision are notified. The on-chain record is a separate step.
  */
 export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now() }) {
   validId(approachId, "approach");
@@ -327,6 +327,14 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
       ]);
       superseded = others.map((doc, index) => ({ doc, slot: slots[index], notice: notices[index] }));
     }
+    const funderId = String(data.funderId || "");
+    const funderNoticeRef = db.collection("moderationNotifications").doc(`funding_approach_outcome_${approachId}_funder`);
+    const researcherNoticeRef = db.collection("moderationNotifications").doc(`funding_approach_outcome_${approachId}_researcher`);
+    const [funderNotice, researcherNotice, funderProfile] = await Promise.all([
+      tx.get(funderNoticeRef),
+      tx.get(researcherNoticeRef),
+      /^0x[0-9a-f]{40}$/.test(funderId) ? tx.get(db.collection("publicProfiles").doc(funderId)) : null,
+    ]);
     const next = {
       status,
       acceptMessage,
@@ -344,8 +352,31 @@ export async function decideFundingApproach({ db, uid, approachId, decision, mes
         updatedAt: now,
       });
     }
+    const title = String(listing.title || "Independent listing").slice(0, 160);
+    const researcherName = String(profile.data().fullName || profile.data().organisation || "The researcher").slice(0, 80);
+    const funderName = String(funderProfile?.exists ? (funderProfile.data().fullName || funderProfile.data().organisation) : "").slice(0, 80) || "A client or funder";
+    const amountLabel = `${data.currency || ""} ${data.amount ?? ""}`.trim();
+    const detail = status === "accepted"
+      ? (acceptMessage ? ` Message: ${acceptMessage}` : "")
+      : ` Reason: ${declineReason}`;
+    const funderMessage = status === "accepted"
+      ? `${researcherName} accepted your funding approach for “${title}” (${amountLabel}).${detail}`
+      : `${researcherName} declined your funding approach for “${title}”.${detail}`;
+    const researcherMessage = status === "accepted"
+      ? `You accepted the funding approach from ${funderName} for “${title}” (${amountLabel}).${detail}`
+      : `You declined the funding approach from ${funderName} for “${title}”.${detail}`;
+    const writeOutcome = (snap, noticeRef, recipientId, message) => {
+      if (!snap || snap.exists || !/^0x[0-9a-f]{40}$/.test(recipientId)) return;
+      tx.create(noticeRef, memberNoticeFields({
+        recipientId, now, createdAt: now,
+        kind: status === "accepted" ? "funding_approach_accepted" : "funding_approach_declined",
+        workflowStatus: status, contentType: "proposal", contentId: data.proposalId, proposalId: data.proposalId, title,
+        message,
+      }));
+    };
+    writeOutcome(funderNotice, funderNoticeRef, funderId, funderMessage);
+    writeOutcome(researcherNotice, researcherNoticeRef, researcherId, researcherMessage);
     if (status === "accepted") {
-      const title = String(listing.title || "Independent listing").slice(0, 160);
       const explanation = autoDeclineReason(title);
       tx.update(proposal.ref, { acceptedApproachId: approachId, fundedAt: now, updatedAt: now });
       superseded.forEach((item) => {
