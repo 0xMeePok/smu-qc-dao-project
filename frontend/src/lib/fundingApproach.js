@@ -2,6 +2,7 @@ import { httpsCallable } from "firebase/functions";
 import { FUNDING_APPROACH_ANCHOR_ABI } from "../../../firebase/functions/fundingApproachAnchor.js";
 import { AUDIT_REGISTRY_CHAIN_ID, getAuditRegistryAddress } from "../config/auditRegistry.js";
 import { CURRENCIES } from "../config/postingCategories.js";
+import { WORKFLOW_STATUS, workflowStatusLabel } from "../config/workflowStatus.js";
 import { requireFirebase } from "./authFlow.js";
 import { toDate } from "./datetime.js";
 import { confirmEscrowTransaction, createWagmiEscrowAdapters, escrowErrorMessage } from "./escrow.js";
@@ -102,8 +103,8 @@ export async function createFundingApproach(proposalId, payload) {
 }
 
 export function fundingApproachStatusLabel(status) {
-  if (status === "expired") return "Expired";
-  if (status === "cancelled") return "Cancelled";
+  if (status === "expired") return workflowStatusLabel(WORKFLOW_STATUS.EXPIRED);
+  if (status === "cancelled") return workflowStatusLabel(WORKFLOW_STATUS.CANCELLED);
   return "Pending";
 }
 
