@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
+import { memberNoticeFields } from "./moderation.js";
 import { instantMs } from "./opportunityExpiry.js";
 
 export const FUNDING_APPROACHES = "fundingApproaches";
@@ -78,6 +79,7 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
   const proposalRef = db.collection("proposals").doc(proposalId);
   const slotRef = db.collection(FUNDING_APPROACH_SLOTS).doc(fundingApproachSlotId(proposalId, funderId));
   const approachRef = db.collection(FUNDING_APPROACHES).doc(randomBytes(16).toString("hex"));
+  const noticeRef = db.collection("moderationNotifications").doc(`funding_approach_${approachRef.id}`);
 
   return db.runTransaction(async (tx) => {
     const [profile, proposal, slot] = await Promise.all([
@@ -109,7 +111,10 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
     if (slot.exists && slot.data().approachId) {
       previousRef = db.collection(FUNDING_APPROACHES).doc(slot.data().approachId);
     }
-    const previous = previousRef ? await tx.get(previousRef) : null;
+    const [previous, notice] = await Promise.all([
+      previousRef ? tx.get(previousRef) : null,
+      tx.get(noticeRef),
+    ]);
     const previousData = previous?.exists ? previous.data() : null;
     const previousPending = previousData?.status === "pending" && instantMs(previousData.expiresAt) > nowMs;
     if (previousPending) fail("already-exists", "You already have a pending approach for this listing.");
@@ -131,6 +136,15 @@ export async function createFundingApproach({ db, uid, proposalId, amount, curre
       tx.update(previousRef, { status: "expired", updatedAt: now });
     }
     tx.create(approachRef, record);
+    if (!notice.exists) {
+      const title = String(data.title || "Independent listing").slice(0, 160);
+      const name = String(profile.data().fullName || profile.data().organisation || "A client or funder").slice(0, 80);
+      tx.create(noticeRef, memberNoticeFields({
+        recipientId: researcherId, now, createdAt: now, kind: "funding_approach",
+        contentType: "proposal", contentId: proposalId, proposalId, title,
+        message: `${name} approached your listing “${title}” with indicative funding of ${currency} ${amount}.`,
+      }));
+    }
     tx.set(slotRef, {
       approachId: approachRef.id,
       funderId,
