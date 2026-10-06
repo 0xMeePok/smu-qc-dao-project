@@ -8,6 +8,7 @@ import { flushSync } from "react-dom";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
 import { findProposal, withdrawProposal } from "../lib/proposals.js";
+import { findPublicProfileByAddress } from "../lib/profile.js";
 import { anchorProposalAudit, anchorProposalWithdrawal, proposalAuditReceipt, readProposalAudit } from "../lib/proposalAudit.js";
 import { auditErrorMessage } from "../lib/errors.js";
 import { downloadAttachment, saveBlobAs } from "../lib/attachments.js";
@@ -32,6 +33,7 @@ import { ContentModerationNotice, ReportContentButton } from "../components/Repo
 import { ReportableComments } from "../components/ReportableComments.jsx";
 import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
+import { PosterIdentity } from "../components/PosterIdentity.jsx";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
@@ -56,6 +58,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [tab, setTab] = useState(initialTab);
   const [escrowState, setEscrowState] = useState(null);
   const [fundingRefreshVersion, setFundingRefreshVersion] = useState(0);
+  const [author, setAuthor] = useState(null);
   useEffect(() => {
     const fundingStarted = proposal?.fundingTerms ? escrowState?.totalDeposited > 0n : proposalMatchingLocked(proposal)
       || ["awaiting_confirmation", "confirmed", "invalidated"].includes(proposal?.problemMatching?.status);
@@ -77,6 +80,15 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [proposalId, initialTab]);
+  useEffect(() => {
+    setAuthor(null);
+    if (!isIndependentProposal(proposal) || !proposal?.researcherId) return undefined;
+    let cancelled = false;
+    findPublicProfileByAddress(proposal.researcherId)
+      .then((found) => { if (!cancelled) setAuthor(found); })
+      .catch(() => { if (!cancelled) setAuthor(null); });
+    return () => { cancelled = true; };
+  }, [proposal?.id, proposal?.researcherId, proposal?.proposalKind]);
   useEffect(() => {
     if (!proposal?.id) return undefined;
     const commentId = new URLSearchParams(window.location.hash.split("?")[1] || "").get("comment");
@@ -323,6 +335,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("overview")); highlightWhenPresent(`comment-${item.commentId}`); }} />}
       </div>
     </article><aside className="context-panel"><span className="eyebrow">{independent ? "Indicative funding" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl>
+      {independent && <PosterIdentity ownerId={proposal.researcherId} poster={author} onNavigate={onNavigate} label="Proposed by" />}
       <div><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd></div>
       {independent && <div><dt>Maturity</dt><dd>{PROPOSAL_MATURITY_LEVELS.find((item) => item.value === proposal.maturity)?.label || "—"}</dd></div>}
       <div><dt>Submitted</dt><dd>{formatInstant(proposal.createdAt)}</dd></div>
