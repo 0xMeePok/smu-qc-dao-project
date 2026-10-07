@@ -1,9 +1,10 @@
 import { formatUnits } from "viem";
 import { ARBITRUM_SEPOLIA_CHAIN_ID } from "../../../firebase/functions/rpcPolicy.js";
+import { FUNDING_EVENT_NAMES } from "../../../firebase/functions/escrowFundingEvents.js";
 
-const STATE_EVENTS = new Set(["EscrowCreated", "SelectionLocked", "Approval", "SelectionInvalidated",
-  "Cancelled", "Expired", "MilestoneSubmitted", "Voided", "FunderVote"]);
-const absentTransferLabel = eventType => STATE_EVENTS.has(eventType) ? "Not applicable" : "Not recorded";
+const TRANSFER_EVENTS = new Set(["Deposit", "TrancheReleased", "RefundClaimed"]);
+const absentTransferLabel = eventType => FUNDING_EVENT_NAMES.includes(eventType) && !TRANSFER_EVENTS.has(eventType)
+  ? "Not applicable" : "Not recorded";
 
 function amountLabel(funding) {
   if (funding.amountBaseUnits == null) {

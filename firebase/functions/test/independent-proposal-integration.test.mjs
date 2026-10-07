@@ -192,7 +192,9 @@ function mockRpc(t, client) {
   return t.mock.method(globalThis, "fetch", async (_url, options) => {
     const { id, method, params } = JSON.parse(options.body);
     let result;
-    if (method === "eth_getTransactionReceipt") {
+    if (method === "eth_chainId") {
+      result = numberToHex(registry.chainId);
+    } else if (method === "eth_getTransactionReceipt") {
       const receipt = await client.getTransactionReceipt();
       result = { ...receipt, status: "0x1", blockNumber: numberToHex(receipt.blockNumber), logs: [] };
     } else if (method === "eth_getTransactionByHash") {
