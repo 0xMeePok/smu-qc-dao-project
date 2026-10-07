@@ -154,10 +154,28 @@ function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
   );
 }
 
+/** Newest first. A listing's group appears where its newest approach does. */
+function groupByProposal(items) {
+  const groups = [];
+  const byProposal = new Map();
+  for (const item of items) {
+    const key = item.proposalId || "";
+    let group = byProposal.get(key);
+    if (!group) {
+      group = { key: key || "listing", title: item.proposalTitle || "Independent listing", items: [] };
+      byProposal.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
+}
+
 /**
- * One party's funding approaches. `showFunder` is the researcher's incoming list;
- * the funder's sent list names the listing instead. Accept and decline are only
- * offered on a pending incoming row.
+ * One party's funding approaches. `showFunder` is the researcher's incoming list,
+ * grouped under each listing. The funder's sent list stays one row per approach
+ * and names the listing on that row. Accept and decline are only offered on a
+ * pending incoming row.
  */
 export function FundingApproachList({ title, hint, empty, items = [], truncated = false, loading = false, error = "", onNavigate, onUpdated, showFunder = false, heading = "h2" }) {
   const Heading = heading === "h3" ? "h3" : "h2";
@@ -165,6 +183,41 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
   const [anchorError, setAnchorError] = useState("");
   const openDraft = draft && items.some((item) => item.id === draft.id && item.status === "pending") ? draft : null;
   const start = (item, decision) => setDraft({ id: item.id, decision, text: "", error: "", busy: false, phase: "" });
+  const approachRow = (item) => {
+    const responding = openDraft?.id === item.id;
+    const signAnchor = showFunder && item.decisionAnchorStatus === "pending"
+      && items.find((row) => row.proposalId === item.proposalId && row.decisionAnchorStatus === "pending")?.id === item.id;
+    return (
+      <div className="table-row" key={item.id}>
+        <div>
+          <strong>{showFunder ? (item.funderName || "A client or funder") : (item.proposalTitle || "Independent listing")}</strong>
+          <small className="table-row-meta">
+            {showFunder ? null : "Sent by you · "}
+            {money(item)} indicative · {fundingApproachStatusLabel(item.status)}
+          </small>
+          <small className="table-row-meta">Expires {formatInstant(item.expiresAt)}</small>
+          {item.scope && <p>{item.scope}</p>}
+          {item.message && <p>{item.message}</p>}
+          {item.status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
+          {item.status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
+          {signAnchor && <p className="field-hint">The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia. The message and reason stay off-chain.</p>}
+          {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
+        </div>
+        <div className="table-row-actions">
+          {showFunder && item.status === "pending" && !responding && (
+            <>
+              <button type="button" className="primary" onClick={() => start(item, "accept")}>Accept</button>
+              <button type="button" className="secondary" onClick={() => start(item, "decline")}>Decline</button>
+            </>
+          )}
+          {signAnchor && <SignDecisionAnchor items={items} proposalId={item.proposalId} onUpdated={onUpdated} onError={setAnchorError} />}
+          {item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
+          <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${item.proposalId}`)}>Open listing</button>
+        </div>
+      </div>
+    );
+  };
+  const groups = showFunder ? groupByProposal(items) : [];
   return (
     <section className="card-table" aria-label={title}>
       <div className="table-header"><Heading>{title}</Heading></div>
@@ -173,40 +226,14 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
       {error && <p role="alert" className="error-banner">{error}</p>}
       {anchorError && <p role="alert" className="error-banner">{anchorError}</p>}
       {!loading && !error && items.length === 0 && <p className="table-empty">{empty}</p>}
-      {!loading && !error && items.map((item) => {
-        const responding = openDraft?.id === item.id;
-        const signAnchor = showFunder && item.decisionAnchorStatus === "pending"
-          && items.find((row) => row.proposalId === item.proposalId && row.decisionAnchorStatus === "pending")?.id === item.id;
-        return (
-          <div className="table-row" key={item.id}>
-            <div>
-              <strong>{item.proposalTitle || "Independent listing"}</strong>
-              <small className="table-row-meta">
-                {showFunder ? (item.funderName || "A client or funder") : "Sent by you"}
-                {" · "}{money(item)} indicative · {fundingApproachStatusLabel(item.status)}
-              </small>
-              <small className="table-row-meta">Expires {formatInstant(item.expiresAt)}</small>
-              {item.scope && <p>{item.scope}</p>}
-              {item.message && <p>{item.message}</p>}
-              {item.status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
-              {item.status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
-              {signAnchor && <p className="field-hint">The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia. The message and reason stay off-chain.</p>}
-              {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
-            </div>
-            <div className="table-row-actions">
-              {showFunder && item.status === "pending" && !responding && (
-                <>
-                  <button type="button" className="primary" onClick={() => start(item, "accept")}>Accept</button>
-                  <button type="button" className="secondary" onClick={() => start(item, "decline")}>Decline</button>
-                </>
-              )}
-              {signAnchor && <SignDecisionAnchor items={items} proposalId={item.proposalId} onUpdated={onUpdated} onError={setAnchorError} />}
-              {item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
-              <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${item.proposalId}`)}>Open listing</button>
-            </div>
+      {!loading && !error && (showFunder
+        ? groups.map((group) => (
+          <div className="approach-group" key={group.key}>
+            <h4 className="approach-group-title">{group.title}</h4>
+            {group.items.map(approachRow)}
           </div>
-        );
-      })}
+        ))
+        : items.map(approachRow))}
       {truncated && <p className="field-hint">Showing a limited set of approaches. Open a listing for the full record.</p>}
     </section>
   );

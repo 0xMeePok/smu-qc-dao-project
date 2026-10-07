@@ -1523,6 +1523,23 @@ input[type="radio"] { accent-color: var(--brand); }
   border-bottom: none;
 }
 
+.approach-group-title {
+  margin: 0;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.approach-group .table-row:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.approach-group:last-child .table-row:last-child {
+  border-bottom: none;
+}
+
 .table-row strong {
   display: block;
   font-size: 15px;
