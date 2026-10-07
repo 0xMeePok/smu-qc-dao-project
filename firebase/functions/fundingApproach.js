@@ -5,7 +5,7 @@ import { decodeEventLog } from "viem";
 import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachDecisionAnchorId, fundingApproachDecisionRecordHash, fundingApproachRecordHash } from "./fundingApproachAnchor.js";
 import { fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { memberNoticeFields } from "./moderation.js";
-import { instantMs } from "./opportunityExpiry.js";
+import { deadlinePassed, instantMs } from "./opportunityExpiry.js";
 
 export const FUNDING_APPROACHES = "fundingApproaches";
 export const FUNDING_APPROACH_SLOTS = "fundingApproachSlots";
@@ -92,25 +92,27 @@ async function lookup(db, collection, ids, pick) {
   return new Map(snaps.map((snap) => [snap.id, snap.exists ? pick(snap.data()) : ""]));
 }
 
-const RESEARCHER_LIST_STATUSES = ["pending", "accepted", "declined"];
+const RESEARCHER_LIST_STATUSES = ["pending", "accepted", "declined", "expired", "cancelled"];
 
-/** Incoming approaches the researcher can still see, and every approach this member sent. */
+/** A pending approach past its deadline is expired. Stored accepted, declined, expired and cancelled stay as written. */
+function listedStatus(data, now) {
+  if ((data.status || "pending") === "pending" && deadlinePassed(data.expiresAt, now)) return "expired";
+  return data.status || "pending";
+}
+
+/** Incoming approaches for this researcher, including expired and cancelled, and every approach this member sent. */
 export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) {
   const actorId = String(uid || "").toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(actorId)) fail("unauthenticated", "Sign in with your wallet.");
   const profile = await db.collection("users").doc(uid).get();
   if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
-  const nowMs = now.toMillis();
   const [incomingPage, sentPage] = await Promise.all([
     db.collection(FUNDING_APPROACHES).where("researcherId", "==", actorId).where("status", "in", RESEARCHER_LIST_STATUSES)
       .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
     db.collection(FUNDING_APPROACHES).where("funderId", "==", actorId)
       .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
   ]);
-  const incomingDocs = incomingPage.docs.filter((doc) => {
-    const data = doc.data();
-    return data.status !== "pending" || instantMs(data.expiresAt) > nowMs;
-  }).slice(0, LIST_CAP);
+  const incomingDocs = incomingPage.docs.slice(0, LIST_CAP);
   const sentDocs = sentPage.docs.slice(0, LIST_CAP);
   const proposalIds = [...incomingDocs, ...sentDocs].map((doc) => doc.data().proposalId);
   const [proposals, names] = await Promise.all([
@@ -118,9 +120,10 @@ export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) 
     lookup(db, "publicProfiles", incomingDocs.map((doc) => doc.data().funderId), (data) => data.fullName || data.organisation || ""),
   ]);
   const item = (doc) => {
-    const proposal = proposals.get(doc.data().proposalId);
+    const data = doc.data();
+    const proposal = proposals.get(data.proposalId);
     const removed = proposal?.moderationStatus === "removed" || proposal?.status === "moderated_removed";
-    return listItem(doc.id, doc.data(), {
+    return listItem(doc.id, { ...data, status: listedStatus(data, now) }, {
       proposalTitle: proposal?.title || "Independent listing",
       funderName: names.get(doc.data().funderId),
       claimFunds: removed && Boolean(proposal?.fundingTerms),

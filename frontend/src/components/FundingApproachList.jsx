@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import { formatInstant } from "../lib/datetime.js";
+import { formatCountdown, formatInstant, isExpired } from "../lib/datetime.js";
 import {
   APPROACH_TEXT_MAX, decideFundingApproach, fundingApproachError, fundingApproachStatusLabel,
   recordFundingApproachDecisionAnchors, submitFundingApproachDecisions, validateApproachDecision,
@@ -181,9 +181,20 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
   const Heading = heading === "h3" ? "h3" : "h2";
   const [draft, setDraft] = useState(null);
   const [anchorError, setAnchorError] = useState("");
-  const openDraft = draft && items.some((item) => item.id === draft.id && item.status === "pending") ? draft : null;
+  const [now, setNow] = useState(() => new Date());
+  const countdown = showFunder && items.some((item) => item.status === "pending" && !isExpired(item.expiresAt, now));
+  useEffect(() => {
+    if (!countdown) return undefined;
+    const timer = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+  const listedStatus = (item) => (
+    showFunder && item.status === "pending" && isExpired(item.expiresAt, now) ? "expired" : item.status
+  );
+  const openDraft = draft && items.some((item) => item.id === draft.id && listedStatus(item) === "pending") ? draft : null;
   const start = (item, decision) => setDraft({ id: item.id, decision, text: "", error: "", busy: false, phase: "" });
   const approachRow = (item) => {
+    const status = listedStatus(item);
     const responding = openDraft?.id === item.id;
     const signAnchor = showFunder && item.decisionAnchorStatus === "pending"
       && items.find((row) => row.proposalId === item.proposalId && row.decisionAnchorStatus === "pending")?.id === item.id;
@@ -193,18 +204,21 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
           <strong>{showFunder ? (item.funderName || "A client or funder") : (item.proposalTitle || "Independent listing")}</strong>
           <small className="table-row-meta">
             {showFunder ? null : "Sent by you · "}
-            {money(item)} indicative · {fundingApproachStatusLabel(item.status)}
+            {money(item)} indicative · {fundingApproachStatusLabel(status)}
           </small>
-          <small className="table-row-meta">Expires {formatInstant(item.expiresAt)}</small>
+          <small className="table-row-meta">
+            {showFunder && status === "pending" ? `${formatCountdown(item.expiresAt, now)} · ` : null}
+            Expires {formatInstant(item.expiresAt)}
+          </small>
           {item.scope && <p>{item.scope}</p>}
           {item.message && <p>{item.message}</p>}
-          {item.status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
-          {item.status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
+          {status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
+          {status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
           {signAnchor && <p className="field-hint">The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia. The message and reason stay off-chain.</p>}
           {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
         </div>
         <div className="table-row-actions">
-          {showFunder && item.status === "pending" && !responding && (
+          {showFunder && status === "pending" && !responding && (
             <>
               <button type="button" className="primary" onClick={() => start(item, "accept")}>Accept</button>
               <button type="button" className="secondary" onClick={() => start(item, "decline")}>Decline</button>
