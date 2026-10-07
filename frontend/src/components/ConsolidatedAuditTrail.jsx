@@ -11,6 +11,7 @@ import { formatInstant } from "../lib/datetime.js";
 import { highlightElement } from "../lib/highlightTarget.js";
 import { findProposal } from "../lib/proposals.js";
 import { StatusBadge } from "./StatusBadge.jsx";
+import { EscrowAuditDetails } from "./EscrowAuditDetails.jsx";
 import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
 
 const EMPTY = { types: [], from: "", to: "", role: "", related: "", verify: "" };
@@ -212,6 +213,7 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
                 <span>{item.entityLabel}</span>
                 <span className={`audit-trail-verify is-${item.verification}`}>{item.verificationLabel}</span>
               </p>
+              <EscrowAuditDetails funding={item.funding} />
               {item.recommendation && <StatusBadge status={item.recommendation} prefix="Evaluator · " interactive={false} />}
               {!item.recommendation && item.workflowStatus && <StatusBadge status={item.workflowStatus} interactive={false} />}
               {((item.receiptKind && item.proposalId) || item.commentId) && <div className="record-jumps">
