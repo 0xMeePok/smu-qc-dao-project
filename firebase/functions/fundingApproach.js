@@ -67,6 +67,7 @@ function listItem(id, data, extras) {
     proposalTitle: extras.proposalTitle || "Independent listing",
     funderId: data.funderId,
     funderName: extras.funderName || "",
+    researcherName: extras.researcherName || "",
     amount: data.amount ?? 0,
     currency: data.currency || "",
     scope: data.scope || "",
@@ -117,7 +118,10 @@ export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) 
   const proposalIds = [...incomingDocs, ...sentDocs].map((doc) => doc.data().proposalId);
   const [proposals, names] = await Promise.all([
     lookup(db, "proposals", proposalIds, (data) => data),
-    lookup(db, "publicProfiles", incomingDocs.map((doc) => doc.data().funderId), (data) => data.fullName || data.organisation || ""),
+    lookup(db, "publicProfiles", [
+      ...incomingDocs.map((doc) => doc.data().funderId),
+      ...sentDocs.map((doc) => doc.data().researcherId),
+    ], (data) => data.fullName || data.organisation || ""),
   ]);
   const item = (doc) => {
     const data = doc.data();
@@ -125,7 +129,8 @@ export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) 
     const removed = proposal?.moderationStatus === "removed" || proposal?.status === "moderated_removed";
     return listItem(doc.id, { ...data, status: listedStatus(data, now) }, {
       proposalTitle: proposal?.title || "Independent listing",
-      funderName: names.get(doc.data().funderId),
+      funderName: names.get(data.funderId),
+      researcherName: names.get(data.researcherId),
       claimFunds: removed && Boolean(proposal?.fundingTerms),
     });
   };

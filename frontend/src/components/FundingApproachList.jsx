@@ -13,6 +13,15 @@ import { Field } from "./Field.jsx";
 
 const money = (item) => `${item.currency || ""} ${Number(item.amount ?? 0).toLocaleString()}`.trim();
 
+/** Outcome of an approach the funder sent, from the status already stored. */
+function funderOutcome(item, status) {
+  const label = fundingApproachStatusLabel(status);
+  if (status === "pending") return "Awaiting the researcher's response.";
+  if (status === "accepted" && item.acceptMessage) return `${label}. ${item.acceptMessage}`;
+  if (status === "declined" && item.declineReason) return `${label}. ${item.declineReason}`;
+  return `${label}.`;
+}
+
 /** Claim the unpaid escrow balance after an administrator removes the listing. */
 export function ClaimRemovedFundsButton({ proposalId }) {
   const { user } = useAuth();
@@ -203,17 +212,18 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
         <div>
           <strong>{showFunder ? (item.funderName || "A client or funder") : (item.proposalTitle || "Independent listing")}</strong>
           <small className="table-row-meta">
-            {showFunder ? null : "Sent by you · "}
+            {showFunder ? null : `${item.researcherName || "The researcher"} · `}
             {money(item)} indicative · {fundingApproachStatusLabel(status)}
           </small>
+          {!showFunder && <p>Outcome: {funderOutcome(item, status)}</p>}
           <small className="table-row-meta">
             {showFunder && status === "pending" ? `${formatCountdown(item.expiresAt, now)} · ` : null}
             Expires {formatInstant(item.expiresAt)}
           </small>
           {item.scope && <p>{item.scope}</p>}
           {item.message && <p>{item.message}</p>}
-          {status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
-          {status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
+          {showFunder && status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
+          {showFunder && status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
           {signAnchor && <p className="field-hint">The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia. The message and reason stay off-chain.</p>}
           {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
         </div>
