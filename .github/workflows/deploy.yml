@@ -150,12 +150,14 @@ jobs:
       - name: Provide the functions runtime environment
         env:
           ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.ARBITRUM_SEPOLIA_RPC_URL || secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
+          ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
         run: |
           if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
             echo "::error::ARBITRUM_SEPOLIA_RPC_URL is required for on-chain publication verification."
             exit 1
           fi
           printf 'ARBITRUM_SEPOLIA_RPC_URL=%s\n' "$ARBITRUM_SEPOLIA_RPC_URL" > firebase/functions/.env
+          printf 'ARBITRUM_SEPOLIA_RPC_BACKUP_URLS=%s\n' "$ARBITRUM_SEPOLIA_RPC_BACKUP_URLS" >> firebase/functions/.env
 
       - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase
@@ -233,8 +235,11 @@ jobs:
           # "Storage is not configured" at runtime instead of uploading.
           VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
           VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
+          VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
           VITE_FIREBASE_USE_EMULATORS: "false"
-        run: npm run build --prefix frontend
+        run: |
+          node firebase/scripts/configure-rpc-csp.mjs
+          npm run build --prefix frontend
 
       # Fails the deploy rather than shipping a bundle that cannot reach Firebase.
       # A missing secret otherwise produces a build that looks fine and only breaks

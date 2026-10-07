@@ -33,7 +33,7 @@ import { assertCurrentAuditRecord } from "../lib/opportunityAuditFlow.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
-import { auditErrorMessage, messageForPublicationSaveError } from "../lib/errors.js";
+import { auditErrorMessage, isRpcQuotaExceeded, isRpcUnreachable, isWalletRejection, messageForPublicationSaveError } from "../lib/errors.js";
 import { SubmissionError } from "../components/SubmissionError.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { useAccount } from "wagmi";
@@ -143,6 +143,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   const { user } = useAuth();
   const { address, isConnected } = useAccount();
   const [auditProgress, setAuditProgress] = useState(null);
+  const [escrowProgress, setEscrowProgress] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmedAudit, setConfirmedAudit] = useState(null);
   const [proposalId, setProposalId] = useState(resumeId || null);
@@ -335,6 +336,8 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       audit = await anchorProposalBeforeWrite({ id: proposalId, ...built, audit: auditProgress }, {
         account: address,
         onChange: setAuditProgress,
+        escrowAudit: escrowProgress,
+        onEscrowChange: setEscrowProgress,
       });
       setAuditProgress(audit);
       setConfirmedAudit(audit);
@@ -351,10 +354,29 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       }
       setSubmitted(true);
     } catch (err) {
-      setSaveFailed(Boolean(audit?.transactionHash));
-      setError(audit?.transactionHash
-        ? `The verification transaction was confirmed, but saving the proposal failed. ${messageForPublicationSaveError(err)} Your entries are still here — submitting again reuses the same anchor.`
-        : auditErrorMessage(err));
+      if (err.listingAudit?.transactionHash) {
+        audit = err.listingAudit;
+        setAuditProgress(audit);
+        if (err.escrowAudit) setEscrowProgress(err.escrowAudit);
+        setSaveFailed(false);
+        if (audit.status !== "confirmed") {
+          setError("The listing transaction was submitted, but its confirmation is still pending. The proposal has not been published. Retry to recheck the same transaction before continuing.");
+        } else if (err.escrowAudit?.transactionHash) {
+          setError("The listing transaction is confirmed, but the escrow transaction still needs verification. The proposal has not been published. Retry to recheck the same escrow transaction; another signature will not be requested while its result is unknown.");
+        } else {
+          const reason = err.code === "AUDIT_TRANSACTION_CANCELLED" ? "The escrow transaction was cancelled in your wallet."
+            : isWalletRejection(err) ? "The escrow signature was declined."
+              : isRpcQuotaExceeded(err) ? "The RPC provider is limiting requests."
+                : isRpcUnreachable(err) ? "Arbitrum Sepolia could not be reached."
+                  : err.receipt?.status === "reverted" ? "The escrow transaction reverted." : "Escrow setup could not be completed.";
+          setError(`The listing transaction is confirmed, but the escrow step did not complete. ${reason} The proposal has not been published. Retry to complete escrow setup using the confirmed listing transaction.`);
+        }
+      } else {
+        setSaveFailed(Boolean(audit?.transactionHash));
+        setError(audit?.transactionHash
+          ? `The verification transaction was confirmed, but saving the proposal failed. ${messageForPublicationSaveError(err)} Your entries are still here — submitting again reuses the same anchor.`
+          : auditErrorMessage(err));
+      }
     }
     finally { submitting.current = false; setBusy(false); if (!audit) setAuditProgress(null); }
   };
@@ -375,6 +397,8 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   }
 
   const disabled = busy || savingDraft;
+  const publicationStarted = Boolean(auditProgress?.transactionHash);
+  const contentDisabled = disabled || publicationStarted;
   const textField = ([key, label, max]) => <Field key={key} htmlFor={`independent-${key}`} label={label} error={errors[key]}>
     {({ id, describedBy, invalid }) => {
       const Tag = key === "title" ? "input" : "textarea";
@@ -402,16 +426,16 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         {editing && <p className="field-hint" role="status">This listing is published but no funding approach has been accepted. Saving your changes records the edit — the changed fields, your wallet and the time — and returns the listing for wallet verification, which appends a revision on Arbitrum Sepolia beside the original.</p>}
         <div className="wizard-card">
           <WizardPanel index={stepIndex("solution")} current={wizard.current}>
-            <fieldset className="field-group" disabled={disabled}>
+            <fieldset className="field-group" disabled={contentDisabled}>
               <legend>Your solution</legend>
               {INDEPENDENT_PROPOSAL_FIELDS.slice(0, 3).map(textField)}
               <Field htmlFor="independent-category" label="Quantum or quantum-adjacent category" error={errors.category}>
-                {({ id, describedBy, invalid }) => <ProposalCategorySelect id={id} value={form.category || ""} disabled={disabled} invalid={invalid} describedBy={describedBy} onChange={(value) => update("category", value)} />}
+                {({ id, describedBy, invalid }) => <ProposalCategorySelect id={id} value={form.category || ""} disabled={contentDisabled} invalid={invalid} describedBy={describedBy} onChange={(value) => update("category", value)} />}
               </Field>
             </fieldset>
           </WizardPanel>
           <WizardPanel index={stepIndex("fit")} current={wizard.current}>
-            <fieldset className="field-group" disabled={disabled}>
+            <fieldset className="field-group" disabled={contentDisabled}>
               <legend>Problems this could address, and the team</legend>
               {textField(INDEPENDENT_PROPOSAL_FIELDS.find(([key]) => key === "addressedProblems"))}
               <Field htmlFor="independent-maturity" label="Maturity or readiness level" error={errors.maturity}>
@@ -427,7 +451,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             </fieldset>
           </WizardPanel>
           <WizardPanel index={stepIndex("funding")} current={wizard.current}>
-            <fieldset className="field-group" disabled={disabled}>
+            <fieldset className="field-group" disabled={contentDisabled}>
               <legend>Funding and supporting material</legend>
               <Field htmlFor="independent-amount" label="Indicative funding sought" error={errors.amount}>
                 {({ id, describedBy, invalid }) => <input id={id} type="number" inputMode="decimal"
@@ -460,10 +484,10 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
                       funderVoting={form.immutableFundingTerms?.funderVoting ?? form.funderVoting}
                     />
                   </fieldset>
-                : <EscrowPaymentPlanFields form={form} disabled={disabled} error={errors.fundingPlan} onChange={update} />)}
+                : <EscrowPaymentPlanFields form={form} disabled={contentDisabled} error={errors.fundingPlan} onChange={update} />)}
               {editing && <p className="field-hint">Supporting PDFs cannot be changed after publication. They stay as the files on the listing.</p>}
               <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments}
-                onChange={setAttachments} onPendingChange={(count) => setPending(count > 0)} disabled={disabled || editing} />
+                onChange={setAttachments} onPendingChange={(count) => setPending(count > 0)} disabled={contentDisabled || editing} />
             </fieldset>
           </WizardPanel>
           <WizardPanel index={stepIndex("review")} current={wizard.current}>
@@ -491,13 +515,14 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>Back</button>
             <div className="wizard-nav-end">
               {!wizard.isLast && <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pending}>Continue</button>}
-              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
+              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : escrowProgress?.transactionHash ? "Confirming escrow…" : auditProgress?.status === "confirmed" ? "Waiting for escrow signature…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
             </div>
           </div>
         </div>
         <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
+        {publicationStarted && !confirmedAudit && !busy && <p className="field-hint" role="status" style={{ overflowWrap: "anywhere" }}>Your entries stay fixed while publication is incomplete. Keep this page open until publication finishes. Recovery references are held only on this page; copy them before refreshing. Listing transaction: <code>{auditProgress.transactionHash}</code>{escrowProgress?.transactionHash && <>. Escrow transaction: <code>{escrowProgress.transactionHash}</code></>}</p>}
         {!editing && <div className="form-actions wizard-secondary">
-          <button className="secondary" type="button" disabled={disabled || pending} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>
+          <button className="secondary" type="button" disabled={disabled || pending || publicationStarted} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>
           <DraftStatus savedAt={savedAt} saving={savingDraft} />
         </div>}
         {Object.values(errors).some(Boolean) && <p className="field-hint" role="status">{Object.values(errors).filter(Boolean).length} field(s) need attention. Steps marked ! have the details.</p>}

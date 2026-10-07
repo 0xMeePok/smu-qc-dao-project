@@ -5,7 +5,7 @@ import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
-import { createPublicClient, http, verifyMessage } from "viem";
+import { createPublicClient, fallback, http, verifyMessage } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { createSiweMessage, parseSiweMessage, validateSiweMessage } from "viem/siwe";
 import { createHash, randomBytes } from "node:crypto";
@@ -26,6 +26,7 @@ import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
+import { createArbitrumRpcTransport, getRpcUrls } from "./rpcPolicy.js";
 import { collectAdminActivity } from "./adminActivity.js";
 import auditRegistryConfig from "./auditRegistry.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
@@ -169,7 +170,9 @@ export const syncProblemMarketplaceMetrics = onDocumentWritten(
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,
   cacheTime: 0,
-  transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL || undefined),
+  transport: createArbitrumRpcTransport({ http, fallback,
+    primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+    backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }),
 });
 
 async function requireMember(request) {
@@ -1068,14 +1071,18 @@ export const adminRetryProposalAudit = onCall({ region: REGION, maxInstances: 3 
   catch (error) { throw new HttpsError("unavailable", error.message); }
 });
 
-// Platform Status probes use their own client: no retries and a short timeout,
-// so latency reflects one real round trip and a dead RPC fails fast.
+// Chain validation plus a read can take two round trips per endpoint. Keep
+// each short enough to try the configured endpoints within the 5 s probe.
 const statusClient = createPublicClient({
   chain: arbitrumSepolia,
-  transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL || undefined, {
-    timeout: STATUS_THRESHOLDS.rpcTimeoutMs,
-    retryCount: 0,
-  }),
+  cacheTime: 0,
+  transport: createArbitrumRpcTransport({ http, fallback,
+    primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+    backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS,
+    timeoutMs: Math.max(1, Math.floor(STATUS_THRESHOLDS.rpcTimeoutMs / (2 * getRpcUrls({
+      primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+      backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS,
+    }).length + 1))) }),
 });
 
 /**

@@ -14,7 +14,7 @@ import {
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
 import { wagmiConfig } from "./wagmi.js";
-import { isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
+import { isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
 import { isEscrowRegistry, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
 import { knownAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
@@ -196,6 +196,8 @@ export function classifyAuditError(error, { attempt = 0, maxRetries = 0 } = {}) 
     category = "user-rejected";
   } else if (isTransactionFeeTooLow(error)) {
     category = "fee-too-low";
+  } else if (isRpcUnreachable(error) || isRpcQuotaExceeded(error)) {
+    category = "transient";
   } else if (/contractfunctionreverted|execution reverted|revert|invalidinput|invalidstate|accessdenied/.test(text)) {
     category = "contract-reverted";
   } else if (/invalid address|missing or invalid|chain mismatch|unsupported chain|wrong network/.test(text)) {

@@ -1,5 +1,6 @@
-import { createConfig, http } from "wagmi";
+import { createConfig } from "wagmi";
 import { arbitrumSepolia } from "wagmi/chains";
+import { createBrowserRpcTransport } from "./rpc.js";
 
 /**
  * No connectors are declared here. wagmi v3 enables `multiInjectedProviderDiscovery`
@@ -10,9 +11,7 @@ import { arbitrumSepolia } from "wagmi/chains";
 export const wagmiConfig = createConfig({
   chains: [arbitrumSepolia],
   transports: {
-    [arbitrumSepolia.id]: http(
-      import.meta.env?.VITE_ARBITRUM_SEPOLIA_RPC_URL?.trim() || undefined,
-    ),
+    [arbitrumSepolia.id]: createBrowserRpcTransport(),
   },
 });
 

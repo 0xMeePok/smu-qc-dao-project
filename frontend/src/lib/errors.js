@@ -121,7 +121,7 @@ export function isRpcQuotaExceeded(error) {
 export function isRpcUnreachable(error) {
   const text = chainText(error);
   if (/dynamically imported module/i.test(text)) return false;
-  return /HttpRequestError|HTTP request failed|failed to fetch|networkerror|load failed|fetch failed|err_(?:network|connection|internet)/i.test(text);
+  return /HttpRequestError|RpcEndpointUnavailableError|TimeoutError|HTTP request failed|failed to fetch|networkerror|load failed|fetch failed|err_(?:network|connection|internet)/i.test(text);
 }
 
 export function isModuleLoadError(error) {

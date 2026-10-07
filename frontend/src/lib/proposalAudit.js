@@ -1,9 +1,11 @@
-import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
+import { encodeFunctionData } from "viem";
+import { AUDIT_ENTITY_ID_SCHEME, AUDIT_REGISTRY_ABI, AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { assertCurrentAuditRecord, configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
 import {
   commitProposalAudit, prepareOpportunityWithdrawal, prepareProposalWithdrawal,
   readOpportunityRevisionIndex, readProposalHashes, readProposalIsAnchored, updateProposalAudit,
-  verifyProposalAudit, withdrawOpportunityAudit, withdrawProposalAudit, writeOpportunityAudit,
+  createWagmiAuditAdapters, verifyProposalAudit, waitForAuditReceipt,
+  withdrawOpportunityAudit, withdrawProposalAudit, writeOpportunityAudit,
 } from "./auditRegistry.js";
 import { findProposal, updateProposalReceipt } from "./proposals.js";
 import { INDEPENDENT_PROPOSAL_HASH_SCHEME, isIndependentProposal } from "../../../firebase/functions/independentProposal.js";
@@ -86,28 +88,117 @@ async function commitIndependentListingEscrow(record, options) {
   const prepared = prepareIndependentEscrowCommit(record);
   const revision = await readOpportunityRevisionIndex(prepared.opportunityId, options);
   const operation = withOpportunityRevisionIndex(prepared, revision);
-  if (await readProposalIsAnchored(operation.entityId, options)) {
-    try {
-      await assertAmendmentIsNew(operation, options);
-    } catch (error) {
-      if (/already anchored/i.test(error?.message ?? "")) return;
-      throw error;
+  let current = { ...options.escrowAudit };
+  const emit = async (patch) => {
+    current = { ...current, ...patch };
+    options.onEscrowChange?.(current);
+  };
+  try {
+    if (current.transactionHash) {
+      // A missing receipt is not proof that a submitted transaction failed.
+      // Check the same hash before considering another wallet signature.
+      const recoveredOperation = current.functionName === "updateHashes" ? asProposalUpdate(operation)
+        : current.functionName === operation.functionName ? operation : null;
+      if (!recoveredOperation || current.entityId !== operation.entityId || current.proposalHash !== operation.proposalHash
+          || current.solutionHash !== operation.solutionHash || current.fundingTermsHash !== operation.fundingTermsHash
+          || current.opportunityRevisionIndex !== revision) {
+        throw new Error("Finish verifying the submitted escrow transaction before changing this listing or its payment plan.");
+      }
+      const receipt = await waitForAuditReceipt({
+        transactionHash: current.transactionHash,
+        adapters: options.adapters,
+        maxRetries: options.maxReceiptRetries ?? 2,
+      });
+      if (receipt?.status !== "success") {
+        const error = new Error("The escrow transaction reverted.");
+        error.receipt = receipt;
+        throw error;
+      }
+      const adapters = options.adapters ?? createWagmiAuditAdapters();
+      if (typeof adapters.getTransaction !== "function") throw new Error("Reading the escrow transaction is required before publication.");
+      const hash = receipt.transactionHash ?? current.transactionHash;
+      const transaction = await adapters.getTransaction({ hash, chainId: AUDIT_REGISTRY_CONFIG.chainId });
+      const expectedCallData = encodeFunctionData({ abi: AUDIT_REGISTRY_ABI,
+        functionName: recoveredOperation.functionName, args: recoveredOperation.args });
+      const same = (left, right) => String(left ?? "").toLowerCase() === String(right ?? "").toLowerCase();
+      if (!same(transaction?.hash, hash) || !same(transaction?.to, configuredAuditRegistryAddress())
+          || !same(transaction?.from, record.researcherId)
+          || Number(transaction?.chainId) !== AUDIT_REGISTRY_CONFIG.chainId
+          || !same(transaction?.input ?? transaction?.data, expectedCallData)) {
+        throw new Error("The confirmed escrow transaction does not match this listing and payment plan.");
+      }
+      await emit({ status: "confirmed", transactionHash: hash, blockNumber: Number(receipt.blockNumber) });
+      return current;
     }
-    return updateProposalAudit(asProposalUpdate(operation), options);
+    let writeOperation = operation;
+    if (await readProposalIsAnchored(operation.entityId, options)) {
+      try {
+        await assertAmendmentIsNew(operation, options);
+      } catch (error) {
+        if (/already anchored/i.test(error?.message ?? "")) return current;
+        throw error;
+      }
+      writeOperation = asProposalUpdate(operation);
+    }
+    await emit({
+      status: "queued", transactionHash: "", blockNumber: 0,
+      entityId: operation.entityId, proposalHash: operation.proposalHash,
+      solutionHash: operation.solutionHash, fundingTermsHash: operation.fundingTermsHash,
+      opportunityRevisionIndex: revision, functionName: writeOperation.functionName,
+    });
+    const writeOptions = { ...options, onStatus: async (event) => {
+      await emit({ status: event.status,
+        ...(event.transactionHash ? { transactionHash: event.transactionHash } : {}),
+        ...(event.blockNumber ? { blockNumber: Number(event.blockNumber) } : {}),
+      });
+      await options.onStatus?.(event);
+    } };
+    await (writeOperation.functionName === "updateHashes"
+      ? updateProposalAudit(writeOperation, writeOptions)
+      : commitProposalAudit(writeOperation, writeOptions));
+    return current;
+  } catch (error) {
+    // Only a known cancellation or mined revert permits another submission.
+    // Network and receipt errors retain the original hash for a later check.
+    if (error.code === "AUDIT_TRANSACTION_CANCELLED" || error.receipt?.status === "reverted") {
+      await emit({ status: "failed", transactionHash: "", blockNumber: 0 });
+    }
+    error.escrowAudit = current;
+    throw error;
   }
-  return commitProposalAudit(operation, options);
 }
 
 async function anchorIndependentListing(record, options) {
   let audit;
+  let listingProgress = record.audit;
   try {
-    audit = await independentFlow.anchor(record, options);
+    audit = await independentFlow.anchor(record, { ...options, onChange: (next) => {
+      listingProgress = next;
+      options.onChange?.(next);
+    } });
   } catch (error) {
-    if (!record?.fundingTerms || !/already anchored/i.test(error?.message ?? "")) throw error;
-    if (!record.audit?.transactionHash) throw error;
-    audit = record.audit;
+    if (record?.fundingTerms && /already anchored/i.test(error?.message ?? "") && record.audit?.transactionHash) {
+      audit = record.audit;
+    } else {
+      if (error.receipt?.status === "reverted") {
+        listingProgress = { ...listingProgress, status: "failed", transactionHash: "", blockNumber: 0 };
+        options.onChange?.(listingProgress);
+      }
+      if (listingProgress?.transactionHash) {
+        error.listingAudit = listingProgress;
+        if (options.escrowAudit) error.escrowAudit = options.escrowAudit;
+      }
+      throw error;
+    }
   }
-  if (record?.fundingTerms) await commitIndependentListingEscrow(record, options);
+  if (record?.fundingTerms) {
+    try {
+      await commitIndependentListingEscrow(record, options);
+    } catch (error) {
+      error.listingAudit = audit;
+      throw error;
+    }
+  }
   return audit;
 }
 

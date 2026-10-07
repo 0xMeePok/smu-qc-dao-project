@@ -3,8 +3,10 @@
  * key-free error text, the browser RPC probe and the overall readiness verdict.
  *
  * The RPC helpers mirror firebase/functions/platformStatus.js so the browser
- * and server cards read the same way; the two packages do not share code.
+ * and server cards read the same way. The RPC transport policy is shared.
  */
+
+import { RPC_ALLOWED_ORIGINS } from "../../../firebase/functions/rpcPolicy.js";
 
 export const STATUS = Object.freeze({ OK: "ok", DEGRADED: "degraded", DOWN: "down", UNKNOWN: "unknown" });
 
@@ -17,8 +19,8 @@ export const HEALTH_LABELS = Object.freeze({
 
 export const EXPECTED_CHAIN_ID = 421614;
 export const PUBLIC_DEFAULT_RPC_HOST = "sepolia-rollup.arbitrum.io";
-// Mirrors connect-src in firebase/firebase.json; any other RPC host is blocked in production.
-export const CSP_RPC_HOSTS = Object.freeze(["arb-sepolia.g.alchemy.com"]);
+// Baseline policy; CI also includes exact origins configured in GitHub Actions.
+export const CSP_RPC_HOSTS = Object.freeze(RPC_ALLOWED_ORIGINS.map(origin => new URL(origin).host));
 
 export const THRESHOLDS = Object.freeze({
   rpcTimeoutMs: 5_000,
@@ -82,21 +84,34 @@ export async function withTimeout(promise, ms, label = "Request") {
 
 const defaultNow = () => Date.now();
 
+function rpcDiagnostics(client) {
+  const state = client?.transport?.rpcStatus;
+  if (!state) return null;
+  const safeHost = host => {
+    if (typeof host !== "string") return null;
+    try { const parsed = new URL(`https://${host}`); return parsed.host === host ? host : null; }
+    catch { return null; }
+  };
+  return { activeHost: safeHost(state.activeHost), fallbackActive: state.fallbackActive === true,
+    unavailableHosts: (Array.isArray(state.unavailableHosts) ? state.unavailableHosts : []).map(safeHost).filter(Boolean) };
+}
+
 /**
- * eth_chainId + latest block from this browser. `production` adds the CSP
- * hint, because only the Alchemy host is allowed by the deployed policy.
+ * eth_chainId + latest block from this browser. Report the provider that
+ * actually answered, and distinguish successful failover from a full outage.
  */
-export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRESHOLDS.rpcTimeoutMs, production = false }) {
-  const endpoint = describeRpcEndpoint(url);
+export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRESHOLDS.rpcTimeoutMs,
+  production = false, allowedRpcHosts = CSP_RPC_HOSTS }) {
+  let endpoint = describeRpcEndpoint(url);
   const notes = [];
-  const cspBlocked = production && endpoint.provider !== "invalid" && !CSP_RPC_HOSTS.includes(endpoint.host);
+  const cspBlocked = production && endpoint.provider !== "invalid" && !allowedRpcHosts.includes(endpoint.host);
   if (endpoint.provider === "public-default") {
     notes.push("VITE_ARBITRUM_SEPOLIA_RPC_URL is not set; the shared public Arbitrum endpoint is used.");
   }
   if (cspBlocked) {
-    notes.push(`The production Content-Security-Policy only allows ${CSP_RPC_HOSTS.join(", ")} for RPC, so ${endpoint.host} is blocked.`);
+    notes.push(`The production Content-Security-Policy does not allow ${endpoint.host} for RPC.`);
   }
-  if (endpoint.provider === "invalid") {
+  if (endpoint.provider === "invalid" && !client?.transport?.rpcStatus) {
     return { status: STATUS.DOWN, endpoint, notes, issues: ["VITE_ARBITRUM_SEPOLIA_RPC_URL is not a valid http(s) URL."] };
   }
   const started = now();
@@ -112,6 +127,12 @@ export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRE
     const blockAgeSeconds = Math.max(0, Math.round(finished / 1000 - blockSeconds));
     const issues = [];
     let status = STATUS.OK;
+    const diagnostics = rpcDiagnostics(client);
+    if (diagnostics?.activeHost) endpoint = describeRpcEndpoint(`https://${diagnostics.activeHost}`);
+    if (diagnostics?.fallbackActive) {
+      status = STATUS.DEGRADED;
+      issues.push(`Using backup RPC ${diagnostics.activeHost || "endpoint"}.`);
+    }
     if (Number(chainId) !== EXPECTED_CHAIN_ID) {
       status = STATUS.DOWN;
       issues.push(`Connected to chain ${Number(chainId)}; expected Arbitrum Sepolia (${EXPECTED_CHAIN_ID}).`);
@@ -135,6 +156,7 @@ export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRE
       latencyMs,
       notes,
       issues,
+      ...(diagnostics || {}),
     };
   } catch (error) {
     return {
@@ -143,6 +165,7 @@ export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRE
       latencyMs: Math.max(0, Math.round(now() - started)),
       notes,
       issues: [`RPC unreachable from this browser: ${scrubError(error, url)}`],
+      ...(rpcDiagnostics(client) || {}),
     };
   }
 }
