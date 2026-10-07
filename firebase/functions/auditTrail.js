@@ -18,6 +18,21 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const CURSOR_ID = /^[\w.:-]{1,200}$/;
 const BLOCKED = new Set(["hidden", "removed"]);
 const FUNDING_ACTORS = new Set(["funding_contributed", "funding_target_reached"]);
+const PRIVATE_ESCROW_ACTORS = new Set(["Deposit", "RefundClaimed", "FunderVote"]);
+const ESCROW_LABELS = Object.freeze({
+  EscrowCreated: "Escrow created",
+  Deposit: "Escrow deposit confirmed",
+  SelectionLocked: "Escrow selection locked",
+  Approval: "Escrow approval recorded",
+  SelectionInvalidated: "Escrow selection invalidated",
+  Cancelled: "Escrow cancelled",
+  Expired: "Escrow expired",
+  MilestoneSubmitted: "Escrow milestone submitted",
+  TrancheReleased: "Escrow tranche released",
+  Voided: "Escrow voided",
+  RefundClaimed: "Escrow refund claimed",
+  FunderVote: "Escrow funder vote recorded",
+});
 const RECOMMENDATIONS = new Set(RECOMMENDATION_VALUES);
 
 const MATCH_TYPES = Object.freeze({
@@ -168,6 +183,7 @@ function publish(fields) {
   for (const key of ["moderationAction", "contentType", "contentId", "reason", "reasonLabel", "transactionHash", "salt", "recordHash", "moderationId"]) {
     if (fields[key]) event[key] = fields[key];
   }
+  if (fields.funding) event.funding = fields.funding;
   return event;
 }
 
@@ -320,7 +336,48 @@ function moderationEvent(row) {
   });
 }
 
-function auditEvent(row, { isAdmin }) {
+const walletAddress = (value) => typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value) ? value : null;
+const sameAddress = (left, right) => left && right && String(left).toLowerCase() === String(right).toLowerCase();
+
+function escrowFundingDetails(row, { isAdmin, proposal, problem }) {
+  const eventType = typeof row.eventType === "string" && row.eventType ? row.eventType : null;
+  const publicRole = (address) => {
+    if (sameAddress(address, proposal?.researcherId)) return "proposal_creator";
+    if (sameAddress(address, proposal?.postingOwnerId)
+        || (problem && proposal?.problemId === problem.id && sameAddress(address, problem.ownerId))) return "problem_owner";
+    return null;
+  };
+  const actor = walletAddress(row.actor), role = publicRole(actor);
+  // A deposit/refund/vote remains a private contribution even when its wallet
+  // also belongs to an owner or creator. Unknown legacy actors stay private.
+  const privateActor = !isAdmin && Boolean(actor)
+    && (!Object.hasOwn(ESCROW_LABELS, eventType) || PRIVATE_ESCROW_ACTORS.has(eventType) || !role);
+  const actorRole = row.actor === "system" ? "system" : privateActor ? "funder" : role || "funder";
+  const actorLabel = row.actor === "system" ? "System" : !actor ? "Unavailable"
+    : privateActor ? "Private contributor" : role ? actorRoleLabel(role) : shortActor(actor, actorRole);
+  const counterparty = walletAddress(row.counterparty), counterpartyRole = publicRole(counterparty);
+  const isEscrow = sameAddress(counterparty, row.escrowAddress);
+  const privateCounterparty = !isAdmin && Boolean(counterparty)
+    && ((privateActor && sameAddress(counterparty, actor)) || (!isEscrow && !counterpartyRole));
+  const counterpartyLabel = !counterparty ? "Unavailable" : privateCounterparty ? "Private contributor"
+    : isEscrow ? "Escrow" : counterpartyRole ? actorRoleLabel(counterpartyRole) : shortActor(counterparty, "member");
+  return { actorRole, funding: {
+    eventType,
+    amountBaseUnits: typeof row.amountBaseUnits === "string" && /^\d+$/.test(row.amountBaseUnits) ? row.amountBaseUnits : null,
+    tokenAddress: walletAddress(row.tokenAddress),
+    tokenSymbol: typeof row.tokenSymbol === "string" && row.tokenSymbol.trim() ? row.tokenSymbol.trim() : null,
+    tokenDecimals: Number.isInteger(row.tokenDecimals) && row.tokenDecimals >= 0 && row.tokenDecimals <= 255 ? row.tokenDecimals : null,
+    actorAddress: privateActor ? null : actor,
+    actorLabel,
+    counterpartyAddress: privateCounterparty ? null : counterparty,
+    counterpartyLabel,
+    transactionHash: typeof row.transactionHash === "string" && /^0x[0-9a-f]{64}$/i.test(row.transactionHash) ? row.transactionHash : null,
+    blockNumber: Number.isSafeInteger(row.blockNumber) && row.blockNumber >= 0 ? row.blockNumber : null,
+    chainId: Number.isSafeInteger(row.chainId) && row.chainId > 0 ? row.chainId : null,
+  } };
+}
+
+function auditEvent(row, { isAdmin, proposal, problem }) {
   const at = iso(row.timestamp) || iso(row.createdAt);
   if (!at) return null;
   if (row.type === "opportunity_expired") {
@@ -343,19 +400,21 @@ function auditEvent(row, { isAdmin }) {
     });
   }
   if (row.type === "escrow") {
-    const anchored = Boolean(row.transactionHash);
-    const redact = !isAdmin;
+    const { actorRole, funding } = escrowFundingDetails(row, { isAdmin, proposal, problem });
+    const anchored = Boolean(funding.transactionHash) && row.verified !== false;
+    const label = funding.eventType === "Deposit" && !anchored ? "Escrow deposit"
+      : Object.hasOwn(ESCROW_LABELS, funding.eventType) ? ESCROW_LABELS[funding.eventType] : "Escrow funding update";
     return publish({
       id: `audit_${row.id}`,
       eventType: "funding_status",
       types: ["funding_status"],
-      label: "Escrow funding update",
+      label,
       description: anchored
-        ? `Escrow activity for “${row.title || "a proposal"}” is anchored on Arbitrum Sepolia.`
-        : `Escrow activity for “${row.title || "a proposal"}” is waiting for an on-chain receipt.`,
+        ? `${label} for “${row.title || "a proposal"}” is anchored on Arbitrum Sepolia.`
+        : `${label} for “${row.title || "a proposal"}” is waiting for on-chain verification.`,
       at,
-      actorRole: "funder",
-      actorLabel: redact ? "Private contributor" : shortActor(row.actor, "funder"),
+      actorRole,
+      actorLabel: funding.actorAddress ? shortActor(funding.actorAddress, actorRole) : funding.actorLabel,
       entityType: "proposal",
       entityId: row.proposalId || row.targetId,
       entityLabel: row.title || "Proposal",
@@ -363,6 +422,8 @@ function auditEvent(row, { isAdmin }) {
       proposalId: row.proposalId || row.targetId,
       verification: anchored ? "anchored" : "pending",
       receiptKind: anchored ? "proposal" : null,
+      transactionHash: funding.transactionHash,
+      funding,
     });
   }
   if (!isAdmin || !["role_change", "suspension_change"].includes(row.type)) return null;
@@ -468,10 +529,15 @@ async function collect(db, scope, filters, uid) {
     problem: new Map(scope.problem ? [[scope.problem.id, scope.problem.title || "Opportunity"]] : []),
     proposal: new Map(scope.proposal ? [[scope.proposal.id, scope.proposal.title || "Proposal"]] : []),
   };
+  // Retain only proposal contexts that the existing title/submission reads
+  // already expose. Funding labels must not add reads or reveal hidden authors.
+  const proposals = new Map(scope.proposal && visibleProposal(scope.proposal, uid, scope.isAdmin)
+    ? [[scope.proposal.id, scope.proposal]] : []);
   const proposalIds = new Set();
   for (const row of batches.flat()) {
     if (row.proposalId) proposalIds.add(row.proposalId);
     if (row.title && row.researcherId && visibleProposal(row, uid, scope.isAdmin)) titles.proposal.set(row.id, row.title);
+    if (row.researcherId && row.status && visibleProposal(row, uid, scope.isAdmin)) proposals.set(row.id, row);
     if (row.title && row.ownerId && !row.researcherId) titles.problem.set(row.id, row.title);
   }
   const missingTitles = [...proposalIds].filter((id) => id && !titles.proposal.has(id)).slice(0, 40);
@@ -480,6 +546,7 @@ async function collect(db, scope, filters, uid) {
     if (!snap.exists) return null;
     const data = snap.data();
     if (!visibleProposal(data, uid, scope.isAdmin)) return null;
+    proposals.set(id, { id, ...data });
     return [id, data.title || "Proposal"];
   }));
   for (const entry of loadedTitles) if (entry) titles.proposal.set(entry[0], entry[1]);
@@ -503,7 +570,8 @@ async function collect(db, scope, filters, uid) {
     } else if (row.contentType && row.action) {
       if (scope.isAdmin || (row.authorId && row.authorId === uid)) push(moderationEvent(row));
     }
-    else if (row.type) push(auditEvent(row, { isAdmin: scope.isAdmin }));
+    else if (row.type) push(auditEvent(row, { isAdmin: scope.isAdmin,
+      proposal: proposals.get(row.proposalId || row.targetId), problem: scope.problem }));
   }
   if (scope.proposal && visibleProposal(scope.proposal, uid, scope.isAdmin)) push(submissionEvent(scope.proposal));
   return { events, truncated: track.truncated };

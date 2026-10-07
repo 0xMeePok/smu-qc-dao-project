@@ -10,6 +10,8 @@ const admin = `0x${"c".repeat(40)}`;
 const creator = `0x${"d".repeat(40)}`;
 const funder = `0x${"e".repeat(40)}`;
 const tx = `0x${"1".repeat(64)}`;
+const token = `0x${"2".repeat(40)}`;
+const escrow = `0x${"3".repeat(40)}`;
 
 const at = (iso) => Timestamp.fromDate(new Date(iso));
 const profile = (role) => ({ role, suspended: false });
@@ -111,6 +113,148 @@ function fixture() {
 
 const problemTrail = (db, uid, role, input = {}) => readAuditTrail({
   db, uid, profile: profile(role), input: { entityType: "problem", entityId: "problem-1", ...input },
+});
+
+it("does not claim an escrow deposit is confirmed without a valid verified transaction reference", async () => {
+  for (const patch of [{ transactionHash: "" }, { transactionHash: "not-a-transaction" }, { verified: false }]) {
+    const db = fixture();
+    const row = db.records.get("audits/escrow-1");
+    db.records.set("audits/escrow-1", { ...row, eventType: "Deposit", verified: true, ...patch });
+    const { items } = await problemTrail(db, member, 0, { eventTypes: ["funding_status"] });
+    const event = items.find(item => item.id === "audit_escrow-1");
+    assert.equal(event.verification, "pending");
+    assert.equal(event.label, "Escrow deposit");
+    assert.equal(event.description.includes("confirmed"), false);
+    assert.match(event.description, /waiting for on-chain verification/);
+  }
+});
+
+function fundingRow(eventType, fields = {}) {
+  return { type: "escrow", eventType, problemId: "problem-1", proposalId: "proposal-1", title: "Cold chain",
+    actor: funder, counterparty: escrow, amountBaseUnits: "1234567", tokenAddress: token,
+    tokenSymbol: "USDC", tokenDecimals: 6, escrowAddress: escrow, verified: true,
+    transactionHash: tx, blockNumber: 101, chainId: 421614, timestamp: at("2026-09-20T00:00:00Z"), ...fields };
+}
+
+describe("QCDAO-117 verified funding audit details", () => {
+  it("projects event-specific deposit, lock, release, refund, cancellation and expiry details", async () => {
+    const db = fixture();
+    const events = [
+      ["Deposit", "Escrow deposit confirmed", {}],
+      ["SelectionLocked", "Escrow selection locked", { actor: owner, counterparty: null, amountBaseUnits: null }],
+      ["TrancheReleased", "Escrow tranche released", { actor: owner, counterparty: creator }],
+      ["RefundClaimed", "Escrow refund claimed", { counterparty: funder }],
+      ["Cancelled", "Escrow cancelled", { actor: owner, counterparty: null, amountBaseUnits: null }],
+      ["Expired", "Escrow expired", { actor: "system", counterparty: null, amountBaseUnits: null }],
+    ];
+    for (const [eventType, , fields] of events) db.records.set(`audits/${eventType}`, fundingRow(eventType, fields));
+    const result = await problemTrail(db, member, 0, { eventTypes: ["funding_status"], verification: "anchored" });
+    for (const [eventType, label, fields] of events) {
+      const event = result.items.find((row) => row.id === `audit_${eventType}`);
+      assert.ok(event, eventType); assert.equal(event.label, label);
+      assert.equal(event.eventType, "funding_status"); assert.deepEqual(event.types, ["funding_status"]);
+      assert.equal(event.funding.eventType, eventType);
+      assert.equal(event.funding.amountBaseUnits, Object.hasOwn(fields, "amountBaseUnits") ? fields.amountBaseUnits : "1234567");
+      assert.equal(event.funding.tokenAddress, token); assert.equal(event.funding.tokenSymbol, "USDC");
+      assert.equal(event.funding.tokenDecimals, 6); assert.equal(event.funding.transactionHash, tx);
+      assert.equal(event.funding.blockNumber, 101); assert.equal(event.funding.chainId, 421614);
+      assert.equal(event.transactionHash, tx); assert.equal(event.verification, "anchored");
+      assert.equal(event.receiptKind, "proposal"); assert.match(event.description, new RegExp(label));
+    }
+    const deposit = result.items.find((row) => row.id === "audit_Deposit");
+    assert.equal(deposit.funding.counterpartyAddress, escrow); assert.equal(deposit.funding.counterpartyLabel, "Escrow");
+    const release = result.items.find((row) => row.id === "audit_TrancheReleased");
+    assert.equal(release.actorRole, "problem_owner"); assert.equal(release.funding.actorLabel, "Problem owner");
+    assert.equal(release.funding.actorAddress, owner);
+    assert.equal(release.funding.counterpartyAddress, creator); assert.equal(release.funding.counterpartyLabel, "Solution owner");
+    const expired = result.items.find((row) => row.id === "audit_Expired");
+    assert.equal(expired.actorRole, "system"); assert.equal(expired.funding.actorLabel, "System");
+    assert.equal(expired.funding.actorAddress, null);
+  });
+
+  it("keeps contributor and matching refund-recipient identities private for every non-admin", async () => {
+    const db = fixture();
+    db.records.set("audits/deposit", fundingRow("Deposit"));
+    db.records.set("audits/refund", fundingRow("RefundClaimed", { counterparty: funder }));
+    for (const uid of [member, owner, creator, funder]) {
+      const result = await problemTrail(db, uid, 0, { eventTypes: ["funding_status"] });
+      for (const id of ["audit_deposit", "audit_refund"]) {
+        const event = result.items.find((row) => row.id === id);
+        assert.equal(event.actorLabel, "Private contributor");
+        assert.equal(event.funding.actorAddress, null); assert.equal(event.funding.actorLabel, "Private contributor");
+        assert.equal(JSON.stringify(event).includes(funder), false);
+      }
+      const refund = result.items.find((row) => row.id === "audit_refund");
+      assert.equal(refund.funding.counterpartyAddress, null); assert.equal(refund.funding.counterpartyLabel, "Private contributor");
+    }
+    const result = await problemTrail(db, admin, 1, { eventTypes: ["funding_status"] });
+    const refund = result.items.find((row) => row.id === "audit_refund");
+    assert.equal(refund.funding.actorAddress, funder); assert.equal(refund.funding.counterpartyAddress, funder);
+    assert.match(refund.funding.actorLabel, /^0xeeee/); assert.match(refund.funding.counterpartyLabel, /^0xeeee/);
+  });
+
+  it("keeps owner contributions and creator funder votes private despite known public roles", async () => {
+    const db = fixture();
+    db.records.set("audits/owner-deposit", fundingRow("Deposit", { actor: owner, counterparty: owner }));
+    db.records.set("audits/owner-refund", fundingRow("RefundClaimed", { actor: owner, counterparty: owner }));
+    db.records.set("audits/creator-vote", fundingRow("FunderVote", { actor: creator, counterparty: null, amountBaseUnits: null }));
+    const result = await problemTrail(db, member, 0, { eventTypes: ["funding_status"] });
+    const deposit = result.items.find((row) => row.id === "audit_owner-deposit");
+    assert.equal(deposit.actorRole, "funder"); assert.equal(deposit.funding.actorAddress, null);
+    assert.equal(deposit.funding.counterpartyAddress, null); assert.equal(deposit.funding.counterpartyLabel, "Private contributor");
+    const refund = result.items.find((row) => row.id === "audit_owner-refund");
+    assert.equal(refund.funding.actorAddress, null); assert.equal(refund.funding.counterpartyAddress, null);
+    assert.equal(refund.funding.counterpartyLabel, "Private contributor");
+    const vote = result.items.find((row) => row.id === "audit_creator-vote");
+    assert.equal(vote.funding.actorAddress, null); assert.equal(vote.funding.actorLabel, "Private contributor");
+  });
+
+  it("preserves zero-decimal tokens and huge exact base-unit amounts without numeric conversion", async () => {
+    const db = fixture(), exact = ((1n << 256n) - 1n).toString();
+    db.records.set("audits/large", fundingRow("Deposit", { amountBaseUnits: exact, tokenDecimals: 0, tokenSymbol: "WHOLE", blockNumber: 0 }));
+    db.records.set("audits/zero", fundingRow("Deposit", { amountBaseUnits: "0", tokenDecimals: 0 }));
+    const result = await problemTrail(db, member, 0, { eventTypes: ["funding_status"] });
+    const large = result.items.find((row) => row.id === "audit_large");
+    assert.equal(large.funding.amountBaseUnits, exact); assert.equal(typeof large.funding.amountBaseUnits, "string");
+    assert.equal(large.funding.tokenDecimals, 0); assert.equal(large.funding.blockNumber, 0);
+    assert.equal(result.items.find((row) => row.id === "audit_zero").funding.amountBaseUnits, "0");
+    assert.doesNotThrow(() => JSON.stringify(result));
+  });
+
+  it("reports missing or malformed legacy metadata as unavailable rather than inventing values", async () => {
+    const db = fixture();
+    const result = await problemTrail(db, member, 0, { eventTypes: ["funding_status"] });
+    const legacy = result.items.find((row) => row.id === "audit_escrow-1");
+    assert.deepEqual(legacy.funding, {
+      eventType: null, amountBaseUnits: null, tokenAddress: null, tokenSymbol: null, tokenDecimals: null,
+      actorAddress: null, actorLabel: "Private contributor", counterpartyAddress: null, counterpartyLabel: "Unavailable",
+      transactionHash: tx, blockNumber: null, chainId: null,
+    });
+    db.records.set("audits/malformed", fundingRow("Deposit", { amountBaseUnits: Number.MAX_SAFE_INTEGER + 1,
+      tokenAddress: "not a token", tokenSymbol: "", tokenDecimals: "18", actor: null, counterparty: "not a wallet",
+      transactionHash: null, blockNumber: "101", chainId: null }));
+    const malformed = (await problemTrail(db, member, 0)).items.find((row) => row.id === "audit_malformed");
+    assert.equal(malformed.verification, "pending");
+    assert.equal(malformed.funding.amountBaseUnits, null); assert.equal(malformed.funding.tokenDecimals, null);
+    assert.equal(malformed.funding.tokenAddress, null); assert.equal(malformed.funding.transactionHash, null);
+    assert.equal(malformed.funding.actorLabel, "Unavailable"); assert.equal(malformed.funding.counterpartyLabel, "Unavailable");
+  });
+
+  it("uses existing readable context for actor roles without extra queries or hidden-author exposure", async () => {
+    const db = fixture(), collections = [], original = db.collection;
+    db.records.set("proposals/hidden", { researcherId: funder, postingOwnerId: owner, problemId: "problem-1",
+      status: "submitted", moderationStatus: "hidden", title: "Secret title", createdAt: at("2026-09-02T00:00:00Z") });
+    db.records.set("audits/hidden-release", fundingRow("TrancheReleased", { proposalId: "hidden", title: "Proposal", actor: funder, counterparty: funder }));
+    db.collection = (name) => { collections.push(name); return original(name); };
+    const result = await problemTrail(db, member, 0, { eventTypes: ["funding_status"] });
+    const hidden = result.items.find((row) => row.id === "audit_hidden-release");
+    assert.equal(hidden.funding.actorAddress, null); assert.equal(hidden.funding.counterpartyAddress, null);
+    assert.equal(JSON.stringify(result).includes(funder), false); assert.equal(JSON.stringify(result).includes("Secret title"), false);
+    // Existing scope/source reads plus the existing missing-title lookup.
+    assert.equal(collections.length, 9);
+    const adminView = await problemTrail(db, admin, 1, { eventTypes: ["funding_status"] });
+    assert.equal(adminView.items.find((row) => row.id === "audit_hidden-release").funding.actorAddress, funder);
+  });
 });
 
 describe("QCDAO-96 and QCDAO-97 consolidated audit trail", () => {

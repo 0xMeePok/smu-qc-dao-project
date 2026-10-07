@@ -101,13 +101,31 @@ export async function withTimeout(promise, ms, label = "Request") {
 
 const defaultNow = () => Date.now();
 
+/** Copy only the policy's key-free diagnostics into the health response. */
+function rpcDiagnostics(client) {
+  const status = client?.transport?.rpcStatus;
+  if (!status) return null;
+  const safeHost = (host) => {
+    if (typeof host !== "string") return null;
+    try {
+      const parsed = new URL(`https://${host}`);
+      return parsed.host === host ? host : null;
+    } catch { return null; }
+  };
+  return {
+    activeHost: safeHost(status.activeHost),
+    fallbackActive: status.fallbackActive === true,
+    unavailableHosts: (Array.isArray(status.unavailableHosts) ? status.unavailableHosts : []).map(safeHost).filter(Boolean),
+  };
+}
+
 /** eth_chainId + latest block through the given client, with latency and block age. */
 export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRESHOLDS.rpcTimeoutMs }) {
-  const endpoint = describeRpcEndpoint(url);
+  let endpoint = describeRpcEndpoint(url);
   const notes = endpoint.provider === "public-default"
     ? ["No RPC URL is configured; the shared public Arbitrum endpoint is used and may be rate limited."]
     : [];
-  if (endpoint.provider === "invalid") {
+  if (endpoint.provider === "invalid" && !client?.transport?.rpcStatus) {
     return { status: STATUS.DOWN, endpoint, notes, issues: ["The configured RPC URL is not a valid http(s) URL."] };
   }
   const started = now();
@@ -123,6 +141,8 @@ export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRE
     const blockAgeSeconds = Math.max(0, Math.round(finished / 1000 - blockSeconds));
     const issues = [];
     let status = STATUS.OK;
+    const diagnostics = rpcDiagnostics(client);
+    if (diagnostics?.activeHost) endpoint = describeRpcEndpoint(`https://${diagnostics.activeHost}`);
     if (Number(chainId) !== EXPECTED_CHAIN_ID) {
       status = STATUS.DOWN;
       issues.push(`Connected to chain ${Number(chainId)}; expected Arbitrum Sepolia (${EXPECTED_CHAIN_ID}).`);
@@ -135,6 +155,10 @@ export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRE
         status = STATUS.DEGRADED;
         issues.push(`Slow response (${latencyMs} ms).`);
       }
+      if (diagnostics?.fallbackActive) {
+        status = STATUS.DEGRADED;
+        issues.push(`Using backup RPC ${diagnostics.activeHost || "endpoint"}.`);
+      }
     }
     return {
       status,
@@ -146,6 +170,7 @@ export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRE
       latencyMs,
       notes,
       issues,
+      ...(diagnostics || {}),
     };
   } catch (error) {
     return {
@@ -154,6 +179,7 @@ export async function probeRpc({ client, url, now = defaultNow, timeoutMs = THRE
       latencyMs: Math.max(0, Math.round(now() - started)),
       notes,
       issues: [`RPC unreachable: ${scrubError(error, url)}`],
+      ...(rpcDiagnostics(client) || {}),
     };
   }
 }

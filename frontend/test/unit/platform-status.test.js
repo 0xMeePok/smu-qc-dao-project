@@ -54,15 +54,42 @@ describe("Platform status rules: browser RPC", () => {
     assert.ok(!JSON.stringify(result).includes(KEY));
   });
 
-  it("[FUT-SXFPP-174] warns that the production CSP blocks any RPC host but Alchemy", async () => {
+  it("[FUT-SXFPP-174] permits configured public backups and warns for an unlisted RPC host", async () => {
     const fallback = await probeRpc({ client: client({ fail: new Error("Failed to fetch") }), url: "", now: () => NOW, production: true });
     assert.equal(fallback.status, STATUS.DOWN);
     assert.ok(fallback.notes.some((note) => /VITE_ARBITRUM_SEPOLIA_RPC_URL is not set/.test(note)));
-    assert.ok(fallback.notes.some((note) => /Content-Security-Policy/.test(note)));
+    assert.ok(!fallback.notes.some((note) => /Content-Security-Policy/.test(note)));
+    const unlisted = await probeRpc({ client: client({ fail: new Error("Failed to fetch") }),
+      url: "https://rpc.example.org", now: () => NOW, production: true });
+    assert.ok(unlisted.notes.some((note) => /Content-Security-Policy/.test(note)));
     const alchemy = await probeRpc({ client: client(), url: ALCHEMY_URL, now: () => NOW, production: true });
     assert.deepEqual(alchemy.notes, []);
     const local = await probeRpc({ client: client(), url: "", now: () => NOW, production: false });
     assert.ok(!local.notes.some((note) => /Content-Security-Policy/.test(note)));
+  });
+
+  it("reports the working backup as degraded instead of mislabelling the failed primary as healthy", async () => {
+    const resilient = { ...client(), transport: { rpcStatus: {
+      activeHost: "sepolia-rollup.arbitrum.io", fallbackActive: true,
+      unavailableHosts: ["arb-sepolia.g.alchemy.com"],
+    } } };
+    const result = await probeRpc({ client: resilient, url: ALCHEMY_URL, now: () => NOW });
+    assert.equal(result.status, STATUS.DEGRADED);
+    assert.equal(result.endpoint.host, "sepolia-rollup.arbitrum.io");
+    assert.equal(result.fallbackActive, true);
+    assert.match(result.issues[0], /Using backup RPC/);
+    assert.ok(!JSON.stringify(result).includes(KEY));
+  });
+
+  it("does not expose paths or keys through malformed transport diagnostics", async () => {
+    const resilient = { ...client(), transport: { rpcStatus: {
+      activeHost: `arb-sepolia.g.alchemy.com/v2/${KEY}`, fallbackActive: false,
+      unavailableHosts: [`arb-sepolia.g.alchemy.com/v2/${KEY}`],
+    } } };
+    const result = await probeRpc({ client: resilient, url: ALCHEMY_URL, now: () => NOW });
+    assert.equal(result.activeHost, null);
+    assert.deepEqual(result.unavailableHosts, []);
+    assert.ok(!JSON.stringify(result).includes(KEY));
   });
 });
 

@@ -8,6 +8,7 @@ import { same } from "./escrowFundingEvents.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { isIndependentProposal } from "./independentProposal.js";
 import { readEscrowQueueActions } from "./escrowQueueMetadata.js";
+import { createRequestReadClient } from "./requestReadClient.js";
 
 const CAP = 50, APPROACH_CAP = 200;
 const iso = value => value?.toDate?.().toISOString?.() ?? null;
@@ -32,6 +33,7 @@ async function removedIndependentClaim(db, proposalId) {
 export async function getFunderDashboard({ db, client, config, uid, now = Timestamp.now() }) {
   const profile = await db.collection("users").doc(uid).get();
   if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+  client = createRequestReadClient(client, { chainId: config.chainId });
   const [owned, deposits, approachesPage] = await Promise.all([
     db.collection("problems").where("ownerId", "==", uid).where("opportunityType", "==", "open-funding").limit(CAP + 1).get(),
     db.collection(FUNDING_EVENTS).where("actor", "==", uid).where("eventType", "==", "Deposit")

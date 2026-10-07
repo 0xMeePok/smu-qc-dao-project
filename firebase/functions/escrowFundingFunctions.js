@@ -2,9 +2,10 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
-import { createWalletClient, http } from "viem";
+import { createWalletClient, fallback, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
+import { createArbitrumRpcTransport } from "./rpcPolicy.js";
 import { enqueueEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary, prepareEscrowDeposit,
   prepareRemovedProposalClaim, queuePostingFundingPause, startEscrowSettlement, sweepEscrowFunding, syncEscrowFunding } from "./escrowFunding.js";
 
@@ -15,7 +16,9 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
     const key = escrowPlatformKey.value()?.trim();
     if (!/^0x[0-9a-fA-F]{64}$/.test(key || "")) throw new HttpsError("failed-precondition", "Configure the deployment's platform signing secret before settlement.");
     return createWalletClient({ account: privateKeyToAccount(key), chain: arbitrumSepolia,
-      transport: http(process.env.ARBITRUM_SEPOLIA_RPC_URL || undefined) });
+      transport: createArbitrumRpcTransport({ http, fallback,
+        primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+        backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }) });
   };
   const shared = { db, client, config, getWallet };
   const callable = (service, signing = false) => onCall({ ...options, timeoutSeconds: 180,
