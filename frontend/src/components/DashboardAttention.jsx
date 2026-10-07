@@ -13,7 +13,7 @@ import { BLOCKER_LABELS } from "../lib/dashboardAttention.js";
  */
 
 export function DashboardAttention({
-  items = [], blockers = [], loading = false, error = "", onNavigate,
+  items = [], blockers = [], loading = false, error = "", onNavigate, onOpenReceipt,
   emptyMessage = "Nothing needs your attention right now.",
 }) {
   return (
@@ -52,6 +52,9 @@ export function DashboardAttention({
                   </span>
                 )}
                 <button type="button" className="primary small" onClick={() => onNavigate?.(item.route)}>{item.cta}</button>
+                {item.kind === "funding-approach" && (
+                  <button type="button" className="text-button" onClick={() => onOpenReceipt?.(item.id)}>Audit receipt</button>
+                )}
               </div>
             </li>
           ))}

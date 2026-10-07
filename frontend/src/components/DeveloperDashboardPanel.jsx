@@ -1,15 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { DashboardAttention, DashboardCount } from "./DashboardAttention.jsx";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { FundingApproachList } from "./FundingApproachList.jsx";
+import { FundingApproachReceiptPane } from "./FundingApproachReceiptPane.jsx";
 import { useActionItems } from "../lib/actionItems.js";
 import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
-import { developerAttention } from "../lib/dashboardAttention.js";
+import { byUrgency, developerAttention, discussionCountLabel, fundingApproachAttention } from "../lib/dashboardAttention.js";
 import {
   isIndependentQueueRow, listMyProposalQueue, proposalQueueWorkflowStatus, queueError,
 } from "../lib/proposalQueues.js";
-import { discussionCountLabel } from "../lib/dashboardAttention.js";
 import { PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { formatInstant } from "../lib/datetime.js";
@@ -110,6 +110,7 @@ function RecommendationLinks({ row, onNavigate }) {
 
 export function DeveloperDashboardPanel({ onNavigate }) {
   const { user } = useAuth();
+  const [receiptId, setReceiptId] = useState(null);
   const queue = useQuery({
     queryKey: ["developerDashboard", user?.id],
     queryFn: listMyProposalQueue,
@@ -126,7 +127,10 @@ export function DeveloperDashboardPanel({ onNavigate }) {
   const rows = queue.data?.items ?? [];
 
   const proposalIds = useMemo(() => new Set(rows.map((row) => row.id)), [rows]);
-  const attention = useMemo(() => developerAttention(actions.data, proposalIds), [actions.data, proposalIds]);
+  const attention = useMemo(() => byUrgency([
+    ...developerAttention(actions.data, proposalIds),
+    ...fundingApproachAttention(approaches.data?.incoming),
+  ]), [actions.data, proposalIds, approaches.data]);
 
   const groups = useMemo(() => {
     const submitted = rows.filter((row) => row.status !== PROPOSAL_STATUS_DRAFT);
@@ -177,9 +181,10 @@ export function DeveloperDashboardPanel({ onNavigate }) {
 
       <DashboardAttention
         items={attention}
-        loading={actions.isPending}
+        loading={actions.isPending || approaches.isPending}
         error={actions.error ? queueError(actions.error) : ""}
         onNavigate={onNavigate}
+        onOpenReceipt={setReceiptId}
         emptyMessage="Nothing is blocked on you right now."
       />
 
@@ -276,6 +281,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
           )}
         </>
       )}
+      {receiptId && <FundingApproachReceiptPane approachId={receiptId} onClose={() => setReceiptId(null)} />}
     </section>
   );
 }

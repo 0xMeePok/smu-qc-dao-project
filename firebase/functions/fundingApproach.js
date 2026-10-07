@@ -5,7 +5,7 @@ import { decodeEventLog } from "viem";
 import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachDecisionAnchorId, fundingApproachDecisionRecordHash, fundingApproachRecordHash } from "./fundingApproachAnchor.js";
 import { fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { memberNoticeFields } from "./moderation.js";
-import { instantMs } from "./opportunityExpiry.js";
+import { deadlinePassed, instantMs } from "./opportunityExpiry.js";
 
 export const FUNDING_APPROACHES = "fundingApproaches";
 export const FUNDING_APPROACH_SLOTS = "fundingApproachSlots";
@@ -67,6 +67,7 @@ function listItem(id, data, extras) {
     proposalTitle: extras.proposalTitle || "Independent listing",
     funderId: data.funderId,
     funderName: extras.funderName || "",
+    researcherName: extras.researcherName || "",
     amount: data.amount ?? 0,
     currency: data.currency || "",
     scope: data.scope || "",
@@ -92,37 +93,44 @@ async function lookup(db, collection, ids, pick) {
   return new Map(snaps.map((snap) => [snap.id, snap.exists ? pick(snap.data()) : ""]));
 }
 
-const RESEARCHER_LIST_STATUSES = ["pending", "accepted", "declined"];
+const RESEARCHER_LIST_STATUSES = ["pending", "accepted", "declined", "expired", "cancelled"];
 
-/** Incoming approaches the researcher can still see, and every approach this member sent. */
+/** A pending approach past its deadline is expired. Stored accepted, declined, expired and cancelled stay as written. */
+function listedStatus(data, now) {
+  if ((data.status || "pending") === "pending" && deadlinePassed(data.expiresAt, now)) return "expired";
+  return data.status || "pending";
+}
+
+/** Incoming approaches for this researcher, including expired and cancelled, and every approach this member sent. */
 export async function listFundingApproaches({ db, uid, now = Timestamp.now() }) {
   const actorId = String(uid || "").toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(actorId)) fail("unauthenticated", "Sign in with your wallet.");
   const profile = await db.collection("users").doc(uid).get();
   if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
-  const nowMs = now.toMillis();
   const [incomingPage, sentPage] = await Promise.all([
     db.collection(FUNDING_APPROACHES).where("researcherId", "==", actorId).where("status", "in", RESEARCHER_LIST_STATUSES)
       .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
     db.collection(FUNDING_APPROACHES).where("funderId", "==", actorId)
       .orderBy("createdAt", "desc").limit(LIST_CAP + 1).get(),
   ]);
-  const incomingDocs = incomingPage.docs.filter((doc) => {
-    const data = doc.data();
-    return data.status !== "pending" || instantMs(data.expiresAt) > nowMs;
-  }).slice(0, LIST_CAP);
+  const incomingDocs = incomingPage.docs.slice(0, LIST_CAP);
   const sentDocs = sentPage.docs.slice(0, LIST_CAP);
   const proposalIds = [...incomingDocs, ...sentDocs].map((doc) => doc.data().proposalId);
   const [proposals, names] = await Promise.all([
     lookup(db, "proposals", proposalIds, (data) => data),
-    lookup(db, "publicProfiles", incomingDocs.map((doc) => doc.data().funderId), (data) => data.fullName || data.organisation || ""),
+    lookup(db, "publicProfiles", [
+      ...incomingDocs.map((doc) => doc.data().funderId),
+      ...sentDocs.map((doc) => doc.data().researcherId),
+    ], (data) => data.fullName || data.organisation || ""),
   ]);
   const item = (doc) => {
-    const proposal = proposals.get(doc.data().proposalId);
+    const data = doc.data();
+    const proposal = proposals.get(data.proposalId);
     const removed = proposal?.moderationStatus === "removed" || proposal?.status === "moderated_removed";
-    return listItem(doc.id, doc.data(), {
+    return listItem(doc.id, { ...data, status: listedStatus(data, now) }, {
       proposalTitle: proposal?.title || "Independent listing",
-      funderName: names.get(doc.data().funderId),
+      funderName: names.get(data.funderId),
+      researcherName: names.get(data.researcherId),
       claimFunds: removed && Boolean(proposal?.fundingTerms),
     });
   };
@@ -155,6 +163,44 @@ function view(id, data) {
     decisionAnchorId: data.decisionAnchor?.decisionAnchorId ?? null,
     decisionRecordHash: data.decisionAnchor?.recordHash ?? null,
     decisionAnchorStatus: data.decisionAnchor?.status ?? null,
+  };
+}
+
+function profileName(snap) {
+  if (!snap?.exists) return "";
+  const data = snap.data();
+  return String(data.fullName || data.organisation || "");
+}
+
+/** One approach, for the researcher who received it or the funder who sent it. */
+export async function getFundingApproach({ db, uid, approachId, now = Timestamp.now() }) {
+  validId(approachId, "approach");
+  const actorId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(actorId)) fail("unauthenticated", "Sign in with your wallet.");
+  const profile = await db.collection("users").doc(uid).get();
+  if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+  const snap = await db.collection(FUNDING_APPROACHES).doc(approachId).get();
+  if (!snap.exists) fail("not-found", "This approach is no longer available.");
+  const data = snap.data();
+  if (!same(data.researcherId, actorId) && !same(data.funderId, actorId)) {
+    fail("permission-denied", "Only the researcher or the funder on this approach can open it.");
+  }
+  const [proposal, funderProfile, researcherProfile] = await Promise.all([
+    data.proposalId ? db.collection("proposals").doc(data.proposalId).get() : Promise.resolve(null),
+    data.funderId ? db.collection("publicProfiles").doc(String(data.funderId)).get() : Promise.resolve(null),
+    data.researcherId ? db.collection("publicProfiles").doc(String(data.researcherId)).get() : Promise.resolve(null),
+  ]);
+  const anchor = data.anchor || {};
+  const decision = data.decisionAnchor || {};
+  return {
+    ...view(approachId, { ...data, status: listedStatus(data, now) }),
+    proposalTitle: proposal?.exists ? (proposal.data().title || "Independent listing") : "Independent listing",
+    funderName: profileName(funderProfile),
+    researcherName: profileName(researcherProfile),
+    transactionHash: anchor.transactionHash || null,
+    anchoredAt: anchor.anchoredAt || null,
+    decisionTransactionHash: decision.transactionHash || null,
+    decisionAnchoredAt: decision.anchoredAt || null,
   };
 }
 

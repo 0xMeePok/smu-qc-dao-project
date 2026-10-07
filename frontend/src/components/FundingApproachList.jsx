@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import { formatInstant } from "../lib/datetime.js";
+import { formatCountdown, formatInstant, isExpired } from "../lib/datetime.js";
+import { FundingApproachReceiptPane } from "./FundingApproachReceiptPane.jsx";
 import {
   APPROACH_TEXT_MAX, decideFundingApproach, fundingApproachError, fundingApproachStatusLabel,
   recordFundingApproachDecisionAnchors, submitFundingApproachDecisions, validateApproachDecision,
@@ -12,6 +13,15 @@ import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
 
 const money = (item) => `${item.currency || ""} ${Number(item.amount ?? 0).toLocaleString()}`.trim();
+
+/** Outcome of an approach the funder sent, from the status already stored. */
+export function funderOutcome(item, status) {
+  const label = fundingApproachStatusLabel(status);
+  if (status === "pending") return "Awaiting the researcher's response.";
+  if (status === "accepted" && item.acceptMessage) return `${label}. ${item.acceptMessage}`;
+  if (status === "declined" && item.declineReason) return `${label}. ${item.declineReason}`;
+  return `${label}.`;
+}
 
 /** Claim the unpaid escrow balance after an administrator removes the listing. */
 export function ClaimRemovedFundsButton({ proposalId }) {
@@ -57,7 +67,7 @@ async function anchorDecisions(decisions, account) {
 }
 
 /** Accept or decline, then ask the researcher's wallet to anchor the decision. */
-function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
+export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
   const { user } = useAuth();
   const { address, isConnected, chainId } = useAccount();
   const [connect, setConnect] = useState(false);
@@ -128,7 +138,7 @@ function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
 }
 
 /** Signs every still-pending decision digest for one listing. */
-function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
+export function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
   const { user } = useAuth();
   const { address, isConnected, chainId } = useAccount();
   const [busy, setBusy] = useState(false);
@@ -154,17 +164,88 @@ function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
   );
 }
 
+/** Newest first. A listing's group appears where its newest approach does. */
+function groupByProposal(items) {
+  const groups = [];
+  const byProposal = new Map();
+  for (const item of items) {
+    const key = item.proposalId || "";
+    let group = byProposal.get(key);
+    if (!group) {
+      group = { key: key || "listing", title: item.proposalTitle || "Independent listing", items: [] };
+      byProposal.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
+}
+
 /**
- * One party's funding approaches. `showFunder` is the researcher's incoming list;
- * the funder's sent list names the listing instead. Accept and decline are only
- * offered on a pending incoming row.
+ * One party's funding approaches. `showFunder` is the researcher's incoming list,
+ * grouped under each listing. The funder's sent list stays one row per approach
+ * and names the listing on that row. Accept and decline are only offered on a
+ * pending incoming row.
  */
 export function FundingApproachList({ title, hint, empty, items = [], truncated = false, loading = false, error = "", onNavigate, onUpdated, showFunder = false, heading = "h2" }) {
   const Heading = heading === "h3" ? "h3" : "h2";
   const [draft, setDraft] = useState(null);
   const [anchorError, setAnchorError] = useState("");
-  const openDraft = draft && items.some((item) => item.id === draft.id && item.status === "pending") ? draft : null;
+  const [receiptId, setReceiptId] = useState(null);
+  const [now, setNow] = useState(() => new Date());
+  const countdown = showFunder && items.some((item) => item.status === "pending" && !isExpired(item.expiresAt, now));
+  useEffect(() => {
+    if (!countdown) return undefined;
+    const timer = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+  const listedStatus = (item) => (
+    showFunder && item.status === "pending" && isExpired(item.expiresAt, now) ? "expired" : item.status
+  );
+  const openDraft = draft && items.some((item) => item.id === draft.id && listedStatus(item) === "pending") ? draft : null;
   const start = (item, decision) => setDraft({ id: item.id, decision, text: "", error: "", busy: false, phase: "" });
+  const approachRow = (item) => {
+    const status = listedStatus(item);
+    const responding = openDraft?.id === item.id;
+    const signAnchor = showFunder && item.decisionAnchorStatus === "pending"
+      && items.find((row) => row.proposalId === item.proposalId && row.decisionAnchorStatus === "pending")?.id === item.id;
+    return (
+      <div className="table-row" key={item.id}>
+        <div>
+          <strong>{showFunder ? (item.funderName || "A client or funder") : (item.proposalTitle || "Independent listing")}</strong>
+          <small className="table-row-meta">
+            {showFunder ? null : `${item.researcherName || "The researcher"} · `}
+            {money(item)} indicative · {fundingApproachStatusLabel(status)}
+          </small>
+          {!showFunder && <p>Outcome: {funderOutcome(item, status)}</p>}
+          <small className="table-row-meta">
+            {showFunder && status === "pending" ? `${formatCountdown(item.expiresAt, now)} · ` : null}
+            Expires {formatInstant(item.expiresAt)}
+          </small>
+          {item.scope && <p>{item.scope}</p>}
+          {item.message && <p>{item.message}</p>}
+          {showFunder && status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
+          {showFunder && status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
+          {signAnchor && <p className="field-hint">The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia. The message and reason stay off-chain.</p>}
+          {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
+        </div>
+        <div className="table-row-actions">
+          {showFunder && status === "pending" && !responding && (
+            <>
+              <button type="button" className="primary" onClick={() => start(item, "accept")}>Accept</button>
+              <button type="button" className="secondary" onClick={() => start(item, "decline")}>Decline</button>
+            </>
+          )}
+          {signAnchor && <SignDecisionAnchor items={items} proposalId={item.proposalId} onUpdated={onUpdated} onError={setAnchorError} />}
+          {item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
+          <button type="button" className="text-button" onClick={() => onNavigate?.(`approach/${item.id}`)}>Open approach</button>
+          <button type="button" className="text-button" onClick={() => setReceiptId(item.id)}>Audit receipt</button>
+          <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${item.proposalId}`)}>Open listing</button>
+        </div>
+      </div>
+    );
+  };
+  const groups = showFunder ? groupByProposal(items) : [];
   return (
     <section className="card-table" aria-label={title}>
       <div className="table-header"><Heading>{title}</Heading></div>
@@ -173,41 +254,16 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
       {error && <p role="alert" className="error-banner">{error}</p>}
       {anchorError && <p role="alert" className="error-banner">{anchorError}</p>}
       {!loading && !error && items.length === 0 && <p className="table-empty">{empty}</p>}
-      {!loading && !error && items.map((item) => {
-        const responding = openDraft?.id === item.id;
-        const signAnchor = showFunder && item.decisionAnchorStatus === "pending"
-          && items.find((row) => row.proposalId === item.proposalId && row.decisionAnchorStatus === "pending")?.id === item.id;
-        return (
-          <div className="table-row" key={item.id}>
-            <div>
-              <strong>{item.proposalTitle || "Independent listing"}</strong>
-              <small className="table-row-meta">
-                {showFunder ? (item.funderName || "A client or funder") : "Sent by you"}
-                {" · "}{money(item)} indicative · {fundingApproachStatusLabel(item.status)}
-              </small>
-              <small className="table-row-meta">Expires {formatInstant(item.expiresAt)}</small>
-              {item.scope && <p>{item.scope}</p>}
-              {item.message && <p>{item.message}</p>}
-              {item.status === "accepted" && item.acceptMessage && <p>Message with acceptance: {item.acceptMessage}</p>}
-              {item.status === "declined" && item.declineReason && <p>Reason for declining: {item.declineReason}</p>}
-              {signAnchor && <p className="field-hint">The decision is saved. Sign the anchor so it can be verified on Arbitrum Sepolia. The message and reason stay off-chain.</p>}
-              {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
-            </div>
-            <div className="table-row-actions">
-              {showFunder && item.status === "pending" && !responding && (
-                <>
-                  <button type="button" className="primary" onClick={() => start(item, "accept")}>Accept</button>
-                  <button type="button" className="secondary" onClick={() => start(item, "decline")}>Decline</button>
-                </>
-              )}
-              {signAnchor && <SignDecisionAnchor items={items} proposalId={item.proposalId} onUpdated={onUpdated} onError={setAnchorError} />}
-              {item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
-              <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${item.proposalId}`)}>Open listing</button>
-            </div>
+      {!loading && !error && (showFunder
+        ? groups.map((group) => (
+          <div className="approach-group" key={group.key}>
+            <h4 className="approach-group-title">{group.title}</h4>
+            {group.items.map(approachRow)}
           </div>
-        );
-      })}
+        ))
+        : items.map(approachRow))}
       {truncated && <p className="field-hint">Showing a limited set of approaches. Open a listing for the full record.</p>}
+      {receiptId && <FundingApproachReceiptPane approachId={receiptId} onClose={() => setReceiptId(null)} />}
     </section>
   );
 }

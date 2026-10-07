@@ -2,6 +2,7 @@ import CreateProposalPage from "./pages/CreateProposalPage.jsx";
 import CreateIndependentProposalPage from "./pages/CreateIndependentProposalPage.jsx";
 import IndependentListingsPage from "./pages/IndependentListingsPage.jsx";
 import ProposalDetailPage from "./pages/ProposalDetailPage.jsx";
+import FundingApproachDetailPage from "./pages/FundingApproachDetailPage.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { opportunityTypes } from "./data.js";
 import { POSTING_CATEGORIES } from "./config/postingCategories.js";
@@ -760,6 +761,12 @@ function AppContent() {
     pageComponent = (
       <RouteGuard targetRoute={fullPath} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
         <CreateIndependentProposalPage key={id ?? "new"} resumeId={id} onNavigate={go} />
+      </RouteGuard>
+    );
+  } else if (section === "approach") {
+    pageComponent = (
+      <RouteGuard targetRoute={fullPath} allowedRoles={routeConfig?.allowedRoles} authRequired={routeConfig?.authRequired} onNavigate={go}>
+        <FundingApproachDetailPage key={`${id}-${user?.id}`} approachId={id} onNavigate={go} />
       </RouteGuard>
     );
   } else if (section === "submit-proposal" || section === "edit-proposal" || section === "proposal") {
