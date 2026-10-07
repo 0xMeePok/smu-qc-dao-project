@@ -134,6 +134,12 @@ export async function listFundingApproaches() {
   return (await httpsCallable(functions, "listFundingApproaches")({})).data;
 }
 
+/** One approach the signed-in researcher received or the signed-in funder sent. */
+export async function getFundingApproach(approachId) {
+  requireFirebase();
+  return (await httpsCallable(functions, "getFundingApproach")({ approachId })).data;
+}
+
 /** The funder's wallet anchors the saved digest. The message is not sent to the chain. */
 export async function submitFundingApproachAnchor(created, { account, adapters = createWagmiEscrowAdapters() } = {}) {
   if (!/^0x[0-9a-f]{64}$/i.test(created?.approachAnchorId || "") || !/^0x[0-9a-f]{64}$/i.test(created?.recordHash || "")) {

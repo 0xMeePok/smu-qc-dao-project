@@ -166,6 +166,44 @@ function view(id, data) {
   };
 }
 
+function profileName(snap) {
+  if (!snap?.exists) return "";
+  const data = snap.data();
+  return String(data.fullName || data.organisation || "");
+}
+
+/** One approach, for the researcher who received it or the funder who sent it. */
+export async function getFundingApproach({ db, uid, approachId, now = Timestamp.now() }) {
+  validId(approachId, "approach");
+  const actorId = String(uid || "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(actorId)) fail("unauthenticated", "Sign in with your wallet.");
+  const profile = await db.collection("users").doc(uid).get();
+  if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+  const snap = await db.collection(FUNDING_APPROACHES).doc(approachId).get();
+  if (!snap.exists) fail("not-found", "This approach is no longer available.");
+  const data = snap.data();
+  if (!same(data.researcherId, actorId) && !same(data.funderId, actorId)) {
+    fail("permission-denied", "Only the researcher or the funder on this approach can open it.");
+  }
+  const [proposal, funderProfile, researcherProfile] = await Promise.all([
+    data.proposalId ? db.collection("proposals").doc(data.proposalId).get() : Promise.resolve(null),
+    data.funderId ? db.collection("publicProfiles").doc(String(data.funderId)).get() : Promise.resolve(null),
+    data.researcherId ? db.collection("publicProfiles").doc(String(data.researcherId)).get() : Promise.resolve(null),
+  ]);
+  const anchor = data.anchor || {};
+  const decision = data.decisionAnchor || {};
+  return {
+    ...view(approachId, { ...data, status: listedStatus(data, now) }),
+    proposalTitle: proposal?.exists ? (proposal.data().title || "Independent listing") : "Independent listing",
+    funderName: profileName(funderProfile),
+    researcherName: profileName(researcherProfile),
+    transactionHash: anchor.transactionHash || null,
+    anchoredAt: anchor.anchoredAt || null,
+    decisionTransactionHash: decision.transactionHash || null,
+    decisionAnchoredAt: decision.anchoredAt || null,
+  };
+}
+
 function pendingDecisionAnchor(record) {
   const decisionAnchorId = fundingApproachDecisionAnchorId(record.approachId, record.researcherId);
   const recordHash = fundingApproachDecisionRecordHash(record);

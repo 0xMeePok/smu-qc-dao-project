@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { DashboardAttention, DashboardCount } from "./DashboardAttention.jsx";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { FundingApproachList } from "./FundingApproachList.jsx";
+import { FundingApproachReceiptPane } from "./FundingApproachReceiptPane.jsx";
 import { useActionItems } from "../lib/actionItems.js";
 import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
 import { byUrgency, developerAttention, discussionCountLabel, fundingApproachAttention } from "../lib/dashboardAttention.js";
@@ -109,6 +110,7 @@ function RecommendationLinks({ row, onNavigate }) {
 
 export function DeveloperDashboardPanel({ onNavigate }) {
   const { user } = useAuth();
+  const [receiptId, setReceiptId] = useState(null);
   const queue = useQuery({
     queryKey: ["developerDashboard", user?.id],
     queryFn: listMyProposalQueue,
@@ -182,6 +184,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
         loading={actions.isPending || approaches.isPending}
         error={actions.error ? queueError(actions.error) : ""}
         onNavigate={onNavigate}
+        onOpenReceipt={setReceiptId}
         emptyMessage="Nothing is blocked on you right now."
       />
 
@@ -278,6 +281,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
           )}
         </>
       )}
+      {receiptId && <FundingApproachReceiptPane approachId={receiptId} onClose={() => setReceiptId(null)} />}
     </section>
   );
 }

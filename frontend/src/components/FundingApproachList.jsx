@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { formatCountdown, formatInstant, isExpired } from "../lib/datetime.js";
+import { FundingApproachReceiptPane } from "./FundingApproachReceiptPane.jsx";
 import {
   APPROACH_TEXT_MAX, decideFundingApproach, fundingApproachError, fundingApproachStatusLabel,
   recordFundingApproachDecisionAnchors, submitFundingApproachDecisions, validateApproachDecision,
@@ -14,7 +15,7 @@ import { Field } from "./Field.jsx";
 const money = (item) => `${item.currency || ""} ${Number(item.amount ?? 0).toLocaleString()}`.trim();
 
 /** Outcome of an approach the funder sent, from the status already stored. */
-function funderOutcome(item, status) {
+export function funderOutcome(item, status) {
   const label = fundingApproachStatusLabel(status);
   if (status === "pending") return "Awaiting the researcher's response.";
   if (status === "accepted" && item.acceptMessage) return `${label}. ${item.acceptMessage}`;
@@ -66,7 +67,7 @@ async function anchorDecisions(decisions, account) {
 }
 
 /** Accept or decline, then ask the researcher's wallet to anchor the decision. */
-function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
+export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
   const { user } = useAuth();
   const { address, isConnected, chainId } = useAccount();
   const [connect, setConnect] = useState(false);
@@ -137,7 +138,7 @@ function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
 }
 
 /** Signs every still-pending decision digest for one listing. */
-function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
+export function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
   const { user } = useAuth();
   const { address, isConnected, chainId } = useAccount();
   const [busy, setBusy] = useState(false);
@@ -190,6 +191,7 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
   const Heading = heading === "h3" ? "h3" : "h2";
   const [draft, setDraft] = useState(null);
   const [anchorError, setAnchorError] = useState("");
+  const [receiptId, setReceiptId] = useState(null);
   const [now, setNow] = useState(() => new Date());
   const countdown = showFunder && items.some((item) => item.status === "pending" && !isExpired(item.expiresAt, now));
   useEffect(() => {
@@ -236,6 +238,8 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
           )}
           {signAnchor && <SignDecisionAnchor items={items} proposalId={item.proposalId} onUpdated={onUpdated} onError={setAnchorError} />}
           {item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
+          <button type="button" className="text-button" onClick={() => onNavigate?.(`approach/${item.id}`)}>Open approach</button>
+          <button type="button" className="text-button" onClick={() => setReceiptId(item.id)}>Audit receipt</button>
           <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${item.proposalId}`)}>Open listing</button>
         </div>
       </div>
@@ -259,6 +263,7 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
         ))
         : items.map(approachRow))}
       {truncated && <p className="field-hint">Showing a limited set of approaches. Open a listing for the full record.</p>}
+      {receiptId && <FundingApproachReceiptPane approachId={receiptId} onClose={() => setReceiptId(null)} />}
     </section>
   );
 }
