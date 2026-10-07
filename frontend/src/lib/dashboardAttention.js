@@ -1,3 +1,5 @@
+import { isExpired } from "./datetime.js";
+
 /**
  * QCDAO-92/93 - the attention panel on both role dashboards.
  *
@@ -117,6 +119,35 @@ export function developerAttention(actions, proposalIds = new Set()) {
       cta: shape.cta, dual: Boolean(shape.dual), target: `proposal/${item.id}?tab=funding` }));
   }
   return byUrgency(items);
+}
+
+/**
+ * Pending funding approaches still waiting on this researcher's accept or decline.
+ * A lapsed approach is already expired and is not an action. The detail page is `approach/{id}`.
+ */
+export function fundingApproachAttention(approaches = [], now = new Date()) {
+  const items = [];
+  for (const approach of approaches) {
+    if (approach?.status !== "pending" || isExpired(approach.expiresAt, now)) continue;
+    const amount = `${approach.currency || ""} ${Number(approach.amount ?? 0).toLocaleString()}`.trim();
+    const funder = approach.funderName || "A client or funder";
+    items.push({
+      key: `approach-${approach.id}`,
+      kind: "funding-approach",
+      heading: "Funding approach to answer",
+      note: `${funder} offered ${amount} indicative. Accept or decline before it expires. This does not deposit tokens.`,
+      cta: "Open approach",
+      dual: false,
+      route: `approach/${approach.id}`,
+      id: approach.id,
+      title: approach.proposalTitle || "Independent listing",
+      postingTitle: "",
+      deadlineAt: approach.expiresAt ?? null,
+      submittedAt: approach.createdAt ?? null,
+      workflowStatus: null,
+    });
+  }
+  return items;
 }
 
 /** Why a posting cannot reach a decision, in the words of whoever must act. */

@@ -5,11 +5,10 @@ import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { FundingApproachList } from "./FundingApproachList.jsx";
 import { useActionItems } from "../lib/actionItems.js";
 import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
-import { developerAttention } from "../lib/dashboardAttention.js";
+import { byUrgency, developerAttention, discussionCountLabel, fundingApproachAttention } from "../lib/dashboardAttention.js";
 import {
   isIndependentQueueRow, listMyProposalQueue, proposalQueueWorkflowStatus, queueError,
 } from "../lib/proposalQueues.js";
-import { discussionCountLabel } from "../lib/dashboardAttention.js";
 import { PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { formatInstant } from "../lib/datetime.js";
@@ -126,7 +125,10 @@ export function DeveloperDashboardPanel({ onNavigate }) {
   const rows = queue.data?.items ?? [];
 
   const proposalIds = useMemo(() => new Set(rows.map((row) => row.id)), [rows]);
-  const attention = useMemo(() => developerAttention(actions.data, proposalIds), [actions.data, proposalIds]);
+  const attention = useMemo(() => byUrgency([
+    ...developerAttention(actions.data, proposalIds),
+    ...fundingApproachAttention(approaches.data?.incoming),
+  ]), [actions.data, proposalIds, approaches.data]);
 
   const groups = useMemo(() => {
     const submitted = rows.filter((row) => row.status !== PROPOSAL_STATUS_DRAFT);
@@ -177,7 +179,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
 
       <DashboardAttention
         items={attention}
-        loading={actions.isPending}
+        loading={actions.isPending || approaches.isPending}
         error={actions.error ? queueError(actions.error) : ""}
         onNavigate={onNavigate}
         emptyMessage="Nothing is blocked on you right now."
