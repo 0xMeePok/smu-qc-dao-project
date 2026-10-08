@@ -61,7 +61,7 @@ export function SelectionResponseDialog({ kind, problemId, proposal, onCancel, o
   </Modal>;
 }
 
-export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onOpenAuditReceipt }) {
+export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onOpenAuditReceipt, integrityBlocked = false }) {
   const { user } = useAuth();
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
@@ -124,7 +124,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onO
 
   const act = async (event) => {
     event.preventDefault();
-    if (!pending || actionInFlight.current || Object.hasOwn(pending.item, "fundingTerms")) return;
+    if ((integrityBlocked && pending?.kind !== "expire") || !pending || actionInFlight.current || Object.hasOwn(pending.item, "fundingTerms")) return;
     if (pending.kind === "decline" && rationale.trim().length < 10) {
       setError("Enter a reason of at least 10 characters for the decision record.");
       return;
@@ -267,10 +267,10 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onO
       <progress aria-label={`Funding for ${item.title}`} value={item.fundedAmount} max={item.amount || 1} />
       <div className="matching-actions">
         {!proposalId && onNavigate && <button type="button" className="text-button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>}
-        {item.canFund && !waiting && !confirmed && !invalidated && <button type="button" className="secondary" disabled={busy || loading} onClick={() => openAction("fund", item)}>Fund proposal</button>}
-        {item.canConfirm && waiting && <button type="button" className="primary" disabled={busy || loading} onClick={() => openAction("confirm", item)}>Accept as proposal creator</button>}
-        {item.canDecline && waiting && <button type="button" className="secondary" disabled={busy || loading} onClick={() => openAction("decline", item)}>Reject selection</button>}
-        {item.canCompleteEvaluation && !invalidated && <button type="button" className="secondary" disabled={busy || loading} onClick={() => openAction("evaluate", item)}>Complete mock evaluation</button>}
+        {item.canFund && !waiting && !confirmed && !invalidated && <button type="button" className="secondary" disabled={busy || loading || integrityBlocked} onClick={() => openAction("fund", item)}>Fund proposal</button>}
+        {item.canConfirm && waiting && <button type="button" className="primary" disabled={busy || loading || integrityBlocked} onClick={() => openAction("confirm", item)}>Accept as proposal creator</button>}
+        {item.canDecline && waiting && <button type="button" className="secondary" disabled={busy || loading || integrityBlocked} onClick={() => openAction("decline", item)}>Reject selection</button>}
+        {item.canCompleteEvaluation && !invalidated && <button type="button" className="secondary" disabled={busy || loading || integrityBlocked} onClick={() => openAction("evaluate", item)}>Complete mock evaluation</button>}
       </div>
     </article>)}</div>
     {!proposalId && <div className="matching-actions">
@@ -281,7 +281,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onO
     <button className="text-button" type="button" disabled={busy || loading} onClick={refresh}>{loading ? "Refreshing…" : "Refresh funding status"}</button>
     {state?.canForceExpire && waiting && <button className="text-button danger-text" type="button" disabled={busy || loading} onClick={() => openAction("expire", { id: state.matching.proposalId, title: "Expire the current confirmation window" })}>Expire window for demonstration</button>}
     {state?.history?.length > 0 && <div className="matching-history history-card history-card-decisions"><h3>Decision record</h3><p className="field-hint">Off-chain receipts recorded by the server. No blockchain transaction or wallet signature is required for selection or acceptance.</p>{state.history.map((entry) => <details key={entry.id} id={`matching-event-${entry.id}`}><summary>{eventLabel(entry.type)} {eventWorkflowStatus(entry.type) && <StatusBadge status={eventWorkflowStatus(entry.type)} interactive={false} />} · {formatInstant(entry.createdAt)}</summary><dl><dt>Actor</dt><dd>{entry.actorId || (["funding_contributed", "funding_target_reached"].includes(entry.type) ? "Private contributor" : "Scheduled expiry")}</dd><dt>Role</dt><dd>{entry.actorRole || "Member"}</dd>{entry.actorWallet && <><dt>Connected wallet</dt><dd>{entry.actorWallet}</dd></>}<dt>Proposal</dt><dd>{entry.proposalId || "All proposals"}</dd>{entry.reason && <><dt>Reason</dt><dd>{entry.reason}</dd></>}<dt>Receipt</dt><dd>Recorded off-chain</dd><dt>Record reference</dt><dd>{entry.id}</dd>{entry.deadlineAt && <><dt>Acceptance deadline</dt><dd>{formatInstant(entry.deadlineAt)}</dd>{waiting && entry.proposalId === state.matching.proposalId && <><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={state.matching.deadlineAt} showInstant={false} /></dd></>}</>}</dl>{["owner_selected", "owner_confirmed", "creator_confirmed", "match_confirmed"].includes(entry.type) && entry.proposalId ? <button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={() => openProposalAudit(entry.proposalId)}>View audit receipt</button> : null}</details>)}{state.historyTruncated && <p className="field-hint">Showing the latest 100 events.</p>}</div>}
-    {pending && <Modal labelledBy="matching-action-title" onDismiss={() => { if (!busy) setPending(null); }}>
+    {pending && (!integrityBlocked || pending.kind === "expire") && <Modal labelledBy="matching-action-title" onDismiss={() => { if (!busy) setPending(null); }}>
       <form onSubmit={act}><div className="modal-head"><h2 id="matching-action-title">{pending.kind === "fund" ? "Fund this proposal with mock funds" : pending.kind === "decline" ? RESPONSE_COPY.decline.title : pending.kind === "evaluate" ? "Complete mock expert evaluation?" : pending.kind === "expire" ? "Expire this window now?" : RESPONSE_COPY.confirm.title}</h2></div>
         <div className="modal-body"><strong>{pending.item.title}</strong>
           {pending.kind === "fund" ? <><p>This records a simulated contribution. No wallet payment is needed.</p><label htmlFor="mock-funding-amount">Amount ({pending.item.currency})</label><input id="mock-funding-amount" type="number" inputMode="decimal" min="0.01" max={pending.remaining} step="0.01" value={amount} disabled={busy} onChange={(event) => { setAmount(event.target.value); setPending((current) => ({ ...current, requestId: crypto.randomUUID() })); }} required /></>

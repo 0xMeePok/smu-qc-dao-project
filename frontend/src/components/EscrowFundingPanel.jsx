@@ -3,6 +3,7 @@ import { QueryClientContext } from "@tanstack/react-query";
 import { formatUnits, keccak256, stringToHex } from "viem";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isModerated } from "../lib/moderation.js";
 import { confirmEscrowTransaction, escrowErrorMessage, hashEscrowEvidence, readEscrow, writeEscrowAction } from "../lib/escrow.js";
@@ -35,7 +36,7 @@ function saveTransaction(key, hash) {
 
 export function EscrowFundingView({ state, evidence, loading, error, busy, progress, walletReady, walletMessage,
   amount, setAmount, delivery, setDelivery, onAction, onRefresh, onConnect, unresolvedTransaction, onConfirm, moderated,
-  fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason, canDeposit = true }) {
+  fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason, canDeposit = true, integrityBlocked = false }) {
   const money = units => `${formatUnits(units ?? 0n, state?.decimals ?? 6)} ${state?.symbol ?? ""}`;
   const disabled = busy || !walletReady || loading || Boolean(unresolvedTransaction);
   const evidenceReady = evidence && state?.currentMilestone?.evidenceHash === evidence.hash;
@@ -43,7 +44,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   const grantMessage = "Grant funding moves into this escrow when the researcher accepts the selected offer.";
   const settlementMessage = grantWaiting && ["waiting", "not_ready", "waiting_approval"].includes(settlement?.status) ? grantMessage : settlement?.message;
   const action = (name, label, extra = {}, allowed = state?.can[name]) => <button type="button" className="primary small"
-    disabled={disabled || !allowed || (name === "deposit" && Boolean(fundingBlockReason)) || (moderated && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
+    disabled={disabled || !allowed || (name === "deposit" && Boolean(fundingBlockReason)) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
   return <section className="card escrow-funding" aria-labelledby="escrow-funding-title">
     <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
       <button type="button" className="secondary small" disabled={busy || loading} onClick={onRefresh}>Refresh escrow</button></div>
@@ -89,7 +90,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       </div>}
       {state.state === 0 && state.remaining === 0n && !state.isGrant && <div className="field-group">
         <p>The target is fully funded. The problem owner selects this proposal, then both owners approve the upfront payment.</p>
-        {state.roles.problemOwner ? <button type="button" className="primary small" disabled={disabled || moderated || state.isHistorical || state.workflowActive === false} onClick={onSettle}>Select proposal for upfront approval</button>
+        {state.roles.problemOwner ? <button type="button" className="primary small" disabled={disabled || moderated || integrityBlocked || state.isHistorical || state.workflowActive === false} onClick={onSettle}>Select proposal for upfront approval</button>
           : <p className="field-hint">Waiting for the problem owner to select this proposal.</p>}
       </div>}
       {state.state === 1 && <div className="field-group">
@@ -147,7 +148,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   </section>;
 }
 
-export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0 }) {
+export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
   const { address, isConnected, chainId } = useAccount();
@@ -211,7 +212,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
     return () => { generation.current += 1; clearInterval(timer); };
   }, [refresh, refreshVersion]);
   const act = async (action, extra = {}) => {
-    if (!walletReady || writing.current || unresolvedTransaction || (action === "deposit" && fundingBlockReason) || (moderated && !refundActions.has(action))) return;
+    if (!walletReady || writing.current || unresolvedTransaction || (action === "deposit" && fundingBlockReason) || ((moderated || integrityBlocked) && !refundActions.has(action))) return;
     writing.current = true; setBusy(true); setError(""); setProgress({ status: "preparing", action }); setNotice("");
     const remember = hash => { saveTransaction(storageKey, hash); if (currentStorageKey.current === storageKey) setUnresolvedTransaction(hash); };
     try {
@@ -236,6 +237,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
       if (action === "rejectSelection") { setNotice("Selection rejected. This proposal’s full contribution balance is refundable; other eligible proposals reopen."); setRejectionReason(""); }
       try { if (!state?.isHistorical) {
         const synchronized = await syncEscrowFunding({ proposalId: proposal.id, ...(result?.transactionHash ? { transactionHash: result.transactionHash } : {}) });
+        invalidateFundingDashboardSummaries(queryClient);
         setHistory(synchronized); setSettlement(synchronized.settlement); setSyncError("");
       } } catch (err) { setSyncError(`The wallet transaction confirmed, but funding records could not be synchronized: ${err.message}. Use Reconcile funding records to retry.`); }
       await refresh();
@@ -258,6 +260,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
         // A recovered hash can belong to the ERC20 approval step rather than the deposit.
         // Reconcile the canonical proposal stream instead of treating that token receipt as an escrow event.
         const synchronized = await syncEscrowFunding({ proposalId: proposal.id });
+        invalidateFundingDashboardSummaries(queryClient);
         setHistory(synchronized); setSettlement(synchronized.settlement); setSyncError("");
       } }
       catch (err) { setSyncError(`Transaction confirmed. Funding records could not be synchronized: ${err.message}`); }
@@ -267,16 +270,17 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
     finally { writing.current = false; setBusy(false); }
   };
   const synchronize = async (select = false) => {
-    if (writing.current || !user?.id || (select && !walletReady) || unresolvedTransaction) return;
+    if (writing.current || !user?.id || (select && (!walletReady || integrityBlocked)) || unresolvedTransaction) return;
     writing.current = true; setBusy(true); setSyncError("");
     try {
       const result = await (select ? startEscrowSettlement : syncEscrowFunding)({ proposalId: proposal.id });
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
+      invalidateFundingDashboardSummaries(queryClient);
       setHistory(result); setSettlement(result.settlement); await refresh();
     } catch (err) { setSyncError(err.message || "Funding status could not be updated. Retry when ready."); }
     finally { writing.current = false; setBusy(false); }
   };
-  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit }}
+  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit, integrityBlocked }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize(true)} onSync={() => synchronize()}
     onAction={act} onRefresh={refresh} onConnect={() => setConnect(true)} onConfirm={confirmPending} />
     {user?.id && !state?.isHistorical && <EscrowFundingHistory data={history} error={syncError || historyError} busy={busy || loading} onSync={() => synchronize()} />}

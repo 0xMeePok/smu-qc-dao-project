@@ -428,3 +428,15 @@ it('routes escrow proposals to their wallet detail and ignores stale mock capabi
   expect(screen.queryByText('Seven-day acceptance window')).toBeNull();
   expect(screen.queryByRole('progressbar')).toBeNull();
 });
+
+it("blocks legacy funding after a detail mismatch while keeping refresh and proposal navigation available", async () => {
+  mocks.read.mockResolvedValue(snapshot({ proposals: [candidate({ canFund: true, fundedAmount: 0 })] }));
+  const navigate = vi.fn();
+  render(<MatchingPanel problemId="problem-1" integrityBlocked onNavigate={navigate} />);
+  const fund = await screen.findByRole("button", { name: "Fund proposal" });
+  expect(fund.disabled).toBe(true); fireEvent.click(fund);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("button", { name: "Refresh funding status" }).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "View proposal" }));
+  expect(navigate).toHaveBeenCalledWith("proposal/proposal-1");
+});

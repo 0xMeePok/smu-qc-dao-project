@@ -215,3 +215,25 @@ it("explains a clipboard failure and allows resuming a known transaction at the 
   expect(await screen.findByText(/Copy unavailable/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Resume verification" })).toBeTruthy();
 });
+
+it("reports automatic integrity results so detail pages can show mismatches outside the receipt tab", async () => {
+  const changed = vi.fn();
+  renderReceipt({ onVerify: async () => ({ verified: false }), onVerificationChange: changed });
+  await waitFor(() => expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "mismatch" })));
+});
+
+it("keeps a reported mismatch blocked during retry and RPC failure until a match is established", async () => {
+  let failRetry;
+  const changed = vi.fn(), verify = vi.fn().mockResolvedValueOnce({ verified: false })
+    .mockImplementationOnce(() => new Promise((_, reject) => { failRetry = reject; }))
+    .mockResolvedValueOnce({ verified: true });
+  renderReceipt({ onVerify: verify, onVerificationChange: changed });
+  await waitFor(() => expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "mismatch" })));
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  expect(changed).toHaveBeenCalledTimes(1);
+  await act(async () => failRetry(new Error("RPC unavailable")));
+  await screen.findByText(/Unable to verify right now/);
+  expect(changed).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  await waitFor(() => expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "match" })));
+});

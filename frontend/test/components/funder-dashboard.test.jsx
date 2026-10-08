@@ -38,21 +38,21 @@ it("opens grant creation, exact funding tab deep links, and the proposal audit r
 it("keeps different tokens in separate totals and reports missing verification", async () => {
   mocks.fetch.mockResolvedValue({ ...fixture, unavailableCommitments: 2, totals: [...fixture.totals, { ...token, tokenAddress: "other", tokenSymbol: "XSGD", committed: "1000000", locked: "1000000", released: "0", refunded: "0" }] });
   render(<FunderDashboard onNavigate={() => {}} />, { wrapper });
-  expect(await screen.findByText(/2 commitments could not be verified/)).toBeTruthy();
+  expect(await screen.findByText(/2 commitments could not be loaded/)).toBeTruthy();
   expect(screen.getAllByText("1 XSGD")).toHaveLength(2);
 });
 it("labels partial totals and unavailable grant decisions instead of claiming no decisions exist", async () => {
   mocks.fetch.mockResolvedValue({ ...fixture, totalsPartial: true, unavailableDecisions: 2 });
   render(<FunderDashboard onNavigate={() => {}} />, { wrapper });
   expect(await screen.findByText(/Funding totals are partial/)).toBeTruthy();
-  expect(screen.getByText(/2 grant decisions could not be verified/)).toBeTruthy();
-  expect(screen.getByText("Verified funding decisions are temporarily unavailable.")).toBeTruthy();
+  expect(screen.getByText(/2 grant decisions could not be loaded/)).toBeTruthy();
+  expect(screen.getByText("Funding decisions are temporarily unavailable.")).toBeTruthy();
   expect(screen.queryByText("No funding decisions recorded yet.")).toBeNull();
 });
 it("shows a retryable error instead of zero commitments when the service fails", async () => {
   mocks.fetch.mockRejectedValue(new Error("Service unavailable")); render(<FunderDashboard onNavigate={() => {}} />, { wrapper });
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Service unavailable");
-  expect(screen.queryByText("No verified proposal commitments yet.")).toBeNull();
+  expect(screen.queryByText("No proposal commitments yet.")).toBeNull();
   mocks.fetch.mockResolvedValue(fixture); fireEvent.click(screen.getByRole("button", { name: "Refresh dashboard" }));
   expect(await screen.findByText("Quantum grants")).toBeTruthy();
 });
@@ -71,7 +71,7 @@ it("lists cached independent commitments separately and leaves unknown refunds b
   render(<FunderDashboard onNavigate={go} />, { wrapper });
   await screen.findByText("Independent library");
   expect(screen.getByText("Your contribution 1 USDT · Available refund —")).toBeTruthy();
-  expect(screen.getByText(/Cached funding record/)).toBeTruthy();
+  expect(screen.getByText(/Open crowdfunding to view current balances/)).toBeTruthy();
   expect(screen.getByText(/These totals cover problem-statement and grant proposal funding/)).toBeTruthy();
   expect(screen.queryByText("Your contribution 1 USDT · Available refund 0 USDT")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Open crowdfunding" }));
@@ -95,7 +95,7 @@ it("renders last verified balances immediately on return while refreshing them",
   mocks.fetch.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   render(<FunderDashboard onNavigate={vi.fn()} />, { wrapper });
   expect(screen.getByText("Quantum grants")).toBeTruthy();
-  expect(screen.getByText("Refreshing your funding dashboard… Showing last verified results.")).toBeTruthy();
+  expect(screen.getByText("Refreshing your funding dashboard… Showing previously loaded results.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Refresh dashboard" }).disabled).toBe(true);
   expect(mocks.fetch).toHaveBeenCalledTimes(2);
   await act(async () => finish({ ...fixture, totals: [{ ...fixture.totals[0], released: "1000000", locked: "49000000000" }] }));
@@ -108,7 +108,7 @@ it("retains verified totals with a visible warning if a manual refresh fails", a
   await screen.findByText("Quantum grants");
   mocks.fetch.mockRejectedValueOnce(new Error("RPC unavailable"));
   fireEvent.click(screen.getByRole("button", { name: "Refresh dashboard" }));
-  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "RPC unavailable Showing last verified results; open individual records to check current balances.");
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "RPC unavailable Showing previously loaded results; open individual records to check current balances.");
   expect(screen.getByText("Quantum grants")).toBeTruthy();
   expect(screen.getByText("Pooled progress: 50000 USDC / 50000 USDC")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Refresh dashboard" }).disabled).toBe(false);

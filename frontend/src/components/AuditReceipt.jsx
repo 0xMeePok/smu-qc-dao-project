@@ -121,6 +121,7 @@ export function AuditReceipt({
   firebaseReference,
   recordTimestamp,
   onVerify,
+  onVerificationChange,
   onRetry,
   entityLabel = "Posting",
   anchorId,
@@ -128,6 +129,13 @@ export function AuditReceipt({
   const [verification, setVerification] = useState(null);
   const [checking, setChecking] = useState(false);
   const generation = useRef(0);
+  const onVerificationChangeRef = useRef(onVerificationChange);
+  onVerificationChangeRef.current = onVerificationChange;
+  // A retry or temporary RPC error is not evidence that a known mismatch is fixed.
+  // Detail pages retain that block until a conclusive result or record navigation.
+  useEffect(() => {
+    if (!checking && ["match", "mismatch"].includes(verification?.kind)) onVerificationChangeRef.current?.(verification);
+  }, [verification, checking]);
   const verifyRef = useRef(onVerify);
   verifyRef.current = onVerify;
   const canVerify = Boolean(onVerify);

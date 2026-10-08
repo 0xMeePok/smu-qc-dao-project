@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding, supportsOpenFunding } from "../openFunding.js";
 import { prepareEscrowDeposit, startEscrowSettlement, fundingBlockReason, settlementAction } from "../escrowFunding.js";
+import { seedDashboardSnapshots } from "./fixtures/dashboardSnapshots.js";
 import { getFunderDashboard } from "../funderDashboard.js";
 import { readVerifiedFunding } from "../escrowFunding.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
@@ -52,6 +53,7 @@ describe("single-owner prefunded open funding", () => {
     f.state.poolAddress = zeroAddress;
     const prepared = await prepareOpenFundingAction({ ...f, action: "create" });
     assert.equal(prepared.functionName, "createOpenFundingPool");
+    await seedDashboardSnapshots(f);
     const dashboard = await getFunderDashboard(f);
     assert.equal(dashboard.opportunities[0].pool.exists, false);
     assert.equal(dashboard.opportunities[0].poolUnavailable, false);
@@ -211,15 +213,17 @@ describe("single-owner prefunded open funding", () => {
   });
 });
 
-describe("funder dashboard verified accounting", () => {
+describe("funder dashboard saved accounting", () => {
   it("records pending and voided grant decisions before any escrow payment", async () => {
     const f = openFundingFixture(); f.select(0); f.select(1, 3);
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.deepEqual(result.decisions.map(row => row.selection.status), ["pending", "voided"]);
     assert.deepEqual(result.totals, []); assert.equal(result.commitments.length, 0);
   });
   it("shows the confirmed posting deadline even before the expiry worker changes stored status", async () => {
     const f = openFundingFixture(); f.state.timestamp = 2000000001n;
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.equal(result.opportunities[0].status, "expired");
     assert.equal(result.opportunities[0].recordStatus, "submitted");
@@ -238,13 +242,14 @@ describe("funder dashboard verified accounting", () => {
     for (let i = 0; i < 60; i++) f.db.records.set(`proposals/unfunded-${i}`, { ...f.proposals[0], id: `unfunded-${i}` });
     for (const row of f.proposals) f.db.records.set(`proposals/${row.id}`, row);
     f.select(1, 2);
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.equal(result.approaches.length, 62);
     assert.deepEqual(result.commitments.map(row => row.proposalId), [f.proposals[1].id]);
     assert.equal(result.totals[0].committed, "50000000000");
     assert.equal(result.truncated.commitments, false); assert.equal(result.totalsPartial, false);
   });
-  it("uses a fresh confirmed head and never counts duplicate or foreign-chain deposit discovery twice", async () => {
+  it("uses saved commitments and never counts duplicate or foreign-chain deposit discovery twice", async () => {
     const f = openFundingFixture(); f.select(0, 2);
     f.client.getBlockNumber = async options => { assert.equal(options.cacheTime, 0); return 103n; };
     for (let i = 0; i < 3; i++) f.db.records.set(`escrowFundingEvents/deposit-${i}`, {
@@ -253,9 +258,10 @@ describe("funder dashboard verified accounting", () => {
     });
     f.db.records.set("escrowFundingEvents/foreign", { actor: owner, registryAddress: f.config.address,
       eventType: "Deposit", verified: true, chainId: 1, proposalId: "missing-foreign-proposal" });
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.equal(result.commitments.length, 1); assert.equal(result.totals[0].committed, "50000000000");
-    assert.equal(result.blockNumber, 102); assert(f.calls.every(row => row.blockNumber === 102n));
+    assert.equal(result.blockNumber, null); assert.equal(result.commitments[0].blockNumber, 102);
   });
   it("keeps different canonical tokens separate and explicitly marks limited discovery totals", async () => {
     const f = openFundingFixture(), tokenAddress = `0x${"9".repeat(40)}`;
@@ -276,6 +282,7 @@ describe("funder dashboard verified accounting", () => {
       actor: owner, registryAddress: f.config.address, eventType: "Deposit", verified: true,
       chainId: f.config.chainId, proposalId: row.id,
     });
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.equal(result.commitments.length, 2); assert.equal(result.totals.length, 2);
     assert.deepEqual(result.totals.map(item => [item.tokenSymbol, item.committed]).sort(), [["USDC", "50000000000"], ["XSGD", "50000000000"]]);
@@ -284,6 +291,7 @@ describe("funder dashboard verified accounting", () => {
   it("does not invent a grant decision from stale accepted status or a legacy single-winner field", async () => {
     const f = openFundingFixture(); f.proposals[0].status = "accepted";
     f.posting.acceptedProposalId = f.proposals[0].id;
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.equal(result.decisions.length, 0); assert.equal(result.commitments.length, 0);
   });
@@ -291,6 +299,7 @@ describe("funder dashboard verified accounting", () => {
     const f = openFundingFixture(); f.select(0, 2); f.select(1, 2);
     f.state.released[0] = 25000000000n; f.state.refunded[0] = 1000000000n;
     await syncOpenFunding(f);
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.equal(result.opportunities.length, 1); assert.equal(result.approaches.length, 2);
     assert.equal(result.decisions.length, 2); assert.equal(result.commitments.length, 2);
@@ -302,6 +311,7 @@ describe("funder dashboard verified accounting", () => {
   });
   it("reports unavailable custody reads without inventing paid funding from Firestore amounts", async () => {
     const f = openFundingFixture(); f.client.getChainId = async () => { throw new Error("Offline"); };
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard(f);
     assert.equal(result.opportunities.length, 1); assert.deepEqual(result.totals, []);
     assert.equal(result.opportunities[0].poolUnavailable, true);

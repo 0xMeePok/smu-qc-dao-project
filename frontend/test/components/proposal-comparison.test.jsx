@@ -226,3 +226,11 @@ it('keeps escrow evaluator comparison and links to detail without offering mock 
   expect(screen.getByText('Evaluator · Recommend with revisions')).toBeTruthy();
   expect(mocks.select).not.toHaveBeenCalled();
 });
+
+it("removes legacy selection controls when the posting fails integrity verification", async () => {
+  render(<ProposalComparison problemId="problem" integrityBlocked />);
+  await screen.findByText("Alpha annealing");
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Confirm match" })).toBeNull();
+  expect(mocks.select).not.toHaveBeenCalled();
+});

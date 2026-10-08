@@ -266,3 +266,30 @@ describe("wallet escrow funding panel", () => {
     expect(Boolean(screen.queryByRole("button", { name: "Vote yes" }))).toBe(funderVoting);
   });
 });
+
+it("refreshes stored dashboard and payment summaries only after confirmed funding is synchronized", async () => {
+  const client = new QueryClient();
+  const keys = [["funderDashboard", account], ["escrowFundingSummary", account]];
+  for (const key of keys) client.setQueryData(key, { amount: "old" });
+  let synchronize;
+  mocks.sync.mockImplementationOnce(() => new Promise(resolve => { synchronize = resolve; }));
+  render(<QueryClientProvider client={client}><EscrowFundingPanel proposal={proposal} /></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole("button", { name: "Fund escrow" }));
+  await waitFor(() => expect(synchronize).toBeTypeOf("function"));
+  for (const key of keys) expect(client.getQueryState(key).isInvalidated).toBe(false);
+  synchronize({ events: [] });
+  await waitFor(() => { for (const key of keys) expect(client.getQueryState(key).isInvalidated).toBe(true); });
+  client.clear();
+});
+
+it("blocks funding after an audit mismatch while keeping verified refund recovery and refresh available", async () => {
+  mocks.read.mockResolvedValue(model({ can: { deposit: true, claimRefund: true } }));
+  render(<EscrowFundingPanel proposal={proposal} integrityBlocked />);
+  const fund = await screen.findByRole("button", { name: "Fund escrow" });
+  expect(fund.disabled).toBe(true);
+  fireEvent.click(fund);
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Refresh escrow" }).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Claim my refund" }));
+  await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "claimRefund" })));
+});

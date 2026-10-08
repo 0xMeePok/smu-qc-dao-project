@@ -139,3 +139,10 @@ it("gives only the sponsor a Feedback tab, where the review form always is", asy
   await screen.findByRole("tab", { name: "Overview" });
   expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Feedback", "Record"]);
 });
+
+it("shows a content mismatch on the overview without opening the audit tab", async () => {
+  mocks.verify.mockResolvedValue({ verified: false });
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={() => {}} />);
+  expect(await screen.findByText(/This proposal does not match its on-chain record/)).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
+});

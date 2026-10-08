@@ -154,6 +154,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
+  const [auditVerification, setAuditVerification] = useState(null);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const [poster, setPoster] = useState(null);
   const [withdrawing, setWithdrawing] = useState(false);
@@ -172,6 +173,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setAuditVerification(null);
     setError(null);
     setConfirm(false);
     setReason("");
@@ -428,6 +430,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
             </div>
           </div>
           <ContentModerationNotice record={posting} />
+          {auditVerification?.kind === "mismatch" && <p className="error-banner" role="alert">This posting does not match its on-chain record. New funding and approval actions are blocked. Open Record to review the differences.</p>}
           {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
 
           {/* One job per tab. Every panel stays mounted and only the active one is
@@ -539,6 +542,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
             />
             {showCollaboration && (
               <ProposalComparison
+                integrityBlocked={auditVerification?.kind === "mismatch"}
                 problemId={posting.id}
                 refreshKey={`${posting.matching?.status || ""}:${posting.matching?.totalFundedMinor || 0}`}
                 onNavigate={onNavigate}
@@ -549,9 +553,9 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
 
           {showCollaboration && (
             <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
-              {isOpenFunding ? <OpenFundingPanel problemId={posting.id} onNavigate={onNavigate} /> : <>
+              {isOpenFunding ? <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} onNavigate={onNavigate} /> : <>
                 <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
-                <MatchingPanel key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
+                <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
               </>}
             </div>
           )}
@@ -562,6 +566,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
               <div className="settings-row"><dt>Reference</dt><dd><code>{posting.id}</code></dd></div>
             </dl>
             <AuditReceipt
+              onVerificationChange={setAuditVerification}
               audit={audit}
               eventLabel={isOpenFunding
                 ? "Open funding opportunity submitted"

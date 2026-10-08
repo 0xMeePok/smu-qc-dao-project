@@ -10,6 +10,7 @@ import { deploymentKey, enqueueEscrowFunding, fundingBlockReason, getEscrowFundi
   prepareEscrowDeposit, readVerifiedFunding, reconcilePostingFundingPause, resumePlatformTransaction, settlementAction,
   startEscrowSettlement, submitPlatformAction, syncEscrowFunding, queuePostingFundingPause } from "../escrowFunding.js";
 import { sweepEscrowFunding } from "../escrowFunding.js";
+import { getFunderDashboard } from "../funderDashboard.js";
 
 const hash = digit => `0x${digit.repeat(64)}`, zero = hash("0"), platform = `0x${"9".repeat(40)}`;
 const now = Timestamp.fromMillis(1900000000000), nextDay = 1900086400n;
@@ -58,6 +59,9 @@ function fixture({ release = false } = {}) {
   client.getLogs = async request => { ranges.push(request); return anchors.filter(log => log.blockNumber >= request.fromBlock && log.blockNumber <= request.toBlock); };
   client.readContract = async request => {
     reads.push(request);
+    if (request.functionName === "depositorSummary") return request.args[0].toLowerCase() === owner.toLowerCase()
+      ? { deposited: state.totalDeposited, refunded: state.totalRefunded, released: state.totalReleased, claimable: 0n }
+      : { deposited: 0n, refunded: 0n, released: 0n, claimable: 0n };
     if (request.functionName === "fundingAnchorCount") return BigInt(anchors.length);
     if (request.functionName === "isFundingActive") return state.active;
     if (request.functionName === "isFundingInvalidated") return state.invalidated;
@@ -100,6 +104,53 @@ describe("escrow funding service", () => {
     assert.equal(f.ranges[0].fromBlock, 88n);
     assert.equal(result.reconciliation.anchors, 2);
     assert.equal(result.reconciliation.status, "verified");
+  });
+
+  it("refreshes every depositor's saved allocation after a payout submitted by another wallet", async () => {
+    const f = fixture({ release: true }), other = `0x${"a".repeat(40)}`;
+    f.db.records.set("escrowFundingEvents/historical-other-deposit", {
+      proposalId: f.record.id, registryAddress: f.config.address.toLowerCase(), chainId: f.config.chainId,
+      eventType: "Deposit", verified: true, actor: other,
+    });
+    const read = f.client.readContract;
+    f.client.readContract = async request => request.functionName === "depositorSummary"
+      ? { deposited: 100n, released: 50n, refunded: 0n, claimable: 0n } : read(request);
+    await syncEscrowFunding({ ...f, uid: researcher, proposalId: f.record.id });
+    for (const wallet of [owner, other]) {
+      const row = f.db.records.get(`escrowFundingPositions/${key(f.record.id)}_${wallet.toLowerCase()}`);
+      assert.equal(row.released, "50"); assert.equal(row.locked, "50"); assert.equal(row.blockNumber, 100);
+    }
+  });
+
+  it("does not repeat depositor RPC reads on unchanged background reconciliations", async () => {
+    const f = fixture();
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    const first = f.reads.filter(row => row.functionName === "depositorSummary").length;
+    assert.equal(first, 1);
+    f.client.getBlockNumber = async () => 102n;
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    assert.equal(f.reads.filter(row => row.functionName === "depositorSummary").length, first);
+    assert.equal(f.db.records.get(`escrowFundingSummaries/${key(f.record.id)}`).blockNumber, 101);
+    f.state.totalRefunded = f.state.totalDeposited;
+    f.client.getBlockNumber = async () => 103n;
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    assert.equal(f.reads.filter(row => row.functionName === "depositorSummary").length, first + 1);
+    assert.equal(f.db.records.get(`escrowFundingPositions/${key(f.record.id)}_${owner}`).refunded, f.state.totalDeposited.toString());
+  });
+
+  it("uses positions written by real reconciliation without RPC, including after a newer unchanged block", async () => {
+    const f = fixture();
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    const rejectRpc = new Proxy({}, { get() { throw new Error("Saved reconciled positions must not access RPC"); } });
+    let dashboard = await getFunderDashboard({ ...f, uid: owner, client: rejectRpc });
+    assert.equal(dashboard.commitments.length, 1);
+    assert.equal(dashboard.unavailableCommitments, 0);
+    assert.equal(dashboard.commitments[0].committed, f.state.totalDeposited.toString());
+    f.client.getBlockNumber = async () => 102n;
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    dashboard = await getFunderDashboard({ ...f, uid: owner, client: rejectRpc });
+    assert.equal(dashboard.commitments.length, 1);
+    assert.equal(dashboard.unavailableCommitments, 0);
   });
 
   it("indexes original creation even when audit.transactionHash points at a later proposal amendment", async () => {
@@ -160,7 +211,7 @@ describe("escrow funding service", () => {
     assert.equal(f.db.records.get(`proposals/${f.record.id}`).status, "accepted");
   });
 
-  it("refreshes payment balances from a confirmed block without rewriting a stale cache or submitting funds", async () => {
+  it("uses saved payment balances without RPC, while confirmed sync updates the saved result", async () => {
     const f = fixture({ release: true });
     await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
     const cachePath = `escrowFundingSummaries/${key(f.record.id)}`;
@@ -172,18 +223,38 @@ describe("escrow funding service", () => {
       ? { ...await read(request), paid: true } : read(request);
     f.client.getBlockNumber = async options => { assert.equal(options.cacheTime, 0); return 103n; };
     const result = await getEscrowFundingSummary({ ...f, uid: owner });
-    assert.equal(result.items[0].totalReleased, f.state.totalDeposited.toString());
-    assert.equal(result.items[0].outstandingBalance, "0");
-    assert.equal(result.items[0].finalReleased, true); assert.equal(result.blockNumber, 102);
+    assert.equal(result.items[0].totalReleased, cached.totalReleased);
+    assert.equal(result.items[0].outstandingBalance, cached.outstandingBalance);
+    assert.equal(result.items[0].finalReleased, false); assert.equal(result.blockNumber, 100);
     assert.equal(result.unavailableItems, 0); assert.equal(f.db.records.get(cachePath), cached);
+    await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+    const refreshed = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.equal(refreshed.items[0].totalReleased, f.state.totalDeposited.toString());
+    assert.equal(refreshed.items[0].outstandingBalance, "0");
+    assert.equal(refreshed.items[0].finalReleased, true);
   });
 
-  it("excludes unverifiable payment balances instead of displaying a stale confirmed cache", async () => {
+  it("retains saved payment balances when RPC is unavailable", async () => {
     const f = fixture({ release: true });
     await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
     f.client.readContract = async () => { throw new Error("RPC unavailable"); };
     const result = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.equal(result.items.length, 1); assert.equal(result.unavailableItems, 0);
+  });
+  it("verifies a missing payment snapshot once and reuses it without blockchain calls", async () => {
+    const f = fixture({ release: true });
+    const first = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.equal(first.items.length, 1); assert.equal(first.items[0].snapshotVerified, true);
+    assert(f.reads.length > 0);
+    f.client = new Proxy({}, { get() { throw new Error("Repeated dashboard must not access RPC"); } });
+    const second = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.deepEqual(second, first);
+  });
+  it("reports unavailable for missing snapshots if verification fails instead of fabricating zero payments", async () => {
+    const f = fixture(); f.client.readContract = async () => { throw new Error("RPC unavailable"); };
+    const result = await getEscrowFundingSummary({ ...f, uid: owner });
     assert.equal(result.items.length, 0); assert.equal(result.unavailableItems, 1);
+    assert.equal(f.db.records.has(`escrowFundingSummaries/${key(f.record.id)}`), false);
   });
   it("deduplicates payment discovery and excludes projections from another chain", async () => {
     const f = fixture({ release: true });

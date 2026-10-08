@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
 import { listActionItems, listMyProposals } from "../proposalQueues.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
+import { seedDashboardSnapshots } from "./fixtures/dashboardSnapshots.js";
 import { getFunderDashboard } from "../funderDashboard.js";
 import { FUNDING_EVENTS } from "../escrowFunding.js";
 import { openFundingFixture, owner, researcher, otherResearcher } from "./fixtures/openFundingFixture.js";
@@ -105,6 +106,7 @@ describe("canonical main escrow action counts", () => {
     f.posting.acceptedProposalId = f.proposals[0].id;
     f.posting.escrowSelection = { proposalId: f.proposals[0].id, requestedAt: nowFor(f) };
     f.state.released[0] = 25000000000n;
+    await seedDashboardSnapshots(f);
     const result = await getFunderDashboard({ ...f, uid: owner, now: nowFor(f) });
     assert.equal(result.decisions.length, 1);
     assert.equal(result.decisions[0].selection.status, "accepted");
@@ -120,6 +122,7 @@ describe("canonical main escrow action counts", () => {
       chainId: f.config.chainId, registryAddress: f.config.address.toLowerCase(), proposalId: f.proposals[0].id });
     const queue = await actions(f, owner);
     assert.equal(queue.owner.awaitingReview.length, 0); assert.equal(queue.escrowActions.length, 0); assert.equal(queue.total, 0);
+    await seedDashboardSnapshots(f);
     const dashboard = await getFunderDashboard({ ...f, uid: owner, now: nowFor(f) });
     assert.equal(dashboard.decisions[0].selection.status, "cancelled");
     assert.equal(dashboard.commitments[0].state, "Cancelled");
@@ -134,6 +137,7 @@ describe("canonical main escrow action counts", () => {
     let queue = await listMyProposals({ ...f, uid: researcher });
     assert.equal(queue.items[0].escrow, undefined); assert.equal(queue.items[0].escrowUnavailable, true);
     assert.equal(queue.unavailableEscrows, 1);
+    await seedDashboardSnapshots(f);
     const dashboard = await getFunderDashboard({ ...f, uid: owner, now: nowFor(f) });
     assert.equal(dashboard.unavailableDecisions, 1); assert.equal(dashboard.decisions.length, 0);
     assert.equal(dashboard.approaches[0].escrowUnavailable, true);

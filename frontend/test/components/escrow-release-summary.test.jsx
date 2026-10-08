@@ -27,14 +27,14 @@ it("shows verified payment amounts and opens the actual funding tab", async () =
 it("retains unavailable and truncation warnings when no payments can be verified", async () => {
   mocks.fetch.mockResolvedValue({ items: [], unavailableItems: 2, truncated: true });
   renderSummary();
-  expect(await screen.findByText(/2 proposal payment records could not be verified/)).toBeTruthy();
+  expect(await screen.findByText(/2 proposal payment records could not be loaded/)).toBeTruthy();
   expect(screen.getByText(/This payment summary is limited/)).toBeTruthy();
-  expect(screen.getByText("Verified proposal payments are temporarily unavailable.")).toBeTruthy();
+  expect(screen.getByText("Proposal payments are temporarily unavailable.")).toBeTruthy();
   expect(screen.queryByText(/No confirmed escrow payments yet/)).toBeNull();
   mocks.fetch.mockResolvedValue({ items: [item], unavailableItems: 0 });
   fireEvent.click(screen.getByRole("button", { name: "Refresh payments" }));
   await screen.findByText(item.title);
-  expect(screen.queryByText(/could not be verified/)).toBeNull();
+  expect(screen.queryByText(/could not be loaded/)).toBeNull();
 });
 
 it.each(["Cancelled", "Refunded", "Expired", "Voided"])("does not imply future payments are pending for a %s escrow", async state => {
@@ -61,7 +61,7 @@ it("keeps the last verified payments visible while a remounted tab fetches curre
 
   renderSummary();
   expect(screen.getByText(item.title)).toBeTruthy();
-  expect(screen.getByText("Refreshing payments… Showing last verified results.")).toBeTruthy();
+  expect(screen.getByText("Refreshing payments… Showing previously loaded results.")).toBeTruthy();
   expect(mocks.fetch).toHaveBeenCalledTimes(2);
   expect(screen.getByRole("button", { name: "Refresh payments" }).disabled).toBe(true);
 
@@ -75,7 +75,7 @@ it("labels retained verified results if refreshing fails", async () => {
   await screen.findByText(item.title);
   mocks.fetch.mockRejectedValue(new Error("RPC unavailable"));
   fireEvent.click(screen.getByRole("button", { name: "Refresh payments" }));
-  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "RPC unavailable Showing last verified results; open an escrow to check its current payments.");
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "RPC unavailable Showing previously loaded results; open an escrow to check its current payments.");
   expect(screen.getByText(item.title)).toBeTruthy();
 });
 
