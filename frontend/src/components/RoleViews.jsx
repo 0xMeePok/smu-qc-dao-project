@@ -453,7 +453,7 @@ export function ResearcherProposals({ onNavigate }) {
   return <section className="page dashboard-page">
     <div className="page-heading">
       <h1>My Research Proposals</h1>
-      <p>Track submissions to posted problems and independent listings you have published. Unfinished drafts resume under My submissions — independent drafts open the independent form, not a parent opportunity.</p>
+      <p>Track your proposals and independent listings. Open My submissions to continue a saved draft.</p>
     </div>
     <WorkspaceTabs id="developer" label="Solution developer workspace sections" tabs={DEVELOPER_TABS} active={tab} onSelect={setTab} />
     <WorkspacePanel id="developer" tab={tab}>

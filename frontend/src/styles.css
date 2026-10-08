@@ -746,6 +746,7 @@ main { display: block; min-height: calc(100vh - var(--header-height) - 140px); }
 .detail-page { padding-top: 24px; }
 .back { margin-bottom: 20px; }
 .detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 336px; align-items: start; gap: clamp(36px, 5vw, 64px); }
+.detail-main { min-width: 0; }
 .card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .trust-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .audit-status-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -905,6 +906,7 @@ input[type="radio"] { accent-color: var(--brand); }
 .brief-form,
 .brief-form > .form-body {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 24px;
 }
@@ -1807,6 +1809,7 @@ footer > p { margin: 0 auto 0 0; }
   font-weight: 650;
 }
 .audit-table-scroll {
+  position: relative;
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -1828,7 +1831,7 @@ footer > p { margin: 0 auto 0 0; }
   padding: 14px 16px;
   border-bottom: 1px solid var(--line-strong);
 }
-.audit-nav-row td {
+.audit-nav-table td {
   padding: 16px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
@@ -3798,7 +3801,9 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 .wizard-card .field-group { gap: 22px; padding: 0; border-radius: 0; background: transparent; }
 .wizard-card .field-group > legend + .field-hint { margin-top: -18px; font-size: 15px; }
 .wizard-card > .field-hint { margin-top: 24px; }
-.wizard-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 32px; }
+.wizard-nav { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 32px; }
+.wizard-nav-end { min-width: 0; }
+.wizard-nav-end button { white-space: normal; }
 .wizard-nav-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .wizard-back.secondary { background: transparent; color: var(--brand); }
 .wizard-back.secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 7%, transparent); color: var(--brand); }
@@ -3806,7 +3811,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 .wizard-secondary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; padding-top: 0; }
 .wizard-secondary > .secondary { background: var(--surface); }
 .wizard-secondary > .secondary:hover:not(:disabled) { background: var(--surface-hover); }
-.wizard-secondary .draft-status { margin: 0 0 0 auto; color: var(--muted); }
+.wizard-secondary .draft-status { max-width: 100%; margin: 0 0 0 auto; color: var(--muted); }
 .wizard-review-head h2 { margin: 0; font-size: 21px; font-weight: 600; }
 .wizard-review-head .field-hint { margin: 4px 0 0; font-size: 15px; }
 .wizard-review { margin: -16px 0 0; }
@@ -4260,12 +4265,31 @@ footer.footer { background: transparent; }
   box-shadow: none;
 }
 .escrow-plan .radio-card.selected { border-color: var(--brand); background: transparent; box-shadow: none; }
-.escrow-history { margin-top: 48px; }
+.escrow-history { margin-top: 48px; container-type: inline-size; }
 .escrow-history .audit-nav-table th {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+.escrow-history .audit-table-scroll { margin-top: 16px; }
+.escrow-history .audit-nav-table { table-layout: fixed; min-width: 0; }
+.escrow-history .audit-nav-table th:nth-child(1) { width: 20%; }
+.escrow-history .audit-nav-table th:nth-child(2) { width: 18%; }
+.escrow-history .audit-nav-table th:nth-child(3) { width: 34%; }
+.escrow-history .audit-nav-table th:nth-child(4) { width: 28%; }
+.escrow-history .audit-nav-table td { overflow-wrap: anywhere; line-height: 1.6; }
+.escrow-history .audit-nav-table td small { font-size: 12px; }
+.escrow-history .audit-nav-table td a { display: inline-block; margin-bottom: 6px; }
+.audit-scroll-hint { display: none; }
+@container (max-width: 500px) {
+  .escrow-history .audit-nav-table { min-width: 560px; }
+  .audit-scroll-hint { display: block; margin: 16px 0 0; }
+}
+@media (max-width: 680px) {
+  .redirect-notice { flex-direction: column; gap: 12px; }
+  .redirect-notice > div { min-width: 0; }
+  .redirect-notice code { overflow-wrap: anywhere; }
 }
 .escrow-release .table-row { align-items: flex-end; }
 @media (max-width: 600px) {
