@@ -41,3 +41,8 @@ d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbi
 9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:390
 9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:403
 9028a02c6d9ce5179ed981f17e773b0cb8f2cc76:docs/testing/open-funding-wallet-evidence.json:generic-api-key:420
+
+# Independent crowdfunding: tokenRegistryAddress is the public Arbitrum Sepolia
+# funding factory address, not an API key. Exempt only these exact historical findings.
+83003d62a45303707ea73eb948f075c1ec405402:firebase/functions/independentFunding.contract.json:generic-api-key:5
+83003d62a45303707ea73eb948f075c1ec405402:frontend/src/config/independentFunding.contract.json:generic-api-key:5
