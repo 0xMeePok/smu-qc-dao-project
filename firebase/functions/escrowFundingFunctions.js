@@ -8,6 +8,7 @@ import { arbitrumSepolia } from "viem/chains";
 import { createArbitrumRpcTransport } from "./rpcPolicy.js";
 import { enqueueEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary, prepareEscrowDeposit,
   prepareRemovedProposalClaim, queuePostingFundingPause, startEscrowSettlement, sweepEscrowFunding, syncEscrowFunding } from "./escrowFunding.js";
+import { sweepIndependentFunding } from "./independentFunding.js";
 
 export const escrowPlatformKey = defineSecret("ESCROW_PLATFORM_PRIVATE_KEY");
 
@@ -48,8 +49,11 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
         problemId: event.params.problemId, record: event.data.after.data() }) : undefined),
     reconcileEscrowFunding: onSchedule({ schedule: "every 1 minutes", region, maxInstances: 1, concurrency: 1,
       timeoutSeconds: 540, secrets: [escrowPlatformKey] }, async () => {
-      try { return await sweepEscrowFunding(shared); }
-      catch { throw new Error("Escrow background reconciliation is unavailable; the persisted jobs will retry."); }
+      let main, independent, failed = false;
+      try { main = await sweepEscrowFunding(shared); } catch { failed = true; }
+      try { independent = await sweepIndependentFunding({ ...shared, outboxAlreadyResumed: true }); } catch { failed = true; }
+      if (failed) throw new Error("Escrow background reconciliation is unavailable; the persisted jobs will retry.");
+      return { main, independent };
     }),
   };
 }

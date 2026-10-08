@@ -6,7 +6,8 @@ import { FundingApproachList } from "./FundingApproachList.jsx";
 import { FundingApproachReceiptPane } from "./FundingApproachReceiptPane.jsx";
 import { useActionItems } from "../lib/actionItems.js";
 import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
-import { byUrgency, developerAttention, discussionCountLabel, fundingApproachAttention } from "../lib/dashboardAttention.js";
+import { byUrgency, developerAttention, discussionCountLabel } from "../lib/dashboardAttention.js";
+import { independentFundingAmount, independentFundingStatus } from "../lib/independentEscrow.js";
 import {
   isIndependentQueueRow, listMyProposalQueue, proposalQueueWorkflowStatus, queueError,
 } from "../lib/proposalQueues.js";
@@ -62,7 +63,7 @@ function RowShell({ row, onNavigate, children, meta }) {
           {independent ? "Independent listing" : `Solution for: ${row.posting?.title || "Untitled opportunity"}`}
         </small>
         <span className="status-badges">
-          <StatusBadge status={proposalQueueWorkflowStatus(row)} />
+          {independent ? <span className="draft-badge">{independentFundingStatus(row.independentFunding).label}</span> : <StatusBadge status={proposalQueueWorkflowStatus(row)} />}
           {!independent && row.qualifying > 0 && <EvaluationBadges counts={recommendationCounts(row.recommendations ?? [])} />}
         </span>
         {/* The discussion count excludes the recommendations listed beneath it,
@@ -129,7 +130,12 @@ export function DeveloperDashboardPanel({ onNavigate }) {
   const proposalIds = useMemo(() => new Set(rows.map((row) => row.id)), [rows]);
   const attention = useMemo(() => byUrgency([
     ...developerAttention(actions.data, proposalIds),
-    ...fundingApproachAttention(approaches.data?.incoming),
+    ...(actions.data?.independentActions ?? []).filter(item => proposalIds.has(item.id)).map(item => ({
+      key: `independent:${item.id}:${item.action}`, kind: "independent-funding", title: item.title,
+      heading: item.action === "accept_funding" ? "Crowdfunding target reached" : item.action === "release_completion" ? "Final payment ready" : "Delivery evidence needed",
+      note: item.action === "accept_funding" ? "Accept or decline funding before the listing closes. Acceptance immediately pays 50%." : "Open the independent crowdfunding panel for delivery, voting and the final payment.",
+      deadlineAt: item.deadlineAt, route: `proposal/${item.id}?tab=funding`, cta: "Open crowdfunding",
+    })),
   ]), [actions.data, proposalIds, approaches.data]);
 
   const groups = useMemo(() => {
@@ -140,7 +146,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
       submitted,
       awaitingFeedback: open.filter((row) => !isIndependentQueueRow(row) && (row.qualifying ?? 0) === 0),
       reviewed: open.filter((row) => (row.qualifying ?? 0) > 0),
-      accepted: submitted.filter((row) => ACCEPTED.has(proposalQueueWorkflowStatus(row))),
+      accepted: submitted.filter((row) => !isIndependentQueueRow(row) && ACCEPTED.has(proposalQueueWorkflowStatus(row))),
       independent: submitted.filter((row) => isIndependentQueueRow(row)),
       // Every visible comment that is not a qualifying recommendation: the
       // ordinary discussion on a solution, kept apart so a question from the
@@ -188,10 +194,10 @@ export function DeveloperDashboardPanel({ onNavigate }) {
         emptyMessage="Nothing is blocked on you right now."
       />
 
-      <FundingApproachList
+      {(approaches.data?.incoming?.length > 0 || approaches.error) && <FundingApproachList
         heading="h3"
-        title="Funding approaches received"
-        hint="Indicative interest from a client or funder. Accept or decline a pending approach. Your wallet then anchors that decision. This does not deposit tokens."
+        title="Legacy funding approach history"
+        hint="Earlier expressions of interest are preserved as a read-only record. Current independent funding uses crowdfunding escrow."
         empty="No funding approaches yet."
         items={approaches.data?.incoming ?? []}
         truncated={approaches.data?.truncated?.incoming}
@@ -200,7 +206,8 @@ export function DeveloperDashboardPanel({ onNavigate }) {
         onNavigate={onNavigate}
         onUpdated={() => approaches.refetch()}
         showFunder
-      />
+        readOnly
+      />}
 
       {!queue.isPending && !error && (
         <>
@@ -269,12 +276,14 @@ export function DeveloperDashboardPanel({ onNavigate }) {
 
               <Group
                 title="Independent listings"
-                hint="Published by you without a parent opportunity, so no evaluator gate applies. Every one is listed here, including any that also appear above."
+                hint="Funders contribute toward each target. Acceptance releases 50%; funder completion approval releases the remaining 50%."
                 rows={groups.independent}
               >
                 {(row) => (
                   <RowShell key={row.id} row={row} onNavigate={onNavigate}
-                    meta={row.acceptedApproachId ? <small className="table-row-meta">A funding approach has been accepted.</small> : null} />
+                    meta={row.independentFunding ? <small className="table-row-meta">Funded {independentFundingAmount(row.independentFunding.totalDeposited, row.independentFunding.tokenDecimals, row.independentFunding.tokenSymbol)} / {independentFundingAmount(row.independentFunding.fundingTarget, row.independentFunding.tokenDecimals, row.independentFunding.tokenSymbol)}</small> : null}>
+                    <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${row.id}?tab=funding`)}>Open crowdfunding</button>
+                  </RowShell>
                 )}
               </Group>
             </>

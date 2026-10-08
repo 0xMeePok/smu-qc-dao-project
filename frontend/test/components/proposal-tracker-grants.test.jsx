@@ -99,6 +99,30 @@ it("shows completed grant payments after the persistent accepted offer and uses 
   expect(within(active).getByText("Escrow approval:")).toBeTruthy();
 });
 
+it("routes independent funding to its own panel and locks edits after zero-deposit activation", async () => {
+  const go = vi.fn(); mocks.fetch.mockResolvedValue({ items: [{ id: "independent", title: "Independent library", status: "submitted",
+    proposalKind: "independent", problemId: null, createdAt: "2026-10-01T00:00:00Z", expiresAt: acceptance,
+    independentFunding: { exists: true, state: "Open", totalDeposited: "0", fundingTarget: "2000000", expiresAt: String(Date.parse(acceptance) / 1000) } }] });
+  render(<ProposalTracker onNavigate={go} />);
+  await screen.findByText("Independent library");
+  expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "View escrow" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open crowdfunding" }));
+  expect(go).toHaveBeenCalledWith("proposal/independent?tab=funding");
+});
+
+it("uses an independent acceptance-relative completion deadline after the listing window closes", async () => {
+  mocks.fetch.mockResolvedValue({ items: [{ id: "independent-completion", title: "Independent delivery", status: "submitted",
+    proposalKind: "independent", problemId: null, createdAt: "2026-10-01T00:00:00Z", expiresAt: "2020-01-01T00:00:00Z",
+    independentFunding: { exists: true, state: "Accepted", totalDeposited: "2000000", fundingTarget: "2000000",
+      expiresAt: "1577836800", completionDeadline: String(Date.parse(acceptance) / 1000) } }] });
+  render(<ProposalTracker onNavigate={vi.fn()} />);
+  const item = (await screen.findByText("Independent delivery")).closest(".table-row");
+  expect(within(item).getByText("Delivery in progress")).toBeTruthy();
+  expect(within(item).getByText("Completion ends:")).toBeTruthy();
+  expect(item.querySelector(".expiry-countdown").getAttribute("aria-label")).toContain("2099-10-09");
+});
+
 it("keeps an unavailable main escrow out of stored-status filters and posting expiry countdowns", async () => {
   mocks.fetch.mockResolvedValue({ items: [{ ...row("unknown-main"), grantUnavailable: false, escrowUnavailable: true }], unavailableEscrows: 1 });
   render(<ProposalTracker onNavigate={() => {}} />);

@@ -6,6 +6,7 @@ import { mockSelectionState } from "./matching.js";
 import { problemIsMemberBrowsable } from "./moderation.js";
 import { WORKFLOW_STATUS, proposalWorkflowStatus, recommendationCounts, recommendationEntries } from "./workflowStatus.js";
 import { readEscrowQueueActions, readGrantQueueMetadata } from "./escrowQueueMetadata.js";
+import { readIndependentFundingQueueMetadata } from "./independentFundingQueueMetadata.js";
 
 // QCDAO-62/63 read the queues out of the records that already exist: proposals,
 // their parent problems and the comments collection. Nothing new is stored.
@@ -163,6 +164,7 @@ export async function listMyProposals({ db, uid, client, config }) {
   const latestByProposal = new Map(latestReviews.filter((snap) => snap.exists).map((snap) => [snap.ref.path.split("/")[1], snap.data()]));
   const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs, parents: problems });
   const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs, blockNumber: grantState.blockNumber });
+  const independentState = await readIndependentFundingQueueMetadata({ db, uid, config, docs });
   const items = docs.map((doc) => {
     const data = doc.data();
     const counts = feedback.get(doc.id) ?? { comments: 0, qualifying: 0, recommendations: [], recommendationComments: [] };
@@ -182,7 +184,8 @@ export async function listMyProposals({ db, uid, client, config }) {
       posting: postingView(data.problemId, problems.get(data.problemId)),
       evaluationComplete: data.matching?.evaluationComplete === true,
       matchingStatus: data.matching?.status ?? null,
-      workflowStatus: escrowState.states.get(doc.id)?.workflowStatus ?? proposalWorkflowStatus(data, problems.get(data.problemId)?.matching),
+      workflowStatus: independentState.states.get(doc.id)?.workflowStatus ?? escrowState.states.get(doc.id)?.workflowStatus ?? proposalWorkflowStatus(data, problems.get(data.problemId)?.matching),
+      ...(independentState.states.has(doc.id) ? { independentFunding: independentState.states.get(doc.id) } : {}),
       ownerReview: ownerReviewSummary(latestByProposal.get(doc.id)),
       ...(grantState.grants.has(doc.id) ? { grant: grantState.grants.get(doc.id) } : {}),
       ...(grantState.unavailable.has(doc.id) ? { grantUnavailable: true } : {}),
@@ -335,6 +338,7 @@ export async function listActionItems({ db, uid, client, config, now = Timestamp
       { grant: grantState.grants.get(doc.id), deadlineAt: grantState.grants.get(doc.id).deadlineAt })));
   const escrowDocs = [...new Map([...mine.docs, ...receivedEscrows.docs].map(doc => [doc.id, doc])).values()];
   const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs: escrowDocs, blockNumber: grantState.blockNumber });
+  const independentState = await readIndependentFundingQueueMetadata({ db, uid, config, docs: mine.docs, now });
   const escrowActionIds = new Set(escrowState.actions.map(item => item.id));
   const displayedAwaitingReview = awaitingReview.filter(item => !escrowActionIds.has(item.id)
     && (!escrowState.states.has(item.id) || escrowState.states.get(item.id).state === "Open"));
@@ -344,10 +348,11 @@ export async function listActionItems({ db, uid, client, config, now = Timestamp
     const queue = await listEvaluatorQueue({ db, uid, filter: "pending" });
     evaluator = { awaitingRecommendation: newestFirst(queue.items), more: Boolean(queue.nextCursor) };
   }
-  const total = readyToSelect.length + displayedAwaitingReview.length + selectionToAccept.length + grantSelectionsToAccept.length + escrowState.actions.length
+  const total = readyToSelect.length + displayedAwaitingReview.length + selectionToAccept.length + grantSelectionsToAccept.length + escrowState.actions.length + independentState.actions.length
     + (evaluator?.awaitingRecommendation.length ?? 0);
   return { owner: { readyToSelect, awaitingReview: displayedAwaitingReview }, researcher: { selectionToAccept, grantSelectionsToAccept }, evaluator, total,
     escrowActions: escrowState.actions, unavailableEscrows: escrowState.unavailable.size, unavailableGrantOffers: grantState.unavailable.size,
+    independentActions: independentState.actions,
     truncated: owned.size === OWNED_CAP || mine.size === MINE_CAP || receivedEscrows.size === MINE_CAP
       || pages.some(page => page.size === QUEUE_CAP) || reviewable.length > REVIEW_CAP };
 }

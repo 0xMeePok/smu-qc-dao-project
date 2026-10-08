@@ -5,7 +5,8 @@ import { formatInstant } from "../lib/datetime.js";
 import { PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { isModerated } from "../lib/moderation.js";
 import { useAuth } from "../context/AuthContext.jsx";
-import { recommendationCounts, workflowStatusLabel } from "../config/workflowStatus.js";
+import { recommendationCounts, workflowStatusLabel, INDEPENDENT_FUNDING_STATE as I } from "../config/workflowStatus.js";
+import { independentFundingLocked, independentFundingStatus } from "../lib/independentEscrow.js";
 import {
   PROPOSAL_SORTS,
   commentCountLabel,
@@ -97,7 +98,7 @@ export function ProposalTracker({ onNavigate }) {
             {independent ? "Independent listing" : `Proposal for: ${item.posting?.title || "Untitled opportunity"}`}
           </small>
           <span className="status-badges">
-            {!item.grantUnavailable && !item.escrowUnavailable && <StatusBadge status={proposalQueueWorkflowStatus(item)} />}
+            {!item.grantUnavailable && !item.escrowUnavailable && (independent ? <span className="draft-badge">{independentFundingStatus(item.independentFunding).label}</span> : <StatusBadge status={proposalQueueWorkflowStatus(item)} />)}
             {!independent && <EvaluationBadges counts={recommendationCounts(item.recommendations ?? [])} />}
             {review && <StatusBadge status={review.status} prefix="Owner · " />}
           </span>
@@ -114,14 +115,16 @@ export function ProposalTracker({ onNavigate }) {
             <span className="table-row-meta">Grant acceptance: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} showInstant={false} /></span>
           ) : item.escrow ? (proposalQueueDeadline(item) && <span className="table-row-meta">
             {item.escrow.state === "Open" ? "Funding closes" : "Escrow approval"}: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} showInstant={false} />
-          </span>) : item.grantUnavailable || item.escrowUnavailable || ["accepted", "voided"].includes(item.grant?.status) ? null : independent && item.status !== "withdrawn" ? (
-            <ExpiryCountdown expiresAt={item.expiresAt ?? item.posting?.expiresAt} status="submitted" showInstant={false} />
+          </span>) : item.grantUnavailable || item.escrowUnavailable || ["accepted", "voided"].includes(item.grant?.status) ? null : independent && item.status !== "withdrawn"
+            && ![I.RELEASED, I.DECLINED, I.EXPIRED, I.CANCELLED, I.REFUNDED].includes(item.independentFunding?.state) ? (
+            <span className="table-row-meta">{item.independentFunding?.state === I.ACCEPTED ? "Completion ends" : "Funding closes"}: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} status="submitted" showInstant={false} /></span>
           ) : !independent ? (
             <ExpiryCountdown expiresAt={item.posting?.expiresAt} status={item.posting?.status} matching={item.posting?.matching} showInstant={false} />
           ) : null}
           {item.grant?.status === "pending" && item.grant.canAccept && <button className="primary small" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Accept grant</button>}
           {(item.escrow || item.escrowUnavailable || item.grant?.status === "accepted") && <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>View escrow</button>}
-          {independent && item.status === "submitted" && <button className="text-button" type="button" onClick={() => onNavigate(`create-proposal/${item.id}`)}>Edit</button>}
+          {independent && <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Open crowdfunding</button>}
+          {independent && item.status === "submitted" && !independentFundingLocked(item.independentFunding) && <button className="text-button" type="button" onClick={() => onNavigate(`create-proposal/${item.id}`)}>Edit</button>}
           <button className="text-button" type="button" onClick={() => onNavigate(`proposal/${item.id}`)}>View proposal</button>
         </div>
       </div>; })}

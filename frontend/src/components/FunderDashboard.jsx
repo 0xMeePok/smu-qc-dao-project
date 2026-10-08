@@ -8,6 +8,9 @@ import { RelatedAuditReceiptPane, RELATED_AUDIT_KIND } from "./RelatedAuditRecei
 import { fundingStateLabel as stateLabel } from "../config/workflowStatus.js";
 import { ClaimRemovedFundsButton, FundingApproachList } from "./FundingApproachList.jsx";
 import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
+import { IndependentFundingPanel } from "./IndependentFundingPanel.jsx";
+import { independentFundingAmount, independentFundingStatus } from "../lib/independentEscrow.js";
+import { Modal } from "./Modal.jsx";
 
 const money = (item, key) => escrowFundingAmount(item[key], item.tokenDecimals, item.tokenSymbol);
 
@@ -16,6 +19,7 @@ export function FunderDashboard({ onNavigate }) {
   const [data, setData] = useState(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(true), [revision, setRevision] = useState(0);
   const [audit, setAudit] = useState(null);
+  const [independentClaim, setIndependentClaim] = useState(null);
   const [sentApproaches, setSentApproaches] = useState(null);
   const [approachError, setApproachError] = useState("");
   const [approachesLoading, setApproachesLoading] = useState(true);
@@ -65,7 +69,7 @@ export function FunderDashboard({ onNavigate }) {
           {data?.totals?.length ? data.totals.map(item => <strong className="stat-num" key={`${item.chainId}:${item.tokenAddress}`}>{money(item, key)}</strong>) : <strong className="stat-num">—</strong>}
         </div>)}
       </div>
-      <p className="field-hint">Totals are shown per token. Available grant pool funds are shown separately below; amounts count as commitments when transferred into proposal escrow.</p>
+      <p className="field-hint">These totals cover problem-statement and grant proposal funding, shown per token. Independent crowdfunding commitments are listed separately below. Available grant pool funds count as commitments when transferred into proposal escrow.</p>
       {data?.totalsPartial && <p role="status" className="field-hint">Funding totals are partial. Some records could not be verified or the result is limited. Refresh or open individual proposals for their current balances.</p>}
       {data?.unavailableCommitments > 0 && <p role="status" className="field-hint">{data.unavailableCommitments} commitments could not be verified and are excluded from these totals. Refresh to retry.</p>}
       {data?.unavailablePools > 0 && <p role="status" className="field-hint">{data.unavailablePools} grant pools could not be verified. Open the opportunity or refresh to retry.</p>}
@@ -86,6 +90,22 @@ export function FunderDashboard({ onNavigate }) {
           {item.escrowAddress && <a href={escrowExplorer("address", item.escrowAddress)} target="_blank" rel="noreferrer">Escrow contract</a>}
         </div>{links(item)}
       </div>)}
+      {group("independentCommitments", "Independent crowdfunding commitments", "No independent crowdfunding contributions yet.", item => {
+        const summary = item.summary ?? item, wallet = item.wallet ?? item;
+        const proposalId = item.proposalId ?? item.id;
+        const tokenMoney = value => independentFundingAmount(value, summary.tokenDecimals, summary.tokenSymbol);
+        return <div className="table-row" key={proposalId}>
+          <div><strong>{item.title || "Independent listing"}</strong><small className="table-row-meta">{independentFundingStatus({ ...item, summary }).label}</small>
+            <small className="table-row-meta">Your contribution {tokenMoney(wallet.deposited ?? wallet.committed)} · Available refund {tokenMoney(wallet.claimable)}</small>
+            <small className="table-row-meta">Funded {tokenMoney(summary.totalDeposited)} / {tokenMoney(summary.fundingTarget)}</small>
+            {(item.stale || wallet.stale || item.detailRefreshRequired) && <small className="table-row-meta">Cached funding record. Open crowdfunding to refresh current balances and refund availability.</small>}
+          </div><div className="table-row-actions">
+            {item.hidden || item.removed || item.claimFunds ? <button type="button" className="primary small" onClick={() => setIndependentClaim(proposalId)}>Open refund</button>
+              : <button type="button" className="primary small" onClick={() => onNavigate(`proposal/${proposalId}?tab=funding`)}>Open crowdfunding</button>}
+          </div>
+        </div>;
+      })}
+      {data?.independentCommitmentsTruncated && <p className="field-hint">Showing a limited set of independent contributions. Open individual listings for their current balances.</p>}
       {group("approaches", "Funding approaches", "No funding approaches received yet.", item => <div className="table-row" key={item.proposalId}>
         <div><strong>{item.title}</strong><small className="table-row-meta">{item.currency} {Number(item.amount ?? 0).toLocaleString()} requested · {stateLabel(item.status)}</small></div>{links(item)}
       </div>)}
@@ -96,16 +116,22 @@ export function FunderDashboard({ onNavigate }) {
         </div>{links(item)}
       </div>)}
     </>}
-    {!loading && !error && <FundingApproachList
-      title="Approaches sent to researchers"
-      hint="Indicative interest you have registered on independent listings. This is separate from proposals received on your own postings."
+    {!loading && !error && (sentApproaches?.sent?.length > 0 || approachError) && <FundingApproachList
+      title="Legacy funding approach history"
+      hint="Earlier expressions of interest are preserved as a read-only record. Current independent listings use crowdfunding escrow."
       empty="You have not approached a researcher yet."
       items={sentApproaches?.sent ?? []}
       truncated={sentApproaches?.truncated?.sent}
       loading={approachesLoading}
       error={approachError}
       onNavigate={onNavigate}
+      readOnly
     />}
+    {independentClaim && <Modal labelledBy="independent-refund-title" onDismiss={() => setIndependentClaim(null)}>
+      <h2 id="independent-refund-title">Independent crowdfunding refund</h2>
+      <IndependentFundingPanel proposal={{ id: independentClaim }} />
+      <button type="button" className="secondary" onClick={() => setIndependentClaim(null)}>Close</button>
+    </Modal>}
     {audit && <RelatedAuditReceiptPane {...audit} onClose={() => { auditRequest.current++; setAudit(null); }} />}
   </section>;
 }

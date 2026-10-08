@@ -147,6 +147,19 @@ describe("QCDAO-93 solution developer dashboard", () => {
     expect(screen.queryByRole("heading", { name: /^Awaiting evaluator feedback/ })).toBeNull();
   });
 
+  it("shows a funded independent listing as researcher crowdfunding work with no problem-owner acceptance", async () => {
+    queue([row({ id: "i1", title: "Crowdfunded library", proposalKind: "independent", problemId: null, posting: null,
+      independentFunding: { exists: true, state: "Open", totalDeposited: "2000000", fundingTarget: "2000000", tokenDecimals: 6, tokenSymbol: "USDT" } })]);
+    mocks.listActionItems.mockResolvedValue({ ...EMPTY_ACTIONS, total: 1, independentActions: [
+      { id: "i1", title: "Crowdfunded library", action: "accept_funding", deadlineAt: "2099-01-01T00:00:00Z" }] });
+    const go = vi.fn(); render(<DeveloperDashboardPanel onNavigate={go} />);
+    const attention = (await screen.findByText("Crowdfunding target reached")).closest("li");
+    fireEvent.click(within(attention).getByRole("button", { name: "Open crowdfunding" }));
+    expect(go).toHaveBeenCalledWith("proposal/i1?tab=funding");
+    expect(screen.queryByRole("heading", { name: /^Accepted solutions/ })).toBeNull();
+    expect(within(group("Independent listings")).getByText("Target reached")).toBeTruthy();
+  });
+
   it("counts drafts without repeating the drafts table below it", async () => {
     queue([row({ id: "d1", title: "Half-written", status: "draft", workflowStatus: "draft" })]);
     render(<DeveloperDashboardPanel onNavigate={vi.fn()} />);

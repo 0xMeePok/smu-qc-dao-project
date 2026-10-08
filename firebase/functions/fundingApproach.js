@@ -6,6 +6,7 @@ import { FUNDING_APPROACH_ANCHOR_ABI, fundingApproachAnchorId, fundingApproachDe
 import { fundingApproachAccepted, independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { memberNoticeFields } from "./moderation.js";
 import { deadlinePassed, instantMs } from "./opportunityExpiry.js";
+import independentFundingConfig from "./independentFunding.contract.json" with { type: "json" };
 
 export const FUNDING_APPROACHES = "fundingApproaches";
 export const FUNDING_APPROACH_SLOTS = "fundingApproachSlots";
@@ -226,7 +227,8 @@ function pendingDecisionAnchor(record) {
  * The slot document is the uniqueness lock; older approaches stay as their own records.
  * Clients cannot write either collection.
  */
-export async function createFundingApproach({ db, uid, proposalId, amount, currency, scope, message, expiresAt, now = Timestamp.now() }) {
+export async function createFundingApproach({ db, uid, proposalId, amount, currency, scope, message, expiresAt, now = Timestamp.now(), config = { independentFunding: independentFundingConfig } }) {
+  if (config.independentFunding?.enabled === true) fail("failed-precondition", "Independent listings use crowdfunding deposits. Legacy funding approaches are read-only.");
   validId(proposalId, "proposal");
   const funderId = String(uid || "").toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(funderId)) fail("unauthenticated", "Sign in with your wallet.");
@@ -345,7 +347,8 @@ function autoDeclineReason(title) {
  * and declines every other still-pending approach on that listing.
  * Both parties to this decision are notified. The researcher anchors the decision afterwards.
  */
-export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now() }) {
+export async function decideFundingApproach({ db, uid, approachId, decision, message, reason, now = Timestamp.now(), config = { independentFunding: independentFundingConfig } }) {
+  if (config.independentFunding?.enabled === true) fail("failed-precondition", "Legacy funding approaches are read-only. Use the independent crowdfunding escrow.");
   validId(approachId, "approach");
   if (decision !== "accept" && decision !== "decline") fail("invalid-argument", "Choose accept or decline.");
   const researcherId = String(uid || "").toLowerCase();

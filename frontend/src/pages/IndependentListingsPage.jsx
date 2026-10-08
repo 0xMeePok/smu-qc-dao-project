@@ -100,7 +100,7 @@ export default function IndependentListingsPage({ onNavigate, params = new URLSe
     <section className="page discover-page">
       <div className="page-heading">
         <h1>Independent solutions.</h1>
-        <p>Published listings that are not attached to an existing problem statement. Funders and clients can approach the author with funding while the listing window is open.</p>
+        <p>Published solutions with their own crowdfunding targets. Open a listing to contribute to its escrow while funding is open. The researcher accepts or declines once the target is reached.</p>
       </div>
 
       <DiscoverySearchRow

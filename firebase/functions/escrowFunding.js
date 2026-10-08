@@ -146,6 +146,9 @@ export function fundingBlockReason(record, parent, chain, now = Date.now(), { de
 
 /** Every read used in a projection is pinned to one confirmed block. */
 export async function readVerifiedFunding({ client, config, record, parent, blockNumber }) {
+  if (isIndependentProposal(record)) {
+    fail("failed-precondition", "Use the independent listing funding workflow for this proposal.");
+  }
   const expected = isIndependentProposal(record)
     ? prepareIndependentEscrowCommit(record, { registryConfig: config })
     : prepareStoredProposal(record, { registryConfig: config });
@@ -193,7 +196,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
 }
 
 export async function enqueueEscrowFunding({ db, config, record, now = Timestamp.now() }) {
-  if (!record?.id || !record.fundingTerms || record.audit?.status !== "confirmed") return;
+  if (!record?.id || isIndependentProposal(record) || !record.fundingTerms || record.audit?.status !== "confirmed") return;
   const ref = db.collection(FUNDING_JOBS).doc(jobKey(config, record.id));
   await db.runTransaction(async tx => {
     const old = await tx.get(ref);
@@ -707,6 +710,13 @@ async function reconcileModerationVoid({ db, client, config, getWallet, ref, job
   const proposal = await db.collection("proposals").doc(job.proposalId).get();
   const stored = proposal.exists ? proposal.data() : null;
   const independent = isIndependentProposal(stored);
+  if (independent) {
+    const { enqueueIndependentFundingCancellation } = await import("./independentFundingModeration.js");
+    await enqueueIndependentFundingCancellation({ db, contentType: "proposal", contentId: job.proposalId,
+      eventId: job.eventId, reason: job.reason, now });
+    await ref.update({ status: "skipped", skipReason: "dedicated-independent-funding", updatedAt: now });
+    return;
+  }
   if (!stored?.fundingTerms || (!independent && !stored.problemId)) {
     await ref.update({ status: "skipped", skipReason: "no-escrow", updatedAt: now });
     return;
@@ -836,6 +846,11 @@ export async function sweepEscrowFunding({ db, client, config, getWallet, now = 
   let processed = 0;
   for (const row of jobs.docs) {
     if (!same(row.data().registryAddress, config.address)) continue;
+    const proposal = await db.collection("proposals").doc(row.data().proposalId).get();
+    if (isIndependentProposal(proposal.data())) {
+      await row.ref.update({ status: "skipped", skipReason: "independent-funding-workflow", updatedAt: now });
+      continue;
+    }
     try { await syncEscrowFunding({ db, client, config, getWallet, proposalId: row.data().proposalId, now }); processed++; }
     catch { /* A redacted retry state was persisted by the reconciliation service. */ }
   }

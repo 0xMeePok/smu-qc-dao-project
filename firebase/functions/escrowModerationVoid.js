@@ -29,8 +29,7 @@ export async function enqueueModerationVoidJobs({ db, contentType, contentId, ev
   if (contentType === "proposal") {
     const doc = await db.collection("proposals").doc(contentId).get();
     const data = doc.exists ? doc.data() : null;
-    if (data?.fundingTerms && isIndependentProposal(data)) targets = [{ id: doc.id, problemId: doc.id }];
-    else if (data?.fundingTerms && data.problemId) targets = [{ id: doc.id, problemId: data.problemId }];
+    if (data?.fundingTerms && !isIndependentProposal(data) && data.problemId) targets = [{ id: doc.id, problemId: data.problemId }];
   } else {
     const rows = await db.collection("proposals").where("problemId", "==", contentId).limit(201).get();
     targets = rows.docs.filter((doc) => doc.data()?.fundingTerms && !isIndependentProposal(doc.data()))

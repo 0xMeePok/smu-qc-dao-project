@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import { after, before, it } from "node:test";
-import { assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
+import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import { collection, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import { INDEPENDENT_PUBLISH_VALIDATION, isPublishableIndependentProposal } from "../functions/publicationValidation.js";
 
@@ -17,6 +17,23 @@ before(async () => {
   }));
 });
 after(async () => { await env?.cleanup(); });
+
+it("keeps activated crowdfunding immutable while allowing receipt progress", async () => {
+  const id = "independent-activated-lock";
+  const audit = { schemaVersion: 2, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+    contentHash: `0x${"2".repeat(64)}`, transactionHash: `0x${"3".repeat(64)}`,
+    status: "pending", blockNumber: 123, attemptCount: 1, lastError: "" };
+  const funding = { activated: true, locked: true, state: "Open", totalDeposited: "0" };
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), "proposals", id), {
+    ...draft(0), status: "submitted", audit, independentFunding: funding,
+  }));
+  const ref = doc(env.authenticatedContext(AUTHOR).firestore(), "proposals", id);
+  await assertSucceeds(updateDoc(ref, { updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(ref, { status: "withdrawn", withdrawalReason: "Cancel this research", updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(ref, { amount: 3, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(ref, { independentFunding: { ...funding, locked: false }, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(ref, { independentFunding: deleteField(), updatedAt: serverTimestamp() }));
+});
 
 // The independent form intentionally has no parent problem or posting owner.
 // Include every draft field the client sends: sparse fixtures missed the cap.

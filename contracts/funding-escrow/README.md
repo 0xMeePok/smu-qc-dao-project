@@ -1,5 +1,45 @@
 # Registry-linked proposal escrow
 
+## Independent crowdfunding (2026-10-08)
+
+Independent listings use an additive `IndependentFundingFactory` and one
+`IndependentFundingEscrow` per published listing. The separate
+`independentFunding.contract.json` files are the current deployment source of
+truth. This workflow does not replace the business-proposal escrow or open-funding
+grant pool described below. Historical deployment notes below retain their dates;
+the current registry and main factory addresses come from the application configs.
+
+1. The researcher publishes a target, token, listing expiry and completion period,
+   then activates crowdfunding. Activation freezes those terms and the listing
+   content. Funders deposit directly, up to the exact target.
+2. Once fully funded, the researcher accepts or declines before listing expiry.
+   Acceptance pays the first 50% immediately and starts the completion period.
+   Decline or expiry before acceptance makes all deposited funds refundable.
+3. The researcher submits completion evidence. Each funder's vote is weighted by
+   their deposit; yes votes must exceed 50% of **all** deposits. The vote crossing
+   that threshold pays the remaining 50% automatically. A new evidence revision
+   starts a new vote without extending the completion deadline.
+4. Admin cancellation stops new deposits and opens pull refunds. Expiry after
+   acceptance likewise refunds only unpaid custody. Previous payments cannot be
+   clawed back. Each funder claims their own proportional share; exact rounding
+   conserves the remaining balance even when contributions include top-ups.
+
+Platform fees are deducted **only from researcher payouts**, using the existing
+factory's fee policy snapshotted when the independent escrow is created. Deposits
+and refunds incur no platform fee. Wallet network gas is separate. Refund claims
+apply expiry atomically and do not require a preliminary keeper transaction.
+
+The backend reads confirmed contract snapshots and receipt-scoped events, without
+historical log scans. Deadline and moderation work reuse the existing scheduler
+and transaction outbox. Idle independent queues make no RPC calls.
+
+Deploy with `INDEPENDENT_FUNDING_NEW_FACTORY_ACK=true npx hardhat run
+scripts/deploy-independent.js --build-profile production --network arbitrumSepolia`.
+The script records the transaction before waiting and verifies runtime bytecode
+and existing wiring before exporting enabled configs. After an interrupted deploy,
+reuse `INDEPENDENT_FUNDING_DEPLOYMENT_RECORD=/path/to/saved-record.json` rather than
+deploying another factory. Existing registry/main-factory configs are not rewritten.
+
 Implements the escrow work for [QCDAO-109](https://qc-dao-fyp.atlassian.net/browse/QCDAO-109),
 the deposit interface for [QCDAO-110](https://qc-dao-fyp.atlassian.net/browse/QCDAO-110),
 settlement for [QCDAO-113](https://qc-dao-fyp.atlassian.net/browse/QCDAO-113), and funding

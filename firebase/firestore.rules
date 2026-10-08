@@ -1563,8 +1563,14 @@ service cloud.firestore {
       // never rebroadcast. `confirmed` is not client-writable; validProposal
       // rejects it so a researcher cannot mint a sponsor-facing receipt.
       function independentProposalUpdateIsAllowed(before, after) {
+        let changed = after.diff(before).affectedKeys();
         return isIndependentProposal(before)
           && isIndependentProposal(after)
+          // Escrow activation fixes its funding terms. Only the server can
+          // project chain state; an author cannot withdraw or edit around it.
+          && !changed.hasAny(['independentFunding'])
+          && (!before.get('independentFunding', {}).get('locked', false)
+            || changed.hasOnly(['audit', 'updatedAt']))
           && ((before.status == 'draft'
             && preservesProposalReceipt(before, after)
             && ((after.status == 'submitted'

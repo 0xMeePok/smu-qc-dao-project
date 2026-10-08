@@ -14,6 +14,8 @@ import { registerModerationCallables } from "./moderationFunctions.js";
 import { registerMatchingNotificationFunctions } from "./matchingNotifications.js";
 import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
 import { registerOpenFundingFunctions } from "./openFundingFunctions.js";
+import { registerIndependentFundingFunctions } from "./independentFundingFunctions.js";
+import { assertIndependentPublicationUnlocked } from "./independentFunding.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
   applyRoleChangeTransaction,
@@ -28,7 +30,8 @@ import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
 import { createArbitrumRpcTransport, getRpcUrls } from "./rpcPolicy.js";
 import { collectAdminActivity } from "./adminActivity.js";
-import auditRegistryConfig from "./auditRegistry.contract.json" with { type: "json" };
+import auditRegistryBaseConfig from "./auditRegistry.contract.json" with { type: "json" };
+import independentFundingConfig from "./independentFunding.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { proposalAuditQueueMetadata } from "./proposalAuditQueue.js";
 import { recordProposalRevision } from "./proposalRevisions.js";
@@ -56,6 +59,10 @@ import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedU
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
 initializeApp();
+
+// Independent crowdfunding is additive; the existing registry and factory stay
+// at their current addresses with their original configuration on disk.
+const auditRegistryConfig = { ...auditRegistryBaseConfig, independentFunding: independentFundingConfig };
 
 const db = getFirestore();
 const NONCE_COLLECTION = "siweNonces";
@@ -204,6 +211,10 @@ export const { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding,
   db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS,
 });
 
+export const { getIndependentFundingState, prepareIndependentFundingAction, syncIndependentFunding } = registerIndependentFundingFunctions({
+  db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+});
+
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
   listModerationNotifications, markModerationNotificationRead, markAllModerationNotificationsRead, listReportableComments,
   screenProblemContent, screenProposalContent, screenCommentContent } = registerModerationCallables({
@@ -265,7 +276,7 @@ export const listOwnerDashboard = onCall(MEMBER_CALL_OPTIONS, async (request) =>
 export const createFundingApproach = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return writeFundingApproach({
-    db, uid, now: Timestamp.now(), proposalId: request.data?.proposalId,
+    db, uid, config: auditRegistryConfig, now: Timestamp.now(), proposalId: request.data?.proposalId,
     amount: request.data?.amount, currency: request.data?.currency,
     scope: request.data?.scope, message: request.data?.message, expiresAt: request.data?.expiresAt,
   });
@@ -284,7 +295,7 @@ export const getFundingApproach = onCall(MEMBER_CALL_OPTIONS, async (request) =>
 export const decideFundingApproach = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return writeFundingApproachDecision({
-    db, uid, now: Timestamp.now(), approachId: request.data?.approachId, decision: request.data?.decision,
+    db, uid, config: auditRegistryConfig, now: Timestamp.now(), approachId: request.data?.approachId, decision: request.data?.decision,
     message: request.data?.message, reason: request.data?.reason,
   });
 });
@@ -457,6 +468,9 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
     if (count >= 10) throw new HttpsError("resource-exhausted", "Wait one minute before retrying publication.");
     tx.set(attemptRef, { count: count + 1, expiresAt: Timestamp.fromMillis(Date.now() + 120_000) });
   });
+  if (scope === "proposals" && record.proposalKind === "independent") {
+    await assertIndependentPublicationUnlocked({ db, client: publicClient, config: auditRegistryConfig, proposalId: recordId, record });
+  }
   try { await verifyPublication({ scope, record, client: publicClient }); }
   catch { throw new HttpsError("failed-precondition", "The content could not be verified against its mined transaction. Wait for confirmation and retry."); }
   const { id: ignoredId, createdAt, updatedAt, audit, ...content } = record;

@@ -2,6 +2,8 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { WORKFLOW_STATUS, proposalWorkflowStatus, workflowStatusLabel } from "../config/workflowStatus.js";
+import { isIndependentProposal } from "../config/proposal.js";
+import { independentFundingStatus } from "./independentEscrow.js";
 
 async function call(name, payload = {}) {
   requireFirebase();
@@ -31,6 +33,7 @@ export function mergeMatchingState(previous, current) {
  * that explains it ("Fully funded · ready for owner selection").
  */
 export function proposalFundingStatus(proposal, problemMatching = proposal.problemMatching) {
+  if (isIndependentProposal(proposal)) return independentFundingStatus(proposal.independentFunding);
   if (Object.hasOwn(proposal, "fundingTerms")) return { label: "On-chain escrow",
     detail: "Open the proposal for wallet funding and delivery status.", tone: "neutral" };
   const status = proposalWorkflowStatus(proposal, problemMatching);
