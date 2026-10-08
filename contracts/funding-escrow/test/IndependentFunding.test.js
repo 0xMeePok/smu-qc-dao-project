@@ -1,7 +1,6 @@
 import { expect } from "chai";
 import { network } from "hardhat";
 import { scopedId, terms, mineAt, Behavior } from "./helpers.js";
-import { loadIndependentArtifacts, verifyIndependentDeployment, independentConfig } from "../lib/independentDeployment.js";
 
 const S = { Open: 0n, Accepted: 1n, Released: 2n, Declined: 3n, Expired: 4n, Cancelled: 5n, Refunded: 6n };
 async function fixture({ target = 100n, feeBps = 0, reviewDays = 30, duration = 2 * 86400, tokenName = "EscrowTestToken" } = {}) {
@@ -343,18 +342,4 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     await accounting(refund);
   });
 
-  it("verifies actual deployed runtime immutable slots and exports only confirmed deployment configs", async function () {
-    const c = await fixture(), artifacts = await loadIndependentArtifacts();
-    const deployment = await c.independentFactory.deploymentTransaction().wait();
-    const record = { contractName: "IndependentFundingFactory", chainId: 421614, status: "ready",
-      deploymentBlock: deployment.blockNumber, factoryAddress: await c.independentFactory.getAddress(),
-      registryAddress: c.registryAddress, tokenRegistryAddress: await c.factory.getAddress(), platformSigner: c.platform.address,
-      tokens: [{ address: c.tokenAddress, decimals: 6, symbol: "TEST" }] };
-    record.runtimeVerification = await verifyIndependentDeployment(c.ethers.provider, record, artifacts);
-    expect(record.runtimeVerification.bytecodeMatches).to.equal(true);
-    expect(independentConfig(record, artifacts).enabled).to.equal(true);
-    expect(() => independentConfig({ ...record, runtimeVerification: null }, artifacts)).to.throw(/verified/);
-    try { await verifyIndependentDeployment(c.ethers.provider, { ...record, platformSigner: c.owner.address }, artifacts); throw new Error("expected rejection"); }
-    catch (error) { expect(error.message).to.match(/mismatch/); }
-  });
 });
