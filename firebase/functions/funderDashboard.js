@@ -9,24 +9,13 @@ import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { isIndependentProposal } from "./independentProposal.js";
 import { readEscrowQueueActions } from "./escrowQueueMetadata.js";
 import { createRequestReadClient } from "./requestReadClient.js";
+import { readIndependentFundingPortfolio } from "./independentFunding.js";
 
 const CAP = 50, APPROACH_CAP = 200;
 const iso = value => value?.toDate?.().toISOString?.() ?? null;
 const at = (row, name, index) => row?.[name] ?? row?.[index];
 const hidden = row => row?.moderated || ["hidden", "removed"].includes(row?.moderationStatus);
 const fail = (code, message) => { throw new HttpsError(code, message); };
-
-/** A removed independent listing stays claimable without exposing its body. */
-async function removedIndependentClaim(db, proposalId) {
-  const snap = await db.collection("proposals").doc(proposalId).get();
-  if (!snap.exists) return null;
-  const stored = snap.data();
-  if (!isIndependentProposal(stored) || stored.moderationStatus !== "removed" || !stored.fundingTerms) return null;
-  return {
-    proposalId, title: String(stored.title || "Independent listing").slice(0, 160),
-    postingTitle: "Independent listing", claimFunds: true, removed: true,
-  };
-}
 
 /** QCDAO-94: member's opportunities, approaches and verified wallet commitments.
  * Exact token base units are grouped by chain and token; currencies never mix. */
@@ -45,10 +34,12 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   let safeBlock;
   let safeTimestamp;
   try {
-    if (await client.getChainId() !== config.chainId) throw new Error("Incorrect chain");
-    safeBlock = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
-    if (safeBlock < 0n) throw new Error("No confirmed block");
-    safeTimestamp = (await client.getBlock({ blockNumber: safeBlock })).timestamp;
+    if (owned.size || deposits.size || approachesPage.docs.some(doc => !isIndependentProposal(doc.data()))) {
+      if (await client.getChainId() !== config.chainId) throw new Error("Incorrect chain");
+      safeBlock = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
+      if (safeBlock < 0n) throw new Error("No confirmed block");
+      safeTimestamp = (await client.getBlock({ blockNumber: safeBlock })).timestamp;
+    }
   } catch { /* Business records remain usable when RPC reads are unavailable. */ }
   for (const doc of owned.docs.slice(0, CAP)) {
     const data = doc.data();
@@ -72,7 +63,7 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   let unavailableDecisions = 0;
   for (const doc of approachesPage.docs.slice(0, APPROACH_CAP)) {
     const data = doc.data();
-    if (data.status === "draft" || hidden(data)) continue;
+    if (isIndependentProposal(data) || data.status === "draft" || hidden(data)) continue;
     let parent = ownedById.get(data.problemId);
     if (!parent) {
       const snap = await db.collection("problems").doc(data.problemId).get();
@@ -147,11 +138,8 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   for (const proposalId of ids) {
     let context;
     try { context = await loadFundingContext({ db, uid, proposalId }); }
-    catch {
-      const removed = await removedIndependentClaim(db, proposalId);
-      if (removed) commitments.push(removed);
-      continue;
-    }
+    catch { continue; }
+    if (isIndependentProposal(context.record)) continue;
     if (!await canReadContent({ get: ref => ref.get() }, db, "proposal", context.record, uid, profile.data())) continue;
     try {
       if (safeBlock === undefined || safeBlock < 0n) throw new Error("RPC unavailable");
@@ -176,7 +164,12 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   }
   opportunities.sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0));
   approaches.sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+  // Wallet allocations can lag a researcher's payout. Keep these explicitly
+  // cached positions separate from the main workflow's live verified totals.
+  const independent = config.independentFunding?.enabled
+    ? await readIndependentFundingPortfolio({ db, config, uid, now }) : { items: [], truncated: false };
   return { opportunities, commitments, approaches, decisions,
+    independentCommitments: independent.items, independentCommitmentsTruncated: independent.truncated,
     totals: [...totals.values()].map(row => ({ ...row, committed: row.committed.toString(), locked: row.locked.toString(),
       released: row.released.toString(), refunded: row.refunded.toString() })),
     truncated: { opportunities: owned.size > CAP, commitments: commitmentIds.size > CAP || deposits.size > APPROACH_CAP || approachesPage.size > APPROACH_CAP,

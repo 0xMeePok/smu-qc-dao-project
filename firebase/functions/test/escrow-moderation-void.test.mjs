@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { Timestamp } from "firebase-admin/firestore";
 import { memoryDb } from "./memoryDb.mjs";
 import { enqueueModerationVoidJobs, moderationVoidReasonHash, voidDecision } from "../escrowModerationVoid.js";
+import { enqueueIndependentFundingCancellation } from "../independentFundingModeration.js";
 import { prepareRemovedProposalClaim } from "../escrowFunding.js";
 import { moderateContent } from "../moderation.js";
 import { prepareModerationMatching } from "../matching.js";
@@ -47,6 +48,9 @@ test("[BUT-ACM-75] remove enqueues a void for the affected escrow only", async (
   });
   assert.equal((await enqueueModerationVoidJobs({
     db, contentType: "proposal", contentId: "indie", eventId: indie.eventId, reason: "misleading", now,
+  })).enqueued, 0);
+  assert.equal((await enqueueIndependentFundingCancellation({
+    db, contentType: "proposal", contentId: "indie", eventId: indie.eventId, reason: "misleading", now,
   })).enqueued, 1);
   const problem = await moderateContent({
     db, uid: "admin", queueId: "problem_problem", action: "remove", reason: "abusive", now, prepareMatching: prepareModerationMatching,
@@ -55,7 +59,10 @@ test("[BUT-ACM-75] remove enqueues a void for the affected escrow only", async (
     db, contentType: "problem", contentId: "problem", eventId: problem.eventId, reason: "abusive", now,
   })).enqueued, 2);
   const proposalIds = [...db.records.entries()].filter(([path]) => path.startsWith("escrowModerationVoidJobs/")).map(([, row]) => row.proposalId).sort();
-  assert.deepEqual(proposalIds, ["a", "a", "b", "indie"]);
+  assert.deepEqual(proposalIds, ["a", "a", "b"]);
+  const independentJobs = [...db.records.entries()].filter(([path]) => path.startsWith("independentFundingCancellationJobs/"));
+  assert.equal(independentJobs.length, 1);
+  assert.equal(independentJobs[0][1].proposalId, "indie");
 });
 
 test("[BUT-ACM-76] a funded proposal can be claimed after its problem is removed", async () => {

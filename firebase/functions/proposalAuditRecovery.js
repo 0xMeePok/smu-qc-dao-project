@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { getStorage } from "firebase-admin/storage";
 import { withOpportunityRevisionIndex } from "./auditCanonical.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
+import { isIndependentProposal } from "./independentProposal.js";
 import { fundingTermsHash, isEscrowRegistry, verifyProposalEscrow } from "./escrowAudit.js";
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { isActiveAuditDeployment, resolveAuditDeployment } from "./auditDeployments.js";
@@ -18,15 +19,20 @@ async function readAttachmentBytes(path) {
   return bytes;
 }
 
-async function verifyAttachmentBytes(record, reader = readAttachmentBytes) {
+async function verifyAttachmentBytes(record, reader = readAttachmentBytes, { independent = false } = {}) {
   for (const attachment of record.attachments ?? []) {
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(attachment?.id ?? "")
-        || !/^0x[0-9a-f]{64}$/.test(attachment?.sha256 ?? "")) {
+        || (!(independent && attachment.sha256 === undefined)
+          && !/^0x[0-9a-f]{64}$/.test(attachment?.sha256 ?? ""))) {
       throw new Error("Mismatch detected: the proposal attachment digest is missing or invalid.");
     }
     const path = `proposals/${String(record.researcherId).toLowerCase()}/${record.id}/${attachment.id}.pdf`;
-    const actual = `0x${createHash("sha256").update(await reader(path)).digest("hex")}`;
-    if (actual !== attachment.sha256) {
+    const bytes = await reader(path);
+    const actual = `0x${createHash("sha256").update(bytes).digest("hex")}`;
+    // Legacy independent listings may carry only attachment metadata. Their
+    // scheme-2 hash binds the file size; check a digest whenever one is present.
+    if ((independent && bytes.length !== attachment.size)
+        || (attachment.sha256 !== undefined && actual !== attachment.sha256)) {
       throw new Error("Mismatch detected: the stored proposal attachment differs from its recorded digest.");
     }
   }
@@ -72,13 +78,17 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
     throw new Error("The transaction is not final yet; confirmation will be checked again.");
   }
   const decoded = decodeFunctionData({ abi: registryConfig.abi, data: transaction.input });
+  const independent = isIndependentProposal(record);
   // The registry enforces the live parent revision at transaction time. Verify
   // that same revision in the current proposal instead of assuming revision zero.
-  if ([expected.functionName, "updateHashes"].includes(decoded.functionName)) {
+  if (!independent && [expected.functionName, "updateHashes"].includes(decoded.functionName)) {
     const revision = decoded.functionName === "commitProposalWithEscrow" ? decoded.args[4] : decoded.args.at(-1);
     expected = withOpportunityRevisionIndex(expected, Number(revision));
   }
-  const expectedArgs = {
+  const expectedArgs = independent ? {
+    commitOpportunity: expected.args,
+    updateOpportunity: [expected.entityId, expected.contentHash, expected.args[3]],
+  }[decoded.functionName] : {
     [expected.functionName]: expected.args,
     updateHashes: [
       expected.entityId, expected.proposalHash, expected.solutionHash,
@@ -90,17 +100,28 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
         ? fundingTermsHash(arg) !== expected.fundingTermsHash : !same(arg, expectedArgs[index]))) {
     throw new Error("Mismatch detected: the stored proposal differs from the submitted transaction.");
   }
-  await verifyAttachmentBytes(record, readAttachment);
-  const actual = await client.readContract({ address, abi: registryConfig.abi, functionName: "getProposal", args: [expected.entityId] });
+  await verifyAttachmentBytes(record, readAttachment, { independent });
+  const actual = await client.readContract({ address, abi: registryConfig.abi,
+    functionName: independent ? "getOpportunity" : "getProposal", args: [expected.entityId] });
   const value = (key, index) => actual[key] ?? actual[index];
-  if (!same(value("researcher", 0), record.researcherId)
+  if (independent) {
+    // A parentless listing anchors as a FundingRequest opportunity. Publication
+    // verifies that listing rather than requiring a child Proposal or escrow.
+    if (!same(value("owner", 0), record.researcherId)
+        || !same(value("contentHash", 2), expected.contentHash)
+        || !same(value("kind", 1), expected.args[1])
+        || !same(value("expiresAt", 5), expected.args[3])
+        || value("withdrawn", 6) !== false) {
+      throw new Error("Mismatch detected: the current independent listing differs from AuditRegistry.");
+    }
+  } else if (!same(value("researcher", 0), record.researcherId)
       || !same(value("opportunityId", 1), expected.opportunityId)
       || Number(value("opportunityRevisionIndex", 2)) !== expected.expectedOpportunityRevisionIndex
       || !same(value("proposalHash", 4), expected.proposalHash)
       || !same(value("solutionHash", 5), expected.solutionHash)) {
     throw new Error("Mismatch detected: the current proposal differs from AuditRegistry.");
   }
-  if (isEscrowRegistry(registryConfig)) {
+  if (!independent && isEscrowRegistry(registryConfig)) {
     await verifyProposalEscrow({ expected, config: registryConfig, readContract: request => client.readContract(request) });
   }
   const blockNumber = Number(receipt.blockNumber);
@@ -135,7 +156,7 @@ export async function enqueueProposalAudit({ db, record, now }) {
   });
 }
 
-export async function recoverProposalAudit({ db, client, proposalId, now, Timestamp, manual = false, registryConfig = registry }) {
+export async function recoverProposalAudit({ db, client, proposalId, now, Timestamp, manual = false, registryConfig = registry, readAttachment }) {
   const jobRef = db.collection(AUDIT_JOBS).doc(proposalId);
   const recordRef = db.collection("proposals").doc(proposalId);
   // Lease prevents callable, trigger and scheduler from racing each other.
@@ -157,7 +178,8 @@ export async function recoverProposalAudit({ db, client, proposalId, now, Timest
     const snapshot = await recordRef.get();
     record = snapshot.exists ? { ...snapshot.data(), id: snapshot.id } : null;
     if (!record || record.audit?.transactionHash !== job.transactionHash) throw new Error("The proposal or transaction has changed. Refresh verification.");
-    audit = await verifyMinedProposal(record, client, { registryConfig, onDeploymentResolved: config => { checkedRegistry = config; } });
+    audit = await verifyMinedProposal(record, client, { registryConfig, readAttachment,
+      onDeploymentResolved: config => { checkedRegistry = config; } });
   } catch (error) { failure = recoveryError(error); }
   const saved = await db.runTransaction(async (tx) => {
     const [latest, latestJob] = await Promise.all([tx.get(recordRef), tx.get(jobRef)]);
@@ -172,6 +194,11 @@ export async function recoverProposalAudit({ db, client, proposalId, now, Timest
           ? latestPrepared.canonicalPayload === checkedPrepared.canonicalPayload
             && latestPrepared.canonicalSolution === checkedPrepared.canonicalSolution
             && latestPrepared.fundingTermsHash === checkedPrepared.fundingTermsHash
+            // Independent scheme-2 hashes retain their original metadata-only
+            // attachment payload. Do not attest bytes against a digest that
+            // changed while the RPC/storage verification was in flight.
+            && (!isIndependentProposal(record)
+              || JSON.stringify(latest.data().attachments ?? []) === JSON.stringify(record.attachments ?? []))
           : JSON.stringify({ ...latest.data(), id: proposalId }) === JSON.stringify(record));
     } catch { /* Unsupported or changed data must never be confirmed. */ }
     if (!unchanged) {

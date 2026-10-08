@@ -412,6 +412,15 @@ export function ActionNeeded({ onNavigate }) {
             meta={item.deadlineAt ? <>{item.action === "select" ? "Funding closes" : "Approval ends"} <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} /></> : undefined}>
             <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>{ESCROW_ACTION_LABELS[item.action] ?? "Open escrow"}</button>
           </ActionRow>} />
+        <ActionGroup title="Independent crowdfunding actions" items={data.independentActions}
+          hint="Accept funding, submit completion evidence, or release the final payment for an independent listing."
+          render={item => <div className="table-row" key={`independent-${item.id}-${item.action}`}>
+            <div><strong>{item.title || "Independent listing"}</strong>
+              {item.deadlineAt && <small className="table-row-meta">Deadline <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} /></small>}
+            </div><button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>
+              {item.action === "accept_funding" ? "Accept or decline funding" : item.action === "release_completion" ? "Release final payment" : "Submit completion evidence"}
+            </button>
+          </div>} />
         <ActionGroup title="Awaiting my recommendation" items={evaluator?.awaitingRecommendation}
           hint="Proposals you have not recommended yet. Each evaluator files their own recommendation on the proposal page."
           render={(item) => <ActionRow key={`recommend-${item.id}`} item={item} onNavigate={onNavigate}

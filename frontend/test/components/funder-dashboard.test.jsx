@@ -8,6 +8,7 @@ vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({ RELATED_AUDIT_KIND: { LISTING: "listing", PROPOSAL: "proposal" },
   RelatedAuditReceiptPane: ({ record, loading, error }) => <div role="dialog">{loading ? "Loading audit" : error || `Receipt for ${record?.title}`}</div> }));
 import { FunderDashboard } from "../../src/components/FunderDashboard.jsx";
+vi.mock("../../src/components/IndependentFundingPanel.jsx", () => ({ IndependentFundingPanel: ({ proposal }) => <p>Independent refund panel {proposal.id}</p> }));
 const token = { chainId: 421614, tokenAddress: `0x${"a".repeat(40)}`, tokenDecimals: 6, tokenSymbol: "USDC" };
 const fixture = { opportunities: [{ id: "grant", title: "Quantum grants", status: "open", amount: 100000, currency: "USDC", pool: { ...token, poolAddress: "pool", totalDeposited: "100000000000", available: "50000000000", totalReserved: "50000000000" } }],
   commitments: [{ ...token, proposalId: "solution", title: "Quantum solution", postingTitle: "Quantum grants", state: 1, committed: "50000000000", locked: "50000000000", released: "0", refunded: "0", fundingTarget: "50000000000", totalDeposited: "50000000000" }],
@@ -56,4 +57,28 @@ it("clears the previous user's funding data while a new account is loading", asy
   mocks.user = { id: "another" }; mocks.fetch.mockImplementation(() => new Promise(() => {}));
   view.rerender(<FunderDashboard onNavigate={() => {}} />);
   expect(screen.queryByText("Quantum grants")).toBeNull(); expect(screen.getByText("Loading your funding dashboard…")).toBeTruthy();
+});
+
+it("lists cached independent commitments separately and leaves unknown refunds blank", async () => {
+  const go = vi.fn();
+  mocks.fetch.mockResolvedValue({ ...fixture, independentCommitments: [{ proposalId: "independent", title: "Independent library",
+    state: "Accepted", tokenDecimals: 6, tokenSymbol: "USDT", totalDeposited: "2000000", fundingTarget: "2000000",
+    wallet: { deposited: "1000000", claimable: null, stale: true }, detailRefreshRequired: true }] });
+  render(<FunderDashboard onNavigate={go} />);
+  await screen.findByText("Independent library");
+  expect(screen.getByText("Your contribution 1 USDT · Available refund —")).toBeTruthy();
+  expect(screen.getByText(/Cached funding record/)).toBeTruthy();
+  expect(screen.getByText(/These totals cover problem-statement and grant proposal funding/)).toBeTruthy();
+  expect(screen.queryByText("Your contribution 1 USDT · Available refund 0 USDT")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open crowdfunding" }));
+  expect(go).toHaveBeenCalledWith("proposal/independent?tab=funding");
+});
+
+it("opens a removed independent listing's refund panel without exposing its proposal body", async () => {
+  mocks.fetch.mockResolvedValue({ ...fixture, independentCommitments: [{ proposalId: "removed-independent", title: "Independent listing",
+    hidden: true, state: "Cancelled", tokenDecimals: 6, tokenSymbol: "USDT", totalDeposited: "2000000", fundingTarget: "2000000",
+    wallet: { deposited: "1000000", claimable: "1000000" } }] });
+  render(<FunderDashboard onNavigate={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open refund" }));
+  expect(await screen.findByText("Independent refund panel removed-independent")).toBeTruthy();
 });

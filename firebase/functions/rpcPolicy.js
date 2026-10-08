@@ -52,14 +52,29 @@ function errorCauses(error) {
 function canFailOver(error) {
   const causes = errorCauses(error);
   const errorText = (cause) => `${cause.shortMessage || cause.message || ""} ${cause.details || ""}`;
-  if (causes.some((cause) => cause.name === "RpcEndpointUnavailableError" || cause.name === "RpcEndpointChainError")) return true;
   if (causes.some((cause) => [3, 4001, 5000, -32003].includes(cause.code)
     || /execution reverted|\breverted\b|user rejected|user denied/i.test(errorText(cause)))) return false;
+  if (causes.some((cause) => ["RpcEndpointUnavailableError", "RpcEndpointChainError", "RpcEndpointLogRangeError"].includes(cause.name))) return true;
   if (causes.some((cause) => [-32700, -32600, -32601, -32602, -32004, -32006, 4100, 4200].includes(cause.code))) return false;
   if (causes.some((cause) => [429, -32005, -32002, -32603].includes(cause.code)
     || /rate.?limit|too many requests|capacity limit exceeded|monthly capacity|compute units|\bquota\b/i.test(errorText(cause)))) return true;
   return causes.some((cause) => cause.name === "TimeoutError"
     || (cause.name === "HttpRequestError" && (!cause.status || [401, 402, 403, 408, 413, 429].includes(cause.status) || cause.status >= 500)));
+}
+
+// Providers can report a plan's log range limit as "invalid request/params".
+// Classify it at the actual request so chain validation and other methods keep
+// their original errors. The fallback callback only receives the resulting error.
+function logRangeRequestError(error, method, host) {
+  if (method !== "eth_getLogs" || !errorCauses(error).some((cause) => {
+    if (![-32600, -32602].includes(cause.code)) return false;
+    const text = `${cause.shortMessage || cause.message || ""} ${cause.details || ""}`;
+    return /\bblock[\s-]+range\b/i.test(text)
+      && /\b(?:up to|at most|limited to|maximum(?: of)?|limit of)\s+(?:a\s+)?[\d,]+\s+blocks?\b/i.test(text);
+  })) return error;
+  const limit = new Error(`RPC endpoint ${host} cannot serve the requested log block range.`, { cause: error });
+  limit.name = "RpcEndpointLogRangeError";
+  return limit;
 }
 
 function unavailableError(host) {
@@ -129,7 +144,12 @@ export function createArbitrumRpcTransport({
               return chainId;
             }
           }
-          const response = await transport.request(args, { ...options, retryCount: 0 });
+          let response;
+          try {
+            response = await transport.request(args, { ...options, retryCount: 0 });
+          } catch (error) {
+            throw logRangeRequestError(error, args.method, state.host);
+          }
           // Re-check explicit chain reads even while the cached validation is fresh.
           if (args.method === "eth_chainId" && Number(response) !== ARBITRUM_SEPOLIA_CHAIN_ID) {
             const error = new Error(`RPC endpoint ${state.host} is not on Arbitrum Sepolia (${ARBITRUM_SEPOLIA_CHAIN_ID}).`);

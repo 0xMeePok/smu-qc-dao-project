@@ -1,7 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
-import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
+import { WORKFLOW_STATUS, INDEPENDENT_FUNDING_STATE as I } from "../config/workflowStatus.js";
 
 /** QCDAO-62/63 workspace queues. Both read records that already exist. */
 // Each evaluator files their own recommendation, so "pending" means not yet by me.
@@ -39,6 +39,11 @@ export function commentCountLabel(row) {
 const time = (value) => (value ? Date.parse(value) : NaN);
 
 export function proposalQueueDeadline(row) {
+  if (isIndependentQueueRow(row) && row?.independentFunding) {
+    const summary = row.independentFunding.summary ?? row.independentFunding;
+    const seconds = summary.state === I.ACCEPTED ? summary.completionDeadline : summary.expiresAt;
+    return Number(seconds) > 0 ? new Date(Number(seconds) * 1000).toISOString() : row.expiresAt;
+  }
   if (row?.grantUnavailable || row?.escrowUnavailable) return null;
   if (["pending", "expired"].includes(row?.grant?.status)) {
     if (row.grant.deadlineAt) return row.grant.deadlineAt;
@@ -52,6 +57,12 @@ export function proposalQueueDeadline(row) {
 }
 
 export function proposalQueueWorkflowStatus(row) {
+  if (isIndependentQueueRow(row) && row?.independentFunding) {
+    const states = { Open: WORKFLOW_STATUS.SUBMITTED, Accepted: WORKFLOW_STATUS.ACCEPTED, Released: WORKFLOW_STATUS.COMPLETED,
+      Declined: WORKFLOW_STATUS.DECLINED, Expired: WORKFLOW_STATUS.EXPIRED, Cancelled: WORKFLOW_STATUS.CANCELLED,
+      Refunded: WORKFLOW_STATUS.REFUNDED };
+    return states[(row.independentFunding.summary ?? row.independentFunding).state] ?? row.workflowStatus ?? row.status;
+  }
   if (row?.grantUnavailable || row?.escrowUnavailable) return undefined;
   if (row?.grant?.status === "accepted") return row?.escrow?.workflowStatus ?? WORKFLOW_STATUS.ACCEPTED;
   const grantStatuses = { pending: WORKFLOW_STATUS.SELECTED,

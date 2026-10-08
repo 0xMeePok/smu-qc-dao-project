@@ -78,6 +78,36 @@ it("explains when the parent listing is missing", async () => {
   fireEvent.click(screen.getByRole("button", { name: "View receipts" }));
   expect(screen.queryByRole("tab", { name: "Listing receipt" })).toBeNull();
 });
+
+it("groups independent listings separately instead of placing them under a missing parent", async () => {
+  const independent = { ...item, proposalKind: "independent", opportunity: null };
+  mocks.call.mockImplementation(async name => ({ data: name === "adminListProposalAudits"
+    ? { items: [{ ...independent, id: "first", title: "Quantum library" },
+      { ...independent, id: "second", title: "Quantum toolkit" }], cursor: null } : { verified: true } }));
+  render(<ProposalAuditQueue />);
+  expect(await screen.findByRole("heading", { name: "Quantum library · Independent listing" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Quantum toolkit · Independent listing" })).toBeTruthy();
+  expect(screen.queryByText("Parent listing is no longer available.")).toBeNull();
+  expect(screen.getAllByRole("region", { name: "Proposal verification jobs" })).toHaveLength(2);
+});
+
+it("opens the independent publication receipt with researcher context and no parent receipt", async () => {
+  const independent = { ...item, proposalKind: "independent", opportunity: null,
+    audit: { ...item.audit, schemaVersion: 2 } };
+  mocks.call.mockImplementation(async name => ({ data: name === "adminListProposalAudits"
+    ? { items: [independent], cursor: null } : { verified: true } }));
+  render(<ProposalAuditQueue />);
+  fireEvent.click(await screen.findByRole("button", { name: "View receipts" }));
+  expect(await screen.findByRole("heading", { name: "Independent listing published" })).toBeTruthy();
+  expect(screen.getByText("Published independently by the researcher.")).toBeTruthy();
+  expect(screen.getByText("Researcher / solution developer")).toBeTruthy();
+  expect(screen.getByText("Version 2")).toBeTruthy();
+  expect(screen.queryByText("Parent listing is no longer available.")).toBeNull();
+  expect(screen.queryByText("Responds to")).toBeNull();
+  expect(screen.queryByRole("tab", { name: "Listing receipt" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Proposal submitted" })).toBeNull();
+  expect(mocks.call).toHaveBeenCalledWith("adminVerifyProposalAudit", { proposalId: "proposal1" });
+});
 // FUT-ARR-133: request status filter from the server
 it("requests a status filter from the server", async () => {
   mocks.call.mockResolvedValue({ data: { items: [item], cursor: null } });

@@ -91,9 +91,9 @@ async function anchorIndependentListing(record, options) {
       options.onChange?.(next);
     } });
   } catch (error) {
-    // A confirmed listing can be saved on retry. The escrow contract rejects an
-    // independent listing because the researcher is both the opportunity owner
-    // and the proposal owner, so publication does not send that second transaction.
+    // A confirmed listing can be saved on retry. Dedicated independent funding
+    // is activated after the published record is saved, so this receipt always
+    // identifies the listing anchor rather than an escrow creation transaction.
     if (/already anchored/i.test(error?.message ?? "") && record.audit?.transactionHash) {
       audit = record.audit;
     } else {
@@ -103,7 +103,6 @@ async function anchorIndependentListing(record, options) {
       }
       if (listingProgress?.transactionHash) {
         error.listingAudit = listingProgress;
-        if (options.escrowAudit) error.escrowAudit = options.escrowAudit;
       }
       throw error;
     }

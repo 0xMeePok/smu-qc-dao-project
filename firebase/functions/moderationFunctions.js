@@ -8,6 +8,7 @@ import { submitContentReport, listModerationQueue, getModerationContext, moderat
   notifyProposalReceived, syncProposalParentVisibility, syncProblemProposalsBrowsable } from "./moderation.js";
 import { enqueueModerationVoidJobs } from "./escrowModerationVoid.js";
 import { cancelPendingFundingApproaches } from "./fundingApproach.js";
+import { enqueueIndependentFundingCancellation } from "./independentFundingModeration.js";
 
 /** Keep moderation transport separate while reusing the application's session checks. */
 export function registerModerationCallables({ db, requireMember, requireAdmin, options, region }) {
@@ -49,6 +50,9 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
         const contentType = index > 0 ? args.queueId.slice(0, index) : "";
         const contentId = index > 0 ? args.queueId.slice(index + 1) : "";
         await enqueueModerationVoidJobs({
+          db, contentType, contentId, eventId: result.eventId, reason: args.reason, now: args.now,
+        });
+        await enqueueIndependentFundingCancellation({
           db, contentType, contentId, eventId: result.eventId, reason: args.reason, now: args.now,
         });
         if (contentType === "proposal") {

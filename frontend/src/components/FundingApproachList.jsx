@@ -187,7 +187,7 @@ function groupByProposal(items) {
  * and names the listing on that row. Accept and decline are only offered on a
  * pending incoming row.
  */
-export function FundingApproachList({ title, hint, empty, items = [], truncated = false, loading = false, error = "", onNavigate, onUpdated, showFunder = false, heading = "h2" }) {
+export function FundingApproachList({ title, hint, empty, items = [], truncated = false, loading = false, error = "", onNavigate, onUpdated, showFunder = false, heading = "h2", readOnly = false }) {
   const Heading = heading === "h3" ? "h3" : "h2";
   const [draft, setDraft] = useState(null);
   const [anchorError, setAnchorError] = useState("");
@@ -206,8 +206,8 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
   const start = (item, decision) => setDraft({ id: item.id, decision, text: "", error: "", busy: false, phase: "" });
   const approachRow = (item) => {
     const status = listedStatus(item);
-    const responding = openDraft?.id === item.id;
-    const signAnchor = showFunder && item.decisionAnchorStatus === "pending"
+    const responding = !readOnly && openDraft?.id === item.id;
+    const signAnchor = !readOnly && showFunder && item.decisionAnchorStatus === "pending"
       && items.find((row) => row.proposalId === item.proposalId && row.decisionAnchorStatus === "pending")?.id === item.id;
     return (
       <div className="table-row" key={item.id}>
@@ -230,15 +230,15 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
           {responding && <ApproachResponseForm draft={openDraft} setDraft={setDraft} onUpdated={onUpdated} onAnchorError={setAnchorError} />}
         </div>
         <div className="table-row-actions">
-          {showFunder && status === "pending" && !responding && (
+          {!readOnly && showFunder && status === "pending" && !responding && (
             <>
               <button type="button" className="primary" onClick={() => start(item, "accept")}>Accept</button>
               <button type="button" className="secondary" onClick={() => start(item, "decline")}>Decline</button>
             </>
           )}
           {signAnchor && <SignDecisionAnchor items={items} proposalId={item.proposalId} onUpdated={onUpdated} onError={setAnchorError} />}
-          {item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
-          <button type="button" className="text-button" onClick={() => onNavigate?.(`approach/${item.id}`)}>Open approach</button>
+          {!readOnly && item.claimFunds && !showFunder && <ClaimRemovedFundsButton proposalId={item.proposalId} />}
+          {!readOnly && <button type="button" className="text-button" onClick={() => onNavigate?.(`approach/${item.id}`)}>Open approach</button>}
           <button type="button" className="text-button" onClick={() => setReceiptId(item.id)}>Audit receipt</button>
           <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${item.proposalId}`)}>Open listing</button>
         </div>

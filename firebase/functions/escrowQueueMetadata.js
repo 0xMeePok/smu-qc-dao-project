@@ -1,6 +1,7 @@
 import { readOpenFunding, supportsOpenFunding } from "./openFunding.js";
 import { fundingBlockReason, loadFundingContext, readVerifiedFunding } from "./escrowFunding.js";
 import { same } from "./escrowFundingEvents.js";
+import { isIndependentProposal } from "./independentProposal.js";
 
 const at = (row, name, index) => row?.[name] ?? row?.[index];
 const blocked = row => row?.moderated || ["hidden", "removed"].includes(row?.moderationStatus);
@@ -14,7 +15,7 @@ const ESCROW_WORKFLOW = Object.freeze({ Open: "submitted", Locked: "pending_appr
 export async function readGrantQueueMetadata({ db, client, config, uid, docs, parents }) {
   const grants = new Map(), unavailable = new Set();
   if (!client || !supportsOpenFunding(config)) return { grants, unavailable };
-  const candidates = docs.filter(doc => doc.data().researcherId === uid && doc.data().status !== "draft"
+  const candidates = docs.filter(doc => !isIndependentProposal(doc.data()) && doc.data().researcherId === uid && doc.data().status !== "draft"
     && doc.data().fundingTerms && doc.data().audit?.status === "confirmed"
     && parents.get(doc.data().problemId)?.opportunityType === "open-funding");
   if (!candidates.length) return { grants, unavailable };
@@ -68,7 +69,7 @@ export async function readGrantQueueMetadata({ db, client, config, uid, docs, pa
 export async function readEscrowQueueActions({ db, client, config, uid, docs, blockNumber }) {
   const actions = [], unavailable = new Set(), states = new Map();
   if (!client || config?.contractName !== "EscrowAuditRegistry" || !config.escrow?.escrowAbi?.length) return { actions, unavailable, states };
-  const candidates = docs.filter(doc => doc.data().fundingTerms && doc.data().status !== "draft"
+  const candidates = docs.filter(doc => !isIndependentProposal(doc.data()) && doc.data().fundingTerms && doc.data().status !== "draft"
     && doc.data().audit?.status === "confirmed" && (doc.data().researcherId === uid || doc.data().postingOwnerId === uid));
   if (!candidates.length) return { actions, unavailable, states };
   try {

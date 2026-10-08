@@ -8,7 +8,6 @@ import {
   INDEPENDENT_PROPOSAL_FIELDS,
   PROPOSAL_CATEGORIES,
   PROPOSAL_MATURITY_LEVELS,
-  fundingApproachAccepted,
   independentListingWindowOpen,
   isIndependentProposal,
 } from "../config/proposal.js";
@@ -33,7 +32,7 @@ import { assertCurrentAuditRecord } from "../lib/opportunityAuditFlow.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
-import { auditErrorMessage, isRpcQuotaExceeded, isRpcUnreachable, isWalletRejection, messageForPublicationSaveError } from "../lib/errors.js";
+import { auditErrorMessage, messageForPublicationSaveError } from "../lib/errors.js";
 import { SubmissionError } from "../components/SubmissionError.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { useAccount } from "wagmi";
@@ -45,8 +44,8 @@ import ProposalDetailPage from "./ProposalDetailPage.jsx";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/functions/escrowProposalTerms.js";
-import { EscrowPaymentPlanFields } from "../components/EscrowPaymentPlanFields.jsx";
-import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
+import { IndependentFundingTerms } from "../components/IndependentFundingTerms.jsx";
+import { activateIndependentFunding, getIndependentFundingState, independentFundingConfigured, independentFundingLocked } from "../lib/independentEscrow.js";
 import { ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
 
 const ESCROW_LINKED = isEscrowRegistry(AUDIT_REGISTRY_CONFIG);
@@ -70,8 +69,8 @@ const EMPTY_FORM = {
   currency: CURRENCIES[0],
   expiryDays: DEFAULT_EXPIRY_DAYS,
   tranchePercentages: HALF_UPFRONT_PERCENTAGES,
-  reviewDays: "7",
-  funderVoting: false,
+  reviewDays: "30",
+  funderVoting: true,
 };
 
 function abandonDraftAttachments(items, ownerId, proposalId) {
@@ -89,8 +88,8 @@ function snapshotOf(form, attachments) {
     currency: form.currency ?? "",
     expiryDays: Number(form.expiryDays) || DEFAULT_EXPIRY_DAYS,
     tranchePercentages: form.tranchePercentages ?? HALF_UPFRONT_PERCENTAGES,
-    reviewDays: form.reviewDays ?? "7",
-    funderVoting: form.funderVoting ?? false,
+    reviewDays: form.reviewDays ?? "30",
+    funderVoting: true,
     attachments: attachments.map((item) => item.id).sort(),
   });
 }
@@ -124,8 +123,8 @@ export function formFromIndependentProposal(record) {
     expiryDays: windowFromExpiry(record?.expiresAt, record?.createdAt),
     ...(ESCROW_LINKED ? {
       tranchePercentages: trancheBps ? trancheBps.map((bps) => bps / 100).join(", ") : HALF_UPFRONT_PERCENTAGES,
-      reviewDays: reviewWindows ? reviewWindows.map((seconds) => seconds / 86400).join(", ") : record?.fundingPlan?.reviewDays ?? "7",
-      funderVoting: terms?.funderVoting ?? record?.fundingPlan?.funderVoting ?? false,
+      reviewDays: reviewWindows ? String(reviewWindows.at(-1) / 86400) : String(record?.fundingPlan?.reviewDays ?? "30").split(",").at(-1).trim(),
+      funderVoting: true,
       ...(terms && record.status !== "draft" ? { immutableFundingTerms: terms } : {}),
     } : {}),
   };
@@ -143,11 +142,14 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   const { user } = useAuth();
   const { address, isConnected } = useAccount();
   const [auditProgress, setAuditProgress] = useState(null);
-  const [escrowProgress, setEscrowProgress] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmedAudit, setConfirmedAudit] = useState(null);
   const [proposalId, setProposalId] = useState(resumeId || null);
   const [record, setRecord] = useState(null);
+  const [fundingState, setFundingState] = useState(null);
+  const [fundingCheckError, setFundingCheckError] = useState("");
+  const [fundingActivationError, setFundingActivationError] = useState("");
+  const [fundingActivationPending, setFundingActivationPending] = useState(null);
   const [draftExists, setDraftExists] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -183,7 +185,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         || String(form.amount ?? "").trim().length > 0
         || (Number(form.expiryDays) || DEFAULT_EXPIRY_DAYS) !== DEFAULT_EXPIRY_DAYS
         || (form.currency && form.currency !== CURRENCIES[0])
-        || (ESCROW_LINKED && ((form.reviewDays ?? "7") !== "7" || form.funderVoting === true))
+        || (ESCROW_LINKED && (form.reviewDays ?? "30") !== "30")
         || attachments.length > 0;
     }
     return snapshotOf(form, attachments) !== baseline;
@@ -205,7 +207,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   useEffect(() => {
     if (!resumeId) return undefined;
     let cancelled = false;
-    findProposal(resumeId).then((found) => {
+    findProposal(resumeId).then(async (found) => {
       if (cancelled) return;
       if (!found) {
         setError("This proposal could not be found or you do not have access.");
@@ -214,6 +216,16 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       if (!isIndependentProposal(found) || found.researcherId !== user.id.toLowerCase()) {
         setError("This is not an independent proposal you can resume.");
         return;
+      }
+      if (found.status !== "draft" && independentFundingConfigured()) {
+        try {
+          const funding = await getIndependentFundingState({ proposalId: found.id });
+          if (cancelled) return;
+          setFundingState(funding);
+        } catch {
+          if (cancelled) return;
+          setFundingCheckError("Crowdfunding could not be verified. Open the listing and refresh funding before editing.");
+        }
       }
       const loadedForm = formFromIndependentProposal(found);
       const loadedAttachments = found.attachments ?? [];
@@ -310,11 +322,10 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         if (!independentListingWindowOpen(record) && record.status === PROPOSAL_STATUS_SUBMITTED) {
           throw new Error("The listing window has closed. This proposal can no longer be edited.");
         }
-        // The listing window and a started deposit are checked here. The escrow
-        // proposal is linked from the publish signature, not from this edit.
+        // Recheck the current listing before signing a content correction.
         const current = await findProposal(proposalId, { fromServer: true });
-        if (fundingApproachAccepted(current)) {
-          throw new Error("A funding approach has been accepted. This listing can no longer be edited.");
+        if (independentFundingConfigured() && independentFundingLocked(await getIndependentFundingState({ proposalId }))) {
+          throw new Error("Crowdfunding is activated. This listing's content and terms are fixed.");
         }
         if (!current || proposalMatchingLocked(current)) {
           throw new Error("Funding or matching has started. This proposal can no longer be edited.");
@@ -336,8 +347,6 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       audit = await anchorProposalBeforeWrite({ id: proposalId, ...built, audit: auditProgress }, {
         account: address,
         onChange: setAuditProgress,
-        escrowAudit: escrowProgress,
-        onEscrowChange: setEscrowProgress,
       });
       setAuditProgress(audit);
       setConfirmedAudit(audit);
@@ -351,25 +360,26 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
           proposalId, researcherId: user.id, form, attachments,
           fromDraft: draftExists, record: built, audit: receiptForWrite(audit), expiresAt: listingExpiry,
         });
+        if (independentFundingConfigured()) {
+          try { await activateIndependentFunding(proposalId, { account: address }); }
+          catch (activationError) {
+            setFundingActivationError("Your listing is published. Crowdfunding is not confirmed yet; enable funding or retry the pending confirmation below.");
+            if (activationError.transactionHash && !activationError.transactionSettled) {
+              setFundingActivationPending({ transactionHash: activationError.transactionHash, action: "activate" });
+            }
+          }
+        }
       }
       setSubmitted(true);
     } catch (err) {
       if (err.listingAudit?.transactionHash) {
         audit = err.listingAudit;
         setAuditProgress(audit);
-        if (err.escrowAudit) setEscrowProgress(err.escrowAudit);
         setSaveFailed(false);
         if (audit.status !== "confirmed") {
           setError("The listing transaction was submitted, but its confirmation is still pending. The proposal has not been published. Retry to recheck the same transaction before continuing.");
-        } else if (err.escrowAudit?.transactionHash) {
-          setError("The listing transaction is confirmed, but the escrow transaction still needs verification. The proposal has not been published. Retry to recheck the same escrow transaction; another signature will not be requested while its result is unknown.");
         } else {
-          const reason = err.code === "AUDIT_TRANSACTION_CANCELLED" ? "The escrow transaction was cancelled in your wallet."
-            : isWalletRejection(err) ? "The escrow signature was declined."
-              : isRpcQuotaExceeded(err) ? "The RPC provider is limiting requests."
-                : isRpcUnreachable(err) ? "Arbitrum Sepolia could not be reached."
-                  : err.receipt?.status === "reverted" ? "The escrow transaction reverted." : "Escrow setup could not be completed.";
-          setError(`The listing transaction is confirmed, but the escrow step did not complete. ${reason} The proposal has not been published. Retry to complete escrow setup using the confirmed listing transaction.`);
+          setError("The listing transaction is confirmed, but publication verification could not finish. The proposal has not been published. Retry to recheck the same listing transaction. Your entries and transaction reference are preserved.");
         }
       } else {
         setSaveFailed(Boolean(audit?.transactionHash));
@@ -381,14 +391,15 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
     finally { submitting.current = false; setBusy(false); if (!audit) setAuditProgress(null); }
   };
 
-  if (submitted) return <ProposalDetailPage proposalId={proposalId} onNavigate={onNavigate} justSubmitted />;
+  if (submitted) return <ProposalDetailPage proposalId={proposalId} onNavigate={onNavigate} justSubmitted initialTab="funding"
+    fundingActivationError={fundingActivationError} pendingFundingTransaction={fundingActivationPending} />;
   if (loading || !proposalId) return <section className="page empty" role="status">{resumeId ? "Loading proposal…" : "Loading form…"}</section>;
   if (resumeId && !record) {
     return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p>
       <button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
   }
-  if (resumeId && record && fundingApproachAccepted(record)) {
-    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">A funding approach has been accepted. This listing can no longer be edited.</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View listing</button></section>;
+  if (resumeId && record && (fundingCheckError || independentFundingLocked(fundingState) || independentFundingLocked(record.independentFunding))) {
+    return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{fundingCheckError || "Crowdfunding is activated. This listing's content and terms are fixed."}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View listing</button></section>;
   }
   if (resumeId && record && (proposalMatchingLocked(record)
     || (!["draft", "submitted"].includes(record.status))
@@ -415,15 +426,15 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       <span className="eyebrow">Independent solution proposal</span>
       <h1>{editing ? "Edit your independent listing" : draftExists ? "Resume your draft" : "Publish an independent proposal"}</h1>
       <p>{editing
-        ? "Update the listing while no funding approach has been accepted. Currency, listing window and supporting PDFs stay as published."
-        : "Share a solution that is not attached to an existing problem statement. Clients and funders can discover it and approach you with funding. All fields are required to submit; you can save an unfinished draft at any point. Supporting PDFs are optional."}</p>
+        ? "Update the listing before crowdfunding starts. Target, token, listing window and supporting PDFs stay as published."
+        : "Publish your solution and crowdfunding target. Funders contribute to escrow; you accept or decline when the target is reached. All fields are required to submit; unfinished drafts can be saved. Supporting PDFs are optional."}</p>
     </div>
     <WizardSteps steps={STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
       completeSteps={wizard.completeSteps(validateIndependentProposal(form, { requireFundingPlan: !editing }))} visitedSteps={wizard.visited} lockForward={pending} />
     <div className="form-layout">
       <form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
         <SubmissionError message={error} />
-        {editing && <p className="field-hint" role="status">This listing is published but no funding approach has been accepted. Saving your changes records the edit — the changed fields, your wallet and the time — and returns the listing for wallet verification, which appends a revision on Arbitrum Sepolia beside the original.</p>}
+        {editing && <p className="field-hint" role="status">Crowdfunding has not started. Your wallet anchors content corrections while the target, token, expiry and completion terms stay fixed.</p>}
         <div className="wizard-card">
           <WizardPanel index={stepIndex("solution")} current={wizard.current}>
             <fieldset className="field-group" disabled={contentDisabled}>
@@ -453,7 +464,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
           <WizardPanel index={stepIndex("funding")} current={wizard.current}>
             <fieldset className="field-group" disabled={contentDisabled}>
               <legend>Funding and supporting material</legend>
-              <Field htmlFor="independent-amount" label="Indicative funding sought" error={errors.amount}>
+              <Field htmlFor="independent-amount" label="Crowdfunding target" error={errors.amount}>
                 {({ id, describedBy, invalid }) => <input id={id} type="number" inputMode="decimal"
                   min="0.000001" max="1000000000" step="any" disabled={ESCROW_LINKED && editing} required value={form.amount || ""}
                   aria-invalid={invalid} aria-describedby={describedBy}
@@ -475,16 +486,8 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
                   </select>
                 )}
               </Field>
-              {ESCROW_LINKED && (editing
-                ? <fieldset className="field-group escrow-plan">
-                    <legend>Escrow payment plan</legend>
-                    <p className="field-hint">The payment split, approval window and completion rule were fixed when this listing was published. Edit the solution text above; this plan cannot change while the listing is live.</p>
-                    <EscrowPaymentPlanSummary
-                      trancheBps={form.immutableFundingTerms?.trancheBps}
-                      funderVoting={form.immutableFundingTerms?.funderVoting ?? form.funderVoting}
-                    />
-                  </fieldset>
-                : <EscrowPaymentPlanFields form={form} disabled={contentDisabled} error={errors.fundingPlan} onChange={update} />)}
+              {ESCROW_LINKED && <IndependentFundingTerms reviewDays={form.reviewDays} disabled={contentDisabled}
+                error={errors.fundingPlan} onChange={update} readOnly={editing} />}
               {editing && <p className="field-hint">Supporting PDFs cannot be changed after publication. They stay as the files on the listing.</p>}
               <AttachmentUploader ownerId={user.id} problemId={proposalId} scope="proposals" value={attachments}
                 onChange={setAttachments} onPendingChange={(count) => setPending(count > 0)} disabled={contentDisabled || editing} />
@@ -503,7 +506,8 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
               { label: "Problems this could address", value: text("addressedProblems"), step: stepIndex("fit") },
               { label: "Maturity", value: PROPOSAL_MATURITY_LEVELS.find((item) => item.value === form.maturity)?.label ?? "", empty: "Not chosen", step: stepIndex("fit") },
               { label: "Team", value: text("team"), step: stepIndex("fit") },
-              { label: "Indicative funding", value: form.amount ? `${form.currency} ${ESCROW_LINKED ? text("amount") : Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: stepIndex("funding") },
+              { label: "Crowdfunding target", value: form.amount ? `${form.currency} ${ESCROW_LINKED ? text("amount") : Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: stepIndex("funding") },
+              { label: "Completion period", value: `${form.reviewDays} days from acceptance`, step: stepIndex("funding") },
               { label: "Listing window", value: formatInstant(listingExpiry), step: stepIndex("funding") },
               { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: stepIndex("funding") },
             ]} />
@@ -515,12 +519,12 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>Back</button>
             <div className="wizard-nav-end">
               {!wizard.isLast && <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pending}>Continue</button>}
-              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : escrowProgress?.transactionHash ? "Confirming escrow…" : auditProgress?.status === "confirmed" ? "Waiting for escrow signature…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
+              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
             </div>
           </div>
         </div>
         <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
-        {publicationStarted && !confirmedAudit && !busy && <p className="field-hint" role="status" style={{ overflowWrap: "anywhere" }}>Your entries stay fixed while publication is incomplete. Keep this page open until publication finishes. Recovery references are held only on this page; copy them before refreshing. Listing transaction: <code>{auditProgress.transactionHash}</code>{escrowProgress?.transactionHash && <>. Escrow transaction: <code>{escrowProgress.transactionHash}</code></>}</p>}
+        {publicationStarted && !confirmedAudit && !busy && <p className="field-hint" role="status" style={{ overflowWrap: "anywhere" }}>Your entries stay fixed while publication is incomplete. Keep this page open until publication finishes. Recovery references are held only on this page; copy them before refreshing. Listing transaction: <code>{auditProgress.transactionHash}</code></p>}
         {!editing && <div className="form-actions wizard-secondary">
           <button className="secondary" type="button" disabled={disabled || pending || publicationStarted} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>
           <DraftStatus savedAt={savedAt} saving={savingDraft} />

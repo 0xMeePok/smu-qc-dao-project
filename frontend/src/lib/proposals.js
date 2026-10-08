@@ -7,7 +7,6 @@ import { deleteAttachment, toPostingRecord } from "./attachments.js";
 import {
   INDEPENDENT_PROPOSAL_FIELDS,
   INDEPENDENT_PROPOSAL_KIND,
-  fundingApproachAccepted,
   isIndependentProposal,
   PROPOSAL_FIELDS,
   PROBLEM_FRAMING_FIELDS,
@@ -15,6 +14,7 @@ import {
 import { expiryDateFrom } from "../config/postingCategories.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { proposalBlockReason, validateIndependentProposal, validateProposal } from "./proposalValidation.js";
+import { getIndependentFundingState, independentFundingConfigured, independentFundingLocked } from "./independentEscrow.js";
 import { toDate } from "./datetime.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
@@ -129,14 +129,14 @@ export function buildIndependentProposalDocument({
   if (expiry) record.expiresAt = Timestamp.fromDate(expiry);
   if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && currency) {
     if (status === PROPOSAL_STATUS_DRAFT) record.fundingPlan = {
-      tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "7"),
-      funderVoting: form.funderVoting ?? false,
+      tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "30"),
+      funderVoting: true,
     };
     else if (form.immutableFundingTerms && typeof form.immutableFundingTerms === "object" && !Array.isArray(form.immutableFundingTerms)) {
       record.fundingTerms = form.immutableFundingTerms;
     } else if (!form.freezeFundingTerms) {
       record.fundingTerms = proposalFundingTerms({
-        form: { ...form, milestones: form.milestones ?? "" },
+        form: { ...form, tranchePercentages: HALF_UPFRONT_PERCENTAGES, reviewDays: String(form.reviewDays ?? "30"), funderVoting: true, milestones: form.milestones ?? "" },
         currency,
         config: AUDIT_REGISTRY_CONFIG,
       });
@@ -305,8 +305,9 @@ export async function updateIndependentProposal({
   });
   const { createdAt, ...record } = built;
   const current = await findProposal(proposalId);
-  if (fundingApproachAccepted(current)) {
-    throw new Error("A funding approach has been accepted. This listing can no longer be edited.");
+  if (independentFundingLocked(current?.independentFunding)
+      || (independentFundingConfigured() && independentFundingLocked(await getIndependentFundingState({ proposalId })))) {
+    throw new Error("Crowdfunding is activated. This listing's content and terms are fixed.");
   }
   await attestPublication("proposals", proposalId, {
     ...(current ?? {}),

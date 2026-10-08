@@ -30,8 +30,10 @@ jobs:
 
       # Community Edition rules only. Do not set SEMGREP_APP_TOKEN in this job.
       # Solidity rules live under p/smart-contracts; p/solidity is not a registry pack.
-      # These six gas/style suggestions are advisory. In particular, making an
+      # These seven gas/style suggestions are advisory. In particular, making an
       # ERC20-only escrow constructor payable changes its native-token behavior.
+      # Prefix increment is a nonfunctional optimization; keeping it advisory
+      # preserves verified deployed source/metadata without a runtime redeploy.
       # Keep every other rule blocking, and still fail on scanner errors.
       - name: Run Semgrep security checks
         env:
@@ -44,6 +46,7 @@ jobs:
           --exclude-rule solidity.performance.state-variable-read-in-a-loop.state-variable-read-in-a-loop
           --exclude-rule solidity.performance.unnecessary-checked-arithmetic-in-loop.unnecessary-checked-arithmetic-in-loop
           --exclude-rule solidity.performance.use-nested-if.use-nested-if
+          --exclude-rule solidity.performance.use-prefix-increment-not-postfix.use-prefix-increment-not-postfix
 
       # Audit mode reports findings without failing for them. The first scan
       # already gates Solidity security rules; this keeps gas suggestions visible.

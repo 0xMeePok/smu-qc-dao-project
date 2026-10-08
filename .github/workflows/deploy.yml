@@ -145,11 +145,12 @@ jobs:
       # authorised by storage.rules, and hosting must never go live with an
       # uploader whose bucket rules are still the previous revision.
       # --force acknowledges the retry policy on queueProposalAudit in CI.
-      # Functions read their environment from this file at deploy time. Without it
-      # publication verification falls back to the rate-limited public node.
+      # Use a no-key public RPC by default. Alchemy's free plan restricts log
+      # ranges to 10 blocks, which cannot serve bounded funding-history scans.
+      # Repository variables can explicitly override the shared primary.
       - name: Provide the functions runtime environment
         env:
-          ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.ARBITRUM_SEPOLIA_RPC_URL || secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
+          ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
           ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
         run: |
           if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
@@ -234,7 +235,7 @@ jobs:
           # QCDAO-58. Absent, the bundle builds fine and the attachment UI reports
           # "Storage is not configured" at runtime instead of uploading.
           VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-          VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_URL }}
+          VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
           VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
           VITE_FIREBASE_USE_EMULATORS: "false"
         run: |

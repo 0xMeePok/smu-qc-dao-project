@@ -55,3 +55,16 @@ export function fundingStateLabel(state) {
   if (typeof state === "number") return ["Pending", "Locked", "Released", "Refunded", "Cancelled", "Expired", "Locked · delivery in progress", "Voided"][state] ?? "Unknown";
   return String(state ?? "Pending").replaceAll("_", " ");
 }
+
+/** Independent crowdfunding is a separate contract lifecycle from main escrow. */
+export const INDEPENDENT_FUNDING_STATE = Object.freeze({ OPEN: "Open", ACCEPTED: "Accepted", RELEASED: "Released",
+  DECLINED: "Declined", EXPIRED: "Expired", CANCELLED: "Cancelled", REFUNDED: "Refunded" });
+export const INDEPENDENT_FUNDING_LABELS = Object.freeze({
+  [INDEPENDENT_FUNDING_STATE.OPEN]: "Open for funding",
+  [INDEPENDENT_FUNDING_STATE.ACCEPTED]: "Delivery in progress",
+  [INDEPENDENT_FUNDING_STATE.RELEASED]: "Fully paid",
+  [INDEPENDENT_FUNDING_STATE.DECLINED]: "Refunds available",
+  [INDEPENDENT_FUNDING_STATE.EXPIRED]: "Refunds available",
+  [INDEPENDENT_FUNDING_STATE.CANCELLED]: "Refunds available",
+  [INDEPENDENT_FUNDING_STATE.REFUNDED]: "Refunded",
+});

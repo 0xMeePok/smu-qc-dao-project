@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
-import { encodeFunctionData, keccak256, stringToHex } from "viem";
+import { decodeFunctionData, encodeFunctionData, keccak256, stringToHex } from "viem";
 import { prepareIndependentEscrowCommit, prepareStoredProposal } from "./proposalAuditPayload.js";
 import { opportunityEntityId } from "./auditCanonical.js";
 import { verifyProposalEscrow } from "./escrowAudit.js";
@@ -146,6 +146,9 @@ export function fundingBlockReason(record, parent, chain, now = Date.now(), { de
 
 /** Every read used in a projection is pinned to one confirmed block. */
 export async function readVerifiedFunding({ client, config, record, parent, blockNumber }) {
+  if (isIndependentProposal(record)) {
+    fail("failed-precondition", "Use the independent listing funding workflow for this proposal.");
+  }
   const expected = isIndependentProposal(record)
     ? prepareIndependentEscrowCommit(record, { registryConfig: config })
     : prepareStoredProposal(record, { registryConfig: config });
@@ -193,7 +196,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
 }
 
 export async function enqueueEscrowFunding({ db, config, record, now = Timestamp.now() }) {
-  if (!record?.id || !record.fundingTerms || record.audit?.status !== "confirmed") return;
+  if (!record?.id || isIndependentProposal(record) || !record.fundingTerms || record.audit?.status !== "confirmed") return;
   const ref = db.collection(FUNDING_JOBS).doc(jobKey(config, record.id));
   await db.runTransaction(async tx => {
     const old = await tx.get(ref);
@@ -230,11 +233,29 @@ async function saveEvent({ db, event, record, summary, now }) {
 }
 
 async function initialBlock(record, client, config) {
-  const receipt = await client.getTransactionReceipt({ hash: record.audit?.transactionHash });
+  const hash = record.audit?.transactionHash;
+  const receipt = await client.getTransactionReceipt({ hash });
   if (receipt.status !== "success" || !same(receipt.to, config.address)) fail("failed-precondition", "This proposal belongs to a different or unconfirmed registry deployment.");
-  // audit.transactionHash may be a later updateHashes receipt. Creation is
-  // immutable, so begin at the deployment checkpoint and scan bounded pages.
-  return BigInt(config.deployment?.blockNumber ?? 0);
+  const deploymentBlock = BigInt(config.deployment?.blockNumber ?? 0);
+  const transaction = await client.getTransaction({ hash });
+  // A confirmed audit may describe an amendment. Only the exact proposal's
+  // creation transaction can safely exclude earlier registry history.
+  if (same(transaction.to, config.address) && same(transaction.from, record.researcherId)
+      && same(transaction.hash, hash) && same(receipt.transactionHash, hash)
+      && Number(transaction.chainId) === config.chainId
+      && typeof receipt.blockNumber === "bigint" && receipt.blockNumber >= deploymentBlock
+      && transaction.blockNumber === receipt.blockNumber && receipt.blockHash
+      && same(transaction.blockHash, receipt.blockHash)) {
+    let decoded;
+    try { decoded = decodeFunctionData({ abi: config.abi, data: transaction.input }); } catch { /* keep the deployment checkpoint */ }
+    if (["commitProposalWithEscrow", "commitProposal"].includes(decoded?.functionName)) {
+      const expected = isIndependentProposal(record)
+        ? prepareIndependentEscrowCommit(record, { registryConfig: config })
+        : prepareStoredProposal(record, { registryConfig: config });
+      if (same(decoded.args[0], expected.entityId) && same(decoded.args[1], expected.opportunityId)) return receipt.blockNumber;
+    }
+  }
+  return deploymentBlock;
 }
 
 export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
@@ -689,6 +710,13 @@ async function reconcileModerationVoid({ db, client, config, getWallet, ref, job
   const proposal = await db.collection("proposals").doc(job.proposalId).get();
   const stored = proposal.exists ? proposal.data() : null;
   const independent = isIndependentProposal(stored);
+  if (independent) {
+    const { enqueueIndependentFundingCancellation } = await import("./independentFundingModeration.js");
+    await enqueueIndependentFundingCancellation({ db, contentType: "proposal", contentId: job.proposalId,
+      eventId: job.eventId, reason: job.reason, now });
+    await ref.update({ status: "skipped", skipReason: "dedicated-independent-funding", updatedAt: now });
+    return;
+  }
   if (!stored?.fundingTerms || (!independent && !stored.problemId)) {
     await ref.update({ status: "skipped", skipReason: "no-escrow", updatedAt: now });
     return;
@@ -818,6 +846,11 @@ export async function sweepEscrowFunding({ db, client, config, getWallet, now = 
   let processed = 0;
   for (const row of jobs.docs) {
     if (!same(row.data().registryAddress, config.address)) continue;
+    const proposal = await db.collection("proposals").doc(row.data().proposalId).get();
+    if (isIndependentProposal(proposal.data())) {
+      await row.ref.update({ status: "skipped", skipReason: "independent-funding-workflow", updatedAt: now });
+      continue;
+    }
     try { await syncEscrowFunding({ db, client, config, getWallet, proposalId: row.data().proposalId, now }); processed++; }
     catch { /* A redacted retry state was persisted by the reconciliation service. */ }
   }
