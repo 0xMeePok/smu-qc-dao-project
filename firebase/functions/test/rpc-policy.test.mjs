@@ -60,6 +60,11 @@ function clientFor(endpoints, options = {}) {
 }
 
 const read = (client) => client.request({ method: "eth_blockNumber" });
+const logRequest = { method: "eth_getLogs", params: [{
+  address: "0x1111111111111111111111111111111111111111", fromBlock: "0x1", toBlock: "0x2710",
+}] };
+const logRangeLimit = "Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range. "
+  + "Based on your parameters, this block range should work: [0x1, 0xa]. Upgrade to PAYG for expanded block range.";
 
 describe("RPC configuration", () => {
   it("orders and deduplicates primary, comma-separated backups and public defaults", () => {
@@ -200,6 +205,69 @@ describe("Arbitrum Sepolia RPC failover", () => {
         assert.equal(client.transport.rpcStatus.activeHost, endpoints[1].host);
       });
     }
+  });
+
+  it("fails over provider log range limits once, preserving the query and using cooldown", async () => {
+    for (const code of [-32600, -32602]) {
+      await withFixtures([
+        ({ method }) => method === "eth_getLogs" ? { error: { code, message: logRangeLimit } } : {},
+        ({ method }) => method === "eth_getLogs" ? { result: [] } : {},
+      ], async endpoints => {
+        const client = clientFor(endpoints);
+        assert.deepEqual(await client.request(logRequest), []);
+        assert.deepEqual(await client.request(logRequest), []);
+        assert.deepEqual(endpoints[0].calls.map(call => call.method), ["eth_chainId", "eth_getLogs"]);
+        assert.deepEqual(endpoints[1].calls.map(call => call.method), ["eth_chainId", "eth_getLogs", "eth_getLogs"]);
+        for (const endpoint of endpoints) {
+          assert.ok(endpoint.calls.filter(call => call.method === "eth_getLogs")
+            .every(call => JSON.stringify(call.params) === JSON.stringify(logRequest.params)));
+        }
+        assert.equal(client.transport.rpcStatus.activeHost, endpoints[1].host);
+        assert.equal(client.transport.rpcStatus.fallbackActive, true);
+        assert.deepEqual(client.transport.rpcStatus.unavailableHosts, [endpoints[0].host]);
+      });
+    }
+  });
+
+  it("keeps malformed log requests and contract reverts terminal", async () => {
+    for (const error of [
+      { code: -32600, message: "Invalid request" },
+      { code: -32602, message: "Invalid block range: fromBlock must be less than or equal to toBlock" },
+      { code: -32602, message: "Invalid params: block range must use hex values" },
+      { code: -32601, message: logRangeLimit },
+      { code: -32700, message: logRangeLimit },
+      { code: 3, message: `execution reverted: ${logRangeLimit}` },
+      { code: -32600, message: `execution reverted: ${logRangeLimit}` },
+    ]) {
+      await withFixtures([
+        ({ method }) => method === "eth_chainId" ? {} : { error }, () => ({}),
+      ], async endpoints => {
+        const client = clientFor(endpoints);
+        await assert.rejects(client.request(logRequest));
+        assert.deepEqual(endpoints[0].calls.map(call => call.method), ["eth_chainId", "eth_getLogs"]);
+        assert.equal(endpoints[1].calls.length, 0);
+        assert.deepEqual(client.transport.rpcStatus.unavailableHosts, []);
+      });
+    }
+  });
+
+  it("does not apply log range failover to other methods or chain validation", async () => {
+    for (const method of ["eth_blockNumber", "eth_call", "eth_sendRawTransaction", "eth_chainId"]) {
+      await withFixtures([
+        (body) => body.method === method ? { error: { code: -32600, message: logRangeLimit } } : {},
+        () => ({}),
+      ], async endpoints => {
+        const client = clientFor(endpoints);
+        await assert.rejects(client.request({ method, params: ["0x1234"] }));
+        assert.equal(endpoints[1].calls.length, 0);
+        assert.deepEqual(client.transport.rpcStatus.unavailableHosts, []);
+      });
+    }
+    await withFixtures([() => ({ error: { code: -32600, message: logRangeLimit } }), () => ({})], async endpoints => {
+      await assert.rejects(clientFor(endpoints).request(logRequest));
+      assert.deepEqual(endpoints[0].calls.map(call => call.method), ["eth_chainId"]);
+      assert.equal(endpoints[1].calls.length, 0);
+    });
   });
 
   it("uses the tertiary endpoint after two failed providers", async () => {

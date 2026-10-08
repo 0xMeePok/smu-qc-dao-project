@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
-import { encodeAbiParameters, encodeEventTopics, keccak256 } from "viem";
+import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256 } from "viem";
 import { escrowClient, escrowConfig, escrowRecord, escrowAddress, owner, researcher, txHash } from "./fixtures/escrowAuditFixture.js";
 import { memoryDb } from "./memoryDb.mjs";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
@@ -93,13 +93,44 @@ describe("escrow funding service", () => {
     assert.equal([...f.db.records.keys()].filter(path => path.startsWith("audits/")).length, 2);
   });
 
+  it("starts a new scan at the verified creation receipt instead of the deployment block", async () => {
+    const f = fixture();
+    f.record.audit.blockNumber = 99;
+    const result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+    assert.equal(f.ranges[0].fromBlock, 88n);
+    assert.equal(result.reconciliation.anchors, 2);
+    assert.equal(result.reconciliation.status, "verified");
+  });
+
   it("indexes original creation even when audit.transactionHash points at a later proposal amendment", async () => {
     const f = fixture(), amendment = hash("a");
-    f.receipts.set(amendment, { to: config.address, status: "success", blockNumber: 99n, logs: [], transactionHash: amendment });
+    f.receipts.set(amendment, { to: config.address, status: "success", blockNumber: 99n,
+      blockHash: hash("4"), logs: [], transactionHash: amendment });
+    f.client.getTransaction = async () => ({ hash: amendment, to: config.address, from: researcher, chainId: config.chainId,
+      blockNumber: 99n, blockHash: hash("4"), input: encodeFunctionData({ abi: config.abi, functionName: "updateHashes",
+        args: [f.expected.entityId, f.expected.proposalHash, f.expected.solutionHash, 0] }) });
     f.record.audit.transactionHash = amendment;
+    f.record.audit.blockNumber = 99;
     const result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
     assert.equal(f.ranges[0].fromBlock, 80n);
     assert.equal(result.reconciliation.anchors, 2);
+  });
+
+  it("keeps the deployment checkpoint when creation identity or receipt consistency cannot be verified", async () => {
+    const variants = [
+      transaction => ({ ...transaction, from: owner }),
+      transaction => ({ ...transaction, input: encodeFunctionData({ abi: config.abi,
+        functionName: "commitProposalWithEscrow", args: [zero, ...prepareStoredProposal(escrowRecord(), { registryConfig: config }).args.slice(1)] }) }),
+      transaction => ({ ...transaction, blockNumber: 99n }),
+      transaction => ({ ...transaction, input: "0x12345678" }),
+    ];
+    for (const variant of variants) {
+      const f = fixture(), original = f.client.getTransaction;
+      f.client.getTransaction = async request => variant(await original(request));
+      const result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+      assert.equal(f.ranges[0].fromBlock, 80n);
+      assert.equal(result.reconciliation.anchors, 2);
+    }
   });
 
   it("persists a bounded scan cursor and publishes no summary until the complete registry history is reconciled", async () => {
@@ -107,6 +138,7 @@ describe("escrow funding service", () => {
     let result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
     assert.equal(result.reconciliation.complete, false); assert.equal(result.summary, null);
     assert.equal(f.ranges[0].toBlock - f.ranges[0].fromBlock + 1n, 10000n);
+    f.client.getTransaction = async () => { throw new Error("A resumed scan must use its saved cursor"); };
     for (let index = 0; index < 3; index++) result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
     assert.equal(result.reconciliation.complete, true); assert.equal(result.reconciliation.anchors, 2);
     assert.equal(f.ranges[1].fromBlock, f.ranges[0].toBlock + 1n);

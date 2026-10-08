@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
-import { encodeFunctionData, keccak256, stringToHex } from "viem";
+import { decodeFunctionData, encodeFunctionData, keccak256, stringToHex } from "viem";
 import { prepareIndependentEscrowCommit, prepareStoredProposal } from "./proposalAuditPayload.js";
 import { opportunityEntityId } from "./auditCanonical.js";
 import { verifyProposalEscrow } from "./escrowAudit.js";
@@ -230,11 +230,29 @@ async function saveEvent({ db, event, record, summary, now }) {
 }
 
 async function initialBlock(record, client, config) {
-  const receipt = await client.getTransactionReceipt({ hash: record.audit?.transactionHash });
+  const hash = record.audit?.transactionHash;
+  const receipt = await client.getTransactionReceipt({ hash });
   if (receipt.status !== "success" || !same(receipt.to, config.address)) fail("failed-precondition", "This proposal belongs to a different or unconfirmed registry deployment.");
-  // audit.transactionHash may be a later updateHashes receipt. Creation is
-  // immutable, so begin at the deployment checkpoint and scan bounded pages.
-  return BigInt(config.deployment?.blockNumber ?? 0);
+  const deploymentBlock = BigInt(config.deployment?.blockNumber ?? 0);
+  const transaction = await client.getTransaction({ hash });
+  // A confirmed audit may describe an amendment. Only the exact proposal's
+  // creation transaction can safely exclude earlier registry history.
+  if (same(transaction.to, config.address) && same(transaction.from, record.researcherId)
+      && same(transaction.hash, hash) && same(receipt.transactionHash, hash)
+      && Number(transaction.chainId) === config.chainId
+      && typeof receipt.blockNumber === "bigint" && receipt.blockNumber >= deploymentBlock
+      && transaction.blockNumber === receipt.blockNumber && receipt.blockHash
+      && same(transaction.blockHash, receipt.blockHash)) {
+    let decoded;
+    try { decoded = decodeFunctionData({ abi: config.abi, data: transaction.input }); } catch { /* keep the deployment checkpoint */ }
+    if (["commitProposalWithEscrow", "commitProposal"].includes(decoded?.functionName)) {
+      const expected = isIndependentProposal(record)
+        ? prepareIndependentEscrowCommit(record, { registryConfig: config })
+        : prepareStoredProposal(record, { registryConfig: config });
+      if (same(decoded.args[0], expected.entityId) && same(decoded.args[1], expected.opportunityId)) return receipt.blockNumber;
+    }
+  }
+  return deploymentBlock;
 }
 
 export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
