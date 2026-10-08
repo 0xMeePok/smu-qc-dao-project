@@ -87,6 +87,16 @@ describe("wallet escrow funding panel", () => {
     await ready(); fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
     await screen.findByText("The posting has been closed.");
     expect(mocks.write).not.toHaveBeenCalled();
+    expect(screen.queryByText("Checking current funding status and network fees…")).toBeNull();
+  });
+  it("shows preparation while deposit eligibility is checked without asking for a wallet prompt yet", async () => {
+    mocks.prepare.mockImplementation(() => new Promise(() => {}));
+    await ready();
+    fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
+    expect(screen.getByText("Checking current funding status and network fees…")).toBeTruthy();
+    expect(screen.queryByText(/confirm the escrow deposit in your wallet/)).toBeNull();
+    expect(screen.queryByText("Transaction confirmed.")).toBeNull();
+    expect(mocks.write).not.toHaveBeenCalled();
   });
   it("allows the problem owner to request selection through the platform service", async () => {
     mocks.read.mockResolvedValue(model({ remaining: 0n, roles: { problemOwner: true } }));

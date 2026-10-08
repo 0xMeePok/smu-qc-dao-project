@@ -37,6 +37,7 @@ export function SessionProvider({ children }) {
   const { signMessageAsync } = useSignMessage();
 
   const [status, setStatus] = useState("signed-out");
+  const [signInPhase, setSignInPhase] = useState(null);
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState(null);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
@@ -51,6 +52,7 @@ export function SessionProvider({ children }) {
   const reset = useCallback(() => {
     lookupToken.current += 1;
     setStatus("signed-out");
+    setSignInPhase(null);
     setProfile(null);
     setVerifiedAddress(null);
     setError(null);
@@ -86,6 +88,7 @@ export function SessionProvider({ children }) {
 
       setError(null);
       setStatus("verifying");
+      setSignInPhase("preparing");
 
       try {
         // `getConnection(config).chainId` - NOT `getChainId(config)`. wagmi keeps two
@@ -122,7 +125,9 @@ export function SessionProvider({ children }) {
           needsSwitch ? switchChain(wagmiConfig, { chainId: EXPECTED_CHAIN_ID }) : null,
         ]);
 
+        setSignInPhase("signing");
         const signature = await signMessageAsync({ message: challenge.message, account: target });
+        setSignInPhase("checking");
         await exchangeSignatureForSession({ address: target, signature, challengeId: challenge.challengeId });
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
@@ -148,6 +153,8 @@ export function SessionProvider({ children }) {
         // That bug meant every failure showed the same generic fallback string no
         // matter what messageForFirebaseError actually produced.
         return { ok: false, rejected, message: failureMessage };
+      } finally {
+        setSignInPhase(null);
       }
     },
     [address, signMessageAsync, disconnectAsync],
@@ -335,6 +342,7 @@ export function SessionProvider({ children }) {
   const value = useMemo(
     () => ({
       status,
+      signInPhase,
       profile,
       error,
       address: verifiedAddress,
@@ -354,7 +362,7 @@ export function SessionProvider({ children }) {
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
     }),
-    [status, profile, error, verifiedAddress, authResolved, signIn, completeOnboarding, saveProfile, signOutOfSession],
+    [status, signInPhase, profile, error, verifiedAddress, authResolved, signIn, completeOnboarding, saveProfile, signOutOfSession],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

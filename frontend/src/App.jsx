@@ -39,9 +39,9 @@ import CreatePostingPage from "./pages/CreatePostingPage.jsx";
 import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
 import OpportunityEditPage from "./pages/OpportunityEditPage.jsx";
 import PostingDetailPage from "./pages/PostingDetailPage.jsx";
-import { listPublishedPostings } from "./lib/postings.js";
+import { usePublishedPostings } from "./lib/usePublishedPostings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
-import { toOpportunityListItem, toRemovedOpportunityListItem } from "./lib/opportunityPresentation.js";
+import { toRemovedOpportunityListItem } from "./lib/opportunityPresentation.js";
 import { listRemovedProblems, moderationReasonLabel } from "./lib/moderation.js";
 import { opportunityWorkflowStatus, workflowStatusLabel } from "./config/workflowStatus.js";
 import {
@@ -428,52 +428,6 @@ function Home() {
   );
 }
 
-// Live postings, shared by Home and Discover. Reading one needs an active session,
-// so a signed-out visitor is never sent to Firestore just to be denied.
-function usePublishedPostings() {
-  const { isAuthenticated } = useAuth();
-  const [postings, setPostings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-  const [hasMore, setHasMore] = useState(false);
-  const cursor = useRef(null);
-  const generation = useRef(0);
-  const busy = useRef(false);
-
-  async function loadPage(reset = false) {
-    if (busy.current || !isAuthenticated) return;
-    busy.current = true;
-    const current = generation.current;
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const page = await listPublishedPostings({ cursor: reset ? null : cursor.current });
-      if (generation.current !== current) return;
-      cursor.current = page.cursor;
-      setHasMore(page.hasMore);
-      setPostings((old) => reset ? page.items.map(toOpportunityListItem)
-        : [...old, ...page.items.filter((item) => !old.some((row) => row.id === item.id)).map(toOpportunityListItem)]);
-    } catch (error) { if (generation.current === current) setLoadError(error); }
-    finally {
-      if (generation.current === current) { busy.current = false; setLoading(false); }
-    }
-  }
-
-  useEffect(() => {
-    generation.current += 1;
-    busy.current = false;
-    cursor.current = null;
-    setPostings([]);
-    setHasMore(false);
-    setLoadError(null);
-    if (isAuthenticated) loadPage(true);
-    else setLoading(false);
-    return () => { generation.current += 1; };
-  }, [isAuthenticated]);
-
-  return { postings, loading, loadError, isAuthenticated, hasMore, loadMore: () => loadPage(false) };
-}
-
 function SignedOutNotice() {
   return (
     <p className="notice" role="status">
@@ -520,12 +474,13 @@ function useRemovedProblems(isAuthenticated) {
 }
 
 function Discover({ params }) {
-  const { postings, loading: liveLoading, loadError, isAuthenticated, hasMore, loadMore } = usePublishedPostings();
+  const { postings, loading: liveLoading, fetching, loadError, isAuthenticated, hasMore, loadMore, refresh } = usePublishedPostings();
   const { items: removedProblems, ready: removedReady } = useRemovedProblems(isAuthenticated);
-  const loading = liveLoading || (isAuthenticated && !removedReady);
+  const loading = liveLoading || (isAuthenticated && !removedReady && postings.length === 0);
   const listed = useMemo(() => {
-    const seen = new Set(postings.map((item) => item.id));
-    return [...postings, ...removedProblems.filter((item) => !seen.has(item.id))];
+    // A fresh moderation tombstone overrides an older cached published row.
+    const removedIds = new Set(removedProblems.map((item) => item.id));
+    return [...postings.filter((item) => !removedIds.has(item.id)), ...removedProblems];
   }, [postings, removedProblems]);
   const { roles } = useAuth();
   const canBrowseSolutions = Boolean(roles?.some((role) => [ROLES.OWNER, ROLES.RESEARCHER, ROLES.EVALUATOR, ROLES.FUNDER].includes(role)));
@@ -653,7 +608,10 @@ function Discover({ params }) {
           ))}
         </div>
         <div className="discover-toolbar-end">
-          {!loading && !loadError && listed.length > 0 && (
+          {isAuthenticated && <button type="button" className="text-button" disabled={fetching} onClick={refresh}>
+            {fetching && !loading ? "Refreshing opportunities…" : "Refresh opportunities"}
+          </button>}
+          {!loading && listed.length > 0 && (
             <span className="discover-results-summary" aria-live="polite">
               {results.totalResults} {results.totalResults === 1 ? "opportunity" : "opportunities"}
               {results.totalPages > 1 && ` · showing ${results.firstResult}–${results.lastResult}`}
@@ -667,7 +625,9 @@ function Discover({ params }) {
       {isAuthenticated && loading && <OpportunityListSkeleton />}
       {loadError && (
         <p className="notice notice-error" role="alert">
-          We could not load published opportunities. Please refresh and try again.
+          {postings.length > 0
+            ? "Could not refresh opportunities. Showing previously loaded results; refresh to check for updates."
+            : "We could not load published opportunities. Please refresh and try again."}
         </p>
       )}
       {!loading && !loadError && isAuthenticated && listed.length === 0 && (
@@ -677,7 +637,7 @@ function Discover({ params }) {
           <p>New problem statements and funding opportunities will appear here once published.</p>
         </div>
       )}
-      {!loading && !loadError && listed.length > 0 && (
+      {!loading && listed.length > 0 && (
         <>
           {results.totalResults === 0 ? (
             <div className="discover-empty discover-no-results" role="status">
@@ -698,8 +658,8 @@ function Discover({ params }) {
         </>
       )}
       {hasMore && <div className="discover-load-more">
-        <button type="button" className="secondary" disabled={loading} onClick={loadMore}>
-          {loading ? "Loading opportunities…" : "Load more opportunities"}
+        <button type="button" className="secondary" disabled={fetching} onClick={loadMore}>
+          {fetching ? "Loading opportunities…" : "Load more opportunities"}
         </button>
       </div>}
     </section>

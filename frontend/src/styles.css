@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap");
-
 :root {
   /* Laboratory blotter: newsprint ground, carbon ink, one cadmium signal.
      Every component reads these tokens. */
@@ -4440,17 +4438,12 @@ h1, h2, h3 { font-weight: 500; }
   transform-origin: top;
   animation: desk-draw 2s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
-.desk-hero h1 { animation: desk-fade 0.8s 0.5s both; }
-.desk-hero > p { animation: desk-fade 0.8s 0.7s both; }
-.desk-hero > .desk-actions,
-.desk-example { animation: desk-fade 0.8s 0.9s both; }
-.desk-reveal { animation: desk-fade 0.8s var(--enter, 0s) both; }
+/* Render content and actions immediately on navigation. Only the decorative
+   rule animates; delayed opacity made a ready page feel like it was loading. */
 @keyframes desk-draw { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-@keyframes desk-fade { from { opacity: 0; } to { opacity: 1; } }
 
-.discover-page { animation: desk-fade 0.6s both; }
 @media (prefers-reduced-motion: reduce) {
-  .desk-rule, .desk-hero h1, .desk-hero > p, .desk-hero > .desk-actions, .desk-example, .desk-reveal, .discover-page { animation: none; }
+  .desk-rule { animation: none; }
 }
 .desk h1, .desk h2 { margin: 0; font-weight: 500; letter-spacing: -0.03em; line-height: 0.96; }
 .desk-hero h1 { max-width: 11ch; font-size: clamp(52px, 8vw, 92px); }
@@ -4997,4 +4990,51 @@ h1, h2, h3 { font-weight: 500; }
 @media (max-width: 540px) {
   .rollup-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-attention-item, .rollup-head { flex-direction: column; }
+}
+
+/* Workspace sections must keep their rhythm inside tab panels as well as pages. */
+.workspace-panel {
+  display: grid;
+  gap: 28px;
+  min-width: 0;
+}
+.workspace-panel > * { min-width: 0; }
+.workspace-panel > .field-hint { margin: 0; line-height: 1.6; }
+.workspace-panel > .role-dashboard-panel { margin-bottom: 0; }
+.dashboard-page > .card-table + .card-table { margin-top: 28px; }
+
+.dashboard-page .page-heading h1 { font-size: clamp(32px, 3.8vw, 42px); line-height: 1.15; }
+.dashboard-page .page-heading p { max-width: 60ch; font-size: 18px; line-height: 1.55; margin-top: 12px; }
+.dashboard-page .eyebrow-row { flex-wrap: wrap; gap: 8px 12px; }
+.dashboard-page .table-header { padding: 22px 28px; gap: 16px 24px; }
+.dashboard-page .table-header h2,
+.dashboard-page .table-header h3 { font-size: 20px; font-weight: 600; line-height: 1.3; }
+.dashboard-page .table-row { padding: 24px 28px; gap: 20px 28px; align-items: flex-start; }
+.dashboard-page .table-row > div:first-child { flex: 1; }
+.dashboard-page .table-row > div:first-child > strong { font-size: 17px; line-height: 1.45; }
+.dashboard-page .table-row small { margin-top: 8px; line-height: 1.6; }
+.dashboard-page .table-row-meta { display: block; }
+.dashboard-page .table-row-meta + .workflow-badge-wrap,
+.dashboard-page .table-row-meta + .status-badges { margin-top: 10px; }
+.dashboard-page .table-row-actions { gap: 12px 16px; max-width: 100%; }
+.dashboard-page .table-empty { margin: 0; padding: 30px 28px; line-height: 1.6; }
+
+/* The payment summary is a peer section, not a heading attached to the preceding card. */
+.dashboard-page .escrow-release { border-radius: 16px; background: var(--surface); }
+.dashboard-page .escrow-release .table-header { align-items: center; }
+.dashboard-page .escrow-release .table-header p { max-width: 54ch; line-height: 1.6; }
+.dashboard-page .escrow-release .table-row { padding: 24px 28px; }
+.dashboard-page .escrow-release .table-row p { margin: 10px 0; line-height: 1.6; }
+
+.funding-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.funding-meta > .funding-note { flex-basis: 100%; order: 1; line-height: 1.6; }
+.funding-meta > .draft-badge { flex: none; }
+
+@media (max-width: 680px) {
+  .workspace-panel { gap: 20px; }
+  .dashboard-page .table-header { padding: 20px; }
+  .dashboard-page .table-row,
+  .dashboard-page .escrow-release .table-row { padding: 20px; }
+  .dashboard-page .table-row-actions { width: 100%; padding-top: 12px; border-top: 1px solid var(--line); }
+  .dashboard-page .table-empty { padding: 24px 20px; }
 }

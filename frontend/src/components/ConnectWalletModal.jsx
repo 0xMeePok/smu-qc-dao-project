@@ -11,7 +11,7 @@ import { Modal } from "./Modal.jsx";
  */
 export function ConnectWalletModal({ onClose }) {
   const { connectors, connectAsync } = useConnect();
-  const { signIn } = useSession();
+  const { signIn, signInPhase } = useSession();
   const [pending, setPending] = useState(null);
   const [phase, setPhase] = useState(null);
   const [error, setError] = useState(null);
@@ -102,7 +102,9 @@ export function ConnectWalletModal({ onClose }) {
               )}
               <span>{connector.name}</span>
               {pending === connector.uid ? (
-                <small>{phase === "connecting" ? "Connecting…" : "Authorising…"}</small>
+                <small>{phase === "connecting" ? "Connecting…"
+                  : signInPhase === "signing" ? "Confirm in your wallet…"
+                    : signInPhase === "checking" ? "Verifying sign-in…" : "Preparing sign-in…"}</small>
               ) : null}
             </button>
           ))}

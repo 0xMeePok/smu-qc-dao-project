@@ -52,7 +52,8 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
     {notice && <p className="proposal-success" role="status">{notice}</p>}
     {progress && <p role="status">{progress.status === "awaiting_signature" ? progress.action === "approve" ? "Step 1: approve this token amount in your wallet."
       : progress.action === "deposit" ? "Step 2: confirm the escrow deposit in your wallet." : progress.action === "resetAllowance" ? "Reset the existing token allowance in your wallet." : "Confirm the transaction in your wallet."
-      : progress.status === "pending" ? "Transaction submitted. Waiting for confirmation…" : "Transaction confirmed."}
+      : progress.status === "pending" ? "Transaction submitted. Waiting for confirmation…"
+        : progress.status === "confirmed" ? "Transaction confirmed." : "Checking current funding status and network fees…"}
       {progress.transactionHash && <> <a href={explorer("tx", progress.transactionHash)} target="_blank" rel="noreferrer">View transaction</a></>}</p>}
     {unresolvedTransaction && <p role="alert">This transaction is awaiting confirmation. Check it before starting another payment. <a href={explorer("tx", unresolvedTransaction)} target="_blank" rel="noreferrer">View pending transaction</a>{" "}
       <button type="button" className="secondary small" disabled={busy} onClick={onConfirm}>Retry confirmation</button></p>}
@@ -211,7 +212,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   }, [refresh, refreshVersion]);
   const act = async (action, extra = {}) => {
     if (!walletReady || writing.current || unresolvedTransaction || (action === "deposit" && fundingBlockReason) || (moderated && !refundActions.has(action))) return;
-    writing.current = true; setBusy(true); setError(""); setProgress(null); setNotice("");
+    writing.current = true; setBusy(true); setError(""); setProgress({ status: "preparing", action }); setNotice("");
     const remember = hash => { saveTransaction(storageKey, hash); if (currentStorageKey.current === storageKey) setUnresolvedTransaction(hash); };
     try {
       // Revalidate current membership and posting eligibility immediately before any deposit signature.
@@ -241,6 +242,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
       if (action === "deposit") setAmount("");
     } catch (err) {
       setError(escrowErrorMessage(err));
+      if (!err.transactionHash) setProgress(null);
       if (err.transactionHash && !err.transactionSettled) remember(err.transactionHash);
       if (err.transactionSettled) { remember(null); setProgress(null); }
     } finally { writing.current = false; setBusy(false); }

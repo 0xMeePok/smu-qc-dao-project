@@ -73,7 +73,7 @@ function WorkspaceTabs({ id, label, tabs, active, onSelect }) {
 function WorkspacePanel({ id, tab, children }) {
   return (
     <div className="admin-tab-content">
-      <div id={`${id}-panel-${tab}`} role="tabpanel" aria-labelledby={`${id}-tab-${tab}`}>{children}</div>
+      <div className="workspace-panel" id={`${id}-panel-${tab}`} role="tabpanel" aria-labelledby={`${id}-tab-${tab}`}>{children}</div>
     </div>
   );
 }
@@ -120,7 +120,7 @@ export function MyProblems({ onNavigate }) {
     loadingPage.current = true;
     setLoading(true);
     try {
-      const page = await listOwnPostings(user.id, { cursor: append ? cursor.current : null });
+      const page = await listOwnPostings(user.id, { cursor: append ? cursor.current : null, includeMetrics: false });
       if (version !== generation.current) return;
       cursor.current = page.cursor;
       setHasMore(page.hasMore);

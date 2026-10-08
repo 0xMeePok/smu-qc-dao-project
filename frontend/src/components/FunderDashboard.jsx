@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getFunderDashboard } from "../lib/openFunding.js";
 import { escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
@@ -16,28 +17,45 @@ const money = (item, key) => escrowFundingAmount(item[key], item.tokenDecimals, 
 
 export function FunderDashboard({ onNavigate }) {
   const { user } = useAuth();
-  const [data, setData] = useState(null), [error, setError] = useState("");
-  const [loading, setLoading] = useState(true), [revision, setRevision] = useState(0);
+  const wallet = user?.id?.toLowerCase();
+  const dashboard = useQuery({
+    queryKey: ["funderDashboard", wallet],
+    queryFn: () => getFunderDashboard(),
+    enabled: Boolean(wallet),
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+  const approaches = useQuery({
+    queryKey: ["funderSentApproaches", wallet],
+    queryFn: () => listFundingApproaches(),
+    enabled: Boolean(wallet),
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+  const data = dashboard.data;
+  const error = dashboard.error?.message || (dashboard.error ? "Your funding dashboard could not be loaded." : "");
+  const sentApproaches = approaches.data;
+  const approachError = approaches.error ? fundingApproachError(approaches.error, "Approaches you sent could not be loaded. Please try again.") : "";
   const [audit, setAudit] = useState(null);
   const [independentClaim, setIndependentClaim] = useState(null);
-  const [sentApproaches, setSentApproaches] = useState(null);
-  const [approachError, setApproachError] = useState("");
-  const [approachesLoading, setApproachesLoading] = useState(true);
   const auditRequest = useRef(0);
   useEffect(() => {
-    let active = true;
     auditRequest.current++;
-    setAudit(null); setData(null); setError(""); setLoading(true);
-    setSentApproaches(null); setApproachError(""); setApproachesLoading(true);
-    if (!user?.id) { setLoading(false); setApproachesLoading(false); return undefined; }
-    getFunderDashboard().then(result => { if (active) setData(result); })
-      .catch(err => { if (active) setError(err.message || "Your funding dashboard could not be loaded."); })
-      .finally(() => { if (active) setLoading(false); });
-    listFundingApproaches().then(result => { if (active) setSentApproaches(result); })
-      .catch(err => { if (active) setApproachError(fundingApproachError(err, "Approaches you sent could not be loaded. Please try again.")); })
-      .finally(() => { if (active) setApproachesLoading(false); });
-    return () => { active = false; };
-  }, [user?.id, revision]);
+    setAudit(null);
+    setIndependentClaim(null);
+    return () => { auditRequest.current++; };
+  }, [wallet]);
+  const refresh = () => {
+    if (dashboard.isFetching || approaches.isFetching) return;
+    auditRequest.current++;
+    setAudit(null);
+    dashboard.refetch({ cancelRefetch: false });
+    approaches.refetch({ cancelRefetch: false });
+  };
   const openAudit = async (kind, id) => {
     const version = ++auditRequest.current;
     setAudit({ kind, loading: true });
@@ -57,12 +75,15 @@ export function FunderDashboard({ onNavigate }) {
     {!data?.[name]?.length ? <p className="table-empty">{empty}</p> : data[name].map(renderItem)}
     {data?.truncated?.[name] && <p className="field-hint">Showing a limited set of {title.toLowerCase()}. Open individual records for full details.</p>}
   </section>;
+  if (!wallet) return null;
   return <section className="page dashboard-page funder-dashboard">
     <div className="page-heading"><div className="eyebrow-row"><span className="role-chip">Funder</span><span>{user?.org}</span></div>
       <h1>Funding dashboard</h1><p>Manage your grant calls and track confirmed proposal commitments, payments and refunds.</p>
-      <button className="secondary small" type="button" disabled={loading} onClick={() => setRevision(value => value + 1)}>Refresh dashboard</button>
+      <button className="secondary small" type="button" disabled={dashboard.isFetching || approaches.isFetching} onClick={refresh}>Refresh dashboard</button>
     </div>
-    {loading ? <p role="status" className="table-empty">Loading your funding dashboard…</p> : error ? <p role="alert" className="error-banner">{error}</p> : <>
+    {error && <p role="alert" className="error-banner">{error}{data && " Showing last verified results; open individual records to check current balances."}</p>}
+    {data && dashboard.isFetching && <p role="status" className="field-hint">Refreshing your funding dashboard… Showing last verified results.</p>}
+    {!data ? !error && <p role="status" className="table-empty">Loading your funding dashboard…</p> : <>
       <div className="dashboard-stats-grid funder-totals">
         {[["committed", "Total committed"], ["locked", "Total locked"], ["released", "Total released"], ["refunded", "Total refunded"]].map(([key, label]) => <div className="stat-card" key={key}>
           <h2 className="stat-label">{label}</h2>
@@ -116,14 +137,16 @@ export function FunderDashboard({ onNavigate }) {
         </div>{links(item)}
       </div>)}
     </>}
-    {!loading && !error && (sentApproaches?.sent?.length > 0 || approachError) && <FundingApproachList
+    {sentApproaches?.sent?.length > 0 && approaches.isFetching && <p role="status" className="field-hint">Refreshing funding approach history… Showing previously loaded results.</p>}
+    {sentApproaches && approachError && <p role="alert" className="error-banner">{approachError} Showing previously loaded approach history.</p>}
+    {(sentApproaches?.sent?.length > 0 || approachError) && <FundingApproachList
       title="Legacy funding approach history"
       hint="Earlier expressions of interest are preserved as a read-only record. Current independent listings use crowdfunding escrow."
       empty="You have not approached a researcher yet."
       items={sentApproaches?.sent ?? []}
       truncated={sentApproaches?.truncated?.sent}
-      loading={approachesLoading}
-      error={approachError}
+      loading={approaches.isPending}
+      error={sentApproaches ? "" : approachError}
       onNavigate={onNavigate}
       readOnly
     />}

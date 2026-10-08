@@ -7,13 +7,14 @@ const mocks = vi.hoisted(() => ({
   connector: { id: "io.metamask", uid: "metamask-1", name: "MetaMask" },
   connect: vi.fn(),
   signIn: vi.fn(),
+  signInPhase: null,
 }));
 
 vi.mock("wagmi", () => ({
   useConnect: () => ({ connectors: [mocks.connector], connectAsync: mocks.connect }),
 }));
 vi.mock("../../src/context/SessionContext.jsx", () => ({
-  useSession: () => ({ signIn: mocks.signIn }),
+  useSession: () => ({ signIn: mocks.signIn, signInPhase: mocks.signInPhase }),
 }));
 vi.mock("../../src/lib/wagmi.js", () => ({
   isUsableConnector: () => true,
@@ -25,6 +26,7 @@ describe("ConnectWalletModal", () => {
   beforeEach(() => {
     mocks.connect.mockReset();
     mocks.signIn.mockReset();
+    mocks.signInPhase = null;
   });
 
   afterEach(cleanup);
@@ -40,12 +42,18 @@ describe("ConnectWalletModal", () => {
     }));
 
     const onClose = vi.fn();
-    render(<ConnectWalletModal onClose={onClose} />);
+    const view = render(<ConnectWalletModal onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: /MetaMask/ }));
     expect(await screen.findByText("Connecting…")).toBeTruthy();
 
     await act(async () => finishConnect({ accounts: [ACCOUNT] }));
-    expect(await screen.findByText("Authorising…")).toBeTruthy();
+    expect(await screen.findByText("Preparing sign-in…")).toBeTruthy();
+    mocks.signInPhase = "signing";
+    view.rerender(<ConnectWalletModal onClose={onClose} />);
+    expect(screen.getByText("Confirm in your wallet…")).toBeTruthy();
+    mocks.signInPhase = "checking";
+    view.rerender(<ConnectWalletModal onClose={onClose} />);
+    expect(screen.getByText("Verifying sign-in…")).toBeTruthy();
 
     await act(async () => finishSignIn({ ok: true, rejected: false }));
     expect(onClose).toHaveBeenCalledOnce();

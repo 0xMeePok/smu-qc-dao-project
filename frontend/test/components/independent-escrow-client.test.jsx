@@ -45,7 +45,27 @@ describe("independent crowdfunding wallet actions", () => {
     await writeIndependentFundingAction({ proposalId: "listing", action: "vote", account, evidenceHash, approve: true,
       adapters: wallet, prepare });
     expect(prepare).toHaveBeenCalledWith({ proposalId: "listing", action: "vote", evidenceHash, approve: true });
-    expect(wallet.writeContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "voteCompletion", args: [4n, evidenceHash, true] }));
+    expect(wallet.writeContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "voteCompletion", args: [4n, evidenceHash, true] }),
+      expect.objectContaining({ onWalletRequest: expect.any(Function) }));
+  });
+  it("asks for wallet confirmation only when the adapter has finished its prechecks", async () => {
+    const wallet = adapters(), updates = [];
+    let openWallet, finish;
+    wallet.writeContract.mockImplementation((_request, options) => new Promise(resolve => {
+      openWallet = options.onWalletRequest;
+      finish = resolve;
+    }));
+    const pending = writeIndependentFundingAction({ proposalId: "listing", action: "vote", account,
+      evidenceHash, approve: true, adapters: wallet, prepare: async () => prepared("voteCompletion", ["4", evidenceHash, true]),
+      onChange: update => updates.push(update) });
+    expect(updates).toEqual([{ status: "preparing", action: "vote" }]);
+    await vi.waitFor(() => expect(wallet.writeContract).toHaveBeenCalledOnce());
+    expect(updates.every(update => update.status === "preparing")).toBe(true);
+    openWallet();
+    expect(updates.at(-1)).toEqual({ status: "awaiting_signature", action: "vote" });
+    finish(tx);
+    await pending;
+    expect(updates.slice(-2).map(update => update.status)).toEqual(["pending", "confirmed"]);
   });
   it("sends the readable decline reason for the backend to hash with the independent domain", async () => {
     const reason = "The delivery scope has changed", wallet = adapters();

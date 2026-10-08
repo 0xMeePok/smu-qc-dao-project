@@ -41,3 +41,20 @@ it("hydrates only the bounded owner page and preserves its cursor", async () => 
   ] });
   expect(mocks.getDoc).toHaveBeenCalledTimes(1);
 });
+
+it("returns management rows without waiting for unused per-posting metrics", async () => {
+  const drafts = { id: "draft1", data: () => ({ title: "Unfinished brief", status: "draft" }) };
+  mocks.getDocs.mockResolvedValue({ docs: [brief, drafts], size: 2 });
+  mocks.getDoc.mockRejectedValue(new Error("Metrics are unavailable"));
+
+  const page = await listOwnPostings("0xOWNER", { includeMetrics: false });
+
+  expect(page.items).toMatchObject([
+    { id: "problem1", title: "Quantum routing problem", status: "submitted", categories: [], attachments: [] },
+    { id: "draft1", title: "Unfinished brief", status: "draft", categories: [], attachments: [] },
+  ]);
+  expect(page.cursor).toBe(drafts);
+  expect(page.hasMore).toBe(false);
+  expect(mocks.getDocs).toHaveBeenCalledTimes(1);
+  expect(mocks.getDoc).not.toHaveBeenCalled();
+});

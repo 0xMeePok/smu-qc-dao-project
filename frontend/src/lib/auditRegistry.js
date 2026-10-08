@@ -95,45 +95,56 @@ export function decorateAuditRevert(error, functionName) {
 
 export function createWagmiAuditAdapters(config = wagmiConfig) {
   return {
-    writeContract: async (request) => {
-      const { maxFeePerGas, maxPriorityFeePerGas } = await wagmiEstimateFeesPerGas(config, {
-        chainId: request.chainId,
-        type: "eip1559",
-      });
-      if (typeof maxFeePerGas !== "bigint" || maxFeePerGas <= 0n
-          || typeof maxPriorityFeePerGas !== "bigint" || maxPriorityFeePerGas < 0n
-          || maxPriorityFeePerGas > maxFeePerGas) {
-        throw new Error("Unable to estimate network fees. Please try again shortly.");
-      }
-      // Leave room for base-fee changes while the wallet confirmation is open.
-      // This raises the spending cap, not the priority fee or gas units consumed.
-      const feeCap = maxFeePerGas * 2n;
-      // Never above the cap: a tip larger than the total fee is an invalid
-      // transaction, which matters on a chain whose base fee is itself tiny.
-      const priorityFee = maxPriorityFeePerGas > 0n
-        ? maxPriorityFeePerGas
-        : (MIN_PRIORITY_FEE_WEI < feeCap ? MIN_PRIORITY_FEE_WEI : feeCap);
+    writeContract: async (request, { onWalletRequest } = {}) => {
+      const estimateFeeCaps = async () => {
+        const { maxFeePerGas, maxPriorityFeePerGas } = await wagmiEstimateFeesPerGas(config, {
+          chainId: request.chainId,
+          type: "eip1559",
+        });
+        if (typeof maxFeePerGas !== "bigint" || maxFeePerGas <= 0n
+            || typeof maxPriorityFeePerGas !== "bigint" || maxPriorityFeePerGas < 0n
+            || maxPriorityFeePerGas > maxFeePerGas) {
+          throw new Error("Unable to estimate network fees. Please try again shortly.");
+        }
+        // Leave room for base-fee changes while the wallet confirmation is open.
+        // This raises the spending cap, not the priority fee or gas units consumed.
+        const feeCap = maxFeePerGas * 2n;
+        // Never above the cap: a tip larger than the total fee is an invalid
+        // transaction, which matters on a chain whose base fee is itself tiny.
+        const priorityFee = maxPriorityFeePerGas > 0n
+          ? maxPriorityFeePerGas
+          : (MIN_PRIORITY_FEE_WEI < feeCap ? MIN_PRIORITY_FEE_WEI : feeCap);
+        return { maxFeePerGas: feeCap, maxPriorityFeePerGas: priorityFee };
+      };
       // Simulate before the wallet opens. A reverting call on Arbitrum does not
       // fail estimateGas cleanly — the node returns a block-sized gas limit, and
       // MetaMask prices that as thousands of ETH. The registry write that should
       // run is still writeContract; simulation only refuses a call that cannot
       // succeed (wrong function for the id, wrong wallet, reused hash, expired).
-      try {
-        await wagmiSimulateContract(config, {
-          address: request.address,
-          abi: request.abi,
-          functionName: request.functionName,
-          args: request.args,
-          account: request.account,
-          chainId: request.chainId,
-        });
-      } catch (error) {
-        throw decorateAuditRevert(error, request.functionName);
-      }
+      const simulate = async () => {
+        try {
+          await wagmiSimulateContract(config, {
+            address: request.address,
+            abi: request.abi,
+            functionName: request.functionName,
+            args: request.args,
+            account: request.account,
+            chainId: request.chainId,
+          });
+        } catch (error) {
+          throw decorateAuditRevert(error, request.functionName);
+        }
+      };
+      // These checks are independent. Start both immediately, but never open
+      // the wallet unless both succeed. This removes a serial RPC round trip
+      // without caching fees or skipping the protection against reverting calls.
+      const [feeCaps] = await Promise.all([estimateFeeCaps(), simulate()]);
+      // Keep UI callbacks outside the contract request so they never reach wagmi
+      // or the wallet RPC. Preparation is complete only at this boundary.
+      onWalletRequest?.();
       return wagmiWriteContract(config, {
         ...request,
-        maxFeePerGas: feeCap,
-        maxPriorityFeePerGas: priorityFee,
+        ...feeCaps,
       });
     },
     waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),

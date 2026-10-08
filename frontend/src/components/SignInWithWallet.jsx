@@ -12,10 +12,12 @@ import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 export function SignInWithWallet() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const { isConnected } = useAccount();
-  const { signIn, error, isVerifying, isChecking, isBusy } = useSession();
+  const { signIn, error, isVerifying, isChecking, isBusy, signInPhase } = useSession();
 
   const label = isVerifying
-    ? "Confirm in your wallet…"
+    ? signInPhase === "signing"
+      ? "Confirm in your wallet…"
+      : signInPhase === "checking" ? "Verifying sign-in…" : "Preparing wallet sign-in…"
     : isChecking
       ? "Signing in…"
       : "Sign in with Wallet";
