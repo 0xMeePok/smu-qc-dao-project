@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(),
   user: { id: `0x${"a".repeat(40)}` }, account: { address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614 } }));
@@ -98,10 +99,37 @@ it("ignores an old account's delayed read after the connected account changes", 
 
 it("retries confirmation of an existing activation hash without requesting a new signature", async () => {
   const transactionHash = `0x${"1".repeat(64)}`;
-  render(<IndependentFundingPanel proposal={{ id: "pending-activation" }} initialTransaction={{ transactionHash, action: "activate" }} />);
+  const client = new QueryClient();
+  const wallet = mocks.user.id;
+  for (const name of ["funderDashboard", "escrowFundingSummary"]) client.setQueryData([name, wallet], {});
+  render(<QueryClientProvider client={client}><IndependentFundingPanel proposal={{ id: "pending-activation" }} initialTransaction={{ transactionHash, action: "activate" }} /></QueryClientProvider>);
   fireEvent.click(await screen.findByRole("button", { name: "Retry confirmation" }));
   await screen.findByText("Crowdfunding transaction confirmed.");
   expect(mocks.confirm).toHaveBeenCalledWith(transactionHash);
   expect(mocks.sync).toHaveBeenCalledWith({ proposalId: "pending-activation", transactionHash });
+  for (const name of ["funderDashboard", "escrowFundingSummary"]) expect(client.getQueryState([name, wallet]).isInvalidated).toBe(true);
+  client.clear();
   expect(mocks.write).not.toHaveBeenCalled();
+});
+
+it("removes stale independent funding actions when refreshed verification fails", async () => {
+  const changed = vi.fn();
+  mocks.read.mockResolvedValue(props().snapshot);
+  render(<IndependentFundingPanel proposal={{ id: "mismatch-check" }} onStateChange={changed} />);
+  await screen.findByRole("button", { name: "Fund independent listing" });
+  mocks.read.mockRejectedValueOnce(new Error("Mismatch detected in the listing."));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh crowdfunding" }));
+  await screen.findByText("Mismatch detected in the listing.");
+  expect(screen.queryByRole("button", { name: "Fund independent listing" })).toBeNull();
+  expect(changed).toHaveBeenLastCalledWith(null);
+});
+
+it("blocks new independent deposits on a page integrity mismatch without blocking available pull refunds", () => {
+  const p = props({ integrityBlocked: true, snapshot: { ...props().snapshot, actions: { deposit: true, claimRefund: true } } });
+  render(<IndependentFundingView {...p} />);
+  expect(screen.getByRole("button", { name: "Fund independent listing" }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Fund independent listing" }));
+  expect(p.onAction).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Claim my refund" }));
+  expect(p.onAction).toHaveBeenCalledWith("claimRefund", {});
 });

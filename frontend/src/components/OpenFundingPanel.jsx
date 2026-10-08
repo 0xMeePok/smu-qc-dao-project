@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { getOpenFundingSummary, openFundingSupported, syncOpenFunding, writeOpenFundingAction } from "../lib/openFunding.js";
 import { confirmEscrowTransaction, escrowErrorMessage } from "../lib/escrow.js";
@@ -24,7 +25,7 @@ function save(key, value) {
 }
 
 export function OpenFundingView({ data, loading, error, notice, busy, walletReady, pending, amount, setAmount,
-  withdrawalAmount = "", setWithdrawalAmount, onAction, onRefresh, onConfirm, onConnect, proposalId, onNavigate }) {
+  withdrawalAmount = "", setWithdrawalAmount, onAction, onRefresh, onConfirm, onConnect, proposalId, onNavigate, integrityBlocked = false }) {
   const disabled = busy || loading || !walletReady || Boolean(pending);
   const money = value => escrowFundingAmount(value, data?.tokenDecimals, data?.tokenSymbol);
   const selected = (data?.selections ?? []).filter(item => !proposalId || item.proposalId === proposalId);
@@ -50,12 +51,12 @@ export function OpenFundingView({ data, loading, error, notice, busy, walletRead
       {data.poolAddress ? <a href={escrowExplorer("address", data.poolAddress)} target="_blank" rel="noreferrer">View grant pool contract</a>
         : <p className="field-hint">The owner must create this pool, then deposit funds. The advertised budget is not a deposit.</p>}
       {!walletReady && <button type="button" className="secondary small" onClick={onConnect}>Connect your signed-in wallet</button>}
-      {data.canCreate && !data.poolAddress && <button type="button" className="primary small" disabled={disabled} onClick={() => onAction("create")}>Create grant pool</button>}
+      {data.canCreate && !data.poolAddress && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("create")}>Create grant pool</button>}
       {data.canDeposit && data.poolAddress && <div className="field-group">
         <Field label="Add funding" htmlFor="grant-deposit" hint={`Enter an additional amount in ${data.tokenSymbol}. You can increase the pool after awarding grants.`}>
           {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" value={amount} aria-describedby={describedBy} maxLength={160} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
         </Field>
-        <button type="button" className="primary small" disabled={disabled || !amount.trim()} onClick={() => onAction("deposit")}>Deposit funds</button>
+        <button type="button" className="primary small" disabled={disabled || integrityBlocked || !amount.trim()} onClick={() => onAction("deposit")}>Deposit funds</button>
         <p className="field-hint">Approve the entered token amount, then confirm the deposit in your wallet.</p>
       </div>}
       {canWithdraw && <div className="field-group">
@@ -73,8 +74,8 @@ export function OpenFundingView({ data, loading, error, notice, busy, walletRead
           {Number(item.acceptanceDeadline) > 0 && <small className="table-row-meta">Accept before {new Date(Number(item.acceptanceDeadline) * 1000).toLocaleString()}</small>}
           {item.status === "none" && data.canSelect && !canSelect && <small className="table-row-meta">{item.canSelect === false ? "This proposal is not currently eligible for selection." : "Deposit more funds to cover this request."}</small>}
         </div><div className="table-row-actions">
-          {canSelect && <button type="button" className="primary small" disabled={disabled} onClick={() => onAction("select", item.proposalId)}>Select for funding</button>}
-          {item.canAccept && <button type="button" className="primary small" disabled={disabled} onClick={() => onAction("accept", item.proposalId)}>Accept grant</button>}
+          {canSelect && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("select", item.proposalId)}>Select for funding</button>}
+          {item.canAccept && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("accept", item.proposalId)}>Accept grant</button>}
           {item.canVoid && <button type="button" className="secondary small" disabled={disabled} onClick={() => onAction("void", item.proposalId)}>Void expired offer</button>}
           {!proposalId && onNavigate && <button type="button" className="text-button" onClick={() => onNavigate(`proposal/${item.proposalId}?tab=funding`)}>View proposal</button>}
         </div></div>;
@@ -88,7 +89,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, walletRead
   </section>;
 }
 
-export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange }) {
+export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
   const { address, isConnected, chainId } = useAccount();
@@ -107,7 +108,7 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange }
       const next = openFundingSupported() ? await getOpenFundingSummary({ problemId, proposalId })
         : { supported: false, message: "The current contract deployment does not yet support grant pools. Grant transactions will be available after deployment." };
       if (activeKey.current === currentKey) setData(next);
-    } catch (err) { if (activeKey.current === currentKey) setError(escrowErrorMessage(err)); }
+    } catch (err) { if (activeKey.current === currentKey) { setData(null); setError(escrowErrorMessage(err)); } }
     finally { if (activeKey.current === currentKey) setLoading(false); }
   }, [problemId, proposalId, key]);
   useEffect(() => { setData(null); setError(""); setNotice(""); setAmount(""); setWithdrawalAmount(""); setPending(stored(key)); void refresh(); }, [refresh, key]);
@@ -119,7 +120,7 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange }
   const walletReady = Boolean(user?.id && isConnected && same(address, user.id) && chainId === AUDIT_REGISTRY_CONFIG.chainId);
   const remember = value => { save(key, value); if (activeKey.current === key) setPending(value); };
   const act = async (action, selectedProposalId) => {
-    if (actionBusy.current || pending || !walletReady) return;
+    if (actionBusy.current || pending || !walletReady || (integrityBlocked && !["withdraw", "void"].includes(action))) return;
     actionBusy.current = true; setBusy(true); setError(""); setNotice("");
     try {
       const result = await writeOpenFundingAction({ problemId, proposalId: selectedProposalId, account: address,
@@ -130,7 +131,7 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange }
         } });
       remember({ transactionHash: result.transactionHash, action, proposalId: selectedProposalId });
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
-      try { await syncOpenFunding({ problemId, proposalId: selectedProposalId, transactionHash: result.transactionHash }); }
+      try { await syncOpenFunding({ problemId, proposalId: selectedProposalId, transactionHash: result.transactionHash }); invalidateFundingDashboardSummaries(queryClient); }
       finally { if (activeKey.current === key) onChange?.({ proposalId: selectedProposalId, action, transactionHash: result.transactionHash }); }
       remember(null);
       if (activeKey.current === key) { setAmount(""); setWithdrawalAmount(""); setNotice(action === "select" ? "Offer recorded. The researcher has seven days to accept." : action === "accept" ? "Grant accepted. The requested funds are now in proposal escrow." : action === "withdraw" ? "Withdrawal confirmed. Unreserved funds have returned to your wallet." : "Grant pool updated."); }
@@ -146,13 +147,13 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange }
     try {
       const result = await confirmEscrowTransaction(pending.transactionHash, { confirmations: 2 });
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
-      try { await syncOpenFunding({ problemId, proposalId: pending.proposalId, transactionHash: result.transactionHash }); }
+      try { await syncOpenFunding({ problemId, proposalId: pending.proposalId, transactionHash: result.transactionHash }); invalidateFundingDashboardSummaries(queryClient); }
       finally { if (activeKey.current === key) onChange?.({ proposalId: pending.proposalId, action: pending.action, transactionHash: result.transactionHash }); }
       remember(null); setNotice("Transaction confirmed. The grant pool has been refreshed."); await refresh();
     } catch (err) { if (err.terminal) remember(null); setError(escrowErrorMessage(err)); }
     finally { actionBusy.current = false; setBusy(false); }
   };
-  return <><OpenFundingView {...{ data, loading, error, notice, busy, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, proposalId, onNavigate }}
+  return <><OpenFundingView {...{ data, loading, error, notice, busy, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, proposalId, onNavigate, integrityBlocked }}
     onAction={act} onRefresh={() => { setError(""); void refresh(); }} onConfirm={confirm} onConnect={() => setWalletPrompt(true)} />
     {walletPrompt && <ConnectWalletModal onClose={() => setWalletPrompt(false)} />}</>;
 }

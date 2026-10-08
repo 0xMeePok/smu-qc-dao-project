@@ -13,7 +13,9 @@ before(async () => {
     for (const uid of [owner, researcher, admin]) await setDoc(doc(context.firestore(), "users", uid), {
       address: uid, fullName: "Grant test", organisation: "Research", role: uid === admin ? 1 : 0, suspended: false,
     });
-    await setDoc(doc(context.firestore(), "openFundingSummaries", "verified-grant"), { owner, totalDeposited: "100000000000", available: "0" });
+    for (const name of ["openFundingSummaries", "openFundingSelections", "escrowFundingPositions"]) {
+      await setDoc(doc(context.firestore(), name, "verified-grant"), { owner, totalDeposited: "100000000000", available: "0" });
+    }
   });
 });
 after(async () => env?.cleanup());
@@ -21,9 +23,11 @@ after(async () => env?.cleanup());
 test("grant financial projections cannot be read, listed, created, edited or deleted through browser SDKs", async () => {
   for (const uid of [owner, researcher, admin, null]) {
     const db = uid ? env.authenticatedContext(uid).firestore() : env.unauthenticatedContext().firestore();
-    const ref = doc(db, "openFundingSummaries", "verified-grant");
-    await assertFails(getDoc(ref)); await assertFails(getDocs(collection(db, "openFundingSummaries")));
-    await assertFails(setDoc(doc(db, "openFundingSummaries", "fake"), { owner, totalDeposited: "1" }));
-    await assertFails(updateDoc(ref, { available: "100000000000" })); await assertFails(deleteDoc(ref));
+    for (const name of ["openFundingSummaries", "openFundingSelections", "escrowFundingPositions"]) {
+      const ref = doc(db, name, "verified-grant");
+      await assertFails(getDoc(ref)); await assertFails(getDocs(collection(db, name)));
+      await assertFails(setDoc(doc(db, name, "fake"), { owner, totalDeposited: "1" }));
+      await assertFails(updateDoc(ref, { available: "100000000000" })); await assertFails(deleteDoc(ref));
+    }
   }
 });

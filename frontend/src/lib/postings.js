@@ -330,8 +330,12 @@ export async function listOpportunityRevisions(postingId, { uid, isOwner = false
     .sort((a, b) => (b.at?.toMillis?.() || 0) - (a.at?.toMillis?.() || 0));
 }
 
-/** A bounded page of this wallet's postings, drafts included, newest first. */
-export async function listOwnPostings(ownerId, { cursor = null } = {}) {
+/**
+ * A bounded page of this wallet's postings, drafts included, newest first.
+ * Management tables only need the posting documents. Callers that display
+ * proposal counts (the profile's My briefs tab) retain metrics by default.
+ */
+export async function listOwnPostings(ownerId, { cursor = null, includeMetrics = true } = {}) {
   requireFirebase();
   const snapshot = await getDocs(query(
     collection(db, "problems"),
@@ -340,9 +344,11 @@ export async function listOwnPostings(ownerId, { cursor = null } = {}) {
     ...(cursor ? [startAfter(cursor)] : []),
     limit(50),
   ));
-  const items = await Promise.all(snapshot.docs.map(async (item) => postingFromSnapshot(
-    item, await findOpportunityMetrics(item.id, item.data()),
-  )));
+  const items = includeMetrics
+    ? await Promise.all(snapshot.docs.map(async (item) => postingFromSnapshot(
+      item, await findOpportunityMetrics(item.id, item.data()),
+    )))
+    : snapshot.docs.map((item) => postingFromSnapshot(item));
   return { items,
     cursor: snapshot.docs.at(-1) ?? null, hasMore: snapshot.size === 50 };
 }

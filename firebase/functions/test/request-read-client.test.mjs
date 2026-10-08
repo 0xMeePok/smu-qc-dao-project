@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRequestReadClient } from "../requestReadClient.js";
+import { seedDashboardSnapshots } from "./fixtures/dashboardSnapshots.js";
 import { getFunderDashboard } from "../funderDashboard.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { openFundingFixture, owner, researcher } from "./fixtures/openFundingFixture.js";
@@ -109,60 +110,141 @@ function instrument(client) {
   return counts;
 }
 
-describe("funder dashboard RPC fanout", () => {
-  it("avoids duplicate decision/commitment verification while keeping exact accounting", async () => {
-    const f = businessFixture(), counts = instrument(f.client), before = JSON.stringify([...f.db.records]);
+function completePositionReads(f) {
+  const read = f.client.readContract;
+  f.client.readContract = async request => {
+    const result = await read(request);
+    return request.functionName === "depositorSummary" ? { ...result, claimable: 0n } : result;
+  };
+}
+
+describe("funder dashboard saved projections", () => {
+  it("does not call any RPC and preserves exact commitments and authorization", async () => {
+    const f = businessFixture(); await seedDashboardSnapshots(f);
+    const counts = instrument(f.client), before = JSON.stringify([...f.db.records]);
     const result = await getFunderDashboard(f);
-    // Before request sharing this fixture issued 158 contract reads / 169 RPCs.
-    assert.equal(counts.readContract, 70);
-    assert.equal(Object.values(counts).reduce((sum, count) => sum + count, 0), 75);
+    assert.deepEqual(counts, {});
     assert.equal(result.decisions.length, 2); assert.equal(result.commitments.length, 2);
     assert.equal(result.totals[0].committed, "100000000000");
     assert.equal(result.totals[0].locked, "100000000000");
     assert.equal(result.totalsPartial, false);
     assert.equal(JSON.stringify([...f.db.records]), before);
-    assert.equal(f.simulations.length, 0);
-    assert.ok(f.calls.every((row) => row.blockNumber === 100n));
-    assert.equal(f.calls.filter((row) => row.functionName === "milestoneAt").length, 4);
+    const other = await getFunderDashboard({ ...f, uid: researcher });
+    assert.deepEqual(other.commitments, []); assert.deepEqual(other.totals, []);
+    f.db.records.get(`users/${owner}`).suspended = true;
+    await assert.rejects(getFunderDashboard(f), { code: "permission-denied" });
   });
 
-  it("shares grant factory and milestone reads while retaining both accepted grants", async () => {
+  it("reads accepted grants without an RPC even when the provider is offline", async () => {
     const f = openFundingFixture(); f.select(0, 2); f.select(1, 2);
-    const counts = instrument(f.client), result = await getFunderDashboard(f);
-    // Before request sharing this fixture issued 97 contract reads / 106 RPCs.
-    assert.equal(counts.readContract, 85);
-    assert.equal(Object.values(counts).reduce((sum, count) => sum + count, 0), 90);
+    await seedDashboardSnapshots(f);
+    f.client = new Proxy({}, { get() { assert.fail("Dashboard must never access RPC"); } });
+    const result = await getFunderDashboard(f);
     assert.equal(result.decisions.length, 2); assert.equal(result.commitments.length, 2);
     assert.equal(result.totals[0].committed, "100000000000");
     assert.equal(result.totalsPartial, false);
-    assert.equal(counts.getBlock, 2); // The safe block and the publication block.
   });
 
-  it("refreshes the head and wallet commitments on the next dashboard request", async () => {
-    const f = businessFixture(), counts = instrument(f.client);
+  it("refreshes saved balances after transaction sync without mixing blocks", async () => {
+    const f = businessFixture(); await seedDashboardSnapshots(f);
     const first = await getFunderDashboard(f);
     f.state.released[0] = 10_000_000_000n;
     f.state.refunded[0] = 5_000_000_000n;
-    f.client.getBlockNumber = async (options) => { assert.equal(options.cacheTime, 0); return 103n; };
-    const next = await getFunderDashboard(f);
-    assert.equal(first.blockNumber, 100); assert.equal(next.blockNumber, 102);
-    assert.equal(first.totals[0].locked, "100000000000");
+    f.client.getBlockNumber = async () => 103n;
+    // Chain changes alone do not cause dashboard RPCs or guesses.
+    assert.deepEqual((await getFunderDashboard(f)).totals, first.totals);
+    await seedDashboardSnapshots(f);
+    const counts = instrument(f.client), next = await getFunderDashboard(f);
+    assert.equal(first.commitments[0].blockNumber, 100); assert.equal(next.commitments[0].blockNumber, 102);
     assert.equal(next.totals[0].locked, "85000000000");
     assert.equal(next.totals[0].released, "10000000000");
     assert.equal(next.totals[0].refunded, "5000000000");
-    assert.equal(counts.getChainId, 2);
-    assert.ok(f.calls.some((row) => row.blockNumber === 102n));
-    const other = await getFunderDashboard({ ...f, uid: researcher });
-    assert.deepEqual(other.commitments, []); assert.deepEqual(other.totals, []);
+    assert.deepEqual(counts, {});
   });
 
-  it("reports unavailable commitments instead of retaining a previous request's balances", async () => {
-    const f = businessFixture();
-    assert.equal((await getFunderDashboard(f)).totals[0].committed, "100000000000");
-    f.client.readContract = async () => { throw new Error("RPC unavailable"); };
+  it("reports missing or corrupt snapshots as partial rather than inventing zero totals", async () => {
+    const f = businessFixture(); await seedDashboardSnapshots(f);
+    for (const [path, row] of f.db.records) if (path.startsWith("escrowFundingPositions/")) {
+      if (row.proposalId === f.proposals[0].id) f.db.records.delete(path);
+      else row.released = "50000000001";
+    }
     const result = await getFunderDashboard(f);
     assert.deepEqual(result.commitments, []); assert.deepEqual(result.totals, []);
-    assert.equal(result.unavailableCommitments, 2); assert.equal(result.unavailableDecisions, 2);
-    assert.equal(result.totalsPartial, true);
+    assert.equal(result.unavailableCommitments, 2); assert.equal(result.totalsPartial, true);
   });
+
+  it("rejects foreign deployment positions if verified fallback is unavailable", async () => {
+    const f = businessFixture(); await seedDashboardSnapshots(f);
+    for (const [path, row] of f.db.records) if (path.startsWith("escrowFundingPositions/")) {
+      if (row.proposalId === f.proposals[0].id) row.chainId = 1;
+      else row.registryAddress = researcher;
+    }
+    f.client.getChainId = async () => { throw new Error("Offline"); };
+    const result = await getFunderDashboard(f);
+    assert.deepEqual(result.totals, []); assert.equal(result.unavailableCommitments, 2);
+  });
+  it("verifies missing snapshots once, persists them and makes the next dashboard RPC-free", async () => {
+    const f = businessFixture(); completePositionReads(f);
+    const first = await getFunderDashboard(f);
+    assert.equal(first.commitments.length, 2);
+    assert.equal(first.totals[0].committed, "100000000000");
+    assert.equal(first.totalsPartial, false);
+    assert.equal([...f.db.records.keys()].filter(key => key.startsWith("escrowFundingPositions/")).length, 2);
+    f.client = new Proxy({}, { get() { assert.fail("Saved dashboard must not access RPC"); } });
+    assert.deepEqual((await getFunderDashboard(f)).totals, first.totals);
+  });
+
+  it("fills only the missing wallet position and leaves saved positions untouched", async () => {
+    const f = businessFixture(); completePositionReads(f); await seedDashboardSnapshots(f);
+    for (const [path, row] of f.db.records) if (path.startsWith("escrowFundingPositions/") && row.proposalId === f.proposals[1].id) f.db.records.delete(path);
+    f.calls.length = 0;
+    const result = await getFunderDashboard(f);
+    assert.equal(result.commitments.length, 2); assert.equal(result.totalsPartial, false);
+    const reads = f.calls.filter(row => row.functionName === "depositorSummary");
+    assert.equal(reads.length, 1); assert.equal(reads[0].address, f.addresses[1]);
+  });
+
+  it("fills grant pools, offers and accepted positions then reuses them", async () => {
+    const f = openFundingFixture(); completePositionReads(f); f.select(0, 2); f.select(1);
+    const first = await getFunderDashboard(f);
+    assert.equal(first.opportunities[0].poolUnavailable, false);
+    assert.deepEqual(first.decisions.map(row => row.selection.status), ["accepted", "pending"]);
+    assert.equal(first.commitments.length, 1); assert.equal(first.totalsPartial, false);
+    f.client = new Proxy({}, { get() { assert.fail("Saved grant dashboard must not access RPC"); } });
+    const second = await getFunderDashboard(f);
+    assert.deepEqual(second.totals, first.totals); assert.deepEqual(second.decisions, first.decisions);
+  });
+
+  it("refreshes a wallet snapshot that predates a newly saved payout summary", async () => {
+    const f = businessFixture(); completePositionReads(f); await seedDashboardSnapshots(f);
+    for (const [path, row] of f.db.records) if (path.startsWith("escrowFundingSummaries/") && row.proposalId === f.proposals[0].id) { row.blockNumber = 102; row.totalReleased = "10000000000"; }
+    f.state.released[0] = 10_000_000_000n;
+    f.client.getBlockNumber = async () => 103n; f.calls.length = 0;
+    const result = await getFunderDashboard(f);
+    assert.equal(result.totals[0].released, "10000000000");
+    assert.equal(f.calls.filter(row => row.functionName === "depositorSummary").length, 1);
+  });
+
+  it("does not let saved zero-balance prospects crowd funded commitments out", async () => {
+    const f = businessFixture(); await seedDashboardSnapshots(f);
+    const example = [...f.db.records.entries()].find(([path]) => path.startsWith("escrowFundingPositions/"))[1];
+    const positions = [...f.db.records.entries()].filter(([path]) => path.startsWith("escrowFundingPositions/"));
+    for (const [path] of positions) f.db.records.delete(path);
+    for (let i = 0; i < 60; i++) f.db.records.set(`escrowFundingPositions/zero-${i}`, { ...example, proposalId: `zero-${i}`, committed: "0" });
+    for (const [path, row] of positions) f.db.records.set(path, row);
+    f.client = new Proxy({}, { get() { assert.fail("All real balances are saved"); } });
+    const result = await getFunderDashboard(f);
+    assert.equal(result.commitments.length, 2); assert.equal(result.truncated.commitments, false);
+    assert.equal(result.totals[0].committed, "100000000000");
+  });
+
+  it("does not reverify unchanged wallet allocations when only the saved block advances", async () => {
+    const f = businessFixture(); await seedDashboardSnapshots(f);
+    for (const [path, row] of f.db.records) if (path.startsWith("escrowFundingSummaries/")) row.blockNumber = 102;
+    f.client = new Proxy({}, { get() { assert.fail("Unchanged allocation must not cause RPC"); } });
+    const result = await getFunderDashboard(f);
+    assert.equal(result.totals[0].committed, "100000000000"); assert.equal(result.totalsPartial, false);
+    assert.equal(result.commitments[0].blockNumber, 100);
+  });
+
 });

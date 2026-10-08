@@ -11,12 +11,15 @@ const mocks = vi.hoisted(() => ({
   go: vi.fn(),
   revoke: vi.fn(async () => ({ success: true })),
   signOut: vi.fn(),
+  requestMessage: vi.fn(),
+  signMessage: vi.fn(),
+  exchangeSignature: vi.fn(),
 }));
 
 vi.mock("wagmi", () => ({
   useAccount: () => ({ address: mocks.accountAddress }),
   useDisconnect: () => ({ disconnectAsync: mocks.disconnect }),
-  useSignMessage: () => ({ signMessageAsync: vi.fn() }),
+  useSignMessage: () => ({ signMessageAsync: mocks.signMessage }),
 }));
 vi.mock("wagmi/actions", () => ({
   getConnection: () => ({ chainId: 421614 }),
@@ -44,8 +47,8 @@ vi.mock("../../src/lib/firebase.js", () => ({
   isFirebaseConfigured: true,
 }));
 vi.mock("../../src/lib/authFlow.js", () => ({
-  exchangeSignatureForSession: vi.fn(),
-  requestSignInMessage: vi.fn(),
+  exchangeSignatureForSession: (...args) => mocks.exchangeSignature(...args),
+  requestSignInMessage: (...args) => mocks.requestMessage(...args),
   revokeOwnSessions: (...args) => mocks.revoke(...args),
 }));
 vi.mock("../../src/lib/profile.js", () => ({
@@ -95,6 +98,32 @@ describe("SessionProvider persistence and logout integration", () => {
     await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
     expect(currentSession.address).toBe(mocks.auth.currentUser.uid);
     expect(currentSession.profile.fullName).toBe("Ada");
+  });
+
+  it("only asks for a wallet signature after the server challenge is ready", async () => {
+    mocks.auth.currentUser = null;
+    mocks.accountAddress = `0x${"a".repeat(40)}`;
+    let nonceReady, signatureReady, sessionReady;
+    mocks.requestMessage.mockReturnValue(new Promise(resolve => { nonceReady = resolve; }));
+    mocks.signMessage.mockReturnValue(new Promise(resolve => { signatureReady = resolve; }));
+    mocks.exchangeSignature.mockReturnValue(new Promise(resolve => { sessionReady = resolve; }));
+    mountProvider();
+    await waitFor(() => expect(currentSession?.isLoading).toBe(false));
+
+    let pending;
+    act(() => { pending = currentSession.signIn(); });
+    expect(currentSession.signInPhase).toBe("preparing");
+    expect(currentSession.isBusy).toBe(true);
+    expect(mocks.signMessage).not.toHaveBeenCalled();
+
+    await act(async () => { nonceReady({ message: "Sign in", challengeId: "nonce" }); });
+    expect(currentSession.signInPhase).toBe("signing");
+    expect(mocks.signMessage).toHaveBeenCalledOnce();
+    await act(async () => { signatureReady("signature"); });
+    expect(currentSession.signInPhase).toBe("checking");
+    await act(async () => { sessionReady(); await pending; });
+    expect(currentSession.signInPhase).toBeNull();
+    expect(currentSession.isSignedIn).toBe(true);
   });
 
   // Revocation already succeeded here, so the token is dead server-side. Staying

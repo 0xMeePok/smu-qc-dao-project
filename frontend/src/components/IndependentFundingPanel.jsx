@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { getIndependentFundingState, independentFundingAmount, independentFundingExplorer, independentFundingStatus,
   independentFundingDeploymentKey, independentFundingError, confirmIndependentFundingTransaction,
@@ -21,12 +22,12 @@ function savePending(key, value) {
 const instant = seconds => Number(seconds) > 0 ? new Date(Number(seconds) * 1000).toLocaleString() : "—";
 
 export function IndependentFundingView({ snapshot, loading, error, busy, progress, notice, walletReady, onConnect,
-  amount, onAmount, delivery, onDelivery, reason = "", onReason, onAction, onRefresh, unresolved, onConfirm }) {
+  amount, onAmount, delivery, onDelivery, reason = "", onReason, onAction, onRefresh, unresolved, onConfirm, integrityBlocked = false }) {
   const summary = snapshot?.summary, actions = snapshot?.actions ?? {}, wallet = snapshot?.wallet ?? {};
   const disabled = loading || busy || !walletReady || Boolean(unresolved);
   const money = value => independentFundingAmount(value, summary?.tokenDecimals, summary?.tokenSymbol);
   const button = (action, label, extra = {}) => actions[action] ? <button type="button" className="primary small"
-    disabled={disabled} onClick={() => onAction(action, extra)}>{label}</button> : null;
+    disabled={disabled || (integrityBlocked && !["claimRefund", "expire"].includes(action))} onClick={() => onAction(action, extra)}>{label}</button> : null;
   return <section className="card escrow-funding" aria-label="Independent crowdfunding">
     <div className="table-header"><div><h3>Independent crowdfunding</h3><p>50% on researcher acceptance · 50% after funder completion approval</p></div>
       <button type="button" className="secondary small" disabled={loading || busy} onClick={onRefresh}>Refresh crowdfunding</button></div>
@@ -94,7 +95,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
   </section>;
 }
 
-export function IndependentFundingPanel({ proposal, onStateChange, refreshVersion = 0, initialTransaction = null }) {
+export function IndependentFundingPanel({ proposal, onStateChange, refreshVersion = 0, initialTransaction = null, integrityBlocked = false }) {
   const { user } = useAuth(), { address, isConnected, chainId } = useAccount();
   const queryClient = useContext(QueryClientContext);
   const [snapshot, setSnapshot] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
@@ -112,7 +113,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, refreshVersio
     const current = ++version.current; setLoading(true); setError("");
     try { const next = await getIndependentFundingState({ proposalId: proposal.id });
       if (alive.current && activeKey.current === key && current === version.current) { setSnapshot(next); change.current?.(next); }
-    } catch (err) { if (alive.current && activeKey.current === key && current === version.current) setError(independentFundingError(err, { reading: true })); }
+    } catch (err) { if (alive.current && activeKey.current === key && current === version.current) { setSnapshot(null); change.current?.(null); setError(independentFundingError(err, { reading: true })); } }
     finally { if (alive.current && activeKey.current === key && current === version.current) setLoading(false); }
   }, [proposal.id, user?.id, key]);
   useEffect(() => { setSnapshot(null); setNotice(""); setProgress(null); setBusy(false); setUnresolved(initialTransaction || pendingTransaction(key));
@@ -122,12 +123,13 @@ export function IndependentFundingPanel({ proposal, onStateChange, refreshVersio
   const remember = value => { savePending(key, value); if (currentPanel()) setUnresolved(value); };
   const sync = async (transactionHash, action) => {
     if (!["approve", "resetAllowance"].includes(action)) await syncIndependentFunding({ proposalId: proposal.id, transactionHash });
+    invalidateFundingDashboardSummaries(queryClient);
     remember(null); if (currentPanel()) await load();
     queryClient?.invalidateQueries({ queryKey: ["actionItems"] });
     queryClient?.invalidateQueries({ queryKey: ["developerDashboard"] });
   };
   const act = async (action, extra = {}) => {
-    if (busy || unresolved) return;
+    if (busy || unresolved || (integrityBlocked && !["claimRefund", "expire"].includes(action))) return;
     if (!walletReady) { setConnect(true); return; }
     setBusy(true); setError(""); setNotice("");
     try {
@@ -148,6 +150,6 @@ export function IndependentFundingPanel({ proposal, onStateChange, refreshVersio
   return <><IndependentFundingView snapshot={snapshot} loading={loading} error={error} busy={busy} progress={progress} notice={notice}
     walletReady={walletReady} onConnect={() => setConnect(true)} amount={amount} onAmount={setAmount} delivery={delivery} onDelivery={setDelivery}
     reason={reason} onReason={setReason}
-    onAction={act} onRefresh={load} unresolved={unresolved} onConfirm={confirm} />
+    integrityBlocked={integrityBlocked} onAction={act} onRefresh={load} unresolved={unresolved} onConfirm={confirm} />
     {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}</>;
 }

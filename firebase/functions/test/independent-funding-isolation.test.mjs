@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { enqueueEscrowFunding, readVerifiedFunding } from "../escrowFunding.js";
 import { readEscrowQueueActions, readGrantQueueMetadata } from "../escrowQueueMetadata.js";
+import { seedDashboardSnapshots } from "./fixtures/dashboardSnapshots.js";
 import { getFunderDashboard } from "../funderDashboard.js";
 import { readIndependentFundingQueueMetadata } from "../independentFundingQueueMetadata.js";
 import { memoryDb } from "./memoryDb.mjs";
@@ -37,6 +38,7 @@ describe("independent funding stays separate from existing escrow workflows", ()
     const f = openFundingFixture();
     f.select(0);
     f.db.records.set(`proposals/${independent.id}`, independent);
+    await seedDashboardSnapshots(f);
     const dashboard = await getFunderDashboard({ ...f, uid: owner });
     assert.equal(dashboard.opportunities.length, 1);
     assert.equal(dashboard.approaches.length, 2);

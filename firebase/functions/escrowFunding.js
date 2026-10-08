@@ -10,6 +10,8 @@ import { ESCROW_STATES, milestoneValue, reconcileFundingReceipt, same } from "./
 import { VOID_JOBS, voidDecision } from "./escrowModerationVoid.js";
 import { ANCHOR_JOBS } from "./moderationAnchor.js";
 import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
+import { FUNDING_POSITIONS, fundingAllocationBasis, saveFundingSnapshot } from "./fundingSnapshots.js";
+export { FUNDING_POSITIONS } from "./fundingSnapshots.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
 export const FUNDING_EVENTS = "escrowFundingEvents", PLATFORM_OUTBOX = "escrowPlatformOutbox", PAUSE_JOBS = "escrowPostingPauseJobs";
@@ -515,6 +517,14 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
     }
     const complete = cursorBlock === safeBlock, anchorCount = (job.anchorCount || 0) + added;
     if (complete && anchorCount !== verified.anchorCount) throw new Error("Escrow reconciliation mismatch: indexed anchor count differs from the registry.");
+    // A payout changes every depositor's allocation, not just the wallet that
+    // submitted it. Refresh all indexed depositors at the same confirmed block.
+    const previousSummary = complete ? await db.collection(FUNDING_SUMMARIES).doc(jobKey(config, proposalId)).get() : null;
+    const unchangedAllocations = previousSummary?.data()?.positionsComplete === true
+      && fundingAllocationBasis(previousSummary.data()) === fundingAllocationBasis(verified.summary);
+    if (unchangedAllocations) verified.summary.positionsComplete = true;
+    const positions = complete && !unchangedAllocations
+      ? await readFundingPositions({ db, client, config, summary: verified.summary }) : [];
     const cursor = await client.getBlock({ blockNumber: cursorBlock });
     const reconciliation = { status: complete ? "verified" : "syncing", matched: complete, complete, anchors: anchorCount, blockNumber: Number(cursorBlock) };
     const fresh = await loadFundingContext({ db, proposalId });
@@ -534,16 +544,18 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
         && ["Cancelled", "Expired", "Voided", "Refunded"].includes(verified.summary.state);
       const touchProposal = complete && verified.summary.upfrontReleased;
       const touchParent = Boolean(parentRef) && (touchProposal || invalidatedSelections.size || unpaidTerminal);
-      const [parent, proposal] = touchParent || touchProposal
-        ? await Promise.all([touchParent ? tx.get(parentRef) : null, touchProposal ? tx.get(proposalRef) : null])
-        : [null, null];
+      const summaryRef = db.collection(FUNDING_SUMMARIES).doc(jobKey(config, proposalId));
+      const [parent, proposal, savedSummary] = await Promise.all([
+        touchParent ? tx.get(parentRef) : null, touchProposal ? tx.get(proposalRef) : null,
+        complete ? tx.get(summaryRef) : null,
+      ]);
       const terminal = ["Released", "Refunded"].includes(verified.summary.state);
       tx.set(ref, { ...current.data(), cursorBlock: Number(cursorBlock), cursorHash: cursor.hash, anchorCount,
         selectionRequested: current.data().selectionRequested === true
           && !((selectionConsumed || unpaidTerminal) && same(current.data().selectionId, job.selectionId)),
         lastTransactionHash: lastHash, reconciliation, settlement, leaseUntil: timestamp(0),
         status: terminal && complete ? "complete" : "pending", nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now });
-      if (complete) tx.set(db.collection(FUNDING_SUMMARIES).doc(jobKey(config, proposalId)), {
+      if (complete && Number(savedSummary?.data()?.blockNumber ?? -1) <= verified.summary.blockNumber) tx.set(summaryRef, {
         ...verified.summary, transactionHash: lastHash, confirmedAt: now.toDate().toISOString(), reconciliation,
       });
       if (!independent && !isOpenFunding(context.record, context.parent) && complete && verified.summary.upfrontReleased && parent?.exists && parent.data().acceptedProposalId !== proposalId) {
@@ -560,6 +572,8 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
         tx.update(parentRef, { escrowSelection: null, updatedAt: now });
       }
     });
+    for (const position of positions) await saveFundingSnapshot({ db, collection: FUNDING_POSITIONS,
+      id: `${jobKey(config, proposalId)}_${position.uid}`, snapshot: { ...position, confirmedAt: now.toDate().toISOString() } });
     return getEscrowFundingHistory({ db, config, uid, proposalId });
   } catch (error) {
     await db.runTransaction(async tx => {
@@ -607,32 +621,97 @@ export async function startEscrowSettlement(options) {
 }
 
 export async function getEscrowFundingSummary({ db, client, config, uid }) {
-  const sets = await Promise.all(["postingOwnerId", "researcherId"].map(field => db.collection(FUNDING_SUMMARIES)
-    .where(field, "==", uid).where("registryAddress", "==", config.address.toLowerCase()).limit(50).get()));
-  const unique = new Map(sets.flatMap(set => set.docs).map(doc => doc.data())
+  const [sets, records] = await Promise.all([
+    Promise.all(["postingOwnerId", "researcherId"].map(field => db.collection(FUNDING_SUMMARIES)
+      .where(field, "==", uid).where("registryAddress", "==", config.address.toLowerCase()).limit(50).get())),
+    Promise.all(["postingOwnerId", "researcherId"].map(field => db.collection("proposals")
+      .where(field, "==", uid).limit(50).get())),
+  ]);
+  const saved = new Map(sets.flatMap(set => set.docs).map(doc => doc.data())
     .filter(item => item.chainId === config.chainId).map(item => [item.proposalId, item]));
+  const candidates = new Set(saved.keys());
+  for (const doc of records.flatMap(set => set.docs)) {
+    const row = doc.data();
+    if (!isIndependentProposal(row) && row.fundingTerms && row.audit?.status === "confirmed" && row.status !== "draft") candidates.add(doc.id);
+  }
   const items = [];
-  if (!unique.size) return { items, truncated: false, unavailableItems: 0, blockNumber: null };
-  if (config.contractName !== "EscrowAuditRegistry" || await client.getChainId() !== config.chainId) {
-    fail("failed-precondition", "Payment summaries require the configured escrow chain.");
-  }
-  const blockNumber = await client.getBlockNumber({ cacheTime: 0 }) - 1n;
-  if (blockNumber < 0n) fail("unavailable", "No confirmed escrow block is available yet.");
   let unavailableItems = 0;
-  for (const item of unique.values()) {
+  for (const proposalId of [...candidates].slice(0, 50)) {
     let context;
-    try {
-      context = await loadFundingContext({ db, uid, proposalId: item.proposalId });
-    } catch { /* Removed or no longer visible; do not expose a stale projection. */ }
-    if (!context) continue;
-    try {
-      // The cache discovers authorized records. Financial values always come
-      // from a fresh confirmed block; reading a dashboard never settles funds.
-      const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
-      items.push({ ...verified.summary });
-    } catch { unavailableItems++; }
+    try { context = await loadFundingContext({ db, uid, proposalId }); }
+    catch { continue; } // Removed or no longer visible; never expose an old projection.
+    let item = saved.get(proposalId);
+    if (!isConfirmedSnapshot(item) || !same(context.record.researcherId, item.researcherId)
+        || !same(context.parent.ownerId, item.postingOwnerId)) {
+      try { item = (await refreshEscrowDashboardSnapshot({ db, client, config, uid, proposalId })).summary; }
+      catch { unavailableItems++; continue; }
+    }
+    // Saved settlement is display-only. Detail pages and every funding action
+    // still verify current registry content and balances before proceeding.
+    items.push({ ...item, title: context.record.title || "Proposal", postingTitle: context.parent.title || "Posting" });
   }
-  return { items, truncated: sets.some(set => set.size === 50), unavailableItems, blockNumber: Number(blockNumber) };
+  return { items, truncated: [...sets, ...records].some(set => set.size === 50) || candidates.size > 50, unavailableItems,
+    blockNumber: items.length ? Math.min(...items.map(item => item.blockNumber)) : null };
+}
+
+const isConfirmedSnapshot = item => Boolean(item && (item.snapshotVerified === true
+  || (item.reconciliation?.complete === true && item.reconciliation?.matched === true))
+  && Number.isSafeInteger(item.blockNumber) && item.blockNumber >= 0);
+
+/** A missing dashboard record is verified once and then reused. No settlement,
+ * event scan or platform signer is involved in filling this display cache. */
+export async function refreshEscrowDashboardSnapshot({ db, client, config, uid, proposalId, blockNumber, now = Timestamp.now() }) {
+  await assertFundingChain(client, config);
+  const context = await loadFundingContext({ db, uid, proposalId });
+  blockNumber ??= await client.getBlockNumber({ cacheTime: 0 }) - 1n;
+  if (blockNumber < 0n) fail("unavailable", "No confirmed escrow block is available yet.");
+  const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
+  const summary = { ...verified.summary, snapshotVerified: true, confirmedAt: now.toDate().toISOString() };
+  const position = await readFundingPosition({ client, config, summary, uid: uid.toLowerCase() });
+  await saveFundingSnapshot({ db, collection: FUNDING_SUMMARIES, id: jobKey(config, proposalId), snapshot: summary });
+  await saveFundingSnapshot({ db, collection: FUNDING_POSITIONS, id: `${jobKey(config, proposalId)}_${position.uid}`, snapshot: position });
+  return { summary, position };
+}
+
+async function readFundingPosition({ client, config, summary, uid }) {
+  const own = await client.readContract({ address: summary.escrowAddress, abi: config.escrow.escrowAbi,
+    functionName: "depositorSummary", args: [uid], blockNumber: BigInt(summary.blockNumber) });
+  const committed = BigInt(at(own, "deposited", 0)), refunded = BigInt(at(own, "refunded", 2)),
+    released = BigInt(at(own, "released", 4)), claimable = BigInt(at(own, "claimable", 3));
+  const locked = committed - refunded - released;
+  if ([committed, refunded, released, claimable, locked].some(value => value < 0n) || claimable > locked) {
+    throw new Error("Escrow reconciliation mismatch: depositor accounting does not reconcile.");
+  }
+  return { ...summary, snapshotVerified: true, uid, committed: String(committed), refunded: String(refunded), released: String(released),
+    locked: String(locked), claimable: String(claimable) };
+}
+
+async function readFundingPositions({ db, client, config, summary }) {
+  const wallets = new Set();
+  let cursor, scanned = 0;
+  do {
+    let query = db.collection(FUNDING_EVENTS).where("proposalId", "==", summary.proposalId)
+      .where("registryAddress", "==", config.address.toLowerCase()).where("eventType", "==", "Deposit")
+      .orderBy("__name__").limit(100);
+    if (cursor) query = query.startAfter(cursor);
+    const page = await query.get();
+    scanned += page.size;
+    for (const doc of page.docs) {
+      const event = doc.data();
+      if (event.verified === true && event.chainId === config.chainId && /^0x[0-9a-f]{40}$/i.test(event.actor)) wallets.add(event.actor.toLowerCase());
+    }
+    cursor = page.size === 100 ? page.docs.at(-1).id : null;
+  } while (cursor && scanned < 1000 && wallets.size < 100);
+  // Bound background RPC work. Any wallet outside this batch is filled lazily
+  // on its next dashboard visit; older-block positions are never combined with
+  // newer aggregate balances.
+  const positions = [], addresses = [...wallets].slice(0, 100);
+  summary.positionsComplete = !cursor && wallets.size <= 100;
+  for (let i = 0; i < addresses.length; i += 8) {
+    positions.push(...await Promise.all(addresses.slice(i, i + 8)
+      .map(uid => readFundingPosition({ client, config, summary, uid }))));
+  }
+  return positions;
 }
 
 export async function queuePostingFundingPause({ db, config, problemId, record, now = Timestamp.now() }) {

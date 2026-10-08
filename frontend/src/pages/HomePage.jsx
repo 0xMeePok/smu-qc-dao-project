@@ -1,30 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { StatusBadge } from "../components/StatusBadge.jsx";
 import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
 const ROLES = [
   { key: "owner", name: "Problem owner", text: "Publishes a problem with a budget and a deadline." },
   { key: "researcher", name: "Researcher", text: "Proposes an approach and delivers the work in stages." },
-  { key: "evaluator", name: "Evaluator", text: "Reviews proposals and confirms each milestone." },
+  { key: "evaluator", name: "Evaluator", text: "Reviews proposals and records recommendations." },
   { key: "funder", name: "Funder", text: "Backs proposals. Funds release only as outcomes are met." },
 ];
 
 const STEPS = [
   ["Publish.", "Describe the problem, set a budget and a deadline. It goes on-chain so everyone sees the same brief."],
   ["Propose.", "Researchers submit approaches. Funders back the ones they believe in until they are fully funded."],
-  ["Match.", "Pick one fully funded proposal. It is a one-to-one match, and every other funder is refunded."],
-  ["Deliver.", "Funds release milestone by milestone as evaluators confirm each outcome."],
+  ["Match.", "Choose an eligible proposal and confirm the funding terms before delivery begins."],
+  ["Deliver.", "Researchers submit delivery evidence. Payments follow the proposal’s approval or funder-voting rules."],
 ];
 
-const MILESTONES = [
-  ["Scheduling model on historical data", true],
-  ["Pilot across two sites", true],
-  ["Rollout plan and final report", false],
+const DELIVERY_STEPS = [
+  ["Funding accepted", WORKFLOW_STATUS.ACCEPTED],
+  ["Delivery evidence submitted", WORKFLOW_STATUS.SUBMITTED],
+  ["Completion approval", WORKFLOW_STATUS.PENDING_APPROVAL],
 ];
-
-function prefersReducedMotion() {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-}
 
 function StepPanel({ index }) {
   if (index === 0) {
@@ -67,12 +63,12 @@ function StepPanel({ index }) {
     </>;
   }
   return <>
-    <p className="desk-panel-kicker">Delivery · Milestones</p>
+    <p className="desk-panel-kicker">Delivery · Payment approvals</p>
     <ul className="desk-milestones">
-      {MILESTONES.map(([label, done]) => (
+      {DELIVERY_STEPS.map(([label, status]) => (
         <li key={label}>
           <span>{label}</span>
-          <StatusBadge interactive={false} status={done ? WORKFLOW_STATUS.DECISION_RECORDED : WORKFLOW_STATUS.AWAITING_EVALUATOR_FEEDBACK} />
+          <StatusBadge interactive={false} status={status} />
         </li>
       ))}
     </ul>
@@ -87,46 +83,10 @@ function daysLeft(expiresAt) {
 }
 
 export default function HomePage({ postings = [], loading = false, isAuthenticated = false, onNavigate, onOpenWorkspaces }) {
-  const stepsRef = useRef(null);
-  const progressRef = useRef(null);
   const [step, setStep] = useState(0);
-  const [compact, setCompact] = useState(() => typeof window !== "undefined" && (window.innerWidth < 960 || window.innerHeight < 640 || prefersReducedMotion()));
   const featured = postings.slice(0, 8);
-
-  useEffect(() => {
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      const isCompact = window.innerWidth < 960 || window.innerHeight < 640 || prefersReducedMotion();
-      setCompact(isCompact);
-      const steps = stepsRef.current;
-      if (!steps || isCompact) return;
-      const box = steps.getBoundingClientRect();
-      const progress = Math.min(1, Math.max(0, -box.top / Math.max(1, box.height - window.innerHeight)));
-      const next = Math.min(STEPS.length - 1, Math.floor(progress * STEPS.length));
-      setStep((current) => (current === next ? current : next));
-      if (progressRef.current) progressRef.current.style.transform = `scaleX(${progress})`;
-    };
-    const onScroll = () => { if (!frame) frame = window.requestAnimationFrame(update); };
-    update();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, []);
-
-  const scrollToStep = (index) => {
-    const steps = stepsRef.current;
-    if (!steps || compact) {
-      setStep(index);
-      return;
-    }
-    const total = steps.offsetHeight - window.innerHeight;
-    window.scrollBy({ top: steps.getBoundingClientRect().top + ((index + 0.5) / STEPS.length) * total, behavior: "smooth" });
-  };
+  // Step selection is immediate. A sticky scroll narrative previously reserved
+  // 340vh and made visitors scroll several screens before reaching live listings.
   const open = (item) => onNavigate(`${item.route ?? "posting"}/${item.id}`);
 
   return (
@@ -134,7 +94,7 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
       <section className="desk-hero">
         <span className="desk-rule" aria-hidden="true" />
         <h1>Fund problems<br />with clear outcomes.</h1>
-        <p>Publish the problems that matter, match with one fully funded proposal, and release funds as outcomes land.</p>
+        <p>Publish the problems that matter, fund a research approach, and track payments through delivery.</p>
         <div className="desk-actions">
           <button type="button" className="primary" onClick={() => onNavigate("create")}>Publish a brief</button>
           <button type="button" className="desk-link" onClick={() => onNavigate("discover")}>Explore opportunities</button>
@@ -157,7 +117,7 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
 
       <section className="desk-section desk-reveal" style={{ "--enter": "1.1s" }}>
         <h2>Four roles.<br />One clear path.</h2>
-        <p className="desk-lede">Everyone sees the same brief, the same proposals and the same milestones.</p>
+        <p className="desk-lede">Everyone sees the same brief, the same proposals and the same funding status.</p>
         <ol className="desk-roles">
           {ROLES.map((role) => (
             <li key={role.key}>
@@ -168,7 +128,7 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
         </ol>
       </section>
 
-      <section id="how" className={`desk-how${compact ? "" : " is-scrub"}`} aria-label="From brief to delivery" ref={stepsRef}>
+      <section id="how" className="desk-how" aria-label="From brief to delivery">
         <div className="desk-how-stage">
           <div className="desk-how-grid">
             <div>
@@ -176,22 +136,16 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
               <ol>
                 {STEPS.map(([title, text], index) => (
                   <li key={title}>
-                    <button type="button" className={index === step ? "is-on" : ""} aria-current={!compact && index === step ? "step" : undefined} onClick={() => scrollToStep(index)}>
+                    <button type="button" className={index === step ? "is-on" : ""} aria-current={index === step ? "step" : undefined} onClick={() => setStep(index)}>
                       {title}
                     </button>
-                    {(compact || index === step) && <p>{text}</p>}
+                    {index === step && <p>{text}</p>}
                   </li>
                 ))}
               </ol>
-              {!compact && <div className="desk-step-progress" aria-hidden="true"><span ref={progressRef} /></div>}
             </div>
             <div className="desk-panel" aria-live="polite">
-              {(compact ? [0, 1, 2, 3] : [step]).map((index) => (
-                <div key={index}>
-                  {compact && <p className="desk-panel-step">{STEPS[index][0]}</p>}
-                  <StepPanel index={index} />
-                </div>
-              ))}
+              <StepPanel index={step} />
             </div>
           </div>
         </div>
@@ -216,7 +170,7 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
         </div>
         <div>
           <h2>Workspaces</h2>
-          <p>Every brief, proposal and milestone you’re part of, by role.</p>
+          <p>Every brief, proposal and payment you’re part of, by role.</p>
           <ul className="desk-lines">
             {ROLES.map((role) => (
               <li key={role.key}>

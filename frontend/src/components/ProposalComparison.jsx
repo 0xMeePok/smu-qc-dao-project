@@ -24,7 +24,7 @@ function developerLabel(row) {
 
 const FILTERS = [["", "All"], ...RECOMMENDATIONS];
 
-export function ProposalComparison({ problemId, refreshKey = "", onSelected, onNavigate }) {
+export function ProposalComparison({ problemId, refreshKey = "", onSelected, onNavigate, integrityBlocked = false }) {
   const { user } = useAuth();
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
@@ -56,7 +56,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
   const hasLegacyRows = (state?.rows ?? []).some((row) => !Object.hasOwn(row, "fundingTerms"));
   const showDecision = state?.viewerIsOwner === true && hasLegacyRows;
   // Only a row the server still marks selectable can stay chosen after a reload.
-  const selected = showDecision ? state?.rows?.find((row) => row.id === selectedId && row.canSelect && !Object.hasOwn(row, "fundingTerms")) ?? null : null;
+  const selected = showDecision && !integrityBlocked ? state?.rows?.find((row) => row.id === selectedId && row.canSelect && !Object.hasOwn(row, "fundingTerms")) ?? null : null;
   const selectableCount = (state?.rows ?? []).filter((row) => row.canSelect && !Object.hasOwn(row, "fundingTerms")).length;
 
   return <section id="proposal-comparison" className="detail-section proposal-comparison" aria-label="Proposal comparison">
@@ -87,7 +87,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
     {loading && !state ? <p role="status">Loading comparison…</p> : null}
     {state && rows.length === 0 && <p className="comparison-empty">{state.rows?.length ? "No proposals match this recommendation." : "No submitted proposals to compare yet."}</p>}
     {state && rows.length > 0 && <div className="comparison-list" role={showDecision ? "radiogroup" : undefined} aria-label={showDecision ? "Choose the proposal to match" : undefined}>
-      {rows.map((row) => <ComparisonRow key={row.id} row={row} problemMatching={state.problemMatching} showDecision={showDecision}
+      {rows.map((row) => <ComparisonRow key={row.id} row={row} problemMatching={state.problemMatching} showDecision={showDecision && !integrityBlocked}
         open={openId === row.id} checked={selected?.id === row.id}
         onToggle={() => setOpenId((current) => current === row.id ? "" : row.id)}
         onOpen={() => onNavigate?.(`proposal/${row.id}`)}
@@ -106,7 +106,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
       </div>
     </div>}
 
-    {pending && <SelectProposalDialog problemId={problemId} proposal={pending} onCancel={() => setPending(null)}
+    {pending && !integrityBlocked && <SelectProposalDialog problemId={problemId} proposal={pending} onCancel={() => setPending(null)}
       onSelected={async () => {
         setState(await getProposalComparison(problemId));
         setPending(null);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext.jsx";
 import { escrowFundingAmount, getEscrowFundingSummary } from "../lib/escrowFunding.js";
 
@@ -7,24 +7,29 @@ const paymentStatus = (item, released) => released ? "paid" : CLOSED_PAYMENT_STA
 
 export function EscrowReleaseSummary({ onNavigate }) {
   const { user } = useAuth();
-  const [data, setData] = useState(null), [error, setError] = useState("");
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    let active = true;
-    setData(null); setError("");
-    if (!user?.id) return undefined;
-    getEscrowFundingSummary().then(result => { if (active) setData(result); })
-      .catch(err => { if (active) setError(err.message || "Payment summaries could not be loaded."); });
-    return () => { active = false; };
-  }, [user?.id, revision]);
+  // Retain saved payment summaries while loading the latest stored records.
+  // The wallet key prevents
+  // another account's payments from appearing during sign-in or switching.
+  const payments = useQuery({
+    queryKey: ["escrowFundingSummary", user?.id?.toLowerCase()],
+    queryFn: getEscrowFundingSummary,
+    enabled: Boolean(user?.id),
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const { data } = payments;
+  const error = payments.error?.message || (payments.error ? "Payment summaries could not be loaded." : "");
   if (!user?.id) return null;
   return <section className="card-table escrow-release" aria-label="Escrow payment summary">
     <div className="table-header"><div><h3>Proposal payments</h3><p className="field-hint">Confirmed upfront and completion payments for proposals you own or sponsor.</p></div>
-      <button className="secondary small" type="button" onClick={() => setRevision(value => value + 1)}>Refresh payments</button></div>
-    {error ? <p className="error-banner" role="alert">{error}</p> : !data ? <p className="table-empty">Loading payments…</p> : <>
-      {data.unavailableItems > 0 && <p className="field-hint" role="status">{data.unavailableItems} proposal payment records could not be verified and are excluded. Refresh to retry.</p>}
+      <button className="secondary small" type="button" disabled={payments.isFetching} onClick={() => payments.refetch()}>Refresh payments</button></div>
+    {error && <p className="error-banner" role="alert">{error}{data && " Showing previously loaded results; open an escrow to check its current payments."}</p>}
+    {data && payments.isFetching && <p className="field-hint" role="status">Refreshing payments… Showing previously loaded results.</p>}
+    {!data ? !error && <p className="table-empty" role="status">Loading payments…</p> : <>
+      {data.unavailableItems > 0 && <p className="field-hint" role="status">{data.unavailableItems} proposal payment records could not be loaded and are excluded. Refresh to retry.</p>}
       {data.truncated && <p className="field-hint" role="status">This payment summary is limited. Open individual proposals for their current payments and balances.</p>}
-      {!data.items?.length ? <p className="table-empty">{data.unavailableItems > 0 ? "Verified proposal payments are temporarily unavailable." : "No confirmed escrow payments yet. Open a proposal to view its live escrow."}</p>
+      {!data.items?.length ? <p className="table-empty">{data.unavailableItems > 0 ? "Proposal payments are temporarily unavailable." : "No confirmed escrow payments yet. Open a proposal to view its live escrow."}</p>
         : data.items.map(item => <div className="table-row" key={item.proposalId}><div>
           <strong>{item.title || "Proposal"}</strong><small className="table-row-meta">{item.postingTitle}</small>
           <p>Upfront 50%: {paymentStatus(item, item.upfrontReleased)} · Final 50%: {paymentStatus(item, item.finalReleased)}</p>

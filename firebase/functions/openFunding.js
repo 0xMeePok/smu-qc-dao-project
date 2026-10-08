@@ -8,6 +8,8 @@ import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { verifyProposalEscrow, requireAddress } from "./escrowAudit.js";
 import { deploymentKey, enqueueEscrowFunding, loadFundingContext } from "./escrowFunding.js";
 import { same } from "./escrowFundingEvents.js";
+import { OPEN_FUNDING_SELECTIONS, saveFundingSnapshot } from "./fundingSnapshots.js";
+export { OPEN_FUNDING_SELECTIONS } from "./fundingSnapshots.js";
 
 export const OPEN_FUNDING_SUMMARIES = "openFundingSummaries";
 const ZERO_ADDRESS = `0x${"0".repeat(40)}`, MAX_PROPOSALS = 100, UINT256 = (1n << 256n) - 1n;
@@ -157,7 +159,30 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
   base.truncated = count > BigInt(MAX_PROPOSALS) || proposals.size > MAX_PROPOSALS;
   return base;
 }
-export async function getOpenFundingSummary(options) { return readOpenFunding(options); }
+export async function getOpenFundingSummary(options) {
+  const summary = await readOpenFunding(options);
+  await saveOpenFundingSnapshot({ ...options, summary });
+  return summary;
+}
+
+export async function saveOpenFundingSnapshot({ db, config, summary, now = Timestamp.now() }) {
+  if (!summary.supported || !Number.isSafeInteger(summary.blockNumber)) return;
+  // Offers are scoped to the caller. Keep them in server-only documents so
+  // a researcher's partial view cannot replace the owner's complete set or
+  // expose other proposals through the member-readable pool totals.
+  const { selections, ...totals } = summary;
+  const metadata = { registryAddress: config.address.toLowerCase(), confirmedAt: now.toDate().toISOString() };
+  await saveFundingSnapshot({ db, collection: OPEN_FUNDING_SUMMARIES,
+    id: `${deploymentKey(config)}_${summary.problemId}`, snapshot: { ...totals, ...metadata } });
+  for (const selection of selections || []) {
+    const { canAccept, canVoid, canSelect, ...saved } = selection;
+    await saveFundingSnapshot({ db, collection: OPEN_FUNDING_SELECTIONS,
+      id: `${deploymentKey(config)}_${selection.proposalId}`, snapshot: {
+        ...saved, ...metadata, problemId: summary.problemId, owner: summary.owner, poolAddress: summary.poolAddress,
+        chainId: config.chainId, blockNumber: summary.blockNumber,
+      } });
+  }
+}
 
 /** Returns a reviewable wallet request. The backend never signs or moves grant funds. */
 export async function prepareOpenFundingAction(options) {
@@ -256,11 +281,8 @@ export async function syncOpenFunding(options) {
     if (receipt.status !== "success" || !same(receipt.transactionHash, transactionHash)
         || !same(receipt.blockHash, block.hash) || !relevant) fail("failed-precondition", "This transaction has no confirmed action for the canonical grant pool.");
   }
-  // Selection details are scoped to the caller and therefore never persisted as
-  // a shared member-readable document. Only public-safe pool totals are cached.
-  const { selections, ...totals } = summary;
-  await db.collection(OPEN_FUNDING_SUMMARIES).doc(`${deploymentKey(config)}_${problemId}`).set({ ...totals,
-    registryAddress: config.address.toLowerCase(), confirmedAt: now.toDate().toISOString() });
+  await saveOpenFundingSnapshot({ db, config, summary, now });
+  const { selections } = summary;
   for (const selection of selections) {
     if (selection.status === "accepted") {
       const proposalRef = db.collection("proposals").doc(selection.proposalId);

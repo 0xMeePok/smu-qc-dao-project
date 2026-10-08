@@ -35,13 +35,13 @@ function deployment(config) {
 /** Uses the same simulation and fee estimation as publication transactions. */
 export function createWagmiEscrowAdapters(config = wagmiConfig) {
   const adapters = createWagmiAuditAdapters(config);
-  return { ...adapters, writeContract: async request => {
+  return { ...adapters, writeContract: async (request, options) => {
     const connection = getConnection(config);
     if (!connection.isConnected || !same(connection.address, request.account)) {
       throw new Error("Connect the wallet selected for this escrow action.");
     }
     if (connection.chainId !== request.chainId) throw new Error("Switch your wallet to Arbitrum Sepolia before continuing.");
-    return adapters.writeContract(request);
+    return adapters.writeContract(request, options);
   } };
 }
 
@@ -267,6 +267,7 @@ export async function claimRemovedProposalFunds({ proposalId, account }) {
 /** Called only from a user action. Never retries a write or signs with a server key. */
 export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve, reason,
   onProgress, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+  onProgress?.({ status: "preparing", action });
   if (config === AUDIT_REGISTRY_CONFIG) {
     config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
     if (!["claimRefund", "expire", "refundInvalidated"].includes(action)) assertActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
@@ -277,8 +278,10 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
   const send = async (functionName, args, { address = snapshot.address, abi = config.escrow.escrowAbi, label = functionName } = {}) => {
     let transactionHash;
     try {
-      onProgress?.({ status: "awaiting_signature", action: label });
-      transactionHash = await adapters.writeContract({ address, abi, functionName, args, account: walletAddress, chainId: config.chainId });
+      onProgress?.({ status: "preparing", action: label });
+      transactionHash = await adapters.writeContract({ address, abi, functionName, args, account: walletAddress, chainId: config.chainId }, {
+        onWalletRequest: () => onProgress?.({ status: "awaiting_signature", action: label }),
+      });
       onProgress?.({ status: "pending", action: label, transactionHash });
       const result = await confirmEscrowTransaction(transactionHash, { adapters, config });
       const { receipt } = result;

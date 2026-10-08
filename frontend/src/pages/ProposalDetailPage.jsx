@@ -49,6 +49,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditBusy, setAuditBusy] = useState(false);
+  const [auditVerification, setAuditVerification] = useState(null);
   const [withdrawing, setWithdrawing] = useState(false);
   const [walletPromptOpen, setWalletPromptOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -77,6 +78,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   activeProposalId.current = proposalId;
   useEffect(() => {
     let cancelled = false;
+    setAuditVerification(null);
     setLoading(true); setProposal(null); setEscrowState(null); setError(""); setConfirm(false);
     setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab);
     setAuditBusy(anchorInFlight.current.has(proposalId));
@@ -250,6 +252,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
       <p className="lead">{proposal.summary}</p>
       <ContentModerationNotice record={proposal} />
+      {auditVerification?.kind === "mismatch" && <p className="error-banner" role="alert">This proposal does not match its on-chain record. New funding and approval actions are blocked. Open Record to review the differences.</p>}
 
       {/* One job per tab, as on the posting page. Every panel stays mounted so
           the match state MatchingPanel reports keeps the sidebar current. */}
@@ -324,11 +327,11 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
-        {isOpenFunding && <OpenFundingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate}
+        {isOpenFunding && <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate}
           onChange={(change) => { if (activeProposalId.current === change.proposalId) setFundingRefreshVersion(previous => previous + 1); }} />}
-        {independent ? <IndependentFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState}
+        {independent ? <IndependentFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState}
           initialTransaction={pendingFundingTransaction} refreshVersion={fundingRefreshVersion} />
-          : proposal.fundingTerms ? <EscrowFundingPanel key={proposal.id} proposal={proposal} onStateChange={setEscrowState} refreshVersion={fundingRefreshVersion} /> : !isOpenFunding && <MatchingPanel problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
+          : proposal.fundingTerms ? <EscrowFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} refreshVersion={fundingRefreshVersion} /> : !isOpenFunding && <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
           if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...current.matching, ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
         }} />}
@@ -339,7 +342,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>}
 
       <div className={panel("record")} role="tabpanel" id="proposal-panel-record" aria-labelledby="proposal-tab-record">
-        <AuditReceipt anchorId="entity-audit-receipt" entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
+        <AuditReceipt onVerificationChange={setAuditVerification} anchorId="entity-audit-receipt" entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
         {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
         {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
         {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("overview")); highlightWhenPresent(`comment-${item.commentId}`); }} />}

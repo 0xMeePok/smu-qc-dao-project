@@ -38,12 +38,14 @@ describe("open funding grant workflow UI", () => {
       mocks.confirm.mockImplementation(async () => { total = 0; return { transactionHash: hash }; });
     } else mocks.write.mockImplementation(async () => { total = 0; return { transactionHash: hash }; });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    for (const name of ["funderDashboard", "escrowFundingSummary"]) client.setQueryData([name, account], {});
     render(<QueryClientProvider client={client}><ActionCount read={async () => ({ total })} /><OpenFundingPanel problemId="grant" /></QueryClientProvider>);
     await screen.findByText("Verified action count: 1");
     fireEvent.click(await screen.findByRole("button", { name: "Accept grant" }));
     if (recovery) fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
     await screen.findByText("Verified action count: 0");
     expect(mocks.write).toHaveBeenCalledTimes(1);
+    await waitFor(() => { for (const name of ["funderDashboard", "escrowFundingSummary"]) expect(client.getQueryState([name, account]).isInvalidated).toBe(true); });
     client.clear();
   });
   it("routes grant selection through the grant API with a proposal reference", async () => {
@@ -146,4 +148,23 @@ describe("open funding grant workflow UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect your signed-in wallet" })); expect(screen.getByText("Wallet connection dialog")).toBeTruthy();
     expect(mocks.write).not.toHaveBeenCalled();
   });
+});
+
+it("removes stale grant actions when the refreshed record fails verification", async () => {
+  render(<OpenFundingPanel problemId="grant" />);
+  await screen.findByRole("button", { name: "Deposit funds" });
+  mocks.read.mockRejectedValueOnce(new Error("Mismatch detected in the funding opportunity."));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh grant pool" }));
+  await screen.findByText("Mismatch detected in the funding opportunity.");
+  expect(screen.queryByRole("button", { name: "Deposit funds" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Select for funding" })).toBeNull();
+});
+
+it("blocks deposits and selection on an integrity mismatch while allowing a confirmed closed-pool withdrawal", () => {
+  const action = vi.fn();
+  render(<OpenFundingView data={model({ canWithdraw: true, closed: true })} integrityBlocked walletReady amount="1" withdrawalAmount="1" onAction={action} />);
+  expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(true);
+  expect(screen.getByRole("button", { name: "Select for funding" }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Withdraw funds" }));
+  expect(action).toHaveBeenCalledWith("withdraw");
 });

@@ -82,8 +82,10 @@ export async function writeIndependentFundingAction({ proposalId, action, accoun
   const spec = prepared.abi?.find(item => item.type === "function" && item.name === prepared.functionName);
   if (!spec || !Array.isArray(prepared.args) || spec.inputs.length !== prepared.args.length) throw new Error("The funding transaction could not be prepared. Refresh and retry.");
   const send = async (request, step) => {
-    onChange?.({ status: "awaiting_signature", action: step });
-    const transactionHash = await adapters.writeContract({ ...request, account, chainId: prepared.chainId });
+    onChange?.({ status: "preparing", action: step });
+    const transactionHash = await adapters.writeContract({ ...request, account, chainId: prepared.chainId }, {
+      onWalletRequest: () => onChange?.({ status: "awaiting_signature", action: step }),
+    });
     onChange?.({ status: "pending", action: step, transactionHash });
     try {
       const confirmed = await confirmEscrowTransaction(transactionHash, { adapters });

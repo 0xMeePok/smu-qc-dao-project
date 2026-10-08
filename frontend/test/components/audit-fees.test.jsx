@@ -13,6 +13,12 @@ import { createWagmiAuditAdapters } from "../../src/lib/auditRegistry.js";
 
 const config = {};
 const request = { chainId: 421614, account: `0x${"a".repeat(40)}`, args: [] };
+const feeEstimate = { maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 5_000n };
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
 beforeEach(() => {
   mocks.estimate.mockReset();
   mocks.write.mockReset().mockResolvedValue(`0x${"b".repeat(64)}`);
@@ -100,4 +106,65 @@ it("does not open the wallet when the registry write would revert", async () => 
   await expect(adapter.writeContract({ ...request, functionName: "commitOpportunity" }))
     .rejects.toThrow(/already on-chain|updateOpportunity/);
   expect(mocks.write).not.toHaveBeenCalled();
+});
+
+it.each(["fees", "simulation"])("starts both preparations together and waits for both when %s finishes first", async first => {
+  const fees = deferred(), simulation = deferred();
+  mocks.estimate.mockReturnValue(fees.promise);
+  mocks.simulate.mockReturnValue(simulation.promise);
+  const sent = { ...request, address: `0x${"c".repeat(40)}`, abi: [], functionName: "commitOpportunity" };
+  const onWalletRequest = vi.fn();
+  const pending = createWagmiAuditAdapters(config).writeContract(sent, { onWalletRequest });
+  expect(mocks.estimate).toHaveBeenCalledTimes(1);
+  expect(mocks.simulate).toHaveBeenCalledWith(config, sent);
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(onWalletRequest).not.toHaveBeenCalled();
+
+  if (first === "fees") { fees.resolve(feeEstimate); await fees.promise; }
+  else { simulation.resolve({}); await simulation.promise; }
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(onWalletRequest).not.toHaveBeenCalled();
+
+  fees.resolve(feeEstimate);
+  simulation.resolve({});
+  await expect(pending).resolves.toBe(`0x${"b".repeat(64)}`);
+  expect(mocks.write).toHaveBeenCalledExactlyOnceWith(config, {
+    ...sent, maxFeePerGas: 4_000_000_000n, maxPriorityFeePerGas: 5_000n,
+  });
+  expect(onWalletRequest).toHaveBeenCalledExactlyOnceWith();
+  expect(onWalletRequest.mock.invocationCallOrder[0]).toBeLessThan(mocks.write.mock.invocationCallOrder[0]);
+  expect(mocks.write.mock.calls[0][1]).not.toHaveProperty("onWalletRequest");
+});
+
+it("a failed fee estimate cannot later open the wallet when the concurrent simulation finishes", async () => {
+  const fees = deferred(), simulation = deferred();
+  mocks.estimate.mockReturnValue(fees.promise);
+  mocks.simulate.mockReturnValue(simulation.promise);
+  const onWalletRequest = vi.fn();
+  const pending = createWagmiAuditAdapters(config).writeContract(request, { onWalletRequest });
+  const failure = expect(pending).rejects.toThrow("RPC unavailable");
+  fees.reject(new Error("RPC unavailable"));
+  await failure;
+  simulation.resolve({});
+  await simulation.promise;
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(onWalletRequest).not.toHaveBeenCalled();
+});
+
+it("preserves the decorated simulation error while the concurrent fee estimate is pending", async () => {
+  const fees = deferred(), simulation = deferred();
+  mocks.estimate.mockReturnValue(fees.promise);
+  mocks.simulate.mockReturnValue(simulation.promise);
+  const error = Object.assign(new Error("execution reverted"), { cause: { data: { errorName: "InvalidInput" } } });
+  const onWalletRequest = vi.fn();
+  const pending = createWagmiAuditAdapters(config).writeContract({ ...request, functionName: "commitOpportunity" }, { onWalletRequest });
+  const failure = expect(pending).rejects.toMatchObject({
+    cause: error, auditErrorName: "InvalidInput", auditFunctionName: "commitOpportunity",
+  });
+  simulation.reject(error);
+  await failure;
+  fees.resolve(feeEstimate);
+  await fees.promise;
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(onWalletRequest).not.toHaveBeenCalled();
 });

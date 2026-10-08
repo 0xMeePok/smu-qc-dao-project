@@ -57,7 +57,7 @@ function fixture(changes = {}) {
       }
       return base.readContract(request);
     },
-    writeContract: async request => { encodeFunctionData(request); writes.push(request); return txHash; },
+    writeContract: async (request, options) => { encodeFunctionData(request); options?.onWalletRequest?.(); writes.push(request); return txHash; },
     waitForTransactionReceipt: async request => {
       waits.push(request);
       if (changes.wait) return changes.wait(request);
@@ -178,7 +178,7 @@ describe("Canonical escrow wallet integration", () => {
     assert(f.writes.every(write => write.account === funder && write.chainId === 421614));
     assert.equal(f.waits.length, 2);
     assert(f.waits.every(request => request.confirmations === 2));
-    assert.deepEqual(progress.map(update => `${update.action}:${update.status}`), ["approve:awaiting_signature", "approve:pending", "approve:confirmed", "deposit:awaiting_signature", "deposit:pending", "deposit:confirmed"]);
+    assert.deepEqual(progress.map(update => `${update.action}:${update.status}`), ["deposit:preparing", "approve:preparing", "approve:awaiting_signature", "approve:pending", "approve:confirmed", "deposit:preparing", "deposit:awaiting_signature", "deposit:pending", "deposit:confirmed"]);
     assert.equal(result.transactionHash, txHash);
   });
 
