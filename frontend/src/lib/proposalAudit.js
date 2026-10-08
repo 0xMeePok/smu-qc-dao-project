@@ -103,7 +103,6 @@ async function anchorIndependentListing(record, options) {
       }
       if (listingProgress?.transactionHash) {
         error.listingAudit = listingProgress;
-        if (options.escrowAudit) error.escrowAudit = options.escrowAudit;
       }
       throw error;
     }

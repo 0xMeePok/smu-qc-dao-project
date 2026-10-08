@@ -6,6 +6,7 @@ import { AuditDetailPane } from "./AuditDetailPane.jsx";
 import { LiveVerifiedBadge } from "./LiveVerifiedBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { isIndependentProposal } from "../config/proposal.js";
 import { postingAuditReceipt, readPostingAudit } from "../lib/postingAudit.js";
 import {
   fundingOpportunityAuditReceipt,
@@ -61,9 +62,10 @@ function listingKind(opportunity) {
 function groupByParent(items) {
   const groups = new Map();
   for (const item of items) {
-    const key = item.opportunity?.id || "__missing__";
+    const independent = isIndependentProposal(item);
+    const key = independent ? `independent:${item.id}` : item.opportunity?.id || "__missing__";
     if (!groups.has(key)) {
-      groups.set(key, { key, opportunity: item.opportunity || null, items: [] });
+      groups.set(key, { key, independent, title: item.title, opportunity: independent ? null : item.opportunity || null, items: [] });
     }
     groups.get(key).items.push(item);
   }
@@ -172,7 +174,7 @@ export function ProposalAuditQueue() {
       {groups.map((group) => (
         <div className="audit-nav-group" key={group.key}>
           <h3 className="audit-group-header">
-            {group.opportunity
+            {group.independent ? `${group.title || "Untitled"} · Independent listing` : group.opportunity
               ? `${group.opportunity.title || "Untitled"} · ${listingKind(group.opportunity)}`
               : "Parent listing is no longer available."}
           </h3>
@@ -235,7 +237,9 @@ export function ProposalAuditQueue() {
         <AuditDetailPane
           title={selected.title}
           onClose={() => setSelected(null)}
-          tabs={selected.opportunity
+          tabs={isIndependentProposal(selected)
+            ? [{ id: "proposal", label: "Listing publication receipt" }]
+            : selected.opportunity
             ? [{ id: "proposal", label: "Proposal receipt" }, { id: "listing", label: "Listing receipt" }]
             : [{ id: "proposal", label: "Proposal receipt" }]}
           activeTab={paneTab}
@@ -245,13 +249,15 @@ export function ProposalAuditQueue() {
             ? <ListingReceipt opportunity={selected.opportunity} />
             : (
               <>
-                {selected.opportunity
+                {isIndependentProposal(selected)
+                  ? <p className="field-hint">Published independently by the researcher.</p>
+                  : selected.opportunity
                   ? <p className="field-hint"><strong>Responds to</strong> {selected.opportunity.title} · {listingKind(selected.opportunity)} · <code>problems/{selected.opportunity.id}</code></p>
                   : <p className="field-hint">Parent listing is no longer available.</p>}
                 <AuditReceipt
                   audit={selected.audit}
-                  entityLabel="Proposal"
-                  eventLabel="Proposal submitted"
+                  entityLabel={isIndependentProposal(selected) ? "Independent listing" : "Proposal"}
+                  eventLabel={isIndependentProposal(selected) ? "Independent listing published" : "Proposal submitted"}
                   actorRole="Researcher / solution developer"
                   firebaseReference={`proposals/${selected.id}`}
                   recordTimestamp={selected.updatedAt ?? selected.createdAt}

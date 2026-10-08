@@ -30,6 +30,7 @@ import { createArbitrumRpcTransport, getRpcUrls } from "./rpcPolicy.js";
 import { collectAdminActivity } from "./adminActivity.js";
 import auditRegistryConfig from "./auditRegistry.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
+import { proposalAuditQueueMetadata } from "./proposalAuditQueue.js";
 import { recordProposalRevision } from "./proposalRevisions.js";
 import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
@@ -1013,16 +1014,8 @@ export const adminListProposalAudits = onCall({ region: REGION }, async (request
     const { leaseUntil, ...job } = row.data();
     const proposal = await db.collection("proposals").doc(row.id).get();
     const proposalData = proposal.data();
-    let audit = proposalData?.audit || null;
-    if (proposal.exists) {
-      try {
-        const prepared = prepareStoredProposal({ ...proposalData, id: row.id });
-        audit = { schemaVersion: 1, chainId: 421614, status: "queued", attemptCount: 0, ...audit,
-          entityId: prepared.entityId, contentHash: prepared.contentHash, solutionHash: prepared.solutionHash };
-      } catch { audit = null; }
-    }
+    const { audit, proposalKind, problemId } = proposalAuditQueueMetadata(row.id, proposalData);
     let opportunity = null;
-    const problemId = typeof proposalData?.problemId === "string" ? proposalData.problemId : "";
     if (problemId) {
       const parent = await db.collection("problems").doc(problemId).get();
       opportunity = parent.exists ? serializeOpportunityForAdmin(parent.id, parent.data()) : null;
@@ -1030,6 +1023,8 @@ export const adminListProposalAudits = onCall({ region: REGION }, async (request
     return {
       ...job,
       id: row.id,
+      title: proposalData?.title ?? job.title,
+      proposalKind,
       audit,
       opportunity,
       updatedAt: job.updatedAt.toDate().toISOString(),

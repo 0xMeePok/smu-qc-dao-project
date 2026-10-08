@@ -33,7 +33,7 @@ import { assertCurrentAuditRecord } from "../lib/opportunityAuditFlow.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
-import { auditErrorMessage, isRpcQuotaExceeded, isRpcUnreachable, isWalletRejection, messageForPublicationSaveError } from "../lib/errors.js";
+import { auditErrorMessage, messageForPublicationSaveError } from "../lib/errors.js";
 import { SubmissionError } from "../components/SubmissionError.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { useAccount } from "wagmi";
@@ -143,7 +143,6 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   const { user } = useAuth();
   const { address, isConnected } = useAccount();
   const [auditProgress, setAuditProgress] = useState(null);
-  const [escrowProgress, setEscrowProgress] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmedAudit, setConfirmedAudit] = useState(null);
   const [proposalId, setProposalId] = useState(resumeId || null);
@@ -310,8 +309,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         if (!independentListingWindowOpen(record) && record.status === PROPOSAL_STATUS_SUBMITTED) {
           throw new Error("The listing window has closed. This proposal can no longer be edited.");
         }
-        // The listing window and a started deposit are checked here. The escrow
-        // proposal is linked from the publish signature, not from this edit.
+        // Recheck the current listing before signing a content correction.
         const current = await findProposal(proposalId, { fromServer: true });
         if (fundingApproachAccepted(current)) {
           throw new Error("A funding approach has been accepted. This listing can no longer be edited.");
@@ -336,8 +334,6 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       audit = await anchorProposalBeforeWrite({ id: proposalId, ...built, audit: auditProgress }, {
         account: address,
         onChange: setAuditProgress,
-        escrowAudit: escrowProgress,
-        onEscrowChange: setEscrowProgress,
       });
       setAuditProgress(audit);
       setConfirmedAudit(audit);
@@ -357,19 +353,11 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       if (err.listingAudit?.transactionHash) {
         audit = err.listingAudit;
         setAuditProgress(audit);
-        if (err.escrowAudit) setEscrowProgress(err.escrowAudit);
         setSaveFailed(false);
         if (audit.status !== "confirmed") {
           setError("The listing transaction was submitted, but its confirmation is still pending. The proposal has not been published. Retry to recheck the same transaction before continuing.");
-        } else if (err.escrowAudit?.transactionHash) {
-          setError("The listing transaction is confirmed, but the escrow transaction still needs verification. The proposal has not been published. Retry to recheck the same escrow transaction; another signature will not be requested while its result is unknown.");
         } else {
-          const reason = err.code === "AUDIT_TRANSACTION_CANCELLED" ? "The escrow transaction was cancelled in your wallet."
-            : isWalletRejection(err) ? "The escrow signature was declined."
-              : isRpcQuotaExceeded(err) ? "The RPC provider is limiting requests."
-                : isRpcUnreachable(err) ? "Arbitrum Sepolia could not be reached."
-                  : err.receipt?.status === "reverted" ? "The escrow transaction reverted." : "Escrow setup could not be completed.";
-          setError(`The listing transaction is confirmed, but the escrow step did not complete. ${reason} The proposal has not been published. Retry to complete escrow setup using the confirmed listing transaction.`);
+          setError("The listing transaction is confirmed, but publication verification could not finish. The proposal has not been published. Retry to recheck the same listing transaction. Your entries and transaction reference are preserved.");
         }
       } else {
         setSaveFailed(Boolean(audit?.transactionHash));
@@ -515,12 +503,12 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>Back</button>
             <div className="wizard-nav-end">
               {!wizard.isLast && <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pending}>Continue</button>}
-              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : escrowProgress?.transactionHash ? "Confirming escrow…" : auditProgress?.status === "confirmed" ? "Waiting for escrow signature…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
+              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
             </div>
           </div>
         </div>
         <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
-        {publicationStarted && !confirmedAudit && !busy && <p className="field-hint" role="status" style={{ overflowWrap: "anywhere" }}>Your entries stay fixed while publication is incomplete. Keep this page open until publication finishes. Recovery references are held only on this page; copy them before refreshing. Listing transaction: <code>{auditProgress.transactionHash}</code>{escrowProgress?.transactionHash && <>. Escrow transaction: <code>{escrowProgress.transactionHash}</code></>}</p>}
+        {publicationStarted && !confirmedAudit && !busy && <p className="field-hint" role="status" style={{ overflowWrap: "anywhere" }}>Your entries stay fixed while publication is incomplete. Keep this page open until publication finishes. Recovery references are held only on this page; copy them before refreshing. Listing transaction: <code>{auditProgress.transactionHash}</code></p>}
         {!editing && <div className="form-actions wizard-secondary">
           <button className="secondary" type="button" disabled={disabled || pending || publicationStarted} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>
           <DraftStatus savedAt={savedAt} saving={savingDraft} />

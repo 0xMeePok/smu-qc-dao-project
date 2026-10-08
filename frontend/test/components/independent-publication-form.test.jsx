@@ -6,7 +6,6 @@ import { INDEPENDENT_PROPOSAL_FIELDS } from "../../src/config/proposal.js";
 const mocks = vi.hoisted(() => ({ anchor: vi.fn(), submit: vi.fn(), saveDraft: vi.fn() }));
 const account = `0x${"a".repeat(40)}`;
 const listing = { status: "confirmed", transactionHash: `0x${"1".repeat(64)}`, blockNumber: 88 };
-const escrow = { status: "pending", transactionHash: `0x${"2".repeat(64)}` };
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}` } }) }));
 vi.mock("wagmi", async importOriginal => ({ ...await importOriginal(), useAccount: () => ({ isConnected: true, address: `0x${"a".repeat(40)}` }) }));
 vi.mock("../../src/lib/proposals.js", async importOriginal => ({
@@ -48,19 +47,14 @@ async function form() {
   fireEvent.click(screen.getByRole("button", { name: "Review" }));
 }
 
-function failAfterListing({ pendingListing = false, pendingEscrow = false } = {}) {
-  const audit = pendingListing ? { ...listing, status: "failed" } : listing;
-  const second = pendingEscrow ? escrow : { status: "failed", transactionHash: "" };
-  const error = Object.assign(new Error(pendingEscrow || pendingListing ? "Failed to fetch" : "User rejected"), {
-    ...(pendingEscrow || pendingListing ? {} : { code: 4001 }), listingAudit: audit,
-    ...(pendingListing ? {} : { escrowAudit: second }),
-  });
+function failAfterListing({ pendingListing = false } = {}) {
+  const audit = pendingListing ? { ...listing, status: "pending" } : listing;
+  const error = Object.assign(new Error("Failed to fetch"), { listingAudit: audit });
   mocks.anchor.mockImplementationOnce(async (_record, options) => {
     options.onChange(audit);
-    if (!pendingListing) options.onEscrowChange(second);
     throw error;
   });
-  return { audit, second };
+  return { audit };
 }
 
 describe("independent publication recovery feedback", () => {
@@ -73,12 +67,13 @@ describe("independent publication recovery feedback", () => {
     expect(screen.getByRole("button", { name: "Sign and publish proposal" }).disabled).toBe(false);
   });
 
-  it("explains the confirmed first transaction after a declined escrow signature and reuses it on retry", async () => {
-    const { audit, second } = failAfterListing();
+  it("preserves the confirmed listing reference when publication verification fails and reuses it on retry", async () => {
+    const { audit } = failAfterListing();
     await form(); fireEvent.click(screen.getByRole("button", { name: "Sign and publish proposal" }));
     const banner = await screen.findByRole("alert");
     expect(banner.textContent).toMatch(/listing transaction is confirmed/);
-    expect(banner.textContent).toMatch(/escrow signature was declined/);
+    expect(banner.textContent).toMatch(/publication verification could not finish/);
+    expect(banner.textContent).not.toMatch(/escrow/);
     expect(banner.textContent).toMatch(/proposal has not been published/);
     expect(banner.textContent).not.toMatch(/Nothing was submitted/);
     expect(screen.getByText(/Recovery references are held only on this page/)).toBeTruthy();
@@ -88,24 +83,23 @@ describe("independent publication recovery feedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry publication" }));
     await screen.findByRole("heading", { name: "Published independent-form" });
     expect(mocks.anchor.mock.calls[1][0].audit).toEqual(audit);
-    expect(mocks.anchor.mock.calls[1][1].escrowAudit).toEqual(second);
+    expect(mocks.anchor.mock.calls[1][1]).not.toHaveProperty("escrowAudit");
     expect(mocks.submit.mock.calls[0][0].audit).toEqual({ ...listing, status: "pending" });
   });
 
-  it("preserves both transaction references and waits for the same escrow hash after a receipt outage", async () => {
-    failAfterListing({ pendingEscrow: true });
+  it("preserves the confirmed anchor and form after a database save fails", async () => {
+    mocks.submit.mockRejectedValueOnce(new Error("Service unavailable"));
     await form(); fireEvent.click(screen.getByRole("button", { name: "Sign and publish proposal" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/another signature will not be requested while its result is unknown/);
-    expect(screen.getByText(listing.transactionHash)).toBeTruthy();
-    expect(screen.getByText(escrow.transactionHash)).toBeTruthy();
-    expect(mocks.submit).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Retry publication" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/saving the proposal failed/);
+    expect(screen.getByLabelText("Proposal title").value).toBe("Proposal title content");
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
     await screen.findByRole("heading", { name: "Published independent-form" });
-    expect(mocks.anchor.mock.calls[1][1].escrowAudit.transactionHash).toBe(escrow.transactionHash);
+    expect(mocks.anchor.mock.calls[1][0].audit).toEqual(listing);
     expect(mocks.anchor.mock.calls[1][0].researcherId).toBe(account);
+    expect(mocks.submit).toHaveBeenCalledTimes(2);
   });
 
-  it("retains the first transaction reference when listing confirmation fails before escrow starts", async () => {
+  it("retains the transaction reference while listing confirmation is pending", async () => {
     const { audit } = failAfterListing({ pendingListing: true });
     await form(); fireEvent.click(screen.getByRole("button", { name: "Sign and publish proposal" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/listing transaction was submitted, but its confirmation is still pending/);
@@ -113,6 +107,6 @@ describe("independent publication recovery feedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry publication" }));
     await screen.findByRole("heading", { name: "Published independent-form" });
     expect(mocks.anchor.mock.calls[1][0].audit).toEqual(audit);
-    expect(mocks.anchor.mock.calls[1][1].escrowAudit).toBeNull();
+    expect(mocks.anchor.mock.calls[1][1]).not.toHaveProperty("escrowAudit");
   });
 });
