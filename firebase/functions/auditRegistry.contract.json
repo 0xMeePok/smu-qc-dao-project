@@ -1,12 +1,12 @@
 {
   "contractName": "EscrowAuditRegistry",
   "chainId": 421614,
-  "address": "0x38BEc81577C0EA78B003F12c6CeBB16896999187",
+  "address": "0xc582a423bbcd08d6B9D930F53bd5ee054965b74f",
   "entityIdScheme": 2,
   "deployment": {
-    "blockNumber": 314941913,
-    "transactionHash": "0xd6455b0c6144a2bf4f2b9b746d6211057cf9b6af22344cf43b470758d89ed0d8",
-    "deployedAt": "2026-10-02T09:41:38.000Z"
+    "blockNumber": 316931878,
+    "transactionHash": "0xd513b7f8d40c60225d5c7aef09fa89b3badac13f61e9e31bcfb4a4ea03dda0d3",
+    "deployedAt": "2026-10-08T03:56:32.000Z"
   },
   "abi": [
     {
@@ -114,6 +114,68 @@
         }
       ],
       "name": "EventAnchored",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "approachId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "recordHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "anchoredBy",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "anchoredAt",
+          "type": "uint64"
+        }
+      ],
+      "name": "FundingApproachAnchored",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "decisionId",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "bytes32",
+          "name": "recordHash",
+          "type": "bytes32"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "anchoredBy",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "anchoredAt",
+          "type": "uint64"
+        }
+      ],
+      "name": "FundingApproachDecisionAnchored",
       "type": "event"
     },
     {
@@ -662,6 +724,42 @@
       "inputs": [
         {
           "internalType": "bytes32",
+          "name": "approachId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "recordHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "anchorFundingApproach",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32[]",
+          "name": "decisionIds",
+          "type": "bytes32[]"
+        },
+        {
+          "internalType": "bytes32[]",
+          "name": "recordHashes",
+          "type": "bytes32[]"
+        }
+      ],
+      "name": "anchorFundingApproachDecisions",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
           "name": "moderationId",
           "type": "bytes32"
         },
@@ -873,6 +971,44 @@
           "internalType": "uint256",
           "name": "",
           "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "decisionId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "fundingApproachDecisionHash",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "recordHash",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "approachId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "fundingApproachRecordHash",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "recordHash",
+          "type": "bytes32"
         }
       ],
       "stateMutability": "view",
@@ -1554,7 +1690,7 @@
     }
   ],
   "escrow": {
-    "factoryAddress": "0x948823f85189e8855f22FbC113BE11332b22b81B",
+    "factoryAddress": "0x173eAf0C60bA4e7584d3460a7B3817Cf920A72f8",
     "tokens": [
       {
         "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",

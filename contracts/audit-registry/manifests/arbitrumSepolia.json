@@ -4,8 +4,7 @@
   "workflowVersion": 2,
   "capabilities": [
     "pooled-funding",
-    "open-funding-grants",
-    "moderation-audit"
+    "open-funding-grants"
   ],
   "chainId": 421614,
   "owner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
@@ -17,20 +16,20 @@
     "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
   ],
   "status": "ready",
-  "startedAt": "2026-10-02T09:41:36.393Z",
+  "startedAt": "2026-10-08T03:56:30.460Z",
   "registry": {
-    "address": "0x38BEc81577C0EA78B003F12c6CeBB16896999187",
+    "address": "0xc582a423bbcd08d6B9D930F53bd5ee054965b74f",
     "constructorArgs": [
       "0x1c608C148F64Fb9657bA4e5fB8992345277371C0"
     ],
-    "transactionHash": "0xd6455b0c6144a2bf4f2b9b746d6211057cf9b6af22344cf43b470758d89ed0d8",
-    "blockNumber": 314941913,
+    "transactionHash": "0xd513b7f8d40c60225d5c7aef09fa89b3badac13f61e9e31bcfb4a4ea03dda0d3",
+    "blockNumber": 316931878,
     "status": "confirmed",
     "verification": "not_requested",
-    "deployedAt": "2026-10-02T09:41:38.000Z"
+    "deployedAt": "2026-10-08T03:56:32.000Z"
   },
   "factory": {
-    "address": "0x948823f85189e8855f22FbC113BE11332b22b81B",
+    "address": "0x173eAf0C60bA4e7584d3460a7B3817Cf920A72f8",
     "constructorArgs": [
       "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
       "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
@@ -40,24 +39,24 @@
         "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
       ],
       10,
-      "0x38BEc81577C0EA78B003F12c6CeBB16896999187"
+      "0xc582a423bbcd08d6B9D930F53bd5ee054965b74f"
     ],
-    "transactionHash": "0x9be2e8db54f02300109ef1cf41beb7b55d19528b0e0461811c48e2c1c0295c25",
-    "blockNumber": 314941927,
+    "transactionHash": "0x367f61fe33c8cb3b19c30c028afcd0e015be023713919cefc83ce3daf13e6e65",
+    "blockNumber": 316931897,
     "status": "confirmed",
     "verification": "not_requested",
-    "deployedAt": "2026-10-02T09:41:42.000Z"
+    "deployedAt": "2026-10-08T03:56:37.000Z"
   },
   "wiring": {
-    "transactionHash": "0x06b939b7dc84212641214f3b0cedc50f5504252f0dc237a65ac1cbf6d8068f7d",
+    "transactionHash": "0x14f1f81ee4fd7c44c82f84fdb205808847c5a8d803f1435416a6fb287ad392ca",
     "status": "confirmed"
   },
   "escrowDeployer": {
-    "address": "0xCcDB86a6AEd97B28913151696f48216C78Ce7860",
+    "address": "0x38ee0772160CbDD897Be986f7c8600A0d908aBA5",
     "status": "confirmed"
   },
   "openFundingPoolDeployer": {
-    "address": "0x7001B33dbD06564739d73C689f6b44d8Bb1B15d8",
+    "address": "0x123E2f0403A0cd0f3092129171A5e2833AF1E4DB",
     "status": "confirmed"
   },
   "tokenMetadata": [
@@ -80,15 +79,15 @@
   "openFunding": {
     "version": 1,
     "verified": true,
-    "registryAddress": "0x38BEc81577C0EA78B003F12c6CeBB16896999187",
-    "factoryAddress": "0x948823f85189e8855f22FbC113BE11332b22b81B",
-    "escrowDeployerAddress": "0xCcDB86a6AEd97B28913151696f48216C78Ce7860",
-    "openFundingPoolDeployerAddress": "0x7001B33dbD06564739d73C689f6b44d8Bb1B15d8"
+    "registryAddress": "0xc582a423bbcd08d6B9D930F53bd5ee054965b74f",
+    "factoryAddress": "0x173eAf0C60bA4e7584d3460a7B3817Cf920A72f8",
+    "escrowDeployerAddress": "0x38ee0772160CbDD897Be986f7c8600A0d908aBA5",
+    "openFundingPoolDeployerAddress": "0x123E2f0403A0cd0f3092129171A5e2833AF1E4DB"
   },
   "runtimeVerification": {
     "contractName": "EscrowAuditRegistry",
-    "address": "0x38BEc81577C0EA78B003F12c6CeBB16896999187",
-    "factoryAddress": "0x948823f85189e8855f22FbC113BE11332b22b81B",
+    "address": "0xc582a423bbcd08d6B9D930F53bd5ee054965b74f",
+    "factoryAddress": "0x173eAf0C60bA4e7584d3460a7B3817Cf920A72f8",
     "chainId": 421614,
     "bytecodeMatches": true,
     "wiringMatches": true,
@@ -96,18 +95,12 @@
     "registryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
     "factoryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
     "feeBps": 10,
-    "registryCodeHash": "0xcc8558f12fe3f9462a9522f007f874f7b904f19b09e5832803397c4fa447eb72",
-    "factoryCodeHash": "0x1f78972222ca3594f42f876214fe23a084a10bc4f75e16f242e0dd1f48a7b732",
-    "escrowDeployer": "0xCcDB86a6AEd97B28913151696f48216C78Ce7860",
-    "openFundingPoolDeployer": "0x7001B33dbD06564739d73C689f6b44d8Bb1B15d8",
+    "registryCodeHash": "0xde333c8c6efe500e884be65ddbe45f5902f423702814b85be444ba65a012f468",
+    "factoryCodeHash": "0xaa6a79feb5e0ecb4e289de5af94b8ab74ffa99310920a300f3d1f6d8cdada3e3",
+    "escrowDeployer": "0x38ee0772160CbDD897Be986f7c8600A0d908aBA5",
+    "openFundingPoolDeployer": "0x123E2f0403A0cd0f3092129171A5e2833AF1E4DB",
     "openFundingGrants": true,
     "readOnly": true,
-    "verifiedAt": "2026-10-02T09:41:50.548Z"
-  },
-  "moderation": {
-    "version": 1,
-    "privacy": "salted-private-record-hash",
-    "ownerManagedAdmins": true,
-    "platformRoleRevocable": true
+    "verifiedAt": "2026-10-08T03:56:47.621Z"
   }
 }

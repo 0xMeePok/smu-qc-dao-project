@@ -1542,21 +1542,21 @@ service cloud.firestore {
         && data.researcherId == uid
         && data.createdAt == request.time
         && data.updatedAt == request.time
-        // Attached creates keep the pre-independent ternary so a 2-PDF submit
-        // stays inside the expression cap. Independent is a separate arm that
-        // attached success never evaluates.
-        && ((data.status == 'draft'
-          ? (validProposal(data)
-            && validAttachments(data, false)
-            && exists(/databases/$(database)/documents/problems/$(data.problemId)))
-          : (data.status == 'submitted'
-            && validProposalSubmission(data, proposalId)))
-          || (isIndependentProposal(data)
-            && ((data.status == 'draft'
-              && validProposal(data)
+        // Choose the listing kind before validation. Independent drafts have
+        // no problemId; trying the attached path first validates them twice
+        // and exceeds Firestore's 1,000-expression limit.
+        && (isIndependentProposal(data)
+          ? (data.status == 'draft'
+            ? (validProposal(data)
               && validAttachments(data, false))
-              || (data.status == 'submitted'
-                && attestedIndependentPublish(proposalId, data)))));
+            : (data.status == 'submitted'
+              && attestedIndependentPublish(proposalId, data)))
+          : (data.status == 'draft'
+            ? (validProposal(data)
+              && validAttachments(data, false)
+              && exists(/databases/$(database)/documents/problems/$(data.problemId)))
+            : (data.status == 'submitted'
+              && validProposalSubmission(data, proposalId))));
       }
       allow create: if proposalCreateIsAllowed();
       // Submitted proposals may update `audit` so a known transaction hash is
