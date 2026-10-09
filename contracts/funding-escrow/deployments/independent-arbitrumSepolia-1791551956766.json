@@ -1,0 +1,48 @@
+{
+  "contractName": "IndependentFundingFactory",
+  "status": "ready",
+  "chainId": 421614,
+  "registryAddress": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
+  "tokenRegistryAddress": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
+  "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "factoryAddress": "0x2f5b892695F33b898FbF3a68D4cc5E7859dbf0a7",
+  "deploymentBlock": 317408013,
+  "transactionHash": "0x408fdbefdeb706b8d84dc68d404df9573e4e0b4824e1fcbe977c1e4bf7aa8024",
+  "tokens": [
+    {
+      "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
+      "symbol": "XSGD",
+      "decimals": 6
+    },
+    {
+      "address": "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+      "symbol": "USDT",
+      "decimals": 6
+    },
+    {
+      "address": "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd",
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  ],
+  "constructorArgs": [
+    "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d"
+  ],
+  "startedAt": "2026-10-09T13:19:16.766Z",
+  "deployedAt": "2026-10-09T13:19:19.000Z",
+  "runtimeVerification": {
+    "bytecodeMatches": true,
+    "wiringMatches": true,
+    "readOnly": true,
+    "factoryAddress": "0x2f5b892695F33b898FbF3a68D4cc5E7859dbf0a7",
+    "registryAddress": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
+    "tokenRegistryAddress": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
+    "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "factoryCodeHash": "0xbc5ce3ed78fc8083ca25aa815660904da936910536b3afbc967ea8b169144908"
+  },
+  "sourceVerification": {
+    "status": "verified",
+    "explorer": "https://sepolia.arbiscan.io/address/0x2f5b892695F33b898FbF3a68D4cc5E7859dbf0a7#code",
+    "evidence": "source-verification-20261009.json"
+  }
+}

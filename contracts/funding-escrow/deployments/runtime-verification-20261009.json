@@ -1,0 +1,33 @@
+{
+  "verifiedAt": "2026-10-09T13:23:05.329Z",
+  "sourceCommit": "be9e3893e2424997192d9447a638ae2c25657a5e",
+  "main": {
+    "contractName": "EscrowAuditRegistry",
+    "address": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
+    "factoryAddress": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
+    "chainId": 421614,
+    "bytecodeMatches": true,
+    "wiringMatches": true,
+    "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "registryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "factoryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "feeBps": 10,
+    "registryCodeHash": "0xde333c8c6efe500e884be65ddbe45f5902f423702814b85be444ba65a012f468",
+    "factoryCodeHash": "0x833ccbff342c468aa3c2ff5ecd0ab6d00f58f2b98356b5b7d25c1538caa4eb72",
+    "escrowDeployer": "0x2F00b964A6b5dF731AB4F18f685374216CD12b85",
+    "openFundingPoolDeployer": "0x55c501f15d7679807E614A6f1bB36a837f097cd4",
+    "openFundingGrants": true,
+    "readOnly": true
+  },
+  "independent": {
+    "bytecodeMatches": true,
+    "wiringMatches": true,
+    "readOnly": true,
+    "factoryAddress": "0x2f5b892695F33b898FbF3a68D4cc5E7859dbf0a7",
+    "registryAddress": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
+    "tokenRegistryAddress": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
+    "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "factoryCodeHash": "0xbc5ce3ed78fc8083ca25aa815660904da936910536b3afbc967ea8b169144908"
+  },
+  "platformSignerEscrowAdmin": true
+}

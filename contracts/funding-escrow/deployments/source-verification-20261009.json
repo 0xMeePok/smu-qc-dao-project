@@ -1,0 +1,39 @@
+[
+  {
+    "contractName": "FundingEscrowFactory",
+    "address": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
+    "status": "verified",
+    "chainId": 421614,
+    "deploymentRecord": "arbitrumSepolia-1791551908138.json"
+  },
+  {
+    "contractName": "EscrowAuditRegistry",
+    "address": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
+    "status": "verified",
+    "chainId": 421614,
+    "deploymentRecord": "arbitrumSepolia-1791551908138.json"
+  },
+  {
+    "contractName": "FundingEscrowDeployer",
+    "address": "0x2F00b964A6b5dF731AB4F18f685374216CD12b85",
+    "status": "verified",
+    "chainId": 421614,
+    "checkedAt": "2026-10-09T13:24:29.364Z",
+    "buildInfoId": "solc-0_8_28-099657c0564565e4142c11307298fbd88900eb83",
+    "verificationMethod": "exact factory compilation unit"
+  },
+  {
+    "contractName": "OpenFundingPoolDeployer",
+    "address": "0x55c501f15d7679807E614A6f1bB36a837f097cd4",
+    "status": "verified",
+    "chainId": 421614,
+    "checkedAt": "2026-10-09T13:22:41.226Z"
+  },
+  {
+    "contractName": "IndependentFundingFactory",
+    "address": "0x2f5b892695F33b898FbF3a68D4cc5E7859dbf0a7",
+    "status": "verified",
+    "chainId": 421614,
+    "checkedAt": "2026-10-09T13:22:50.468Z"
+  }
+]

@@ -1,11 +1,11 @@
 {
   "enabled": true,
   "chainId": 421614,
-  "registryAddress": "0xc582a423bbcd08d6B9D930F53bd5ee054965b74f",
-  "tokenRegistryAddress": "0x173eAf0C60bA4e7584d3460a7B3817Cf920A72f8",
-  "factoryAddress": "0xB66863be8b3ef2762D92EFc5F2dc88f3d3567255",
+  "registryAddress": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
+  "tokenRegistryAddress": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
+  "factoryAddress": "0x2f5b892695F33b898FbF3a68D4cc5E7859dbf0a7",
   "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
-  "deploymentBlock": 317050834,
+  "deploymentBlock": 317408013,
   "defaultReviewDays": 30,
   "reviewDays": 30,
   "tokens": [
@@ -251,44 +251,6 @@
     {
       "inputs": [
         {
-          "internalType": "uint256",
-          "name": "remainingAfter",
-          "type": "uint256"
-        },
-        {
-          "internalType": "uint256",
-          "name": "minimum",
-          "type": "uint256"
-        }
-      ],
-      "name": "ContributionLeavesDust",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint256",
-          "name": "minimum",
-          "type": "uint256"
-        }
-      ],
-      "name": "ContributionBelowMinimum",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint8",
-          "name": "maximumDecimals",
-          "type": "uint8"
-        }
-      ],
-      "name": "AmountPrecisionExceeded",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
           "components": [
             {
               "internalType": "bytes32",
@@ -382,6 +344,44 @@
     {
       "inputs": [],
       "name": "AlreadyVoted",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint8",
+          "name": "maximumDecimals",
+          "type": "uint8"
+        }
+      ],
+      "name": "AmountPrecisionExceeded",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "minimum",
+          "type": "uint256"
+        }
+      ],
+      "name": "ContributionBelowMinimum",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "remainingAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "minimum",
+          "type": "uint256"
+        }
+      ],
+      "name": "ContributionLeavesDust",
       "type": "error"
     },
     {
