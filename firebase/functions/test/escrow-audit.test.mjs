@@ -4,7 +4,7 @@ import { encodeFunctionData } from "viem";
 import { asProposalUpdate, withOpportunityRevisionIndex } from "../auditCanonical.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { verifyMinedProposal, recoverProposalAudit, enqueueProposalAudit } from "../proposalAuditRecovery.js";
-import { fundingTermsHash, normalizeFundingTerms } from "../escrowAudit.js";
+import { fundingTermsHash, normalizeFundingTerms, verifyProposalEscrow } from "../escrowAudit.js";
 import { fundingAmountText, fundingAmountUnits, proposalFundingTerms } from "../escrowProposalTerms.js";
 import { escrowClient, escrowConfig, escrowRecord, txHash, escrowAddress } from "./fixtures/escrowAuditFixture.js";
 import { Timestamp } from "firebase-admin/firestore";
@@ -12,6 +12,29 @@ import { Timestamp } from "firebase-admin/firestore";
 const options = { registryConfig: escrowConfig };
 
 describe("Escrow-linked proposal verification", () => {
+  it("overlaps independent terms reads only after both canonical mappings resolve", async () => {
+    const record = escrowRecord(), client = escrowClient(record);
+    const expected = prepareStoredProposal(record, options), reads = [];
+    let releaseMapping, releaseTerms;
+    const mappingGate = new Promise(resolve => { releaseMapping = resolve; });
+    const termsGate = new Promise(resolve => { releaseTerms = resolve; });
+    const verification = verifyProposalEscrow({ expected, config: escrowConfig, readContract: async request => {
+      reads.push(request);
+      if (request.functionName === "escrowForProposal") await mappingGate;
+      if (request.functionName === "fundingTarget") await termsGate;
+      return client.readContract(request);
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(reads.length, 4);
+    assert(!reads.some(request => request.address === escrowAddress));
+    releaseMapping();
+    await new Promise(resolve => setImmediate(resolve));
+    assert(reads.some(request => request.functionName === "getOpportunity"));
+    assert.deepEqual(reads.filter(request => request.functionName === "milestoneAt").map(request => request.args[0]), [0n, 1n]);
+    releaseTerms();
+    assert.equal((await verification).address, escrowAddress);
+  });
+
   it("prepares an atomic escrow commit and preserves terms when the viewed parent revision changes", () => {
     const prepared = prepareStoredProposal(escrowRecord(), options);
     assert.equal(prepared.functionName, "commitProposalWithEscrow");

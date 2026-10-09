@@ -105,7 +105,8 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
   const supportsPause = config.abi.some(item => item.type === "function" && item.name === "postingFundingPaused");
   const supportsPendingSelection = config.abi.some(item => item.type === "function" && item.name === "pendingProposalForPosting");
   const supportsSelectionRejection = config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "rejectSelection");
-  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused, pendingProposalId] = await Promise.all([
+  const tokenRead = (functionName, args) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
+  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused, pendingProposalId, walletValues] = await Promise.all([
     Promise.all(names.map(name => read(name))),
     readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
@@ -114,6 +115,10 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     supportsInvalidation ? readContract({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, canonical.address] }) : null,
     supportsPause ? readContract({ address: config.address, abi: config.abi, functionName: "postingFundingPaused", args: [expected.opportunityId] }) : false,
     supportsPendingSelection ? readContract({ address: config.address, abi: config.abi, functionName: "pendingProposalForPosting", args: [expected.opportunityId] }) : ZERO_HASH,
+    walletAddress ? Promise.all([
+      tokenRead("balanceOf", [walletAddress]), tokenRead("allowance", [walletAddress, canonical.address]),
+      read("depositorSummary", [walletAddress]),
+    ]) : null,
   ]);
   if (!same(field(registered, "proposalHash", 4), expected.proposalHash) || !same(field(registered, "solutionHash", 5), expected.solutionHash)) {
     throw new Error("Mismatch detected: this proposal differs from its current on-chain record. Refresh before continuing.");
@@ -137,13 +142,10 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
   const currentMilestone = milestones[snapshot.currentTranche] ?? null;
   const wallet = { address: walletAddress, balance: 0n, allowance: 0n, contribution: 0n, hasVoted: false, depositor: null };
   if (walletAddress) {
-    const tokenRead = (functionName, args) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
-    const [balance, allowance, summary, hasVoted] = await Promise.all([
-      tokenRead("balanceOf", [walletAddress]), tokenRead("allowance", [walletAddress, canonical.address]),
-      read("depositorSummary", [walletAddress]),
-      currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH)
-        ? read("hasVoted", [BigInt(snapshot.currentTranche), currentMilestone.evidenceHash, walletAddress]) : false,
-    ]);
+    const [balance, allowance, summary] = walletValues;
+    // Only the vote lookup depends on the verified current milestone.
+    const hasVoted = currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH)
+      ? await read("hasVoted", [BigInt(snapshot.currentTranche), currentMilestone.evidenceHash, walletAddress]) : false;
     Object.assign(wallet, { balance: BigInt(balance), allowance: BigInt(allowance), depositor: depositor(summary), hasVoted });
     wallet.contribution = wallet.depositor.deposited;
   }

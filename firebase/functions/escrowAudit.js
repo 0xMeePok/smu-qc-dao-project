@@ -93,9 +93,14 @@ export async function verifyProposalEscrow({ expected, config, readContract }) {
   }
   const names = ["postingId", "proposalId", "token", "fundingTarget", "funderVoting", "proposalOwner", "problemOwner",
     "tokenRegistry", "auditRegistry", "milestoneCount", "expiresAt", "tokenDecimals"];
-  const values = await Promise.all(names.map(name => read(escrowAddress, escrowAbi, name)));
+  // Once both canonical mappings agree, these independent reads can share one
+  // RPC round trip. Every result still participates in verification below.
+  const [values, posting, milestones] = await Promise.all([
+    Promise.all(names.map(name => read(escrowAddress, escrowAbi, name))),
+    read(registryAddress, config.abi, "getOpportunity", [expected.opportunityId]),
+    Promise.all(terms.trancheBps.map((_, index) => read(escrowAddress, escrowAbi, "milestoneAt", [BigInt(index)]))),
+  ]);
   const actual = Object.fromEntries(names.map((name, index) => [name, values[index]]));
-  const posting = await read(registryAddress, config.abi, "getOpportunity", [expected.opportunityId]);
   const checks = [
     [actual.postingId, expected.opportunityId], [actual.proposalId, expected.entityId],
     [actual.token, terms.token], [actual.fundingTarget, terms.target], [actual.funderVoting, terms.funderVoting],
@@ -107,7 +112,7 @@ export async function verifyProposalEscrow({ expected, config, readContract }) {
   if (checks.some(([left, right]) => !same(left, right))) throw mismatchError("the escrow differs from the proposal funding terms.");
   let cumulativeBps = 0n, allocated = 0n;
   for (let index = 0; index < terms.trancheBps.length; index++) {
-    const milestone = await read(escrowAddress, escrowAbi, "milestoneAt", [BigInt(index)]);
+    const milestone = milestones[index];
     cumulativeBps += BigInt(terms.trancheBps[index]);
     const cumulative = terms.target * cumulativeBps / 10000n;
     const matches = [[field(milestone, "bps", 0), terms.trancheBps[index]],

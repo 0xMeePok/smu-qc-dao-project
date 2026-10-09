@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(), load: vi.fn(), save: vi.fn(), prepare: vi.fn(), sync: vi.fn(), history: vi.fn(), start: vi.fn(), account: null, user: null }));
@@ -31,7 +31,7 @@ beforeEach(() => {
   mocks.confirm.mockReset().mockResolvedValue({ transactionHash: hash }); mocks.save.mockReset().mockResolvedValue({});
   mocks.load.mockReset().mockResolvedValue({ summary: "Delivery complete", url: "https://example.com/delivery", ownerId: account });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 const ready = async () => { render(<EscrowFundingPanel proposal={proposal} />); await screen.findByText("Open for funding"); };
 function ActionCount({ read }) {
   const { data } = useQuery({ queryKey: [...ACTION_ITEMS_KEY, account], queryFn: read, staleTime: 60_000 });
@@ -292,4 +292,156 @@ it("blocks funding after an audit mismatch while keeping verified refund recover
   expect(screen.getByRole("button", { name: "Refresh escrow" }).disabled).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Claim my refund" }));
   await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "claimRefund" })));
+});
+
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+
+it("shows independently verified balances while history and evidence are still loading", async () => {
+  const records = deferred(), evidence = deferred();
+  mocks.history.mockReturnValue(records.promise); mocks.load.mockReturnValue(evidence.promise);
+  mocks.read.mockResolvedValue(model({ state: 6, currentMilestone: { evidenceHash: hash },
+    roles: { problemOwner: true }, can: { approveMilestone: true, claimRefund: true } }));
+  render(<EscrowFundingPanel proposal={proposal} />);
+  await screen.findByText("Delivery in progress");
+  expect(screen.queryByText("Reading the verified escrow…")).toBeNull();
+  expect(screen.getByRole("button", { name: "Claim my refund" }).disabled).toBe(false);
+  expect(screen.getByRole("button", { name: "Accept as delivered" }).disabled).toBe(true);
+  await act(async () => { evidence.resolve({ summary: "Delivery complete", url: "https://example.com/delivery" }); });
+  expect(screen.getByRole("button", { name: "Accept as delivered" }).disabled).toBe(false);
+  await act(async () => { records.resolve({ events: [] }); });
+});
+
+it("refreshes confirmed wallet balances before a slow reconciliation finishes", async () => {
+  const synced = deferred(); mocks.sync.mockReturnValue(synced.promise);
+  await ready();
+  mocks.read.mockResolvedValue(model({ state: 6, totalReleased: 500000000n, can: {} }));
+  fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
+  await screen.findByText("Delivery in progress");
+  expect(screen.getByText("500 USDC")).toBeTruthy();
+  expect(screen.getByText(/Your transaction is confirmed. Updating funding records/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Refresh escrow" }).disabled).toBe(true);
+  expect(mocks.history).toHaveBeenCalledTimes(1);
+  await act(async () => { synced.resolve({ events: [] }); });
+  expect(screen.getByRole("button", { name: "Refresh escrow" }).disabled).toBe(false);
+});
+
+it("follows the separate platform payout receipt and updates released funds without waiting for polling", async () => {
+  const receipt = deferred(), paymentHash = `0x${"f".repeat(64)}`;
+  mocks.read.mockResolvedValue(model({ state: 1, roles: { problemOwner: true }, can: { approveSelection: true } }));
+  mocks.sync.mockResolvedValueOnce({ events: [], settlement: { status: "pending", transactionHash: paymentHash } })
+    .mockResolvedValueOnce({ events: [], settlement: { status: "waiting", message: "Delivery evidence required." } });
+  mocks.confirm.mockReturnValue(receipt.promise);
+  render(<EscrowFundingPanel proposal={proposal} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Approve upfront payment" }));
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(paymentHash));
+  expect(screen.getByText(/platform action is awaiting confirmation/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Approve upfront payment" }).disabled).toBe(true);
+  mocks.read.mockResolvedValue(model({ state: 6, totalReleased: 500000000n, can: {} }));
+  await act(async () => { receipt.resolve({ transactionHash: paymentHash }); });
+  await screen.findByText("Delivery in progress");
+  expect(screen.getByText("500 USDC")).toBeTruthy();
+  expect(mocks.sync).toHaveBeenCalledTimes(2);
+  expect(mocks.sync).toHaveBeenLastCalledWith({ proposalId: proposal.id });
+  expect(mocks.write).toHaveBeenCalledTimes(1);
+  expect(mocks.history).toHaveBeenCalledTimes(1);
+});
+
+it("keeps a delayed platform receipt separate from the confirmed wallet payment and retries without a wallet write", async () => {
+  const paymentHash = `0x${"f".repeat(64)}`;
+  mocks.sync.mockResolvedValue({ events: [], settlement: { status: "pending", transactionHash: paymentHash } });
+  mocks.confirm.mockRejectedValueOnce(new Error("Receipt temporarily unavailable"));
+  await ready(); fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
+  await screen.findByText(/wallet transaction confirmed, but funding records/);
+  expect(screen.queryByRole("button", { name: "Retry confirmation" })).toBeNull();
+  expect(screen.getByText(/Deposit confirmed. Your tokens are held/)).toBeTruthy();
+  mocks.sync.mockResolvedValue({ events: [], settlement: { status: "complete" } });
+  fireEvent.click(screen.getByRole("button", { name: "Retry payment status" }));
+  await waitFor(() => expect(mocks.sync).toHaveBeenCalledTimes(2));
+  expect(mocks.write).toHaveBeenCalledTimes(1);
+});
+
+it("uses the existing interval to recover queued settlement without overlapping a pending request", async () => {
+  vi.useFakeTimers();
+  const synced = deferred();
+  mocks.history.mockResolvedValue({ events: [], settlement: { status: "queued", message: "Payment queued." } });
+  mocks.sync.mockReturnValue(synced.promise);
+  render(<EscrowFundingPanel proposal={proposal} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(mocks.sync).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(mocks.sync).toHaveBeenCalledTimes(1);
+  await act(async () => { synced.resolve({ events: [], settlement: { status: "complete" } }); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(mocks.sync).toHaveBeenCalledTimes(1);
+});
+
+it("does not apply stale evidence after switching proposals", async () => {
+  const previous = deferred();
+  mocks.read.mockResolvedValue(model({ state: 6, currentMilestone: { evidenceHash: hash }, roles: { problemOwner: true }, can: { approveMilestone: true } }));
+  mocks.load.mockReturnValueOnce(previous.promise).mockResolvedValueOnce(null);
+  const view = render(<EscrowFundingPanel proposal={proposal} />);
+  await screen.findByText("Delivery in progress");
+  view.rerender(<EscrowFundingPanel proposal={{ ...proposal, id: "proposal2" }} />);
+  await waitFor(() => expect(mocks.load).toHaveBeenCalledTimes(2));
+  await act(async () => { previous.resolve({ summary: "Delivery complete", url: "https://example.com/old" }); });
+  expect(screen.queryByRole("link", { name: "Review delivery evidence" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Accept as delivered" }).disabled).toBe(true);
+});
+
+it("follows a platform selection receipt immediately without a wallet signature", async () => {
+  const receipt = deferred(), selectionHash = `0x${"e".repeat(64)}`;
+  mocks.read.mockResolvedValue(model({ remaining: 0n, roles: { problemOwner: true } }));
+  mocks.start.mockResolvedValue({ events: [], settlement: { status: "pending", transactionHash: selectionHash } });
+  mocks.confirm.mockReturnValue(receipt.promise);
+  await ready(); fireEvent.click(screen.getByRole("button", { name: "Select proposal for upfront approval" }));
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(selectionHash));
+  expect(screen.getByText(/The platform action is awaiting confirmation/)).toBeTruthy();
+  mocks.read.mockResolvedValue(model({ state: 1, roles: { problemOwner: true }, can: { approveSelection: true } }));
+  await act(async () => { receipt.resolve({ transactionHash: selectionHash }); });
+  await screen.findByText("Awaiting upfront approval");
+  expect(mocks.start).toHaveBeenCalledTimes(1);
+  expect(mocks.sync).toHaveBeenCalledTimes(1);
+  expect(mocks.write).not.toHaveBeenCalled();
+});
+
+it("does not let a delayed transaction refresh or synchronize a newly opened proposal", async () => {
+  const written = deferred(); mocks.write.mockReturnValue(written.promise);
+  const view = render(<EscrowFundingPanel proposal={proposal} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Fund escrow" }));
+  await waitFor(() => expect(mocks.write).toHaveBeenCalledTimes(1));
+  view.rerender(<EscrowFundingPanel proposal={{ ...proposal, id: "proposal2" }} />);
+  await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+  await act(async () => { written.resolve({ transactionHash: hash }); });
+  expect(mocks.sync).not.toHaveBeenCalled();
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText(/Deposit confirmed/)).toBeNull();
+});
+
+it("stops before asking the wallet when navigation occurs during deposit preparation", async () => {
+  const prepared = deferred(); mocks.prepare.mockReturnValue(prepared.promise);
+  const view = render(<EscrowFundingPanel proposal={proposal} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Fund escrow" }));
+  await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
+  view.rerender(<EscrowFundingPanel proposal={{ ...proposal, id: "proposal2" }} />);
+  await act(async () => { prepared.resolve({}); });
+  expect(mocks.write).not.toHaveBeenCalled();
+});
+
+it("retains an original proposal's uncertain broadcast when navigation happens during the wallet request", async () => {
+  const written = deferred(); let progress;
+  mocks.write.mockImplementation(({ onProgress }) => { progress = onProgress; return written.promise; });
+  const view = render(<EscrowFundingPanel proposal={proposal} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Fund escrow" }));
+  await waitFor(() => expect(progress).toBeTypeOf("function"));
+  view.rerender(<EscrowFundingPanel proposal={{ ...proposal, id: "proposal2" }} />);
+  await act(async () => {
+    progress({ status: "pending", action: "deposit", transactionHash: hash });
+    written.reject(Object.assign(new Error("Receipt unavailable"), { transactionHash: hash }));
+  });
+  expect(screen.queryByRole("button", { name: "Retry confirmation" })).toBeNull();
+  expect(screen.queryByText("Receipt unavailable")).toBeNull();
+  view.rerender(<EscrowFundingPanel proposal={proposal} />);
+  await screen.findByRole("button", { name: "Retry confirmation" });
+  expect(screen.getByRole("link", { name: "View pending transaction" }).getAttribute("href")).toContain(hash);
 });
