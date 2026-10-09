@@ -1,7 +1,19 @@
-import { requireHalfUpfrontFundingTerms } from "./escrowProposalTerms.js";
+import { configuredFundingToken, fundingAmountUnits, requireHalfUpfrontFundingTerms } from "./escrowProposalTerms.js";
+import { fundingTargetError } from "./fundingAmountPolicy.js";
 import { isEscrowRegistry, normalizeFundingTerms } from "./escrowAudit.js";
 import { isIndependentProposal } from "./independentProposal.js";
 import registry from "./auditRegistry.contract.json" with { type: "json" };
+
+/** Validate new publications, without preventing corrections to a legacy target. */
+export function requireNewProposalTargetPolicy(record, { registryConfig = registry, existingRecord } = {}) {
+  if (!isEscrowRegistry(registryConfig)) return;
+  if (existingRecord && existingRecord.status !== "draft"
+      && existingRecord.amount === record.amount && existingRecord.currency === record.currency) return;
+  const token = configuredFundingToken(registryConfig, record.currency);
+  const error = fundingTargetError({ targetBaseUnits: fundingAmountUnits(record.amount, token.decimals),
+    decimals: token.decimals, symbol: token.symbol });
+  if (error) throw new TypeError(error);
+}
 
 /** Escrow publications and corrections always use the fixed 50/50 policy. */
 export function requireProposalPublicationFundingPolicy(record, { registryConfig = registry } = {}) {

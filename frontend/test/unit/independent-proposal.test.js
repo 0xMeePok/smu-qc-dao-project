@@ -83,6 +83,12 @@ describe("independent listing proposals", () => {
     assert.ok(validateIndependentProposal(completeForm({ amount: "0" })).amount);
   });
 
+  it("validates new independent targets while allowing legacy content corrections", () => {
+    assert.match(validateIndependentProposal(completeForm({ amount: "1000.001" })).amount, /2 decimal places/);
+    assert.equal(validateIndependentProposal(completeForm({ amount: "1000.01" })).amount, undefined);
+    assert.equal(validateIndependentProposal(completeForm({ amount: "1000.001" }), { requireFundingPlan: false }).amount, undefined);
+  });
+
   it("[FUT-RPF-185] skips frozen escrow validation on a content edit", () => {
     const incomplete = completeForm({
       immutableFundingTerms: { trancheBps: [5000, 5000] },

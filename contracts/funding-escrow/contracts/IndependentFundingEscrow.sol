@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {AuditRegistry} from "audit-registry/contracts/AuditRegistry.sol";
+import {FundingAmountPolicy} from "./FundingAmountPolicy.sol";
 import {TokenDecimals} from "./TokenDecimals.sol";
 import {IndependentEscrowInit, IIndependentTokenPolicy, IIndependentRegistryPolicy} from "./IndependentFundingTypes.sol";
 
@@ -131,6 +132,7 @@ contract IndependentFundingEscrow is ReentrancyGuard {
         researcher = init.researcher;
         token = IERC20(init.token);
         tokenDecimals = init.tokenDecimals;
+        FundingAmountPolicy.requirePrecision(init.target, tokenDecimals);
         fundingTarget = init.target;
         expiresAt = init.expiresAt;
         reviewDays = init.reviewDays;
@@ -154,6 +156,7 @@ contract IndependentFundingEscrow is ReentrancyGuard {
         if (amount == 0) revert InvalidInput();
         uint256 remaining = fundingTarget - totalDeposited;
         if (amount > remaining) revert FundingTargetExceeded(remaining);
+        FundingAmountPolicy.requireContribution(amount, remaining, tokenDecimals);
         _recordContribution(msg.sender, amount);
         contributions[msg.sender] += amount;
         totalDeposited += amount;

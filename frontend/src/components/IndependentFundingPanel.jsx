@@ -62,7 +62,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
         {Number(summary.completionDeadline) > 0 && <div className="settings-row"><dt>Complete and approve by</dt><dd>{instant(summary.completionDeadline)}</dd></div>}
       </dl>
       {actions.deposit && <div className="field-group">
-        <Field htmlFor="independent-contribution" label={`Contribution (${summary.tokenSymbol})`} hint={`Still needed: ${money(remaining)}. Your wallet approves only the entered amount, then deposits it into this listing's escrow.`} error={amountError}>
+        <Field htmlFor="independent-contribution" label={`Contribution (${summary.tokenSymbol})`} hint={`Still needed: ${money(remaining)}. Use up to 2 decimal places. Minimum 1 ${summary.tokenSymbol}, or the exact remaining balance. Your wallet approves only the entered amount, then deposits it into this listing's escrow.`} error={amountError}>
           {({ id, describedBy, invalid }) => <input id={id} aria-invalid={invalid} type="text" inputMode="decimal" value={amount} maxLength={160} disabled={disabled}
             aria-describedby={describedBy} onChange={event => onAmount(event.target.value)} />}
         </Field>{button("deposit", "Fund independent listing", { amount })}

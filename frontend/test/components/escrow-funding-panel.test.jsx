@@ -74,11 +74,11 @@ describe("wallet escrow funding panel", () => {
   });
   it("sends the exact decimal input only after a user action and refreshes after confirmation", async () => {
     await ready(); expect(mocks.write).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "12.000001" } });
+    fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "12.01" } });
     fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
-    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ proposal, account, action: "deposit", amount: "12.000001" })));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ proposal, account, action: "deposit", amount: "12.01" })));
     await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
-    expect(mocks.prepare).toHaveBeenCalledWith({ proposalId: proposal.id });
+    expect(mocks.prepare).toHaveBeenCalledWith({ proposalId: proposal.id, amount: "12.01" });
     expect(mocks.sync).toHaveBeenCalledWith({ proposalId: proposal.id, transactionHash: hash });
     expect(screen.getByText(/Deposit confirmed. Your tokens are held/)).toBeTruthy();
   });
@@ -475,6 +475,24 @@ it("blocks overfunding inline before preparation or wallet approval and accepts 
   expect(mocks.prepare).not.toHaveBeenCalled();
   expect(mocks.write).not.toHaveBeenCalled();
   fireEvent.change(input, { target: { value: "20" } });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(fund.disabled).toBe(false);
+});
+
+it("keeps invalid precision, tiny partial amounts and dusty remainders out of the wallet", async () => {
+  mocks.read.mockResolvedValue(model({ totalDeposited: 980000000n, remaining: 20000000n }));
+  await ready();
+  const input = screen.getByLabelText("Contribution (USDC)");
+  const fund = screen.getByRole("button", { name: "Fund escrow", exact: true });
+  for (const [amount, message] of [["1.001", /2 decimal places/], ["0.99", /at least 1/], ["19.01", /would leave only 0.99/]]) {
+    fireEvent.change(input, { target: { value: amount } });
+    expect(screen.getByRole("alert").textContent).toMatch(message);
+    expect(fund.disabled).toBe(true);
+    fireEvent.click(fund);
+  }
+  expect(mocks.prepare).not.toHaveBeenCalled();
+  expect(mocks.write).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { value: "19" } });
   expect(screen.queryByRole("alert")).toBeNull();
   expect(fund.disabled).toBe(false);
 });

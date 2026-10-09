@@ -14,8 +14,18 @@ import {
 } from "./errors.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
-import { proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
+import { configuredFundingToken, proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
+import { fundingTargetInputError } from "./contributionValidation.js";
 import { validateExpiry } from "./validation.js";
+
+function newTargetError(amount, currency) {
+  let decimals = 6;
+  if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG)) {
+    try { decimals = configuredFundingToken(AUDIT_REGISTRY_CONFIG, currency).decimals; }
+    catch { return ""; } // The existing funding-plan validation explains missing token configuration.
+  }
+  return fundingTargetInputError(amount, decimals, currency);
+}
 
 export function proposalBlockReason(posting, now = new Date()) {
   if (!posting) return "This opportunity is not available.";
@@ -34,7 +44,7 @@ export function proposalBlockReason(posting, now = new Date()) {
   return "";
 }
 
-export function validateProposal(form, posting) {
+export function validateProposal(form, posting, { requireNewTarget = true } = {}) {
   const errors = {};
   const fields = [...PROPOSAL_FIELDS, ...(posting?.opportunityType === OPEN_FUNDING_TYPE ? PROBLEM_FRAMING_FIELDS : [])];
   for (const [key, label, max] of fields) {
@@ -46,6 +56,8 @@ export function validateProposal(form, posting) {
   if (!PROPOSAL_CATEGORIES.some(({ value }) => value === form.category)) errors.category = "Choose a quantum or quantum-adjacent category.";
   const amount = Number(form.amount);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) errors.amount = "Enter a funding amount greater than 0 and no more than 1,000,000,000.";
+  if (requireNewTarget && !errors.amount) errors.amount = newTargetError(form.amount, posting?.currency) || undefined;
+  if (!errors.amount) delete errors.amount;
   if (isEscrowRegistry(AUDIT_REGISTRY_CONFIG) && !errors.amount) {
     try { proposalFundingTerms({ form: posting?.opportunityType === OPEN_FUNDING_TYPE ? { ...form, funderVoting: false } : form, currency: posting?.currency, config: AUDIT_REGISTRY_CONFIG }); }
     catch (error) { errors.fundingPlan = error.message; }
@@ -71,6 +83,8 @@ export function validateIndependentProposal(form, { requireFundingPlan = true } 
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) {
     errors.amount = "Enter a funding amount greater than 0 and no more than 1,000,000,000.";
   }
+  if (requireFundingPlan && !errors.amount) errors.amount = newTargetError(form.amount, form.currency) || undefined;
+  if (!errors.amount) delete errors.amount;
   if (!CURRENCIES.includes(form.currency)) errors.currency = "Choose a funding currency.";
   if (validateExpiry(form.expiryDays)) errors.expiryDays = validateExpiry(form.expiryDays);
   // Published listings freeze the escrow plan. Content edits must not rebuild

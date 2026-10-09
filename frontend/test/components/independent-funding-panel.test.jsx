@@ -186,3 +186,21 @@ it("shows the independent remaining limit inline and prevents overfunding withou
   fireEvent.click(fund);
   expect(p.onAction).toHaveBeenCalledWith("deposit", { amount: "1" });
 });
+
+it.each([["1.001", /2 decimal places/], ["0.99", /at least 1/], ["1.01", /would leave only 0.99/]])("blocks invalid independent contributions before a wallet request (%s)", (amount, message) => {
+  const p = props({ amount, snapshot: { ...props().snapshot, summary: { ...summary, totalDeposited: "0" } } });
+  render(<IndependentFundingView {...p} />);
+  expect(screen.getByRole("alert").textContent).toMatch(message);
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(true);
+  fireEvent.click(fund);
+  expect(p.onAction).not.toHaveBeenCalled();
+});
+it.each([["0.25", "250000"], ["0.000001", "1"]])("lets exact final balances finish existing independent funding (%s)", (amount, remaining) => {
+  const p = props({ amount, snapshot: { ...props().snapshot, summary: { ...summary, totalDeposited: (2000000n - BigInt(remaining)).toString() } } });
+  render(<IndependentFundingView {...p} />);
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(false);
+  fireEvent.click(fund);
+  expect(p.onAction).toHaveBeenCalledWith("deposit", { amount });
+});

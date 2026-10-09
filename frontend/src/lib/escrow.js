@@ -1,4 +1,4 @@
-import { remainingContributionMessage } from "./contributionValidation.js";
+import { contributionError } from "./contributionValidation.js";
 import { erc20Abi, keccak256, stringToHex } from "viem";
 import { getConnection } from "wagmi/actions";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG, getAuditRegistryAddress } from "../config/auditRegistry.js";
@@ -197,6 +197,9 @@ export async function readPostingFundingStarted(posting, { adapters = createWagm
 }
 
 const REVERT_MESSAGES = {
+  AmountPrecisionExceeded: "Use at most 2 decimal places for funding amounts.",
+  ContributionBelowMinimum: "Contribute at least 1 token, or fund the exact remaining balance.",
+  ContributionLeavesDust: "This contribution would leave less than 1 token still needed. Enter a smaller amount or fund the exact remaining balance.",
   AccessDenied: "This connected wallet cannot perform that escrow action.",
   InvalidState: "The escrow state changed. Refresh before continuing.",
   InvalidInput: "The selection or evidence changed. Refresh before continuing.",
@@ -301,8 +304,8 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
   };
   if (action === "deposit") {
     const units = fundingAmountUnits(amount, snapshot.decimals);
-    if (units > snapshot.remaining) throw new Error(remainingContributionMessage(snapshot.remaining, snapshot.decimals, snapshot.symbol));
-    if (units > snapshot.wallet.balance) throw new Error(`Your ${snapshot.symbol} balance is too low for that deposit.`);
+    const invalid = contributionError({ amount, decimals: snapshot.decimals, symbol: snapshot.symbol, remaining: snapshot.remaining, balance: snapshot.wallet.balance });
+    if (invalid) throw new Error(invalid);
     if (snapshot.wallet.allowance < units) {
       // Zero first supports tokens that require clearing an existing allowance.
       if (snapshot.wallet.allowance > 0n) await send("approve", [snapshot.address, 0n], { address: snapshot.token, abi: erc20Abi, label: "resetAllowance" });

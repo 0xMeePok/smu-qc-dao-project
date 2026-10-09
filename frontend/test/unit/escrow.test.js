@@ -414,3 +414,22 @@ describe("Escrow evidence and error messages", () => {
     assert.match(escrowErrorMessage({ cause: { code: 4001 } }), /declined/);
   });
 });
+
+it("rejects fractional cents, small partial contributions and dusty remainders before any approval", async () => {
+  for (const amount of ["1.000001", "0.99", "1199.26"]) {
+    const f = fixture();
+    await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "deposit", amount }), /decimal places|at least 1|would leave/);
+    assert.equal(f.writes.length, 0);
+  }
+  for (const remaining of [250000n, 1n]) {
+    const f = fixture({ state: { totalDeposited: target - remaining } });
+    await writeEscrowAction({ ...f, account: funder, action: "deposit", amount: remaining === 1n ? "0.000001" : "0.25" });
+    assert.equal(f.writes.at(-1).functionName, "deposit");
+    assert.deepEqual(f.writes.at(-1).args, [remaining]);
+  }
+});
+it("explains decoded contract precision, minimum and dust errors", () => {
+  for (const [name, message] of [["AmountPrecisionExceeded", /2 decimal places/], ["ContributionBelowMinimum", /at least 1/], ["ContributionLeavesDust", /leave less than 1/]]) {
+    assert.match(escrowErrorMessage({ cause: { data: { errorName: name } } }), message);
+  }
+});

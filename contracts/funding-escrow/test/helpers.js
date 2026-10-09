@@ -20,7 +20,8 @@ export async function createProposal(c, label = "proposal-2", changes = {}, sign
     c.ethers.id(label), c.ethers.id(`solution-${label}`), 0, terms(c, changes));
 }
 export async function fixture(options = {}) {
-  const { decimals = 6, duration = 10 * 86400, target = 1000n, feeBps = 0 } = options;
+  // Arithmetic fixtures use whole-token units; decimal-sensitive scenarios opt in explicitly.
+  const { decimals = 0, duration = 10 * 86400, target = 1000n, feeBps = 0 } = options;
   const connection = await network.create();
   const { ethers } = connection;
   const [platform, owner, solution, alice, bob, other, admin] = await ethers.getSigners();

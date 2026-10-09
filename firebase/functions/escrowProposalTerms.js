@@ -1,3 +1,4 @@
+import { fundingTargetError } from "./fundingAmountPolicy.js";
 import { keccak256, stringToHex } from "viem";
 import { normalizeFundingTerms, requireAddress } from "./escrowAudit.js";
 
@@ -76,6 +77,8 @@ export function proposalFundingTerms({ form, currency, config }) {
     }
     return serializeFundingTerms(saved);
   }
+  const targetError = fundingTargetError({ targetBaseUnits: target, decimals: token.decimals, symbol: token.symbol });
+  if (targetError) throw new TypeError(targetError);
   const ratios = String(form.tranchePercentages ?? HALF_UPFRONT_PERCENTAGES).split(",").map(value => value.trim());
   if (ratios.length < 1 || ratios.length > 5 || ratios.some(value => !/^\d{1,3}(\.\d{1,2})?$/.test(value))) {
     throw new TypeError("Proposals require the fixed payment split 50, 50.");

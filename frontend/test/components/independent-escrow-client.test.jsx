@@ -157,3 +157,7 @@ it("reports the over-target race after approval without treating the approval as
   expect(error.transactionHash).toBeUndefined();
   expect(independentFundingError(error)).toMatch(/exceeds the funding still needed/);
 });
+
+it.each([["AmountPrecisionExceeded", /2 decimal places/], ["ContributionBelowMinimum", /at least 1/], ["ContributionLeavesDust", /leave less than 1/]])("explains the independent funding policy error %s", (name, message) => {
+  expect(independentFundingError({ cause: { data: { errorName: name } } })).toMatch(message);
+});

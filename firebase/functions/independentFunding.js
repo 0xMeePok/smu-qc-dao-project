@@ -1,7 +1,8 @@
+import { fundingAmountError, fundingTargetError } from "./fundingAmountPolicy.js";
 import { boundedMap } from "./boundedMap.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
-import { decodeEventLog, decodeFunctionData, encodeAbiParameters, formatUnits, keccak256, parseUnits, stringToHex } from "viem";
+import { decodeEventLog, decodeFunctionData, encodeAbiParameters, keccak256, parseUnits, stringToHex } from "viem";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { assertActiveAuditDeployment, resolveAuditDeployment } from "./auditDeployments.js";
@@ -259,15 +260,15 @@ export async function prepareIndependentFundingAction({ action, amount, evidence
   const funding = options.config.independentFunding;
   let address = response.summary?.escrowAddress, abi = funding.escrowAbi, functionName, args, amountBaseUnits;
   if (action === "activate") {
+    const error = fundingTargetError({ targetBaseUnits: expected.target, decimals: expected.token.decimals, symbol: expected.token.symbol });
+    if (error) fail("invalid-argument", error);
     address = funding.factoryAddress; abi = funding.factoryAbi; functionName = "createEscrow";
     args = [expected.prepared.entityId, expected.token.address, expected.target, expected.reviewDays, expected.termsHash];
   } else if (action === "deposit") {
     amountBaseUnits = exactAmount(amount, expected.token.decimals);
-    if (amountBaseUnits < 1n) fail("invalid-argument", "Enter a contribution greater than zero.");
-    const remaining = expected.target - BigInt(response.summary.totalDeposited);
-    if (amountBaseUnits > remaining) {
-      fail("invalid-argument", `Only ${formatUnits(remaining, expected.token.decimals)} ${expected.token.symbol} is still needed. Enter this amount or less.`);
-    }
+    const error = fundingAmountError({ amountBaseUnits, decimals: expected.token.decimals, symbol: expected.token.symbol,
+      remainingBaseUnits: expected.target - BigInt(response.summary.totalDeposited) });
+    if (error) fail("invalid-argument", error);
     functionName = "deposit"; args = [amountBaseUnits];
   } else if (action === "submitEvidence") {
     const normalized = normalizeIndependentFundingEvidence(evidence), hash = hashIndependentFundingEvidence(normalized);

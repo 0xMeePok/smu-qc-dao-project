@@ -3,11 +3,11 @@ import { network } from "hardhat";
 import { scopedId, terms, mineAt, Behavior } from "./helpers.js";
 
 const S = { Open: 0n, Accepted: 1n, Released: 2n, Declined: 3n, Expired: 4n, Cancelled: 5n, Refunded: 6n };
-async function fixture({ target = 100n, feeBps = 0, reviewDays = 30, duration = 2 * 86400, tokenName = "EscrowTestToken" } = {}) {
+async function fixture({ decimals = 0, target = 100n, feeBps = 0, reviewDays = 30, duration = 2 * 86400, tokenName = "EscrowTestToken" } = {}) {
   const connection = await network.create({ override: { chainId: 421614 } });
   const { ethers } = connection;
   const [platform, owner, solution, alice, bob, other, admin] = await ethers.getSigners();
-  const token = await ethers.deployContract(tokenName, [6]);
+  const token = await ethers.deployContract(tokenName, [decimals]);
   const tokenAddress = await token.getAddress();
   const registry = await ethers.deployContract("EscrowAuditRegistry", [admin.address]);
   const registryAddress = await registry.getAddress();
@@ -342,4 +342,55 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     await accounting(refund);
   });
 
+});
+
+// The same direct-contribution boundaries must hold in both funding workflows.
+import { fundingPolicyCases } from "./fundingPolicyCases.js";
+describe("IndependentFundingEscrow: contribution amount policy", function () {
+  fundingPolicyCases(fixture);
+  it("rejects off-cent targets at activation", async function () {
+    const c = await fixture({ decimals: 6, target: 1_000_000_000n });
+    const id = scopedId(c, c.solution, "off-cent-target");
+    await c.registry.connect(c.solution).commitOpportunity(id, 2, c.contentHash, c.expiresAt);
+    const target = 999_999_999n;
+    const hash = c.ethers.keccak256(c.ethers.AbiCoder.defaultAbiCoder().encode(
+      ["bytes32", "address", "address", "uint256", "uint64", "uint32"],
+      [id, c.solution.address, c.tokenAddress, target, c.expiresAt, c.reviewDays]));
+    await expect(c.independentFactory.connect(c.solution).createEscrow(id, c.tokenAddress, target, c.reviewDays, hash))
+      .to.be.revertedWithCustomError(c.escrow, "AmountPrecisionExceeded").withArgs(2);
+  });
+});
+
+describe("Independent six-decimal settlement with contribution limits", function () {
+  for (const outcome of ["complete", "cancel", "decline"]) {
+    it(`preserves ${outcome} with exact fees and fee-free refunds`, async function () {
+      const c = await fixture({ decimals: 6, target: 10_010_000n, feeBps: 25 });
+      await c.escrow.connect(c.alice).deposit(6_010_000n);
+      await c.escrow.connect(c.bob).deposit(4_000_000n);
+      if (outcome === "decline") {
+        await c.escrow.connect(c.solution).declineFunding(c.reason);
+      } else {
+        await c.escrow.connect(c.solution).acceptFunding();
+        expect(await c.escrow.totalReleased()).to.equal(5_005_000n);
+        expect(await c.escrow.feePaid()).to.equal(12_512n);
+        if (outcome === "complete") {
+          await evidence(c);
+          await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
+          expect(await c.escrow.totalReleased()).to.equal(c.target);
+          expect(await c.escrow.feePaid()).to.equal(25_025n);
+          expect(await c.token.balanceOf(c.solution.address)).to.equal(c.target * 10n + c.target - 25_025n);
+        } else {
+          await c.escrow.connect(c.admin).adminCancel(c.reason);
+        }
+      }
+      if (outcome !== "complete") {
+        await c.escrow.connect(c.bob).claimRefund();
+        await c.escrow.connect(c.alice).claimRefund();
+        expect(await c.escrow.totalRefunded()).to.equal(outcome === "decline" ? c.target : 5_005_000n);
+        expect(await c.escrow.feePaid()).to.equal(outcome === "decline" ? 0n : 12_512n);
+      }
+      expect(await c.token.balanceOf(c.escrowAddress)).to.equal(0n);
+      await accounting(c);
+    });
+  }
 });

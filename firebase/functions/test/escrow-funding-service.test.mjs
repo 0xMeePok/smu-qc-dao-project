@@ -603,3 +603,16 @@ describe("serialized platform signing outbox", () => {
     assert(!f.db.records.get(outboxPath).leaseToken);
   });
 });
+
+
+it("validates the requested main escrow contribution against the verified remainder", async () => {
+  const f = fixture(); f.state.totalDeposited = BigInt(f.record.fundingTerms.target) - 2_000_000n;
+  for (const [amount, message] of [["0.50", /at least 1/], ["1.000001", /at most 2 decimal/], ["1.50", /leave only 0.5/], ["2.01", /Only 2/]]) {
+    await assert.rejects(prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount }), message);
+  }
+  assert.equal((await prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount: "1" })).remainingBaseUnits, "2000000");
+  f.state.totalDeposited = BigInt(f.record.fundingTerms.target) - 500_000n;
+  assert.equal((await prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount: "0.50" })).remainingBaseUnits, "500000");
+  f.state.totalDeposited = BigInt(f.record.fundingTerms.target) - 765_433n;
+  assert.equal((await prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount: "0.765433" })).remainingBaseUnits, "765433");
+});

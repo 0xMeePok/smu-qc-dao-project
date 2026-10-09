@@ -26,7 +26,7 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
     ...(signing ? { secrets: [escrowPlatformKey] } : {}) }, async request => {
     const uid = await requireMember(request);
     try {
-      return await service({ ...shared, uid, proposalId: request.data?.proposalId, transactionHash: request.data?.transactionHash });
+      return await service({ ...shared, uid, proposalId: request.data?.proposalId, amount: request.data?.amount, transactionHash: request.data?.transactionHash });
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       // Viem errors can contain complete request objects. Never return or log

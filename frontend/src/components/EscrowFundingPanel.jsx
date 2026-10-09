@@ -85,7 +85,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       {grantWaiting && !settlementMessage && <p className="field-hint">{grantMessage} Manage the offer in the grant funding panel.</p>}
       {state.state === 0 && state.remaining > 0n && !state.isGrant && canDeposit && <div className="field-group">
         <p><strong>Funding token: {state.symbol}</strong> · This proposal accepts the token fixed in its payment plan.</p>
-        <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Wallet balance: ${money(state.wallet.balance)}.`} error={amountError}>
+        <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Use up to 2 decimal places. Minimum 1 ${state.symbol}, or the exact remaining balance. Wallet balance: ${money(state.wallet.balance)}.`} error={amountError}>
           {({ id, describedBy, invalid }) => <input id={id} aria-invalid={invalid} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
         </Field>
         <p className="field-hint">1. Approve only the entered token amount if needed. 2. Confirm the deposit. Deposited funds remain locked until an approved payment or an available refund.</p>
@@ -252,7 +252,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
     const remember = hash => { saveTransaction(storageKey, hash); if (currentStorageKey.current === storageKey) setUnresolvedTransaction(hash); };
     try {
       // Revalidate current membership and posting eligibility immediately before any deposit signature.
-      if (action === "deposit") await prepareEscrowDeposit({ proposalId: proposal.id });
+      if (action === "deposit") await prepareEscrowDeposit({ proposalId: proposal.id, amount });
       if (currentStorageKey.current !== storageKey) return;
       const payload = { proposal: requestedProposal, account: address, action, selectionId: state?.selectionId, ...extra, onProgress: next => {
         if (next.status === "pending") remember(next.transactionHash);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
-import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256 } from "viem";
+import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, parseUnits } from "viem";
 import main from "../auditRegistry.contract.json" with { type: "json" };
 import independent from "../independentFunding.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
@@ -16,7 +16,7 @@ import { reconcileModerationVoids } from "../escrowFunding.js";
 const address = digit => `0x${digit.repeat(40)}`, hash = digit => `0x${digit.repeat(64)}`;
 const researcher = address("a"), funder = address("b"), outsider = address("c"), platform = address("d");
 const publicationHash = hash("1"), depositHash = hash("5"), now = Timestamp.fromMillis(1_900_000_000_000);
-function fixture({ activated = true } = {}) {
+function fixture({ activated = true, requestedAmount = 2 } = {}) {
   const config = { ...main, address: address("7"), escrow: { ...main.escrow, factoryAddress: address("8"),
     tokens: [{ address: address("e"), symbol: "USDC", decimals: 6 }] } };
   config.independentFunding = { ...independent, enabled: true, chainId: config.chainId, registryAddress: config.address,
@@ -25,16 +25,17 @@ function fixture({ activated = true } = {}) {
   const record = { id: "independent-service", proposalKind: "independent", researcherId: researcher,
     title: "Quantum routing", summary: "Routing with quantum-adjacent research", methodology: "Hybrid annealing",
     category: "quantum-adjacent", maturity: "pilot", addressedProblems: "Routing", team: "Research team",
-    amount: 2, currency: "USDC", expiresAt: Timestamp.fromMillis(now.toMillis() + 30 * 864e5),
+    amount: requestedAmount, currency: "USDC", expiresAt: Timestamp.fromMillis(now.toMillis() + 30 * 864e5),
     status: "submitted", attachments: [], fundingTerms: { reviewWindows: [604800, 604800] },
     audit: { schemaVersion: 2, chainId: config.chainId, transactionHash: publicationHash, status: "confirmed" } };
   const prepared = prepareStoredProposal(record, { registryConfig: config });
   const expiresAt = BigInt(record.expiresAt.toMillis() / 1000);
+  const target = parseUnits(String(requestedAmount), 6);
   const termsHash = keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "address" }, { type: "address" },
     { type: "uint256" }, { type: "uint64" }, { type: "uint32" }],
-  [prepared.entityId, researcher, config.escrow.tokens[0].address, 2_000_000n, expiresAt, 7]));
+  [prepared.entityId, researcher, config.escrow.tokens[0].address, target, expiresAt, 7]));
   const state = { state: 0, listingId: prepared.entityId, researcher, token: config.escrow.tokens[0].address,
-    tokenDecimals: 6, fundingTarget: 2_000_000n, expiresAt, reviewDays: 7, completionDeadline: 0n,
+    tokenDecimals: 6, fundingTarget: target, expiresAt, reviewDays: 7, completionDeadline: 0n,
     termsHash, listingContentHash: prepared.contentHash, platformSigner: platform,
     tokenRegistry: config.escrow.factoryAddress, auditRegistry: config.address, factory: config.independentFunding.factoryAddress,
     feeBps: 25, feeRecipient: platform, totalDeposited: 1_000_000n, totalReleased: 0n, totalRefunded: 0n, feePaid: 0n,
@@ -363,4 +364,26 @@ it("reports the exact remaining independent contribution separately from invalid
     error => error.code === "invalid-argument" && error.message === "Enter a contribution greater than zero.");
   await assert.rejects(prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "0.0000001" }), /supported decimal places/);
   assert.equal(f.simulations.length, 0);
+});
+
+
+it("rejects sub-minimum, fractional-cent and dust-leaving independent deposits before wallet simulation", async () => {
+  const f = fixture();
+  Object.assign(f.state, { totalDeposited: 0n, outstandingBalance: 0n, contribution: 0n });
+  for (const [amount, message] of [["0.50", /at least 1/], ["1.000001", /at most 2 decimal/], ["1.50", /leave only 0.5/]]) {
+    await assert.rejects(prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount }), message);
+  }
+  assert.equal((await prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "1" })).amountBaseUnits, "1000000");
+  assert.equal((await prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "2" })).amountBaseUnits, "2000000");
+  Object.assign(f.state, { totalDeposited: 1_500_000n, outstandingBalance: 1_500_000n });
+  assert.equal((await prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "0.5" })).amountBaseUnits, "500000");
+  assert.equal(f.simulations.length, 0);
+});
+
+
+it("verifies and activates a new independent cent target with exact token units", async () => {
+  const f = fixture({ activated: false, requestedAmount: 2.01 });
+  const action = await prepareIndependentFundingAction({ ...f.options(researcher), action: "activate" });
+  assert.equal(action.args[2], "2010000");
+  assert.equal(f.simulations.length, 1);
 });

@@ -5,7 +5,7 @@ import { parseTokenAmount, formatTokenAmount } from "../lib/tokenAmounts.js";
 describe("FundingEscrow: token decimal policy and exact settlement", function () {
   for (const decimals of [0, 1, 2, 6, 8, 18, 24, 36, 77]) {
     it(`lists, snapshots and relists a ${decimals}-decimal token`, async function () {
-      const c = await fixture({ decimals });
+      const c = await fixture({ decimals, target: 10n ** BigInt(Math.max(0, decimals - 2)) });
       expect(await c.factory.MAX_TOKEN_DECIMALS()).to.equal(77n);
       expect(await c.factory.tokenDecimals(c.tokenAddress)).to.equal(BigInt(decimals));
       expect(await c.escrow.tokenDecimals()).to.equal(BigInt(decimals));
@@ -19,32 +19,36 @@ describe("FundingEscrow: token decimal policy and exact settlement", function ()
       expect(await c.factory.tokenDecimals(await another.getAddress())).to.equal(BigInt(decimals));
     });
 
-    it(`refunds exact repeated deposits, including a single base unit, at ${decimals} decimals`, async function () {
-      const c = await fixture({ decimals, feeBps: 10000 });
-      for (const amount of [1n, 37n, 961n]) await c.escrow.connect(c.alice).deposit(amount);
-      await at(c, c.expiresAt);
-      await c.escrow.connect(c.alice).claimRefund();
-      const summary = await c.escrow.depositorSummary(c.alice.address);
-      expect(summary.deposited).to.equal(999n);
-      expect(summary.depositCount).to.equal(3n);
-      expect(summary.refunded).to.equal(999n);
-      expect(summary.claimable).to.equal(0n);
-      expect(await c.escrow.feePaid()).to.equal(0n);
-      expect(await c.token.balanceOf(c.alice.address)).to.equal(c.target * 10n);
-      expect(parseTokenAmount(formatTokenAmount(summary.refunded, decimals), decimals)).to.equal(999n);
-      await assertAccounting(c);
-    });
-
-    for (const [target, fee] of [[999n, 0n], [1000n, 1n]]) {
-      it(`rounds the 10-bps fee on ${target} base units at ${decimals} decimals to ${fee}`, async function () {
-        const c = await fixture({ decimals, target, feeBps: 10 }); await approve(c);
-        await c.escrow.release(c.selectionId);
-        expect(await c.token.balanceOf(c.admin.address)).to.equal(fee);
-        expect(await c.token.balanceOf(c.solution.address)).to.equal(target - fee);
-        expect(await c.escrow.feePaid()).to.equal(fee);
-        expect(await c.escrow.totalReleased()).to.equal(target);
+    if (decimals < 77) {
+      const unit = 10n ** BigInt(decimals);
+      it(`refunds exact repeated whole-token contributions at ${decimals} decimals without fees`, async function () {
+        const c = await fixture({ decimals, target: 1000n * unit, feeBps: 10000 });
+        for (const amount of [unit, 37n * unit, 961n * unit]) await c.escrow.connect(c.alice).deposit(amount);
+        await at(c, c.expiresAt);
+        await c.escrow.connect(c.alice).claimRefund();
+        const summary = await c.escrow.depositorSummary(c.alice.address);
+        expect(summary.deposited).to.equal(999n * unit);
+        expect(summary.depositCount).to.equal(3n);
+        expect(summary.refunded).to.equal(999n * unit);
+        expect(summary.claimable).to.equal(0n);
+        expect(await c.escrow.feePaid()).to.equal(0n);
+        expect(await c.token.balanceOf(c.alice.address)).to.equal(c.target * 10n);
+        expect(parseTokenAmount(formatTokenAmount(summary.refunded, decimals), decimals)).to.equal(999n * unit);
         await assertAccounting(c);
       });
+      const increment = 10n ** BigInt(Math.max(0, decimals - 2));
+      for (const multiple of [999n, 1000n]) {
+        const target = multiple * increment, fee = target * 10n / 10000n;
+        it(`rounds the fee exactly on an allowed target at ${decimals} decimals (${multiple} increments)`, async function () {
+          const c = await fixture({ decimals, target, feeBps: 10 }); await approve(c);
+          await c.escrow.release(c.selectionId);
+          expect(await c.token.balanceOf(c.admin.address)).to.equal(fee);
+          expect(await c.token.balanceOf(c.solution.address)).to.equal(target - fee);
+          expect(await c.escrow.feePaid()).to.equal(fee);
+          expect(await c.escrow.totalReleased()).to.equal(target);
+          await assertAccounting(c);
+        });
+      }
     }
   }
 
@@ -89,10 +93,11 @@ describe("FundingEscrow: token decimal policy and exact settlement", function ()
 
   for (const original of [0, 6]) {
     it(`blocks deposits, new escrows and relisting after a change from ${original} decimals`, async function () {
-      const c = await fixture({ decimals: original });
-      await c.escrow.connect(c.alice).deposit(10n);
+      const unit = 10n ** BigInt(original);
+      const c = await fixture({ decimals: original, target: 1000n * unit });
+      await c.escrow.connect(c.alice).deposit(10n * unit);
       await c.token.setDecimals(18);
-      await expect(c.escrow.connect(c.alice).deposit(10n)).to.be.revertedWithCustomError(c.escrow, "TokenDecimalsChanged").withArgs(original, 18);
+      await expect(c.escrow.connect(c.alice).deposit(10n * unit)).to.be.revertedWithCustomError(c.escrow, "TokenDecimalsChanged").withArgs(original, 18);
       const next = scopedId(c, c.solution, "another-proposal");
       await expect(createProposal(c, "another-proposal"))
         .to.be.revertedWithCustomError(c.factory, "TokenDecimalsChanged").withArgs(original, 18);
@@ -102,12 +107,12 @@ describe("FundingEscrow: token decimal policy and exact settlement", function ()
         .to.be.revertedWithCustomError(c.factory, "TokenDecimalsChanged").withArgs(original, 18);
       expect(await c.factory.tokenDecimals(c.tokenAddress)).to.equal(BigInt(original));
       expect(await c.escrow.tokenDecimals()).to.equal(BigInt(original));
-      expect(await c.escrow.contributions(c.alice.address)).to.equal(10n);
+      expect(await c.escrow.contributions(c.alice.address)).to.equal(10n * unit);
       expect(await c.escrow.depositCounts(c.alice.address)).to.equal(1n);
       await c.token.setDecimals(original);
       await c.factory.connect(c.admin).setTokenAllowed(c.tokenAddress, true);
-      await c.escrow.connect(c.alice).deposit(5n);
-      expect(await c.escrow.contributions(c.alice.address)).to.equal(15n);
+      await c.escrow.connect(c.alice).deposit(5n * unit);
+      expect(await c.escrow.contributions(c.alice.address)).to.equal(15n * unit);
     });
   }
 
@@ -115,8 +120,8 @@ describe("FundingEscrow: token decimal policy and exact settlement", function ()
     const c = await fixture();
     await c.token.connect(c.alice).approve(c.escrowAddress, 50n);
     await c.token.setChangeDecimalsOnTransfer(true);
-    await expect(c.escrow.connect(c.alice).deposit(50n)).to.be.revertedWithCustomError(c.escrow, "TokenDecimalsChanged").withArgs(6, 18);
-    expect(await c.token.decimals()).to.equal(6n);
+    await expect(c.escrow.connect(c.alice).deposit(50n)).to.be.revertedWithCustomError(c.escrow, "TokenDecimalsChanged").withArgs(0, 6);
+    expect(await c.token.decimals()).to.equal(0n);
     expect(await c.token.balanceOf(c.alice.address)).to.equal(c.target * 10n);
     expect(await c.token.balanceOf(c.escrowAddress)).to.equal(0n);
     expect(await c.token.allowance(c.alice.address, c.escrowAddress)).to.equal(50n);
@@ -149,7 +154,7 @@ describe("FundingEscrow: token decimal policy and exact settlement", function ()
           await at(c, c.expiresAt); await c.escrow.connect(c.alice).claimRefund();
           expect(await c.escrow.refundedAmounts(c.alice.address)).to.equal(500n);
         }
-        expect(await c.escrow.tokenDecimals()).to.equal(6n);
+        expect(await c.escrow.tokenDecimals()).to.equal(0n);
         await assertAccounting(c);
       });
     }

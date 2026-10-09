@@ -1,3 +1,5 @@
+import { configuredFundingToken, fundingAmountUnits } from "./escrowProposalTerms.js";
+import { fundingAmountError } from "./fundingAmountPolicy.js";
 import { randomUUID } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -280,7 +282,7 @@ export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
     settlement: publicSettlement(job.data()) };
 }
 
-export async function prepareEscrowDeposit({ db, client, config, uid, proposalId }) {
+export async function prepareEscrowDeposit({ db, client, config, uid, proposalId, amount }) {
   await assertFundingChain(client, config);
   const context = await loadFundingContext({ db, uid, proposalId });
   if (isIndependentProposal(context.record)) {
@@ -294,6 +296,15 @@ export async function prepareEscrowDeposit({ db, client, config, uid, proposalId
   const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
   const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000, { deposit: true });
   if (reason) fail("failed-precondition", reason);
+  if (amount !== undefined) {
+    const token = configuredFundingToken(config, context.record.currency);
+    let amountBaseUnits;
+    try { amountBaseUnits = fundingAmountUnits(amount, token.decimals); }
+    catch (error) { fail("invalid-argument", error.message); }
+    const error = fundingAmountError({ amountBaseUnits, decimals: token.decimals, symbol: token.symbol,
+      remainingBaseUnits: BigInt(verified.summary.fundingTarget) - BigInt(verified.summary.totalDeposited) });
+    if (error) fail("invalid-argument", error);
+  }
   await enqueueEscrowFunding({ db, config, record: context.record });
   return { escrowAddress: verified.escrow.address, tokenAddress: verified.summary.tokenAddress, chainId: config.chainId,
     postingId: verified.expected.opportunityId, postingOwner: context.parent.ownerId, terms: context.record.fundingTerms,

@@ -28,6 +28,12 @@ export function independentFundingError(error, { transactionHash, reading = fals
   // A confirmed approval may precede a competing deposit. The final deposit
   // simulation exposes the contract's specific error through adapter wrappers.
   for (let cause = error, depth = 0; cause && depth < 8; cause = cause.cause, depth++) {
+    const policyMessage = {
+      AmountPrecisionExceeded: "Use at most 2 decimal places for funding amounts.",
+      ContributionBelowMinimum: "Contribute at least 1 token, or fund the exact remaining balance.",
+      ContributionLeavesDust: "This contribution would leave less than 1 token still needed. Enter a smaller amount or fund the exact remaining balance.",
+    }[cause.data?.errorName ?? cause.auditErrorName];
+    if (policyMessage) return policyMessage;
     if ((cause.data?.errorName ?? cause.auditErrorName) === "FundingTargetExceeded") {
       return "That contribution exceeds the funding still needed. Refresh funding status and enter the remaining amount or less.";
     }

@@ -143,16 +143,17 @@ describe("Escrow-linked proposal verification", () => {
 });
 
 describe("Escrow form amounts and plans", () => {
-  it("preserves small high-precision token amounts across draft and submitted form restoration", () => {
+  it("rejects new fractional-cent targets but preserves historical immutable terms", () => {
     const config = { ...escrowConfig, escrow: { ...escrowConfig.escrow,
       tokens: [{ ...escrowConfig.escrow.tokens[0], decimals: 18 }] } };
     const form = { amount: "0.000000000000000002", milestones: "Delivery" };
-    const terms = proposalFundingTerms({ form, currency: "USDC", config });
+    const terms = { ...proposalFundingTerms({ form: { ...form, amount: "1" }, currency: "USDC", config }), target: "2" };
+    assert.throws(() => proposalFundingTerms({ form, currency: "USDC", config }), /at most 2 decimal/);
     const restored = { ...form, amount: fundingAmountText(Number(form.amount)), immutableFundingTerms: terms };
     assert.equal(restored.amount, form.amount);
     assert.deepEqual(proposalFundingTerms({ form: restored, currency: "USDC", config }), terms);
     assert.equal(terms.target, "2");
-    assert.throws(() => proposalFundingTerms({ form: { ...form, amount: "0.000000000000000001" }, currency: "USDC", config }), /at least one token base unit/);
+    assert.throws(() => proposalFundingTerms({ form: { ...form, amount: "0.000000000000000001" }, currency: "USDC", config }), /at most 2 decimal/);
   });
   for (const decimals of [0, 6, 18, 77]) it(`uses exact base units for a token with ${decimals} decimals`, () => {
     assert.equal(fundingAmountUnits("1", decimals), 10n ** BigInt(decimals));
@@ -160,13 +161,13 @@ describe("Escrow form amounts and plans", () => {
     assert.throws(() => fundingAmountUnits(`0.${"0".repeat(decimals)}1`, decimals), /decimal places/);
   });
   it("requires half upfront and half final, with exact amounts and one or two review windows", () => {
-    const form = { amount: "1000.123456", milestones: "Delivery evidence", tranchePercentages: "50, 50",
+    const form = { amount: "1000.12", milestones: "Delivery evidence", tranchePercentages: "50, 50",
       reviewDays: "7, 90", funderVoting: true };
     const terms = proposalFundingTerms({ form, currency: "USDC", config: escrowConfig });
     assert.deepEqual(terms.trancheBps, [5000, 5000]);
     assert.deepEqual(terms.reviewWindows, [7 * 86400, 90 * 86400]);
     assert.equal(terms.funderVoting, true);
-    assert.equal(terms.target, "1000123456");
+    assert.equal(terms.target, "1000120000");
     const defaults = proposalFundingTerms({ form: { amount: "1", milestones: "Delivery" }, currency: "USDC", config: escrowConfig });
     assert.deepEqual(defaults.trancheBps, [5000, 5000]);
     assert.deepEqual(defaults.reviewWindows, [604800, 604800]);

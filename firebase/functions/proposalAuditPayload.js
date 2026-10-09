@@ -1,7 +1,7 @@
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { asEscrowProposal, prepareOpportunityCommit, prepareProposalCommit } from "./auditCanonical.js";
 import { isEscrowRegistry } from "./escrowAudit.js";
-import { validateStoredFundingTerms } from "./escrowProposalTerms.js";
+import { fundingAmountText, validateStoredFundingTerms } from "./escrowProposalTerms.js";
 import {
   INDEPENDENT_PROPOSAL_HASH_SCHEME,
   INDEPENDENT_PROPOSAL_KIND,
@@ -32,6 +32,16 @@ export function proposalAuditPayload(record) {
  */
 export function independentProposalAuditPayload(record) {
   const researcherId = trimmed(record.researcherId).toLowerCase();
+  const amount = Number(record.amount) || 0;
+  // Scheme 2 historically encoded integer amounts as numbers. Preserve those
+  // hashes byte for byte. Fractional numbers were never canonicalizable; encode
+  // new cent targets explicitly as decimal text without relaxing the canonicalizer.
+  const fractional = !Number.isSafeInteger(amount);
+  const amountText = fractional ? fundingAmountText(amount) : null;
+  if (fractional && (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000
+      || !/^\d+\.\d{1,2}$/.test(amountText))) {
+    throw new TypeError("Funding targets support at most 2 decimal places.");
+  }
   const attachments = [...(record.attachments ?? [])]
     .map((item) => ({
       id: trimmed(item.id),
@@ -45,7 +55,8 @@ export function independentProposalAuditPayload(record) {
     researcherId,
     ownerId: researcherId,
     category: trimmed(record.category),
-    amount: Number(record.amount) || 0,
+    amount: fractional ? amountText : amount,
+    ...(fractional ? { amountEncoding: "decimal-v1" } : {}),
     currency: trimmed(record.currency),
     title: trimmed(record.title),
     summary: trimmed(record.summary),
