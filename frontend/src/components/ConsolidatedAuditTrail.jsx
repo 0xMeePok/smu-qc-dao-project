@@ -18,9 +18,9 @@ const EMPTY = { types: [], from: "", to: "", role: "", related: "", verify: "" }
 
 function readFilters() {
   const params = new URLSearchParams(window.location.hash.split("?")[1] || "");
-  const types = (params.get("auditTypes") || "").split(",").filter((type) => AUDIT_EVENT_OPTIONS.some(([id]) => id === type));
+  const type = (params.get("auditTypes") || "").split(",").find((id) => AUDIT_EVENT_OPTIONS.some(([option]) => option === id));
   return {
-    types,
+    types: type ? [type] : [],
     from: params.get("auditFrom") || "",
     to: params.get("auditTo") || "",
     role: ACTOR_ROLE_OPTIONS.some(([id]) => id === params.get("auditRole")) ? params.get("auditRole") : "",
@@ -121,11 +121,6 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
     }
   };
 
-  const toggleType = (id) => setFilters((current) => ({
-    ...current,
-    types: current.types.includes(id) ? current.types.filter((type) => type !== id) : [...current.types, id],
-  }));
-
   const openReceipt = async (item) => {
     highlightElement(`audit-trail-${item.id}`);
     const request = ++receiptRequest.current;
@@ -158,16 +153,13 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
         <p>One chronological list of workflow events on records you can view. Anchored events link to a verification receipt. Evaluator recommendations stay off-chain and are not verified on-chain.</p>
       </div>
       <form className="audit-trail-filters" onSubmit={(event) => event.preventDefault()}>
-        <fieldset className="audit-trail-types">
-          <legend>Event type</legend>
-          {options.map(([id, label]) => (
-            <label key={id} className="audit-trail-check">
-              <input type="checkbox" checked={filters.types.includes(id)} onChange={() => toggleType(id)} />
-              <span>{label}</span>
-            </label>
-          ))}
-        </fieldset>
         <div className="audit-trail-filter-row">
+          <label>Event type
+            <select value={filters.types[0] || ""} onChange={(event) => setFilters((current) => ({ ...current, types: event.target.value ? [event.target.value] : [] }))}>
+              <option value="">All event types</option>
+              {options.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
           <label>From <input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} /></label>
           <label>To <input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} /></label>
           <label>Actor role

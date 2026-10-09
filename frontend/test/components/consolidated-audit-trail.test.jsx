@@ -59,7 +59,7 @@ describe("QCDAO-96 and QCDAO-97 audit trail filters", () => {
     expect(screen.getByText("Evaluator · Recommend with revisions")).toBeTruthy();
     expect(screen.getAllByText(/not verified on-chain/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/criterion|weighted score|qft/i)).toBeNull();
-    expect(screen.getByRole("checkbox", { name: "Evaluator recommendation" }).checked).toBe(true);
+    expect(screen.getByLabelText("Event type").value).toBe("evaluator_recommendation");
     expect(screen.getByLabelText("Actor role").value).toBe("evaluator");
     expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({
       entityType: "proposal",
@@ -131,7 +131,7 @@ describe("QCDAO-117 consolidated escrow details", () => {
     expect(details.getByRole("link", { name: "View escrow transaction" }).getAttribute("href"))
       .toBe("https://sepolia.arbiscan.io/tx/" + transactionHash);
     expect(document.body.textContent).not.toContain(contributor);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Funding status change" }));
+    fireEvent.change(screen.getByLabelText("Event type"), { target: { value: "funding_status" } });
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ eventTypes: ["funding_status"] }));
   });
 

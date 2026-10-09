@@ -301,7 +301,7 @@ function submissionEvent(row) {
 function moderationEvent(row) {
   const at = iso(row.createdAt);
   if (!at || !row.contentId) return null;
-  const action = row.action === "hide" ? "hidden" : row.action === "remove" ? "removed" : row.action === "restore" ? "restored" : "updated";
+  const action = row.action === "hide" ? "hidden" : row.action === "remove" ? "removed" : row.action === "restore" && !["hidden", "removed"].includes(row.previousVisibility) ? "report dismissed; content left published" : row.action === "restore" ? "restored" : "updated";
   const kind = row.contentType === "proposal" ? "proposal" : row.contentType === "comment" ? "comment" : "problem";
   const parentProposalId = row.parentProposalId || (kind === "proposal" ? row.contentId : "");
   const parentProblemId = row.parentProblemId || (kind === "problem" ? row.contentId : "");
