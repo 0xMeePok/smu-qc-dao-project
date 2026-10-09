@@ -144,6 +144,7 @@ it.each([false, true])("uses the verified sync response without another independ
   const changed = vi.fn();
   render(<IndependentFundingPanel proposal={{ id: "fast-confirm" }} onStateChange={changed}
     initialTransaction={recovery ? { transactionHash, action: "deposit" } : null} />);
+  if (!recovery) fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
   fireEvent.click(await screen.findByRole("button", { name: recovery ? "Retry confirmation" : "Fund independent listing" }));
   await screen.findByText("Fully paid");
   expect(mocks.read).toHaveBeenCalledTimes(1);
@@ -155,7 +156,8 @@ it("does not apply a delayed independent sync result to another wallet", async (
   mocks.write.mockResolvedValue({ transactionHash: `0x${"3".repeat(64)}` });
   mocks.sync.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   const changed = vi.fn(), view = render(<IndependentFundingPanel proposal={{ id: "sync-switch" }} onStateChange={changed} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Fund independent listing" }));
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Fund independent listing" }));
   await act(async () => {});
   mocks.user = { id: `0x${"c".repeat(40)}` }; mocks.account = { ...mocks.account, address: mocks.user.id };
   const current = { ...props().snapshot, summary: { ...summary, totalDeposited: "3000000", fundingTarget: "4000000" } };
@@ -165,4 +167,22 @@ it("does not apply a delayed independent sync result to another wallet", async (
   await act(async () => finish({ ...props().snapshot, summary: { ...summary, state: "Released" } }));
   expect(changed).toHaveBeenLastCalledWith(current);
   expect(screen.queryByText("Fully paid")).toBeNull();
+});
+
+it("shows the independent remaining limit inline and prevents overfunding without a wallet request", () => {
+  const p = props({ amount: "1.000001" });
+  const view = render(<IndependentFundingView {...p} />);
+  expect(screen.getByRole("alert").textContent).toBe("Only 1 USDT is still needed. Enter 1 USDT or less.");
+  const input = screen.getByLabelText("Contribution (USDT)");
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(input.getAttribute("aria-describedby")).toContain("independent-contribution-error");
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(true);
+  fireEvent.click(fund);
+  expect(p.onAction).not.toHaveBeenCalled();
+  view.rerender(<IndependentFundingView {...p} amount="1" />);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(fund.disabled).toBe(false);
+  fireEvent.click(fund);
+  expect(p.onAction).toHaveBeenCalledWith("deposit", { amount: "1" });
 });

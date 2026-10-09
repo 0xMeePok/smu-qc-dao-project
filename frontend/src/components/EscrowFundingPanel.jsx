@@ -1,3 +1,4 @@
+import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { formatUnits, keccak256, stringToHex } from "viem";
@@ -40,12 +41,13 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason, canDeposit = true, integrityBlocked = false }) {
   const money = units => `${formatUnits(units ?? 0n, state?.decimals ?? 6)} ${state?.symbol ?? ""}`;
   const disabled = busy || !walletReady || loading || Boolean(unresolvedTransaction);
+  const amountError = state ? contributionError({ amount, decimals: state.decimals, symbol: state.symbol, remaining: state.remaining, balance: state.wallet?.balance }) : "";
   const evidenceReady = evidence && state?.currentMilestone?.evidenceHash === evidence.hash;
   const grantWaiting = state?.isGrant && state.state === 0;
   const grantMessage = "Grant funding moves into this escrow when the researcher accepts the selected offer.";
   const settlementMessage = grantWaiting && ["waiting", "not_ready", "waiting_approval"].includes(settlement?.status) ? grantMessage : settlement?.message;
   const action = (name, label, extra = {}, allowed = state?.can[name]) => <button type="button" className="primary small"
-    disabled={disabled || !allowed || (name === "deposit" && Boolean(fundingBlockReason)) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
+    disabled={disabled || !allowed || (name === "deposit" && (Boolean(fundingBlockReason) || !String(amount ?? "").trim() || Boolean(amountError))) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
   return <section className="card escrow-funding" aria-labelledby="escrow-funding-title">
     <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
       <button type="button" className="secondary small" disabled={busy || loading} onClick={onRefresh}>Refresh escrow</button></div>
@@ -83,8 +85,8 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       {grantWaiting && !settlementMessage && <p className="field-hint">{grantMessage} Manage the offer in the grant funding panel.</p>}
       {state.state === 0 && state.remaining > 0n && !state.isGrant && canDeposit && <div className="field-group">
         <p><strong>Funding token: {state.symbol}</strong> · This proposal accepts the token fixed in its payment plan.</p>
-        <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Wallet balance: ${money(state.wallet.balance)}.`}>
-          {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
+        <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Wallet balance: ${money(state.wallet.balance)}.`} error={amountError}>
+          {({ id, describedBy, invalid }) => <input id={id} aria-invalid={invalid} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
         </Field>
         <p className="field-hint">1. Approve only the entered token amount if needed. 2. Confirm the deposit. Deposited funds remain locked until an approved payment or an available refund.</p>
         {action("deposit", "Fund escrow", { amount })}

@@ -1,3 +1,4 @@
+import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
@@ -25,9 +26,11 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
   amount, onAmount, delivery, onDelivery, reason = "", onReason, onAction, onRefresh, unresolved, onConfirm, integrityBlocked = false }) {
   const summary = snapshot?.summary, actions = snapshot?.actions ?? {}, wallet = snapshot?.wallet ?? {};
   const disabled = loading || busy || !walletReady || Boolean(unresolved);
+  const remaining = summary ? BigInt(summary.fundingTarget ?? summary.target ?? 0) - BigInt(summary.totalDeposited ?? 0) : null;
+  const amountError = summary ? contributionError({ amount, decimals: summary.tokenDecimals, symbol: summary.tokenSymbol, remaining }) : "";
   const money = value => independentFundingAmount(value, summary?.tokenDecimals, summary?.tokenSymbol);
   const button = (action, label, extra = {}) => actions[action] ? <button type="button" className="primary small"
-    disabled={disabled || (integrityBlocked && !["claimRefund", "expire"].includes(action))} onClick={() => onAction(action, extra)}>{label}</button> : null;
+    disabled={disabled || (action === "deposit" && (!String(amount ?? "").trim() || Boolean(amountError))) || (integrityBlocked && !["claimRefund", "expire"].includes(action))} onClick={() => onAction(action, extra)}>{label}</button> : null;
   return <section className="card escrow-funding" aria-label="Independent crowdfunding">
     <div className="table-header"><div><h3>Independent crowdfunding</h3><p>50% on researcher acceptance · 50% after funder completion approval</p></div>
       <button type="button" className="secondary small" disabled={loading || busy} onClick={onRefresh}>Refresh crowdfunding</button></div>
@@ -59,8 +62,8 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
         {Number(summary.completionDeadline) > 0 && <div className="settings-row"><dt>Complete and approve by</dt><dd>{instant(summary.completionDeadline)}</dd></div>}
       </dl>
       {actions.deposit && <div className="field-group">
-        <Field htmlFor="independent-contribution" label={`Contribution (${summary.tokenSymbol})`} hint="Your wallet approves only this amount, then deposits it into this listing's escrow.">
-          {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" value={amount} maxLength={160} disabled={disabled}
+        <Field htmlFor="independent-contribution" label={`Contribution (${summary.tokenSymbol})`} hint={`Still needed: ${money(remaining)}. Your wallet approves only the entered amount, then deposits it into this listing's escrow.`} error={amountError}>
+          {({ id, describedBy, invalid }) => <input id={id} aria-invalid={invalid} type="text" inputMode="decimal" value={amount} maxLength={160} disabled={disabled}
             aria-describedby={describedBy} onChange={event => onAmount(event.target.value)} />}
         </Field>{button("deposit", "Fund independent listing", { amount })}
       </div>}

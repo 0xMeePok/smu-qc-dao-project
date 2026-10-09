@@ -25,6 +25,13 @@ export function independentFundingError(error, { transactionHash, reading = fals
   if (reading && (isRpcQuotaExceeded(error) || isRpcUnreachable(error))) {
     return "Crowdfunding status is temporarily unavailable. Refresh to verify current balances and available actions.";
   }
+  // A confirmed approval may precede a competing deposit. The final deposit
+  // simulation exposes the contract's specific error through adapter wrappers.
+  for (let cause = error, depth = 0; cause && depth < 8; cause = cause.cause, depth++) {
+    if ((cause.data?.errorName ?? cause.auditErrorName) === "FundingTargetExceeded") {
+      return "That contribution exceeds the funding still needed. Refresh funding status and enter the remaining amount or less.";
+    }
+  }
   const code = String(error?.code ?? "").split("/").at(-1);
   if (["invalid-argument", "failed-precondition", "permission-denied", "unauthenticated"].includes(code)) return error.message;
   return auditErrorMessage(error);

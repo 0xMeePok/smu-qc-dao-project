@@ -1,7 +1,7 @@
 import { boundedMap } from "./boundedMap.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
-import { decodeEventLog, decodeFunctionData, encodeAbiParameters, keccak256, parseUnits, stringToHex } from "viem";
+import { decodeEventLog, decodeFunctionData, encodeAbiParameters, formatUnits, keccak256, parseUnits, stringToHex } from "viem";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { assertActiveAuditDeployment, resolveAuditDeployment } from "./auditDeployments.js";
@@ -263,8 +263,10 @@ export async function prepareIndependentFundingAction({ action, amount, evidence
     args = [expected.prepared.entityId, expected.token.address, expected.target, expected.reviewDays, expected.termsHash];
   } else if (action === "deposit") {
     amountBaseUnits = exactAmount(amount, expected.token.decimals);
-    if (!amountBaseUnits || amountBaseUnits < 1n || amountBaseUnits > expected.target - BigInt(response.summary.totalDeposited)) {
-      fail("invalid-argument", "Enter an exact positive deposit within the remaining funding target.");
+    if (amountBaseUnits < 1n) fail("invalid-argument", "Enter a contribution greater than zero.");
+    const remaining = expected.target - BigInt(response.summary.totalDeposited);
+    if (amountBaseUnits > remaining) {
+      fail("invalid-argument", `Only ${formatUnits(remaining, expected.token.decimals)} ${expected.token.symbol} is still needed. Enter this amount or less.`);
     }
     functionName = "deposit"; args = [amountBaseUnits];
   } else if (action === "submitEvidence") {

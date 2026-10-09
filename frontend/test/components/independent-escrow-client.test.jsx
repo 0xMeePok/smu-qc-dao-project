@@ -115,3 +115,45 @@ describe("independent crowdfunding wallet actions", () => {
     expect(pending).not.toMatch(/Nothing was submitted|private-api-key/);
   });
 });
+
+
+it.each([
+  { data: { errorName: "FundingTargetExceeded", args: [123n] } },
+  { auditErrorName: "FundingTargetExceeded", message: "The verification transaction would revert." },
+  { message: "Funding failed", cause: { message: "Adapter wrapped simulation", cause: { data: { errorName: "FundingTargetExceeded", args: [123n] } } } },
+])("explains a decoded over-target deposit failure through wrapper errors", error => {
+  expect(independentFundingError(error)).toBe("That contribution exceeds the funding still needed. Refresh funding status and enter the remaining amount or less.");
+});
+
+it("preserves exact backend remaining-amount errors and does not guess an unidentified receipt revert", () => {
+  const backend = { code: "functions/invalid-argument", message: "Only 0.765433 USDC is still needed. Enter this amount or less." };
+  expect(independentFundingError(backend)).toBe(backend.message);
+  const reverted = Object.assign(new Error("The escrow transaction reverted. No change was applied by this transaction."),
+    { transactionHash: tx, transactionSettled: true, outcome: "reverted" });
+  expect(independentFundingError(reverted)).toMatch(/reverted/);
+  expect(independentFundingError(reverted)).not.toMatch(/exceeds|remaining amount|was submitted/);
+});
+
+it("keeps transaction recovery when confirmation is pending even if a wrapped error mentions overfunding", () => {
+  const error = { transactionHash: tx, cause: { data: { errorName: "FundingTargetExceeded" } } };
+  expect(independentFundingError(error)).toMatch(/Retry confirmation to check the same transaction/);
+});
+
+it("reports the over-target race after approval without treating the approval as a failed pending deposit", async () => {
+  const wallet = adapters();
+  const failure = Object.assign(new Error("The verification transaction would revert."), {
+    auditErrorName: "FundingTargetExceeded", cause: { data: { errorName: "FundingTargetExceeded", args: [1n] } },
+  });
+  wallet.writeContract.mockImplementation(async request => {
+    if (request.functionName === "deposit") throw failure;
+    return tx;
+  });
+  let error;
+  try { await writeIndependentFundingAction({ proposalId: "listing", action: "deposit", account, amount: "2", adapters: wallet, prepare: async () => prepared() }); }
+  catch (cause) { error = cause; }
+  expect(error).toBe(failure);
+  expect(wallet.writeContract.mock.calls.map(([request]) => request.functionName)).toEqual(["approve", "deposit"]);
+  expect(mocks.confirm).toHaveBeenCalledTimes(1);
+  expect(error.transactionHash).toBeUndefined();
+  expect(independentFundingError(error)).toMatch(/exceeds the funding still needed/);
+});

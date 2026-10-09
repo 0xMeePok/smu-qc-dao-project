@@ -350,3 +350,17 @@ it("loads independent portfolio records concurrently with bounded reads and stab
   assert.deepEqual(result.items.map(row => row.proposalId), [f.record.id, ...Array.from({ length: 8 }, (_, index) => `portfolio-${index}`)]);
   assert.equal(result.items.find(row => row.proposalId === "portfolio-2").title, "Removed independent listing");
 });
+
+
+it("reports the exact remaining independent contribution separately from invalid positive amounts", async () => {
+  const f = fixture();
+  Object.assign(f.state, { totalDeposited: 1_234_567n, outstandingBalance: 1_234_567n });
+  await assert.rejects(prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "0.765434" }),
+    error => error.code === "invalid-argument" && error.message === "Only 0.765433 USDC is still needed. Enter this amount or less.");
+  const exact = await prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "0.765433" });
+  assert.equal(exact.amountBaseUnits, "765433");
+  await assert.rejects(prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "0" }),
+    error => error.code === "invalid-argument" && error.message === "Enter a contribution greater than zero.");
+  await assert.rejects(prepareIndependentFundingAction({ ...f.options(funder), action: "deposit", amount: "0.0000001" }), /supported decimal places/);
+  assert.equal(f.simulations.length, 0);
+});

@@ -1,3 +1,4 @@
+import { remainingContributionMessage } from "./contributionValidation.js";
 import { erc20Abi, keccak256, stringToHex } from "viem";
 import { getConnection } from "wagmi/actions";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG, getAuditRegistryAddress } from "../config/auditRegistry.js";
@@ -200,7 +201,7 @@ const REVERT_MESSAGES = {
   InvalidState: "The escrow state changed. Refresh before continuing.",
   InvalidInput: "The selection or evidence changed. Refresh before continuing.",
   WindowClosed: "The approval or funding window has closed.", WindowStillOpen: "The refund window is not open yet.",
-  FundingTargetExceeded: "That amount exceeds the funding still needed.", FundingIncomplete: "The full funding target must be in escrow first.",
+  FundingTargetExceeded: "That amount exceeds the funding still needed. Refresh funding status and enter the remaining amount or less.", FundingIncomplete: "The full funding target must be in escrow first.",
   ApprovalIncomplete: "Both owners must approve before payment can be released.", AlreadyApproved: "This wallet has already approved.",
   NothingToRefund: "This wallet has no refund available.", TokenNotListed: "This token is no longer available for new deposits.",
   VotingDisabled: "This proposal uses approval from both owners without funder voting.", AlreadyVoted: "This wallet already voted on this evidence.",
@@ -300,7 +301,7 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
   };
   if (action === "deposit") {
     const units = fundingAmountUnits(amount, snapshot.decimals);
-    if (units > snapshot.remaining) throw new Error("That amount exceeds the funding still needed.");
+    if (units > snapshot.remaining) throw new Error(remainingContributionMessage(snapshot.remaining, snapshot.decimals, snapshot.symbol));
     if (units > snapshot.wallet.balance) throw new Error(`Your ${snapshot.symbol} balance is too low for that deposit.`);
     if (snapshot.wallet.allowance < units) {
       // Zero first supports tokens that require clearing an existing allowance.
