@@ -41,6 +41,7 @@ export function SessionProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState(null);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
+  const [profileLookupVersion, setProfileLookupVersion] = useState(0);
 
   // Starts TRUE when Firebase was never configured: there is no persisted session
   // that could arrive late, so the app should render immediately rather than hang on
@@ -131,7 +132,11 @@ export function SessionProvider({ children }) {
         await exchangeSignatureForSession({ address: target, signature, challengeId: challenge.challengeId });
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
+        setStatus("checking");
         setVerifiedAddress(target);
+        // A failed Firestore listener is terminal. Same-wallet reauthentication
+        // may emit no auth-state event, so explicitly replace that subscription.
+        if (target === verifiedAddress) setProfileLookupVersion(version => version + 1);
         return { ok: true, rejected: false };
       } catch (caught) {
         // A rejected signature or a declined network switch is a normal user choice,
@@ -157,7 +162,7 @@ export function SessionProvider({ children }) {
         setSignInPhase(null);
       }
     },
-    [address, signMessageAsync, disconnectAsync],
+    [address, verifiedAddress, signMessageAsync, disconnectAsync],
   );
 
   // Once an address is verified, decide between onboarding and a normal sign-in.
@@ -180,10 +185,8 @@ export function SessionProvider({ children }) {
         setProfile(found);
         setStatus(found ? "signed-in" : "needs-onboarding");
 
-        // Fires once per session establishment (this effect only re-runs when
-        // verifiedAddress changes - a fresh sign-in or a restored session on page
-        // load), not on every render, so navigating elsewhere afterward doesn't
-        // keep yanking an admin back here.
+        // Route once when establishing or reauthenticating a session, rather
+        // than on every profile update or render while an admin navigates.
         if (found && isAdmin(found.role) && !found.suspended && !hasRoutedToAdmin) {
           hasRoutedToAdmin = true;
           go("admin");
@@ -197,7 +200,7 @@ export function SessionProvider({ children }) {
     );
 
     return () => unsubscribe();
-  }, [verifiedAddress, reset]);
+  }, [verifiedAddress, profileLookupVersion, reset]);
 
   // If the wallet switches to a DIFFERENT account, the Firebase session belongs to
   // the wrong address and has to go - otherwise a write could land under the wrong
