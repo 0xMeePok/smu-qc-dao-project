@@ -4694,6 +4694,7 @@ h1, h2, h3 { font-weight: 500; }
 }
 
 .audit-trail-panel {
+  min-width: 0;
   margin: 8px 0 28px;
   padding: 18px 20px 20px;
   border: 1px solid var(--line-strong);
@@ -4705,23 +4706,6 @@ h1, h2, h3 { font-weight: 500; }
 .audit-trail-heading h2 { margin: 0 0 8px; font-size: 22px; }
 .audit-trail-heading p { margin: 0 0 16px; color: var(--muted); max-width: 68ch; }
 .audit-trail-filters { display: grid; gap: 14px; margin-bottom: 12px; }
-.audit-trail-types {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  margin: 0;
-  padding: 12px;
-  border: 1px solid var(--line);
-  background: var(--page-bg);
-}
-.audit-trail-types legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
-.audit-trail-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  font-size: 14px;
-}
 .audit-trail-filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -4753,17 +4737,19 @@ h1, h2, h3 { font-weight: 500; }
 }
 .audit-trail-empty h3 { margin: 0 0 6px; font-size: 18px; }
 .audit-trail-empty p { margin: 0; color: var(--muted); }
-.audit-trail-list { display: grid; gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
+.audit-trail-list { display: grid; gap: 12px; min-width: 0; margin: 0 0 16px; padding: 0; list-style: none; }
 .audit-trail-event {
+  min-width: 0;
   padding: 14px 14px 8px;
   border: 1px solid var(--line);
   background: var(--page-bg);
+  overflow-wrap: anywhere;
 }
-.audit-trail-event h3 { margin: 0; font-size: 16px; }
-.audit-trail-event-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
-.audit-trail-event time { color: var(--muted); font-size: 13px; white-space: nowrap; }
-.audit-trail-event > p { margin: 8px 0; }
-.audit-trail-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 13px; }
+.audit-trail-event h3 { min-width: 0; margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.audit-trail-event-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; min-width: 0; }
+.audit-trail-event time { flex: 0 0 auto; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.audit-trail-event > p { margin: 8px 0; overflow-wrap: anywhere; }
+.audit-trail-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .audit-trail-verify {
   padding: 2px 8px;
   border: 1px solid var(--line-strong);

@@ -103,6 +103,7 @@ export function ModerationQueue({ onCountChange }) {
     } catch (err) { setContextError(moderationError(err)); }
     finally { inFlight.current = false; setBusy(false); }
   };
+  const takenDown = ["removed", "hidden"].includes(selected?.status) || ["removed", "hidden"].includes(context?.content?.moderationStatus);
   const auditTarget = relatedAuditTarget(selected, context);
   const openRelatedAudit = async () => {
     if (!auditTarget) return;
@@ -145,10 +146,10 @@ export function ModerationQueue({ onCountChange }) {
           {context.reportsTruncated && <p className="field-hint">Showing the first 100 reports.</p>}
           <h3>Moderation history</h3>{context.history?.length ? context.history.map((entry, index) => <p key={entry.id || index}>{entry.action} · {reasonLabel(entry.reason)} · {formatInstant(entry.createdAt)}{entry.details ? ` — ${entry.details}` : ""}<small className="table-row-meta">By {entry.actorId} · Record {entry.id} · Stored in Firestore and eligible to anchor</small>{entry.evaluationReadiness && <small className="table-row-meta">Evaluator-feedback readiness changed from {entry.evaluationReadiness.before ? "ready" : "not ready"} to {entry.evaluationReadiness.after ? "ready" : "not ready"}. The evaluator badge and recommendation are unchanged.</small>}{entry.escrowVoid?.transactionHash && <small className="table-row-meta">Escrow void {entry.escrowVoid.transactionHash}</small>}</p>) : <p>No prior decisions.</p>}
           {context.historyTruncated && <p className="field-hint">Showing the first 100 moderation decisions.</p>}
-          <label htmlFor="moderation-action">Action</label><select id="moderation-action" required disabled={busy} value={action} onChange={(event) => { setAction(event.target.value); setReason(""); }}><option value="">Choose an action</option><option value="remove">Remove from workflow</option><option value="restore">Restore content</option></select>
+          <label htmlFor="moderation-action">Action</label><select id="moderation-action" required disabled={busy} value={action} onChange={(event) => { setAction(event.target.value); setReason(""); }}><option value="">Choose an action</option><option value="remove">Remove from workflow</option><option value="restore">{takenDown ? "Restore content" : "Dismiss report"}</option></select>
           <label htmlFor="moderation-reason">Reason</label><select id="moderation-reason" required disabled={busy || !action} value={reason} onChange={(event) => setReason(event.target.value)}><option value="">{action ? "Choose a reason" : "Choose an action first"}</option>{reasonsForAction(action).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
           <label htmlFor="moderation-details">Additional explanation (optional)</label><textarea id="moderation-details" rows={3} maxLength={2000} value={details} disabled={busy} onChange={(event) => setDetails(event.target.value)} />
-          <p className="field-hint">The author receives a private notice. Remove refunds mock pledges, including confirmed ones, and opens a claim for the unpaid on-chain balance. Paid tranches stay paid. Restore does not recreate refunded mock pledges or reopen a voided escrow.</p>
+          <p className="field-hint">The author receives a private notice. Remove refunds mock pledges, including confirmed ones, and opens a claim for the unpaid on-chain balance. Paid tranches stay paid. {takenDown ? "Restore does not recreate refunded mock pledges or reopen a voided escrow." : "Dismissing the report leaves it published."}</p>
         </> : !contextError && <p role="status">Loading full context…</p>}
         {contextError && <p role="alert" className="error-banner">{contextError}</p>}
       </div><div className="modal-actions"><button type="button" className="secondary" disabled={busy} onClick={() => setSelected(null)}>Close</button><button type="submit" className="primary" disabled={busy || !context}>{busy ? "Recording…" : "Record moderation decision"}</button></div>

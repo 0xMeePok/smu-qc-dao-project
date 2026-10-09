@@ -395,7 +395,8 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
         action, reason, details: note, createdAt: now, readAt: null,
         ...(opensEscrowRefund ? { message: independentListing
           ? `Your listing “${noticeTitle}” was removed. Any pending funding approaches are cancelled. The on-chain escrow opens a claim for the unpaid balance. Paid tranches stay paid.`
-          : `Your ${contentType} “${noticeTitle}” was removed. Mock pledges on this item are refunded. Linked on-chain escrows open a claim for the unpaid balance. Paid tranches stay paid.` } : {}),
+          : `Your ${contentType} “${noticeTitle}” was removed. Mock pledges on this item are refunded. Linked on-chain escrows open a claim for the unpaid balance. Paid tranches stay paid.` }
+          : action === "restore" && !hidden ? { message: `A moderator reviewed a report on your ${contentType} “${noticeTitle}” and left it published.` } : {}),
         ...(problemId ? { problemId } : {}), ...(proposalId ? { proposalId } : {}),
         ...(navigationTarget ? { navigationTarget, link: `#/${navigationTarget}` } : {}),
       });

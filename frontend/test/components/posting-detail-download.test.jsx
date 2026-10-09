@@ -1,5 +1,5 @@
 import React from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -269,7 +269,7 @@ describe("a removed problem statement", () => {
     });
     render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
     expect(await screen.findByRole("heading", { name: "Audit trail" })).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: "Moderation action" })).toBeTruthy();
+    expect(within(screen.getByLabelText("Event type")).getByRole("option", { name: "Moderation action" })).toBeTruthy();
   });
 
   it("[FIT-ACM-071] opens the redacted problem when the full record is not readable", async () => {

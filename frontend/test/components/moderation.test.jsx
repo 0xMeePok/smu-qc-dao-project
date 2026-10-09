@@ -137,6 +137,7 @@ describe("administrator moderation queue", () => {
     render(<ModerationQueue />);
     fireEvent.click(await screen.findByRole("button", { name: "Review content" }));
     await screen.findByLabelText("Action");
+    expect(screen.getByRole("option", { name: "Dismiss report" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: action } });
     const reasonOptions = [...screen.getByLabelText("Reason").options].map((option) => option.value);
     expect(reasonOptions).toEqual(action === "restore" ? ["", "no_violation", "appeal_accepted"] : ["", "off_topic", "abusive", "misleading", "duplicate", "spam", "policy_violation", "other"]);
