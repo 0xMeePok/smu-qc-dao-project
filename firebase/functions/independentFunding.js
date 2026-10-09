@@ -1,3 +1,5 @@
+import { signalFundingChange } from "./activitySignals.js";
+import { fundingAmountError, fundingTargetError } from "./fundingAmountPolicy.js";
 import { boundedMap } from "./boundedMap.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -259,13 +261,15 @@ export async function prepareIndependentFundingAction({ action, amount, evidence
   const funding = options.config.independentFunding;
   let address = response.summary?.escrowAddress, abi = funding.escrowAbi, functionName, args, amountBaseUnits;
   if (action === "activate") {
+    const error = fundingTargetError({ targetBaseUnits: expected.target, decimals: expected.token.decimals, symbol: expected.token.symbol });
+    if (error) fail("invalid-argument", error);
     address = funding.factoryAddress; abi = funding.factoryAbi; functionName = "createEscrow";
     args = [expected.prepared.entityId, expected.token.address, expected.target, expected.reviewDays, expected.termsHash];
   } else if (action === "deposit") {
     amountBaseUnits = exactAmount(amount, expected.token.decimals);
-    if (!amountBaseUnits || amountBaseUnits < 1n || amountBaseUnits > expected.target - BigInt(response.summary.totalDeposited)) {
-      fail("invalid-argument", "Enter an exact positive deposit within the remaining funding target.");
-    }
+    const error = fundingAmountError({ amountBaseUnits, decimals: expected.token.decimals, symbol: expected.token.symbol,
+      remainingBaseUnits: expected.target - BigInt(response.summary.totalDeposited) });
+    if (error) fail("invalid-argument", error);
     functionName = "deposit"; args = [amountBaseUnits];
   } else if (action === "submitEvidence") {
     const normalized = normalizeIndependentFundingEvidence(evidence), hash = hashIndependentFundingEvidence(normalized);
@@ -360,6 +364,7 @@ async function persistSnapshot({ db, config, verified, events = [], now = Timest
     if ((old.data()?.blockNumber ?? 0) > response.summary.blockNumber) return;
     const summary = { ...response.summary, updatedAt: now, confirmedAt: now.toDate().toISOString() };
     tx.set(summaryRef, summary);
+    signalFundingChange(tx, db, old.data(), summary);
     tx.update(proposalRef, { independentFunding: { activated: true, locked: true, ...summary }, updatedAt: now });
     if (positionRef && (position.data()?.blockNumber ?? 0) <= response.summary.blockNumber) tx.set(positionRef, {
       walletId: uid, proposalId: record.id, summaryKey: key, registryAddress: summary.registryAddress,

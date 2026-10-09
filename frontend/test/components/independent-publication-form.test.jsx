@@ -26,7 +26,9 @@ vi.mock("../../src/components/AttachmentUploader.jsx", () => ({ AttachmentUpload
 vi.mock("../../src/pages/ProposalDetailPage.jsx", () => ({ default: ({ proposalId, fundingActivationError, pendingFundingTransaction }) => <>
   <h1>Published {proposalId}</h1>{fundingActivationError && <p role="status">{fundingActivationError}</p>}
   {pendingFundingTransaction && <p>Pending funding: {pendingFundingTransaction.transactionHash}</p>}</> }));
-import CreateIndependentProposalPage from "../../src/pages/CreateIndependentProposalPage.jsx";
+import { buildIndependentProposalDocument } from "../../src/lib/proposals.js";
+import { independentProposalAuditPayload, prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
+import CreateIndependentProposalPage, { formFromIndependentProposal } from "../../src/pages/CreateIndependentProposalPage.jsx";
 
 beforeEach(() => {
   window.scrollTo = vi.fn(); Element.prototype.scrollIntoView = vi.fn();
@@ -38,7 +40,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function form() {
+async function form(amount = "100") {
   render(<CreateIndependentProposalPage onNavigate={vi.fn()} />);
   await screen.findByRole("heading", { name: "Publish an independent proposal" });
   for (const [, label] of INDEPENDENT_PROPOSAL_FIELDS) {
@@ -47,7 +49,7 @@ async function form() {
   fireEvent.click(screen.getByRole("combobox", { name: "Quantum or quantum-adjacent category" }));
   fireEvent.click(screen.getByRole("option", { name: "Quantum annealing" }));
   fireEvent.change(screen.getByLabelText("Maturity or readiness level"), { target: { value: "pilot" } });
-  fireEvent.change(screen.getByLabelText("Crowdfunding target"), { target: { value: "100" } });
+  fireEvent.change(screen.getByLabelText("Crowdfunding target"), { target: { value: amount } });
   fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "USDC" } });
   fireEvent.click(screen.getByRole("button", { name: "Review" }));
 }
@@ -149,4 +151,29 @@ describe("independent publication recovery feedback", () => {
     expect(mocks.anchor.mock.calls[1][0].audit).toEqual(audit);
     expect(mocks.anchor.mock.calls[1][1]).not.toHaveProperty("escrowAudit");
   });
+});
+
+it.each(["2.01", "0.01", "999999999.99"])("publishes, reloads and prepares content edits with the exact fractional target %s", async amount => {
+  let anchored;
+  mocks.anchor.mockImplementation(async record => {
+    anchored = prepareStoredProposal(record);
+    return listing;
+  });
+  await form(amount);
+  fireEvent.click(screen.getByRole("button", { name: "Sign and publish proposal" }));
+  await screen.findByRole("heading", { name: "Published independent-form" });
+  const submitted = { ...mocks.submit.mock.calls[0][0].record, id: "independent-form" };
+  expect(submitted.amount).toBe(Number(amount));
+  expect(submitted.fundingTerms.target).toBe((BigInt(amount.replace(".", "")) * 10000n).toString());
+  expect(independentProposalAuditPayload(submitted)).toMatchObject({ amount, amountEncoding: "decimal-v1" });
+  // Firestore retains its existing numeric field, so re-reading builds the same digest.
+  expect(prepareStoredProposal({ ...submitted, amount: Number(submitted.amount) }).contentHash).toBe(anchored.contentHash);
+  const editForm = formFromIndependentProposal(submitted);
+  expect(editForm.amount).toBe(amount);
+  const rebuilt = { ...buildIndependentProposalDocument({ researcherId: account, form: editForm, expiresAt: submitted.expiresAt }), id: submitted.id };
+  expect(rebuilt.fundingTerms).toEqual(submitted.fundingTerms);
+  expect(prepareStoredProposal(rebuilt).contentHash).toBe(anchored.contentHash);
+  const corrected = { ...rebuilt, summary: "An updated solution summary" };
+  expect(prepareStoredProposal(corrected).contentHash).not.toBe(anchored.contentHash);
+  expect(independentProposalAuditPayload(corrected)).toMatchObject({ amount, amountEncoding: "decimal-v1" });
 });

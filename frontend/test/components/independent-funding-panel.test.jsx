@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const live = vi.hoisted(() => ({ options: null }));
+vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(),
   user: { id: `0x${"a".repeat(40)}` }, account: { address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614 } }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
@@ -141,11 +143,13 @@ it.each([false, true])("uses the verified sync response without another independ
     totalDeposited: "2000000", totalReleased: "2000000", outstandingBalance: "0" }, actions: {} };
   mocks.sync.mockResolvedValue(next);
   mocks.write.mockResolvedValue({ transactionHash });
-  const changed = vi.fn();
-  render(<IndependentFundingPanel proposal={{ id: "fast-confirm" }} onStateChange={changed}
+  const changed = vi.fn(), confirmed = vi.fn();
+  render(<IndependentFundingPanel proposal={{ id: "fast-confirm" }} onStateChange={changed} onConfirmed={confirmed}
     initialTransaction={recovery ? { transactionHash, action: "deposit" } : null} />);
+  if (!recovery) fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
   fireEvent.click(await screen.findByRole("button", { name: recovery ? "Retry confirmation" : "Fund independent listing" }));
   await screen.findByText("Fully paid");
+  expect(confirmed).toHaveBeenCalledTimes(1);
   expect(mocks.read).toHaveBeenCalledTimes(1);
   expect(changed).toHaveBeenLastCalledWith(next);
 });
@@ -155,7 +159,8 @@ it("does not apply a delayed independent sync result to another wallet", async (
   mocks.write.mockResolvedValue({ transactionHash: `0x${"3".repeat(64)}` });
   mocks.sync.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   const changed = vi.fn(), view = render(<IndependentFundingPanel proposal={{ id: "sync-switch" }} onStateChange={changed} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Fund independent listing" }));
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Fund independent listing" }));
   await act(async () => {});
   mocks.user = { id: `0x${"c".repeat(40)}` }; mocks.account = { ...mocks.account, address: mocks.user.id };
   const current = { ...props().snapshot, summary: { ...summary, totalDeposited: "3000000", fundingTarget: "4000000" } };
@@ -165,4 +170,53 @@ it("does not apply a delayed independent sync result to another wallet", async (
   await act(async () => finish({ ...props().snapshot, summary: { ...summary, state: "Released" } }));
   expect(changed).toHaveBeenLastCalledWith(current);
   expect(screen.queryByText("Fully paid")).toBeNull();
+});
+
+it("shows the independent remaining limit inline and prevents overfunding without a wallet request", () => {
+  const p = props({ amount: "1.000001" });
+  const view = render(<IndependentFundingView {...p} />);
+  expect(screen.getByRole("alert").textContent).toBe("Only 1 USDT is still needed. Enter 1 USDT or less.");
+  const input = screen.getByLabelText("Contribution (USDT)");
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(input.getAttribute("aria-describedby")).toContain("independent-contribution-error");
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(true);
+  fireEvent.click(fund);
+  expect(p.onAction).not.toHaveBeenCalled();
+  view.rerender(<IndependentFundingView {...p} amount="1" />);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(fund.disabled).toBe(false);
+  fireEvent.click(fund);
+  expect(p.onAction).toHaveBeenCalledWith("deposit", { amount: "1" });
+});
+
+it.each([["1.001", /2 decimal places/], ["0.99", /at least 1/], ["1.01", /would leave only 0.99/]])("blocks invalid independent contributions before a wallet request (%s)", (amount, message) => {
+  const p = props({ amount, snapshot: { ...props().snapshot, summary: { ...summary, totalDeposited: "0" } } });
+  render(<IndependentFundingView {...p} />);
+  expect(screen.getByRole("alert").textContent).toMatch(message);
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(true);
+  fireEvent.click(fund);
+  expect(p.onAction).not.toHaveBeenCalled();
+});
+it.each([["0.25", "250000"], ["0.000001", "1"]])("lets exact final balances finish existing independent funding (%s)", (amount, remaining) => {
+  const p = props({ amount, snapshot: { ...props().snapshot, summary: { ...summary, totalDeposited: (2000000n - BigInt(remaining)).toString() } } });
+  render(<IndependentFundingView {...p} />);
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(false);
+  fireEvent.click(fund);
+  expect(p.onAction).toHaveBeenCalledWith("deposit", { amount });
+});
+
+
+it("refreshes an independent balance from live activity and preserves an unfinished contribution", async () => {
+  render(<IndependentFundingPanel proposal={{ id: "live-independent" }} />);
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  mocks.read.mockResolvedValue(props({ snapshot: { exists: true, configured: true, summary: { ...summary,
+    totalDeposited: "1500000" }, wallet: {}, actions: { deposit: true } } }).snapshot);
+  await act(async () => { await live.options.onRefresh(); });
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+  expect(screen.getByLabelText("Contribution (USDT)").value).toBe("1");
+  expect(live.options).toMatchObject({ proposalId: "live-independent", channel: "funding", identity: mocks.user.id, blocked: false });
+  expect(mocks.write).not.toHaveBeenCalled();
 });

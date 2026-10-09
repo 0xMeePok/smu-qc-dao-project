@@ -39,6 +39,11 @@ describe("QCDAO-59/60 proposals", () => {
     assert.ok(validateProposal({ ...form, title: " ", category: "unknown" }, posting).title);
     assert.ok(validateProposal({ ...form, methodology: "x".repeat(4001) }, posting).methodology);
   });
+  it("uses at most two decimal places for new targets, while retaining legacy content edits", () => {
+    assert.match(validateProposal({ ...form, amount: "1000.001" }, posting).amount, /2 decimal places/);
+    assert.equal(validateProposal({ ...form, amount: "1000.01" }, posting).amount, undefined);
+    assert.equal(validateProposal({ ...form, amount: "1000.001" }, posting, { requireNewTarget: false }).amount, undefined);
+  });
   it("blocks every closed status, moderation and accepted solutions", () => {
     for (const status of ["expired", "withdrawn", "moderated", "matched", "funded", "draft", "completed", "cancelled"]) assert.ok(proposalBlockReason({ ...posting, status }));
     for (const patch of [{ acceptedProposalId: "p" }, { acceptedSolutionId: "s" }, { hasAcceptedSolution: true }, { moderated: true }, { moderationStatus: "hidden" }]) assert.ok(proposalBlockReason({ ...posting, ...patch }));

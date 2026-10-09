@@ -968,3 +968,22 @@ test("[QCDAO-95] surfaces a moderated-away recommendation as needing attention, 
   assert.equal(row.filedRecommendation, "recommend");
   assert.equal(row.gatesSelection, true);
 });
+
+test("comment create, edit, delete and moderation emit content-free counters for both detail pages", async () => {
+  const db = fixture();
+  const comment = await create(db);
+  const paths = ["proposals/a/activity/latest", "problems/problem/activity/latest"];
+  for (const path of paths) assert.deepEqual(db.records.get(path), { comments: 1 });
+  await editComment({ db, uid: "funder", commentId: comment.id, body: "Updated benchmark reference.", now: later(1000) });
+  for (const path of paths) assert.deepEqual(db.records.get(path), { comments: 2 });
+  await db.runTransaction(async tx => {
+    const gate = await prepareCommentEvaluationGate({ tx, db, contentId: comment.id,
+      data: db.records.get(`comments/${comment.id}`), action: "hide", now: later(2000) });
+    gate.apply();
+  });
+  for (const path of paths) assert.deepEqual(db.records.get(path), { comments: 3 });
+  await deleteComment({ db, uid: "funder", commentId: comment.id, now: later(3000) });
+  for (const path of paths) assert.deepEqual(db.records.get(path), { comments: 4 });
+  await deleteComment({ db, uid: "funder", commentId: comment.id, now: later(4000) });
+  for (const path of paths) assert.deepEqual(db.records.get(path), { comments: 4 }, "Idempotent deletion does not emit a new update");
+});

@@ -1,3 +1,4 @@
+import { contributionError } from "./contributionValidation.js";
 import { erc20Abi, keccak256, stringToHex } from "viem";
 import { getConnection } from "wagmi/actions";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG, getAuditRegistryAddress } from "../config/auditRegistry.js";
@@ -76,18 +77,8 @@ function depositor(value) {
     .map((name, index) => [name, name === "status" ? Number(field(value, name, index)) : BigInt(field(value, name, index))]));
 }
 
-/** A single-block snapshot, verified through the registry AND factory mappings.
- * Amounts and timestamps are bigint; state/currentTranche/decimals/feeBps are numbers.
- */
-export async function readEscrow({ proposal, account, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
-  const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
-  if (usingConfiguredDeployment) config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
-  deployment(config);
-  const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
-  const expected = isIndependentProposal(proposal)
-    ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
-    : prepareStoredProposal(proposal, { registryConfig: config });
-  const walletAddress = account ? requireAddress(account, "Wallet address") : null;
+// Request-local cache: every verification and eligibility read uses the same fresh block.
+async function escrowBlockReader(adapters, config) {
   const block = await adapters.getBlock({ chainId: config.chainId, blockTag: "latest" });
   if (typeof block?.number !== "bigint" || typeof block?.timestamp !== "bigint") throw new Error("Could not read the current escrow block. Please refresh.");
   const cache = new Map();
@@ -96,6 +87,104 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     if (!cache.has(key)) cache.set(key, adapters.readContract({ ...request, chainId: config.chainId, blockNumber: block.number }));
     return cache.get(key);
   };
+  return { block, readContract };
+}
+
+function assertProposalContent(registered, expected) {
+  if (!same(field(registered, "proposalHash", 4), expected.proposalHash) || !same(field(registered, "solutionHash", 5), expected.solutionHash)) {
+    throw new Error("Mismatch detected: this proposal differs from its current on-chain record. Refresh before continuing.");
+  }
+}
+
+const VERIFIED_USER_ACTIONS = new Set(["deposit", "approveSelection", "submitMilestone", "approveMilestone", "voteMilestone"]);
+
+function reviewEligibility({ snapshot, account, active, timestamp, currentMilestone, contribution = 0n, hasVoted = false }) {
+  const problemOwner = Boolean(account && same(account, snapshot.problemOwner));
+  const proposalOwner = Boolean(account && same(account, snapshot.proposalOwner));
+  const reviewOpen = active && timestamp < BigInt(snapshot.approvalDeadline);
+  const upfront = Number(snapshot.state) === ESCROW_STATE.Locked && Number(snapshot.currentTranche) === 0;
+  const final = Number(snapshot.state) === ESCROW_STATE.Active && Number(snapshot.currentTranche) === 1;
+  const evidenceReady = Boolean(currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH));
+  const needsOwnerApproval = (problemOwner && !snapshot.ownerApproved) || (proposalOwner && !snapshot.solutionApproved);
+  return {
+    approveSelection: upfront && reviewOpen && needsOwnerApproval,
+    submitMilestone: final && reviewOpen && proposalOwner,
+    approveMilestone: final && reviewOpen && evidenceReady && needsOwnerApproval,
+    voteMilestone: final && reviewOpen && evidenceReady && snapshot.funderVoting && contribution > 0n && !hasVoted,
+  };
+}
+
+// Verify the complete canonical record, then fetch only the current action's guards.
+// Dashboard accounting, refunds and unrelated wallet reads must not delay a signature.
+async function readUserAction({ proposal, account, action, adapters, config }) {
+  deployment(config);
+  const expected = isIndependentProposal(proposal)
+    ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
+    : prepareStoredProposal(proposal, { registryConfig: config });
+  const { block, readContract } = await escrowBlockReader(adapters, config);
+  const [canonical, registered] = await Promise.all([
+    verifyProposalEscrow({ expected, config, readContract }),
+    readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
+  ]);
+  assertProposalContent(registered, expected);
+  const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
+  const names = action === "deposit"
+    ? ["state", "fundingTarget", "totalDeposited", "expiresAt", "tokenDecimals"]
+    : ["state", "currentTranche", "selectionId", "approvalDeadline", "ownerApproved", "solutionApproved", "problemOwner", "proposalOwner", "funderVoting"];
+  const tokenRead = (functionName, args = []) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
+  const [values, active, depositValues, contributionSummary] = await Promise.all([
+    Promise.all(names.map(name => read(name))),
+    readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
+    action === "deposit" ? Promise.all([
+      tokenRead("decimals"),
+      readContract({ address: canonical.factoryAddress, abi: config.escrow.factoryAbi, functionName: "allowedTokens", args: [expected.fundingTerms.token] }),
+      tokenRead("balanceOf", [account]), tokenRead("allowance", [account, canonical.address]),
+    ]) : null,
+    action === "voteMilestone" ? read("depositorSummary", [account]) : null,
+  ]);
+  const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
+  if (action === "deposit") {
+    const [tokenDecimals, tokenListed, balance, allowance] = depositValues;
+    const decimals = Number(snapshot.tokenDecimals);
+    const remaining = BigInt(snapshot.fundingTarget) - BigInt(snapshot.totalDeposited);
+    return { ...canonical, decimals, remaining, token: expected.fundingTerms.token,
+      symbol: config.escrow.tokens.find(token => same(token.address, expected.fundingTerms.token))?.symbol ?? proposal.currency,
+      wallet: { balance: BigInt(balance), allowance: BigInt(allowance) },
+      can: { deposit: Boolean(account && proposal.opportunityType !== "open-funding" && Number(snapshot.state) === ESCROW_STATE.Open
+        && active && tokenListed && Number(tokenDecimals) === decimals && block.timestamp < BigInt(snapshot.expiresAt)
+        && remaining > 0n && BigInt(balance) > 0n) },
+    };
+  }
+  // milestoneAt is already cached by canonical verification; no additional RPC.
+  const currentTranche = Number(snapshot.currentTranche);
+  const currentMilestone = action !== "approveSelection" && currentTranche >= 0 && currentTranche < expected.fundingTerms.trancheBps.length
+    ? milestone(await read("milestoneAt", [BigInt(currentTranche)])) : null;
+  const hasVoted = action === "voteMilestone" && currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH)
+    ? await read("hasVoted", [BigInt(currentTranche), currentMilestone.evidenceHash, account]) : false;
+  return { ...canonical, selectionId: snapshot.selectionId, currentTranche, currentMilestone,
+    can: reviewEligibility({ snapshot, account, active, timestamp: block.timestamp, currentMilestone,
+      contribution: contributionSummary ? depositor(contributionSummary).deposited : 0n, hasVoted }),
+  };
+}
+
+/** A single-block snapshot, verified through the registry AND factory mappings.
+ * Amounts and timestamps are bigint; state/currentTranche/decimals/feeBps are numbers.
+ */
+export async function readEscrow({ proposal, account, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+  const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
+  if (usingConfiguredDeployment) config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
+  deployment(config);
+  const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
+  return readEscrowSnapshot({ proposal, account, adapters, config, isHistorical });
+}
+
+async function readEscrowSnapshot({ proposal, account, adapters, config, isHistorical = false }) {
+  deployment(config);
+  const expected = isIndependentProposal(proposal)
+    ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
+    : prepareStoredProposal(proposal, { registryConfig: config });
+  const walletAddress = account ? requireAddress(account, "Wallet address") : null;
+  const { block, readContract } = await escrowBlockReader(adapters, config);
   const canonical = await verifyProposalEscrow({ expected, config, readContract });
   const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
   const names = ["state", "platformSigner", "problemOwner", "proposalOwner", "fundingTarget", "tokenDecimals", "funderVoting",
@@ -120,9 +209,7 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
       read("depositorSummary", [walletAddress]),
     ]) : null,
   ]);
-  if (!same(field(registered, "proposalHash", 4), expected.proposalHash) || !same(field(registered, "solutionHash", 5), expected.solutionHash)) {
-    throw new Error("Mismatch detected: this proposal differs from its current on-chain record. Refresh before continuing.");
-  }
+  assertProposalContent(registered, expected);
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
   let grantEscrow = false;
   if (proposal.opportunityType === "open-funding" && config.escrow.openFundingPoolAbi?.length
@@ -158,17 +245,14 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
   const final = snapshot.state === ESCROW_STATE.Active && snapshot.currentTranche === 1;
   const reviewOpen = active && block.timestamp < snapshot.approvalDeadline;
   const evidenceReady = Boolean(currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH));
-  const needsOwnerApproval = (roles.problemOwner && !snapshot.ownerApproved) || (roles.proposalOwner && !snapshot.solutionApproved);
   const bothApproved = snapshot.ownerApproved && snapshot.solutionApproved;
   const majorityApproved = !snapshot.funderVoting || snapshot.yesWeight > snapshot.totalDeposited / 2n;
   const can = {
     deposit: Boolean(walletAddress && open && active && tokenListed && tokenPrecisionValid && block.timestamp < snapshot.expiresAt && remaining > 0n && wallet.balance > 0n),
     lockSelection: roles.platform && open && active && block.timestamp < snapshot.expiresAt && remaining === 0n,
-    approveSelection: upfront && reviewOpen && needsOwnerApproval,
+    ...reviewEligibility({ snapshot, account: walletAddress, active, timestamp: block.timestamp, currentMilestone,
+      contribution: wallet.contribution, hasVoted: wallet.hasVoted }),
     rejectSelection: supportsSelectionRejection && proposal.opportunityType !== "open-funding" && upfront && reviewOpen && (roles.problemOwner || roles.proposalOwner),
-    submitMilestone: final && reviewOpen && roles.proposalOwner,
-    approveMilestone: final && reviewOpen && evidenceReady && needsOwnerApproval,
-    voteMilestone: final && reviewOpen && evidenceReady && snapshot.funderVoting && roles.funder && !wallet.hasVoted,
     release: upfront && reviewOpen && roles.platform && bothApproved,
     releaseMilestone: final && reviewOpen && roles.platform && bothApproved && evidenceReady && majorityApproved,
     claimRefund: Boolean(walletAddress && wallet.depositor?.claimable > 0n),
@@ -196,11 +280,14 @@ export async function readPostingFundingStarted(posting, { adapters = createWagm
 }
 
 const REVERT_MESSAGES = {
+  AmountPrecisionExceeded: "Use at most 2 decimal places for funding amounts.",
+  ContributionBelowMinimum: "Contribute at least 1 token, or fund the exact remaining balance.",
+  ContributionLeavesDust: "This contribution would leave less than 1 token still needed. Enter a smaller amount or fund the exact remaining balance.",
   AccessDenied: "This connected wallet cannot perform that escrow action.",
   InvalidState: "The escrow state changed. Refresh before continuing.",
   InvalidInput: "The selection or evidence changed. Refresh before continuing.",
   WindowClosed: "The approval or funding window has closed.", WindowStillOpen: "The refund window is not open yet.",
-  FundingTargetExceeded: "That amount exceeds the funding still needed.", FundingIncomplete: "The full funding target must be in escrow first.",
+  FundingTargetExceeded: "That amount exceeds the funding still needed. Refresh funding status and enter the remaining amount or less.", FundingIncomplete: "The full funding target must be in escrow first.",
   ApprovalIncomplete: "Both owners must approve before payment can be released.", AlreadyApproved: "This wallet has already approved.",
   NothingToRefund: "This wallet has no refund available.", TokenNotListed: "This token is no longer available for new deposits.",
   VotingDisabled: "This proposal uses approval from both owners without funder voting.", AlreadyVoted: "This wallet already voted on this evidence.",
@@ -270,12 +357,16 @@ export async function claimRemovedProposalFunds({ proposalId, account }) {
 export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve, reason,
   onProgress, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
   onProgress?.({ status: "preparing", action });
-  if (config === AUDIT_REGISTRY_CONFIG) {
+  const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
+  if (usingConfiguredDeployment) {
     config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
     if (!["claimRefund", "expire", "refundInvalidated"].includes(action)) assertActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
   }
+  const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
   const walletAddress = requireAddress(account, "Connected wallet");
-  const snapshot = await readEscrow({ proposal, account: walletAddress, adapters, config });
+  const snapshot = await (VERIFIED_USER_ACTIONS.has(action) ? readUserAction : readEscrowSnapshot)({
+    proposal, account: walletAddress, action, adapters, config, isHistorical,
+  });
   if (!Object.hasOwn(snapshot.can, action) || !snapshot.can[action]) throw new Error("This escrow action is not available to the connected wallet in the current state. Refresh and try again.");
   const send = async (functionName, args, { address = snapshot.address, abi = config.escrow.escrowAbi, label = functionName } = {}) => {
     let transactionHash;
@@ -300,8 +391,8 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
   };
   if (action === "deposit") {
     const units = fundingAmountUnits(amount, snapshot.decimals);
-    if (units > snapshot.remaining) throw new Error("That amount exceeds the funding still needed.");
-    if (units > snapshot.wallet.balance) throw new Error(`Your ${snapshot.symbol} balance is too low for that deposit.`);
+    const invalid = contributionError({ amount, decimals: snapshot.decimals, symbol: snapshot.symbol, remaining: snapshot.remaining, balance: snapshot.wallet.balance });
+    if (invalid) throw new Error(invalid);
     if (snapshot.wallet.allowance < units) {
       // Zero first supports tokens that require clearing an existing allowance.
       if (snapshot.wallet.allowance > 0n) await send("approve", [snapshot.address, 0n], { address: snapshot.token, abi: erc20Abi, label: "resetAllowance" });

@@ -7,7 +7,8 @@ const plans = [[10000], [3333, 6667], [3333, 3333, 3334], [1000, 2000, 3000, 400
 describe("Milestone payments: immutable plans, arithmetic and approvals", function () {
   for (const decimals of [0, 6, 18, 77]) for (const plan of plans) {
     it(`${plan.length} tranches conserve principal and cumulative fees at ${decimals} decimals`, async function () {
-      const c = await fixture({ decimals, target: 10007n, feeBps: 3333, trancheBps: plan });
+      const target = decimals === 77 ? 10n ** 75n : 10007n * 10n ** BigInt(Math.max(0, decimals - 2));
+      const c = await fixture({ decimals, target, feeBps: 3333, trancheBps: plan });
       let cumulativeBps = 0n, previous = 0n;
       for (let i = 0; i < plan.length; i++) {
         cumulativeBps += BigInt(plan[i]);

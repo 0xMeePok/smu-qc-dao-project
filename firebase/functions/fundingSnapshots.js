@@ -1,3 +1,5 @@
+import { signalFundingChange } from "./activitySignals.js";
+
 /** Server-only dashboard projections. A slow older request must never replace
  * a newer confirmed snapshot. These records never authorize a transaction. */
 export const FUNDING_POSITIONS = "escrowFundingPositions";
@@ -22,6 +24,9 @@ export async function saveFundingSnapshot({ db, collection, id, snapshot }) {
     const old = await tx.get(ref);
     if (old.exists && Number(old.data().blockNumber) > snapshot.blockNumber) return false;
     tx.set(ref, snapshot);
+    if (["escrowFundingSummaries", "openFundingSummaries", OPEN_FUNDING_SELECTIONS].includes(collection)) {
+      signalFundingChange(tx, db, old.data(), snapshot);
+    }
     return true;
   });
 }

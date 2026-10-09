@@ -51,6 +51,52 @@ describe("proposal audit handoff", () => {
     expect(result.status).toBe("confirmed");
     expect(result.transactionHash).toBe(tx);
   });
+  it("reads parent revision and proposal anchoring concurrently, waiting for both before signing", async () => {
+    let finishParent, finishProposal;
+    const parentGate = new Promise(resolve => { finishParent = resolve; });
+    const proposalGate = new Promise(resolve => { finishProposal = resolve; });
+    const chainRead = vi.fn(request => request.functionName === "opportunityRevisionCount" ? parentGate
+      : request.functionName === "revisionCount" ? proposalGate : readContract(request));
+    const writeContract = vi.fn(async () => tx);
+    const pending = anchorProposalAudit(record, { account, adapters: { writeContract, readContract: chainRead,
+      waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } });
+    await vi.waitFor(() => {
+      expect(chainRead.mock.calls.some(([request]) => request.functionName === "opportunityRevisionCount")).toBe(true);
+      expect(chainRead.mock.calls.some(([request]) => request.functionName === "revisionCount")).toBe(true);
+    });
+    expect(writeContract).not.toHaveBeenCalled();
+    finishParent(3n);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(writeContract).not.toHaveBeenCalled();
+    finishProposal(0n);
+    await pending;
+    expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
+    expect(writeContract.mock.calls[0][0].args.at(-1)).toBe(2);
+  });
+  it("retains the original parent revision fallback when its concurrent lookup fails", async () => {
+    const writeContract = vi.fn(async () => tx);
+    const chainRead = request => request.functionName === "opportunityRevisionCount"
+      ? Promise.reject(new Error("Parent lookup unavailable")) : readContract(request);
+    await anchorProposalAudit(record, { account, adapters: { writeContract, readContract: chainRead,
+      waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } });
+    expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
+    expect(writeContract.mock.calls[0][0].args.at(-1)).toBe(0);
+  });
+  it("blocks signing on a failed proposal lookup even while the parent remains pending", async () => {
+    let finishParent;
+    const parentGate = new Promise((resolve, reject) => { finishParent = reject; });
+    const writeContract = vi.fn();
+    const chainRead = request => request.functionName === "opportunityRevisionCount" ? parentGate
+      : request.functionName === "revisionCount" ? Promise.reject(new Error("Proposal lookup unavailable")) : readContract(request);
+    const pending = anchorProposalAudit(record, { account, adapters: { writeContract, readContract: chainRead,
+      waitForTransactionReceipt: vi.fn() } });
+    await expect(pending).rejects.toThrow(/Proposal lookup unavailable/);
+    expect(writeContract).not.toHaveBeenCalled();
+    // A late second failure must also be consumed rather than becoming unhandled.
+    finishParent(new Error("Parent lookup unavailable"));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(writeContract).not.toHaveBeenCalled();
+  });
   it("QCDAO-57 amends an already-anchored proposal instead of committing it twice", async () => {
     // commitProposal reverts once the entity id is taken, so a corrected
     // proposal has to go to updateHashes - which appends a revision beside the

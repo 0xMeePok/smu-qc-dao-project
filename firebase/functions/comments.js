@@ -1,3 +1,4 @@
+import { signalActivity } from "./activitySignals.js";
 import { randomBytes } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -129,6 +130,7 @@ async function feedbackSummaryReads(tx, db, proposalId) {
 
 function applyFeedbackSummary(tx, db, docs, { commentId, next, proposalId, problemId, now }) {
   if (!proposalId) return;
+  signalActivity(tx, db, { proposalId, problemId }, "comments");
   const counts = emptyCounts();
   for (const doc of docs) {
     if (doc.id === commentId) continue;

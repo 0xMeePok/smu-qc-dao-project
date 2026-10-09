@@ -1,3 +1,5 @@
+import { useLiveActivity } from "../hooks/useLiveActivity.js";
+import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { formatUnits, keccak256, stringToHex } from "viem";
@@ -10,7 +12,7 @@ import { confirmEscrowTransaction, escrowErrorMessage, hashEscrowEvidence, readE
 import { loadEscrowEvidence, saveEscrowEvidence } from "../lib/escrowEvidence.js";
 import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
-import { getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
+import { fundingActivityCovered, getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
 import { EscrowFundingHistory } from "./EscrowFundingHistory.jsx";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { ACTION_ITEMS_KEY } from "../lib/proposalQueues.js";
@@ -40,12 +42,13 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason, canDeposit = true, integrityBlocked = false }) {
   const money = units => `${formatUnits(units ?? 0n, state?.decimals ?? 6)} ${state?.symbol ?? ""}`;
   const disabled = busy || !walletReady || loading || Boolean(unresolvedTransaction);
+  const amountError = state ? contributionError({ amount, decimals: state.decimals, symbol: state.symbol, remaining: state.remaining, balance: state.wallet?.balance }) : "";
   const evidenceReady = evidence && state?.currentMilestone?.evidenceHash === evidence.hash;
   const grantWaiting = state?.isGrant && state.state === 0;
   const grantMessage = "Grant funding moves into this escrow when the researcher accepts the selected offer.";
   const settlementMessage = grantWaiting && ["waiting", "not_ready", "waiting_approval"].includes(settlement?.status) ? grantMessage : settlement?.message;
   const action = (name, label, extra = {}, allowed = state?.can[name]) => <button type="button" className="primary small"
-    disabled={disabled || !allowed || (name === "deposit" && Boolean(fundingBlockReason)) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
+    disabled={disabled || !allowed || (name === "deposit" && (Boolean(fundingBlockReason) || !String(amount ?? "").trim() || Boolean(amountError))) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
   return <section className="card escrow-funding" aria-labelledby="escrow-funding-title">
     <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
       <button type="button" className="secondary small" disabled={busy || loading} onClick={onRefresh}>Refresh escrow</button></div>
@@ -83,8 +86,8 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       {grantWaiting && !settlementMessage && <p className="field-hint">{grantMessage} Manage the offer in the grant funding panel.</p>}
       {state.state === 0 && state.remaining > 0n && !state.isGrant && canDeposit && <div className="field-group">
         <p><strong>Funding token: {state.symbol}</strong> · This proposal accepts the token fixed in its payment plan.</p>
-        <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Wallet balance: ${money(state.wallet.balance)}.`}>
-          {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
+        <Field label={`Contribution (${state.symbol})`} htmlFor="escrow-contribution" hint={`Still needed: ${money(state.remaining)}. Use up to 2 decimal places. Minimum 1 ${state.symbol}, or the exact remaining balance. Wallet balance: ${money(state.wallet.balance)}.`} error={amountError}>
+          {({ id, describedBy, invalid }) => <input id={id} aria-invalid={invalid} type="text" inputMode="decimal" maxLength={160} value={amount} aria-describedby={describedBy} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
         </Field>
         <p className="field-hint">1. Approve only the entered token amount if needed. 2. Confirm the deposit. Deposited funds remain locked until an approved payment or an available refund.</p>
         {action("deposit", "Fund escrow", { amount })}
@@ -149,7 +152,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   </section>;
 }
 
-export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0, integrityBlocked = false }) {
+export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refreshVersion = 0, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
   const { address, isConnected, chainId } = useAccount();
@@ -164,9 +167,10 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   const [history, setHistory] = useState(null), [historyError, setHistoryError] = useState("");
   const [syncError, setSyncError] = useState(""), [settlement, setSettlement] = useState(null);
   const [notice, setNotice] = useState("");
-  const current = useRef({ proposal, onStateChange }); current.current = { proposal, onStateChange };
+  const current = useRef({ proposal, onStateChange, onConfirmed }); current.current = { proposal, onStateChange, onConfirmed };
   const currentStorageKey = useRef(storageKey); currentStorageKey.current = storageKey;
   const generation = useRef(0), writing = useRef(false), periodicRefresh = useRef(null);
+  const lastVerified = useRef(null);
   useEffect(() => { setUnresolvedTransaction(savedTransaction(storageKey)); }, [storageKey]);
   const walletReady = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
   const roles = user?.roles ?? (user?.role ? [user.role] : []);
@@ -182,25 +186,17 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   const walletMessage = !isConnected ? "Connect your signed-in wallet to fund, approve or claim refunds."
     : address?.toLowerCase() !== user?.id?.toLowerCase() ? "Connect the wallet belonging to your signed-in account."
       : "Switch your wallet to Arbitrum Sepolia to continue.";
-  const refresh = useCallback(async ({ includeHistory = true } = {}) => {
+  const refresh = useCallback(async ({ includeHistory = true, activityOnly = false, activitySnapshots = [] } = {}) => {
     const request = ++generation.current;
     const requestedProposal = current.current.proposal;
+    const startedAt = Date.now();
     setLoading(true);
     // History and evidence cannot delay an independently verified balance. Each
     // result is scoped to this refresh so navigation cannot apply an old record.
     const records = includeHistory && user?.id
       ? getEscrowFundingHistory({ proposalId: requestedProposal.id }).then(data => ({ data }), err => ({ error: err.message })) : null;
-    try {
-      const next = await readEscrow({ proposal: requestedProposal, account: address });
-      if (request !== generation.current) return;
-      setState(next); setError(""); setLoading(false);
-      setEvidence(saved => saved?.hash === next.currentMilestone?.evidenceHash ? saved : null);
-      current.current.onStateChange?.(next);
-      if (next.isHistorical) { setHistory(null); setHistoryError(""); }
-      else if (records) void records.then(result => {
-        if (request === generation.current) { setHistory(result.data ?? null); setHistoryError(result.error || ""); }
-      });
-      if (nonzero(next.currentMilestone?.evidenceHash)) void loadEscrowEvidence(requestedProposal.id, next.currentMilestone.evidenceHash).then(raw => {
+    const observeEvidence = (pending, next) => {
+      void pending.then(raw => {
         if (request !== generation.current) return;
         setEvidence(raw && hashEscrowEvidence(raw) === next.currentMilestone.evidenceHash ? { ...raw, hash: next.currentMilestone.evidenceHash } : null);
       }).catch(() => {
@@ -209,20 +205,55 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
           setError("Delivery evidence could not be loaded. Refresh before approving; escrow balances and refunds remain available.");
         }
       });
+    };
+    try {
+      // Only coalesce a push notification against a very recent verified read.
+      // Manual refresh, focus/reconnect and periodic checks always read the chain.
+      const previous = lastVerified.current;
+      if (activityOnly && activitySnapshots.length && previous?.scope === storageKey
+          && startedAt >= previous.startedAt && startedAt - previous.startedAt < 5000
+          && activitySnapshots.every(snapshot => fundingActivityCovered(previous.snapshot, snapshot,
+            { proposalId: requestedProposal.id, config: AUDIT_REGISTRY_CONFIG }))) {
+        if (records) void records.then(result => {
+          if (request === generation.current) { setHistory(result.data ?? null); setHistoryError(result.error || ""); }
+        });
+        // Re-observe a pending evidence read under this generation; the prior
+        // observer is now stale, but its request and verified digest are reusable.
+        if (previous.evidencePromise) observeEvidence(previous.evidencePromise, previous.snapshot);
+        return previous.snapshot;
+      }
+      const next = await readEscrow({ proposal: requestedProposal, account: address });
+      if (request !== generation.current) return;
+      lastVerified.current = { scope: storageKey, snapshot: next, startedAt };
+      setState(next); setError(""); setLoading(false);
+      setEvidence(saved => saved?.hash === next.currentMilestone?.evidenceHash ? saved : null);
+      current.current.onStateChange?.(next);
+      if (next.isHistorical) { setHistory(null); setHistoryError(""); }
+      else if (records) void records.then(result => {
+        if (request === generation.current) { setHistory(result.data ?? null); setHistoryError(result.error || ""); }
+      });
+      if (nonzero(next.currentMilestone?.evidenceHash)) {
+        const evidencePromise = loadEscrowEvidence(requestedProposal.id, next.currentMilestone.evidenceHash);
+        lastVerified.current.evidencePromise = evidencePromise;
+        observeEvidence(evidencePromise, next);
+      }
       return next;
     } catch (err) {
-      if (request === generation.current) { setState(null); setEvidence(null); setError(escrowErrorMessage(err)); current.current.onStateChange?.(null); }
+      if (request === generation.current) { lastVerified.current = null; setState(null); setEvidence(null); setError(escrowErrorMessage(err)); current.current.onStateChange?.(null); }
     } finally { if (request === generation.current) setLoading(false); }
-  }, [proposal.id, address, user?.id]);
+  }, [proposal.id, address, user?.id, storageKey]);
   useEffect(() => {
+    lastVerified.current = null;
     setState(null); setEvidence(null); setSettlement(null); setHistory(null);
     refresh();
-    const timer = setInterval(() => { if (!writing.current) periodicRefresh.current?.(); }, 30_000);
+    // Preserve recovery of a known platform settlement; ordinary reads use live activity.
+    const timer = setInterval(() => { if (!writing.current && document.visibilityState !== "hidden") periodicRefresh.current?.(); }, 30_000);
     return () => { generation.current += 1; clearInterval(timer); };
   }, [refresh, refreshVersion]);
   const recordSynchronized = result => {
     invalidateFundingDashboardSummaries(queryClient);
     setHistory(result); setSettlement(result.settlement); setSyncError("");
+    current.current.onConfirmed?.();
   };
   const synchronizeConfirmed = async (args = {}, initialResult) => {
     const key = storageKey;
@@ -250,7 +281,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
     const remember = hash => { saveTransaction(storageKey, hash); if (currentStorageKey.current === storageKey) setUnresolvedTransaction(hash); };
     try {
       // Revalidate current membership and posting eligibility immediately before any deposit signature.
-      if (action === "deposit") await prepareEscrowDeposit({ proposalId: proposal.id });
+      if (action === "deposit") await prepareEscrowDeposit({ proposalId: proposal.id, amount });
       if (currentStorageKey.current !== storageKey) return;
       const payload = { proposal: requestedProposal, account: address, action, selectionId: state?.selectionId, ...extra, onProgress: next => {
         if (next.status === "pending") remember(next.transactionHash);
@@ -326,8 +357,9 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   };
   periodicRefresh.current = () => {
     if (pendingSettlement.has((settlement ?? history?.settlement)?.status) && user?.id && !state?.isHistorical) void synchronize();
-    else void refresh();
   };
+  useLiveActivity({ proposalId: proposal.id, channel: "funding", identity: user?.id, onRefresh: refresh,
+    enabled: Boolean(proposal.id), blocked: busy || loading });
   return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit, integrityBlocked }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize(true)} onSync={() => synchronize()}
     onAction={act} onRefresh={refresh} onConnect={() => setConnect(true)} onConfirm={confirmPending} />

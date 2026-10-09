@@ -1508,6 +1508,30 @@ service cloud.firestore {
           || data.get('postingOwnerId', '') == request.auth.uid);
     }
 
+    // Content-free change counters inherit the parent get ACL. Clients cannot
+    // enumerate activity or forge updates; all content still uses its normal API.
+    match /proposals/{proposalId}/activity/{activityId} {
+      function visibleProposalActivity() {
+        let parent = get(/databases/$(database)/documents/proposals/$(proposalId));
+        return exists(/databases/$(database)/documents/proposals/$(proposalId))
+          && (proposalOwnedByViewer(parent.data) || submittedProposalVisibleToMembers(parent.data));
+      }
+      allow get: if activityId == 'latest' && isActiveUser(request.auth.uid) && visibleProposalActivity();
+      allow list, write: if false;
+    }
+
+    match /problems/{problemId}/activity/{activityId} {
+      function visibleProblemActivity() {
+        let parent = get(/databases/$(database)/documents/problems/$(problemId));
+        return exists(/databases/$(database)/documents/problems/$(problemId))
+          && (parent.data.ownerId == request.auth.uid || isModerationAdmin(request.auth.uid)
+            || (parent.data.status in ['submitted', 'open', 'cancelled', 'expired']
+              && hasCompletedProfile(request.auth.uid)));
+      }
+      allow get: if activityId == 'latest' && isActiveUser(request.auth.uid) && visibleProblemActivity();
+      allow list, write: if false;
+    }
+
     match /proposals/{proposalId} {
       // Author, sponsor and admins keep their existing get/list paths. Drafts stay
       // author-only. Submitted (and later) proposals follow the parent problem's

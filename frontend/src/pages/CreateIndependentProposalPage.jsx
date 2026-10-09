@@ -464,9 +464,9 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
           <WizardPanel index={stepIndex("funding")} current={wizard.current}>
             <fieldset className="field-group" disabled={contentDisabled}>
               <legend>Funding and supporting material</legend>
-              <Field htmlFor="independent-amount" label="Crowdfunding target" error={errors.amount}>
+              <Field htmlFor="independent-amount" label="Crowdfunding target" hint="Use at most 2 decimal places." error={errors.amount}>
                 {({ id, describedBy, invalid }) => <input id={id} type="number" inputMode="decimal"
-                  min="0.000001" max="1000000000" step="any" disabled={ESCROW_LINKED && editing} required value={form.amount || ""}
+                  min="0.01" max="1000000000" step="0.01" disabled={ESCROW_LINKED && editing} required value={form.amount || ""}
                   aria-invalid={invalid} aria-describedby={describedBy}
                   onChange={(event) => update("amount", event.target.value)} />}
               </Field>

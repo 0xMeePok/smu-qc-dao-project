@@ -42,9 +42,9 @@ describe("FundingEscrow: deposits and dashboard history", function () {
 
   for (const decimals of [6, 18]) {
     it(`uses exact base units for a ${decimals}-decimal token`, async function () {
-      const c = await fixture({ decimals, target: 10n ** BigInt(decimals) });
-      await c.escrow.connect(c.alice).deposit(1n);
-      await c.escrow.connect(c.alice).deposit(c.target - 1n);
+      const c = await fixture({ decimals, target: 3n * 10n ** BigInt(decimals) });
+      await c.escrow.connect(c.alice).deposit(101n * 10n ** BigInt(decimals - 2));
+      await c.escrow.connect(c.alice).deposit(199n * 10n ** BigInt(decimals - 2));
       expect(await c.escrow.totalDeposited()).to.equal(c.target);
       await assertAccounting(c);
     });

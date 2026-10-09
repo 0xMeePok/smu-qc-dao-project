@@ -468,6 +468,33 @@ describe("escrow funding service", () => {
     assert.equal(paid.db.records.get(parentPath).escrowSelection.selectionId, selectionId);
   });
 
+  it("submits the upfront payout in the approval reconciliation that confirms the previous selection", async () => {
+    const f = fixture(), previousHash = hash("d"), signedBytes = "0x2345", payments = [];
+    f.state.state = 1; f.state.ownerApproved = true; f.state.solutionApproved = true;
+    f.add(2, fundingDigest(["bytes32", "address", "uint64"], [hash("5"), researcher, nextDay]), "SelectionLocked",
+      { selectionId: hash("5"), solutionOwner: researcher, approvalDeadline: nextDay }, previousHash, 92n, platform);
+    const outboxPath = `escrowPlatformOutbox/${deploymentKey(config)}`;
+    f.db.records.set(outboxPath, { status: "pending", actionKey: `select:${f.record.id}:${hash("5")}`,
+      proposalId: f.record.id, transactionHash: previousHash, serializedTransaction: "0xabcd", nonce: 6, signerAddress: platform });
+    f.client.simulateContract = async request => { payments.push(request.functionName); };
+    f.client.getTransactionCount = async () => 7;
+    f.client.sendRawTransaction = async ({ serializedTransaction }) => {
+      assert.equal(f.db.records.get(outboxPath).serializedTransaction, serializedTransaction);
+      return keccak256(serializedTransaction);
+    };
+    const result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: researcher,
+      getWallet: localWorkerWallet(signedBytes) });
+    assert.equal(result.reconciliation.status, "verified");
+    assert.equal(result.settlement.status, "pending");
+    assert.equal(result.settlement.transactionHash, keccak256(signedBytes));
+    assert.deepEqual(payments, ["release"]);
+    assert.equal(f.db.records.get(outboxPath).functionName, "release");
+    // A repeat request while that payout is pending rebroadcasts its durable
+    // bytes, but cannot sign a second payout or advance the signer nonce.
+    await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner, getWallet: localWorkerWallet(signedBytes) });
+    assert.deepEqual(payments, ["release"]);
+  });
+
   it("settles and notifies from the scheduled queue after both approvals even when no browser calls sync", async () => {
     const f = fixture(), signedBytes = "0x2345", pendingHash = keccak256(signedBytes), payments = [];
     f.state.state = 1; f.state.ownerApproved = true; f.state.solutionApproved = true;
@@ -518,6 +545,92 @@ describe("serialized platform signing outbox", () => {
     return { ...f, action, getWallet, broadcasts, prepared, serializedTransaction,
       setReceipt: value => { receipt = value; }, setConfirmedNonce: value => { confirmedNonce = value; } };
   }
+
+  function previousTransaction(f, actionKey = "select:previous") {
+    const transactionHash = keccak256("0xabcd");
+    const path = `escrowPlatformOutbox/${deploymentKey(config)}`;
+    f.db.records.set(path, { status: "pending", actionKey, transactionHash,
+      serializedTransaction: "0xabcd", nonce: 7, signerAddress: platform });
+    const getReceipt = f.client.getTransactionReceipt;
+    f.client.getTransactionReceipt = request => {
+      if (request.hash === transactionHash) return getReceipt(request);
+      throw new Error("New transaction not mined");
+    };
+    return { path, transactionHash };
+  }
+
+  it("reports an already-confirmed requested action without signing or rebroadcasting it", async () => {
+    const f = signingFixture(), previous = previousTransaction(f, f.action.key);
+    f.setReceipt({ status: "success", blockNumber: 99n, blockHash: hash("4") });
+    const result = await submitPlatformAction(f);
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.transactionHash, previous.transactionHash);
+    assert.equal(f.prepared.length, 0); assert.equal(f.broadcasts.length, 0);
+  });
+
+  it("allows only one contender to claim the signer after both resume the same confirmed transaction", async () => {
+    const f = signingFixture(); previousTransaction(f);
+    f.setReceipt({ status: "success", blockNumber: 99n, blockHash: hash("4") });
+    const results = await Promise.all([submitPlatformAction(f), submitPlatformAction(f),
+      submitPlatformAction({ ...f, action: { ...f.action, key: "another-payment" } })]);
+    assert.equal(f.prepared.length, 1);
+    assert(results.some(result => result.status === "pending"));
+    assert(results.some(result => result.status === "queued"));
+    assert.equal(f.db.records.get(`escrowPlatformOutbox/${deploymentKey(config)}`).actionKey, f.action.key);
+  });
+
+  for (const outcome of ["unmined", "too-recent", "noncanonical", "reverted", "replaced"]) {
+    it(`does not start the next action when the previous transaction is ${outcome}`, async () => {
+      const f = signingFixture(); previousTransaction(f);
+      if (!["unmined", "replaced"].includes(outcome)) f.setReceipt({
+        status: outcome === "reverted" ? "reverted" : "success",
+        blockNumber: outcome === "too-recent" ? 101n : 99n,
+        blockHash: outcome === "noncanonical" ? hash("e") : hash("4"),
+      });
+      if (outcome === "replaced") f.setConfirmedNonce(8);
+      assert.equal((await submitPlatformAction(f)).status, "queued");
+      assert.equal(f.prepared.length, 0);
+      assert(f.broadcasts.every(bytes => bytes === "0xabcd"));
+    });
+  }
+
+  for (const outcome of ["reverted", "replaced"]) {
+    it(`does not resubmit the same ${outcome} action until escrow state is reconciled again`, async () => {
+      const f = signingFixture(), previous = previousTransaction(f, f.action.key);
+      if (outcome === "reverted") f.setReceipt({ status: outcome, blockNumber: 99n, blockHash: hash("4") });
+      else f.setConfirmedNonce(8);
+      const result = await submitPlatformAction(f);
+      assert.equal(result.status, outcome === "reverted" ? "failed" : "retrying");
+      assert.equal(result.transactionHash, previous.transactionHash);
+      assert.equal(f.prepared.length, 0); assert.equal(f.broadcasts.length, 0);
+    });
+  }
+
+  it("rechecks the posting revision after confirming another action and skips a superseded pause", async () => {
+    const f = signingFixture(); previousTransaction(f);
+    const pausePath = `escrowPostingPauseJobs/${key(f.parent.id)}`;
+    f.db.records.set(pausePath, { revision: "old", status: "pending" });
+    f.db.records.set(`problems/${f.parent.id}`, { ...f.parent, moderated: true });
+    f.setReceipt({ status: "success", blockNumber: 99n, blockHash: hash("4") });
+    const getBlock = f.client.getBlock;
+    f.client.getBlock = async request => {
+      f.db.records.set(pausePath, { revision: "new", status: "pending" });
+      return getBlock(request);
+    };
+    const result = await submitPlatformAction({ ...f, action: { ...f.action,
+      problemId: f.parent.id, pauseRevision: "old", args: [hash("5"), true] } });
+    assert.equal(result.status, "superseded");
+    assert.equal(f.prepared.length, 0); assert.equal(f.broadcasts.length, 0);
+  });
+
+  it("simulates the next action again after freeing the signer and never signs if it fails", async () => {
+    const f = signingFixture(); previousTransaction(f);
+    f.setReceipt({ status: "success", blockNumber: 99n, blockHash: hash("4") });
+    f.client.simulateContract = async () => { throw new Error("Approval window elapsed"); };
+    await assert.rejects(submitPlatformAction(f), /Approval window elapsed/);
+    assert.equal(f.prepared.length, 0); assert.equal(f.broadcasts.length, 0);
+    assert.equal(f.db.records.get(`escrowPlatformOutbox/${deploymentKey(config)}`).status, "idle");
+  });
 
   it("persists signed bytes before broadcast, retries exactly those bytes and serializes concurrent actions", async () => {
     const f = signingFixture();
@@ -602,4 +715,17 @@ describe("serialized platform signing outbox", () => {
     assert.equal(f.db.records.get(outboxPath).status, "idle");
     assert(!f.db.records.get(outboxPath).leaseToken);
   });
+});
+
+
+it("validates the requested main escrow contribution against the verified remainder", async () => {
+  const f = fixture(); f.state.totalDeposited = BigInt(f.record.fundingTerms.target) - 2_000_000n;
+  for (const [amount, message] of [["0.50", /at least 1/], ["1.000001", /at most 2 decimal/], ["1.50", /leave only 0.5/], ["2.01", /Only 2/]]) {
+    await assert.rejects(prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount }), message);
+  }
+  assert.equal((await prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount: "1" })).remainingBaseUnits, "2000000");
+  f.state.totalDeposited = BigInt(f.record.fundingTerms.target) - 500_000n;
+  assert.equal((await prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount: "0.50" })).remainingBaseUnits, "500000");
+  f.state.totalDeposited = BigInt(f.record.fundingTerms.target) - 765_433n;
+  assert.equal((await prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id, amount: "0.765433" })).remainingBaseUnits, "765433");
 });

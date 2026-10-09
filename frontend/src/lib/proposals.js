@@ -278,7 +278,7 @@ export async function submitIndependentProposal({
 
 export async function updateProposal({ proposalId, researcherId, posting, form, attachments = [], record: preparedRecord = null, audit = null }) {
   requireFirebase();
-  const errors = validateProposal(form, posting);
+  const errors = validateProposal(form, posting, { requireNewTarget: false });
   if (Object.keys(errors).length) throw new Error("Complete all required proposal fields.");
   const blocked = proposalBlockReason(posting);
   if (blocked) throw new Error(blocked);

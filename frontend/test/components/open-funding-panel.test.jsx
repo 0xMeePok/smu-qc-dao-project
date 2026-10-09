@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+const live = vi.hoisted(() => ({ options: null }));
+vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), supported: true, account: null, user: null }));
 vi.mock("wagmi", () => ({ useAccount: () => mocks.account }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
@@ -211,4 +213,17 @@ it("keeps a slow grant read single-flight across polling ticks", async () => {
     await act(async () => finish(model()));
     view.unmount();
   } finally { vi.useRealTimers(); }
+});
+
+
+it("refreshes grant pool activity without clearing the entered contribution or requesting a wallet action", async () => {
+  render(<OpenFundingPanel problemId="live-pool" />);
+  await waitFor(() => expect(live.options.blocked).toBe(false));
+  const amount = screen.getByLabelText("Add funding");
+  fireEvent.change(amount, { target: { value: "12" } });
+  await act(async () => { await live.options.onRefresh(); });
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+  expect(amount.value).toBe("12");
+  expect(live.options).toMatchObject({ problemId: "live-pool", channel: "funding", identity: account });
+  expect(mocks.write).not.toHaveBeenCalled();
 });

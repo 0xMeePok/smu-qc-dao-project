@@ -26,3 +26,16 @@ export function escrowEventLabel(type) {
 }
 
 export const escrowExplorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`;
+
+// A notification may describe the same confirmed block already read locally.
+// This only avoids a redundant display read; write preflight always verifies again.
+export function fundingActivityCovered(snapshot, summary, { proposalId, config }) {
+  const same = (a, b) => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
+  return Boolean(snapshot && !snapshot.isHistorical && summary
+    && summary.proposalId === proposalId && summary.chainId === snapshot.chainId
+    && summary.chainId === config.chainId && same(summary.registryAddress, config.address)
+    && same(summary.escrowAddress, snapshot.address)
+    && summary.verified === true
+    && Number.isSafeInteger(summary.blockNumber) && summary.blockNumber >= 0
+    && typeof snapshot.blockNumber === "bigint" && snapshot.blockNumber >= BigInt(summary.blockNumber));
+}

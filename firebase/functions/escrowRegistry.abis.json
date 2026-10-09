@@ -2476,8 +2476,46 @@
       "type": "error"
     },
     {
+      "inputs": [
+        {
+          "internalType": "uint8",
+          "name": "maximumDecimals",
+          "type": "uint8"
+        }
+      ],
+      "name": "AmountPrecisionExceeded",
+      "type": "error"
+    },
+    {
       "inputs": [],
       "name": "ApprovalIncomplete",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "minimum",
+          "type": "uint256"
+        }
+      ],
+      "name": "ContributionBelowMinimum",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "remainingAfter",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "minimum",
+          "type": "uint256"
+        }
+      ],
+      "name": "ContributionLeavesDust",
       "type": "error"
     },
     {

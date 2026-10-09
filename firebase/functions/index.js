@@ -40,7 +40,7 @@ import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
 import { verifyPublication } from "./publication.js";
 import { PUBLISH_VALIDATION, INDEPENDENT_PUBLISH_VALIDATION, isPublishableProblem, isPublishableIndependentProposal } from "./publicationValidation.js";
-import { requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
+import { requireNewProposalTargetPolicy, requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
   selectMockProposal as chooseMockProposal, confirmMockProposal as acceptMockProposal,
   getMockFundingPortfolio as readMockFundingPortfolio, sweepExpiredMockMatches,
@@ -476,14 +476,18 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
   const { id: ignoredId, createdAt, updatedAt, audit, ...content } = record;
   const proofRef = db.collection("publicationProofs").doc(resourceKey(scope, recordId));
   await db.runTransaction(async (tx) => {
-    const [maintenance, reservation, profile] = await Promise.all([
+    const [maintenance, reservation, profile, existingProposal] = await Promise.all([
       tx.get(db.collection("maintenanceState").doc("registryCutover")),
       tx.get(db.collection("recordReservations").doc(resourceKey(scope, recordId))),
       scope === "problems" ? tx.get(db.collection("users").doc(uid)) : Promise.resolve(null),
+      scope === "proposals" ? tx.get(db.collection("proposals").doc(recordId)) : Promise.resolve(null),
     ]);
     if (maintenance.data()?.active || reservation.data()?.retired) throw new HttpsError("failed-precondition", "Registry maintenance or retirement prevents publication.");
     if (scope === "proposals") {
-      try { requireProposalPublicationFundingPolicy(record); }
+      try {
+        requireProposalPublicationFundingPolicy(record);
+        requireNewProposalTargetPolicy(record, { existingRecord: existingProposal?.data() });
+      }
       catch (error) { throw new HttpsError("failed-precondition", error.message); }
     }
     const attachments = record.attachments ?? [];

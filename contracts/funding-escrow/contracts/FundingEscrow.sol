@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {FundingAmountPolicy} from "./FundingAmountPolicy.sol";
 import {TokenDecimals} from "./TokenDecimals.sol";
 import {EscrowInit, FundingEvent, IFundingFactory, IEscrowAuditRegistry} from "./FundingTypes.sol";
 
@@ -140,6 +141,7 @@ contract FundingEscrow is ReentrancyGuard {
         tokenRegistry = IFundingFactory(init.factory);
         auditRegistry = IEscrowAuditRegistry(init.auditRegistry);
         tokenDecimals = IFundingFactory(init.factory).tokenDecimals(init.token);
+        FundingAmountPolicy.requirePrecision(init.target, tokenDecimals);
         funderVoting = init.funderVoting;
         openFundingPool = IFundingFactory(init.factory).openFundingPoolForPosting(init.postingId);
         _buildPlan(init.target, bps, windows, descriptions);
@@ -172,6 +174,7 @@ contract FundingEscrow is ReentrancyGuard {
         if (amount == 0) revert InvalidInput();
         uint256 remaining = fundingTarget - totalDeposited;
         if (amount > remaining) revert FundingTargetExceeded(remaining);
+        FundingAmountPolicy.requireContribution(amount, remaining, tokenDecimals);
         _recordContribution(msg.sender, amount);
         contributions[msg.sender] += amount;
         depositCounts[msg.sender] += 1;

@@ -1,3 +1,4 @@
+import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
@@ -30,6 +31,7 @@ export function ProposalTracker({ onNavigate }) {
   // The overview requests this same verified queue. Switching tabs must not
   // discard it and repeat every escrow read; wallet changes use a separate key.
   const queue = useQuery({
+    ...LIVE_DASHBOARD_OPTIONS,
     queryKey: ["developerDashboard", user?.id],
     queryFn: listMyProposalQueue,
     enabled: Boolean(user?.id),

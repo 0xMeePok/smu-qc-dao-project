@@ -262,7 +262,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   const submit = async (event) => {
     event.preventDefault();
     if (submitting.current || pending) return;
-    const validation = validateProposal(form, posting);
+    const validation = validateProposal(form, posting, { requireNewTarget: !editing });
     setErrors(validation);
     if (Object.keys(validation).length) {
       const invalidStep = wizard.stepWithError(validation);
@@ -369,7 +369,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       <h1>{editing ? "Edit your proposal" : draftExists ? "Resume your draft" : "Submit a proposal"}</h1>
       <p>Respond to {posting.title}. All fields are required to submit; you can save an unfinished draft at any point. Supporting PDFs are optional.</p></div>
     {showForm && <WizardSteps steps={steps} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
-      completeSteps={wizard.completeSteps(validateProposal(form, posting))} visitedSteps={wizard.visited} lockForward={pending} />}
+      completeSteps={wizard.completeSteps(validateProposal(form, posting, { requireNewTarget: !editing }))} visitedSteps={wizard.visited} lockForward={pending} />}
     <div className="form-layout">
       <form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
         <SubmissionError message={error} />
@@ -395,8 +395,8 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
             </WizardPanel>
             <WizardPanel index={stepIndex("funding")} current={wizard.current}>
               <fieldset className="field-group" disabled={disabled}><legend>Funding and supporting material</legend>
-                <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} error={errors.amount}>
-                  {({ id, describedBy, invalid }) => <input id={id} type={ESCROW_LINKED ? "text" : "number"} inputMode="decimal" min="0.000001" max="1000000000" step="any" disabled={ESCROW_LINKED && editing} required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
+                <Field htmlFor="proposal-amount" label={`Requested funding amount (${posting.currency})`} hint="Use at most 2 decimal places." error={errors.amount}>
+                  {({ id, describedBy, invalid }) => <input id={id} type={ESCROW_LINKED ? "text" : "number"} inputMode="decimal" min="0.01" max="1000000000" step="0.01" disabled={ESCROW_LINKED && editing} required value={form.amount || ""} aria-invalid={invalid} aria-describedby={describedBy} onChange={(event) => update("amount", event.target.value)} />}
                 </Field>
                 {ESCROW_LINKED && <EscrowPaymentPlanFields form={form} grant={isOpenFunding} disabled={disabled || editing} error={errors.fundingPlan} onChange={update} />}
                 {editing && <p className="field-hint">Supporting PDFs cannot be changed after submission. They stay as the files under review.</p>}

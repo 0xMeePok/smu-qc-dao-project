@@ -5,6 +5,7 @@ import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../../src/config/propos
 const mocks = vi.hoisted(() => ({ user: { id: "member" }, report: vi.fn(), queue: vi.fn(), context: vi.fn(), moderate: vi.fn(), notifications: vi.fn(), markRead: vi.fn(), comments: vi.fn(), create: vi.fn(), edit: vi.fn(), remove: vi.fn() }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/lib/firebase.js", () => ({ functions: {} }));
+vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: () => {} }));
 vi.mock("../../src/lib/comments.js", async (importOriginal) => ({
   ...await importOriginal(),
   createComment: (...args) => mocks.create(...args),

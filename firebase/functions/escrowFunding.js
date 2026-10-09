@@ -1,3 +1,6 @@
+import { signalFundingChange } from "./activitySignals.js";
+import { configuredFundingToken, fundingAmountUnits } from "./escrowProposalTerms.js";
+import { fundingAmountError } from "./fundingAmountPolicy.js";
 import { randomUUID } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -198,6 +201,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     upfrontReleased: milestoneValue(milestones[0], "paid", 6) === true,
     finalReleased: milestoneValue(milestones.at(-1), "paid", 6) === true, active, invalidated,
     proposalEntityId: expected.entityId, pendingProposalEntityId,
+    fundingActivityVersion: Number(count),
     timestamp: Number(block.timestamp), blockNumber: Number(blockNumber), currentTranche: Number(data.currentTranche) };
   summary.fundingBlockReason = fundingBlockReason(record, parent, summary, summary.timestamp * 1000, { deposit: true });
   return { expected, escrow, data, summary, milestones, anchorCount: Number(count) };
@@ -280,7 +284,7 @@ export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
     settlement: publicSettlement(job.data()) };
 }
 
-export async function prepareEscrowDeposit({ db, client, config, uid, proposalId }) {
+export async function prepareEscrowDeposit({ db, client, config, uid, proposalId, amount }) {
   await assertFundingChain(client, config);
   const context = await loadFundingContext({ db, uid, proposalId });
   if (isIndependentProposal(context.record)) {
@@ -294,6 +298,15 @@ export async function prepareEscrowDeposit({ db, client, config, uid, proposalId
   const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
   const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000, { deposit: true });
   if (reason) fail("failed-precondition", reason);
+  if (amount !== undefined) {
+    const token = configuredFundingToken(config, context.record.currency);
+    let amountBaseUnits;
+    try { amountBaseUnits = fundingAmountUnits(amount, token.decimals); }
+    catch (error) { fail("invalid-argument", error.message); }
+    const error = fundingAmountError({ amountBaseUnits, decimals: token.decimals, symbol: token.symbol,
+      remainingBaseUnits: BigInt(verified.summary.fundingTarget) - BigInt(verified.summary.totalDeposited) });
+    if (error) fail("invalid-argument", error);
+  }
   await enqueueEscrowFunding({ db, config, record: context.record });
   return { escrowAddress: verified.escrow.address, tokenAddress: verified.summary.tokenAddress, chainId: config.chainId,
     postingId: verified.expected.opportunityId, postingOwner: context.parent.ownerId, terms: context.record.fundingTerms,
@@ -305,7 +318,7 @@ export async function prepareEscrowDeposit({ db, client, config, uid, proposalId
  * those exact bytes, never a fresh transaction or a different recipient. */
 export async function submitPlatformAction({ db, client, config, getWallet, action, now = Timestamp.now() }) {
   const ref = db.collection(PLATFORM_OUTBOX).doc(deploymentKey(config)), token = randomUUID();
-  const claimed = await db.runTransaction(async tx => {
+  const claim = (resuming = false) => db.runTransaction(async tx => {
     const row = await tx.get(ref), old = row.data() || {};
     if (action.pauseRevision) {
       const [pause, parent] = await Promise.all([
@@ -316,20 +329,41 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
           || !parent.exists || desiredPostingPause(parent.data()) !== action.args[1]) return { superseded: true };
     }
     if (old.transactionHash) return { existing: old };
+    // Another caller may have completed this same action while we resumed the
+    // previous transaction. Do not sign that already-confirmed payment again.
+    if (resuming && old.lastActionKey === action.key && old.lastOutcome === "success") return { confirmed: old.lastTransactionHash };
     if (millis(old.leaseUntil) > now.toMillis()) return { busy: true };
     tx.set(ref, { ...old, problemId: action.problemId || null, proposalId: action.proposalId || null,
       voidJobId: action.voidJobId || null, anchorJobId: action.anchorJobId || null,
       actionKey: action.key, leaseToken: token, leaseUntil: timestamp(now.toMillis() + 120_000), status: "preparing" });
     return { acquired: true };
   });
-  if (claimed.superseded) return { status: "superseded", message: "A newer posting update replaced this action." };
-  if (claimed.busy) return { status: "queued", message: "The platform signer is processing another confirmed action." };
+  let claimed = await claim();
   if (claimed.existing) {
-    await resumePlatformTransaction({ db, client, config, now });
-    return claimed.existing.actionKey === action.key
-      ? { status: "pending", transactionHash: claimed.existing.transactionHash, message: "A signed platform transaction is awaiting confirmation." }
-      : { status: "queued", message: "The platform signer is confirming another action before this payment." };
+    const previous = claimed.existing;
+    const resumed = await resumePlatformTransaction({ db, client, config, now });
+    // Continue only after this exact previous transaction is canonically
+    // confirmed. Pending, replaced and reverted transactions need another
+    // verified reconciliation before a different action is attempted.
+    if (resumed.status === "success" && same(resumed.transactionHash, previous.transactionHash)) {
+      if (previous.actionKey === action.key) return { status: "confirmed", transactionHash: previous.transactionHash,
+        message: "Platform transaction confirmed; reconciling funding events." };
+      // One bounded retry, using the same atomic lease and revision checks.
+      // A concurrent caller that wins the signer is handled below, not chased.
+      claimed = await claim(true);
+    } else if (same(resumed.transactionHash, previous.transactionHash) && previous.actionKey === action.key
+        && ["reverted", "replaced"].includes(resumed.status)) {
+      return { status: resumed.status === "reverted" ? "failed" : "retrying", transactionHash: previous.transactionHash,
+        message: "The platform transaction did not confirm successfully; the confirmed escrow state will be checked again." };
+    }
   }
+  if (claimed.superseded) return { status: "superseded", message: "A newer posting update replaced this action." };
+  if (claimed.confirmed) return { status: "confirmed", transactionHash: claimed.confirmed,
+    message: "Platform transaction confirmed; reconciling funding events." };
+  if (claimed.busy) return { status: "queued", message: "The platform signer is processing another confirmed action." };
+  if (claimed.existing) return claimed.existing.actionKey === action.key
+    ? { status: "pending", transactionHash: claimed.existing.transactionHash, message: "A signed platform transaction is awaiting confirmation." }
+    : { status: "queued", message: "The platform signer is confirming another action before this payment." };
   try {
     await assertFundingChain(client, config);
     const wallet = await getWallet();
@@ -561,9 +595,11 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
           && !((selectionConsumed || unpaidTerminal) && same(current.data().selectionId, job.selectionId)),
         lastTransactionHash: lastHash, reconciliation, settlement, leaseUntil: timestamp(0),
         status: terminal && complete ? "complete" : "pending", nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now });
-      if (complete && Number(savedSummary?.data()?.blockNumber ?? -1) <= verified.summary.blockNumber) tx.set(summaryRef, {
-        ...verified.summary, transactionHash: lastHash, confirmedAt: now.toDate().toISOString(), reconciliation,
-      });
+      if (complete && Number(savedSummary?.data()?.blockNumber ?? -1) <= verified.summary.blockNumber) {
+        const snapshot = { ...verified.summary, transactionHash: lastHash, confirmedAt: now.toDate().toISOString(), reconciliation };
+        tx.set(summaryRef, snapshot);
+        signalFundingChange(tx, db, savedSummary?.data(), snapshot);
+      }
       if (!independent && !isOpenFunding(context.record, context.parent) && complete && verified.summary.upfrontReleased && parent?.exists && parent.data().acceptedProposalId !== proposalId) {
         tx.update(parentRef, { acceptedProposalId: proposalId, hasAcceptedSolution: true, updatedAt: now });
       }
