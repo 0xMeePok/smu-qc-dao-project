@@ -8,13 +8,25 @@ const hash = `0x${"3".repeat(64)}`;
 const record = { audit: { transactionHash: hash, chainId: 421614 } };
 
 describe("Audit deployment resolution", () => {
-  it("rejects retired registry receipts after removing the historical deployment configuration", async () => {
-    assert.deepEqual(history, []);
+  it("rejects retired registry receipts absent from the deployment history", async () => {
     for (const address of ["0x47dA28cAEf8021dD88fe18B80e367746e0036964",
       "0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD", "0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0"]) {
       await assert.rejects(resolveAuditDeployment(record, {
         transaction: { hash, to: address, chainId: 421614 },
       }), /does not belong to a known/);
+    }
+  });
+  it("preserves verification of archived deployments while preventing new funding actions", async () => {
+    assert.ok(history.length > 0, "The previous deployment must remain available for existing receipts");
+    const addresses = new Set([active.address.toLowerCase()]);
+    for (const archived of history) {
+      assert.equal(addresses.has(archived.address.toLowerCase()), false, "Deployment addresses must be unique");
+      addresses.add(archived.address.toLowerCase());
+      const resolved = await resolveAuditDeployment(record, {
+        transaction: { hash, to: archived.address, chainId: archived.chainId },
+      });
+      assert.equal(resolved, archived);
+      assert.throws(() => assertActiveAuditDeployment(resolved), /earlier AuditRegistry deployment and is read-only/);
     }
   });
   it("routes new records to the active registry without an RPC read", async () => {
