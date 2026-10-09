@@ -43,13 +43,13 @@ export function ProposalList({ received = false, draftsOnly = false, onNavigate 
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      setData(await listProposals(received ? "postingOwnerId" : "researcherId", user.id));
+      setData(await listProposals(received ? "postingOwnerId" : "researcherId", user.id, { draftsOnly }));
     } catch (err) {
       setError(messageForProposalError(err));
     } finally {
       setLoading(false);
     }
-  }, [received, user.id]);
+  }, [received, user.id, draftsOnly]);
 
   useEffect(() => { load(); }, [load]);
 

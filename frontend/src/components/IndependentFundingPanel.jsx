@@ -122,9 +122,17 @@ export function IndependentFundingPanel({ proposal, onStateChange, refreshVersio
   const currentPanel = () => alive.current && activeKey.current === key;
   const remember = value => { savePending(key, value); if (currentPanel()) setUnresolved(value); };
   const sync = async (transactionHash, action) => {
-    if (!["approve", "resetAllowance"].includes(action)) await syncIndependentFunding({ proposalId: proposal.id, transactionHash });
+    const next = !["approve", "resetAllowance"].includes(action)
+      ? await syncIndependentFunding({ proposalId: proposal.id, transactionHash }) : null;
     invalidateFundingDashboardSummaries(queryClient);
-    remember(null); if (currentPanel()) await load();
+    remember(null);
+    if (currentPanel()) {
+      if (next?.configured && typeof next.exists === "boolean"
+          && (!next.summary?.proposalId || next.summary.proposalId === proposal.id)) {
+        // Sync already verified this confirmed state. Supersede older background reads.
+        ++version.current; setSnapshot(next); setLoading(false); setError(""); change.current?.(next);
+      } else await load(); // Approvals and older backend responses still need a fresh read.
+    }
     queryClient?.invalidateQueries({ queryKey: ["actionItems"] });
     queryClient?.invalidateQueries({ queryKey: ["developerDashboard"] });
   };

@@ -12,6 +12,19 @@ const nowFor = f => Timestamp.fromMillis(Number(f.state.timestamp) * 1000);
 const actions = (f, uid) => listActionItems({ ...f, uid, now: nowFor(f) });
 
 describe("canonical grant queue metadata", () => {
+  it("shares pinned verification across grant and escrow queue passes without caching the next request", async () => {
+    const f = openFundingFixture(); f.select(0);
+    await actions(f, researcher);
+    const escrowCalls = f.calls.filter(call => call.address === f.addresses[0]);
+    assert.deepEqual(escrowCalls.filter(call => call.functionName === "milestoneAt").map(call => call.args[0]), [0n, 1n]);
+    assert.equal(escrowCalls.filter(call => call.functionName === "expiresAt").length, 1);
+    assert.equal(f.calls.filter(call => call.functionName === "fundingFactory").length, 1);
+    f.calls.length = 0;
+    f.state.paused = true;
+    const second = await actions(f, researcher);
+    assert.equal(second.researcher.grantSelectionsToAccept.length, 0);
+    assert(f.calls.some(call => call.functionName === "postingFundingPaused"));
+  });
   it("counts only the selected researcher's grant offer and keeps the stored status separate", async () => {
     const f = openFundingFixture(); f.select(0);
     const result = await actions(f, researcher);

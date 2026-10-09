@@ -11,6 +11,9 @@ import { VOID_JOBS, voidDecision } from "./escrowModerationVoid.js";
 import { ANCHOR_JOBS } from "./moderationAnchor.js";
 import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { FUNDING_POSITIONS, fundingAllocationBasis, saveFundingSnapshot } from "./fundingSnapshots.js";
+import { createRequestReadClient } from "./requestReadClient.js";
+import { boundedMap } from "./boundedMap.js";
+import { createRequestDocumentReader } from "./requestDocuments.js";
 export { FUNDING_POSITIONS } from "./fundingSnapshots.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
@@ -95,15 +98,15 @@ export async function prepareRemovedProposalClaim({ db, client, config, uid, pro
   };
 }
 
-export async function loadFundingContext({ db, proposalId, uid }) {
+export async function loadFundingContext({ db, proposalId, uid, readDocument = ref => ref.get() }) {
   validId(proposalId);
-  const proposal = await db.collection("proposals").doc(proposalId).get();
+  const proposal = await readDocument(db.collection("proposals").doc(proposalId));
   if (!proposal.exists) fail("not-found", "This proposal is no longer available.");
   const record = { ...proposal.data(), id: proposalId };
   if (uid) {
-    const profile = await db.collection("users").doc(uid).get();
+    const profile = await readDocument(db.collection("users").doc(uid));
     if (!profile.exists || profile.data().suspended
-        || !await canReadContent({ get: ref => ref.get() }, db, "proposal", record, uid, profile.data())) {
+        || !await canReadContent({ get: readDocument }, db, "proposal", record, uid, profile.data())) {
       fail("permission-denied", "This proposal is not available to your account.");
     }
   }
@@ -120,7 +123,7 @@ export async function loadFundingContext({ db, proposalId, uid }) {
     } };
   }
   validId(record.problemId);
-  const parent = await db.collection("problems").doc(record.problemId).get();
+  const parent = await readDocument(db.collection("problems").doc(record.problemId));
   if (!parent.exists || !same(parent.data().ownerId, record.postingOwnerId)) fail("failed-precondition", "The proposal's posting ownership cannot be verified.");
   return { record, parent: { ...parent.data(), id: parent.id } };
 }
@@ -154,6 +157,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
   const expected = isIndependentProposal(record)
     ? prepareIndependentEscrowCommit(record, { registryConfig: config })
     : prepareStoredProposal(record, { registryConfig: config });
+  client = createRequestReadClient(client, { chainId: config.chainId });
   const read = request => client.readContract({ ...request, blockNumber });
   const [proposal, escrow] = await Promise.all([
     read({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
@@ -167,21 +171,23 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
   }
   const names = ["state", "totalDeposited", "totalReleased", "totalRefunded", "outstandingBalance", "currentTranche",
     "selectionId", "ownerApproved", "solutionApproved", "yesWeight", "approvalDeadline", "expiresAt", "platformSigner"];
-  const values = await Promise.all(names.map(functionName => read({ address: escrow.address, abi: config.escrow.escrowAbi, functionName })));
-  const data = Object.fromEntries(names.map((name, i) => [name, values[i]]));
-  const [active, invalidated, count, pendingProposalEntityId, block] = await Promise.all([
-    read({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, escrow.address] }),
-    read({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, escrow.address] }),
-    read({ address: config.address, abi: config.abi, functionName: "fundingAnchorCount", args: [expected.entityId] }),
-    !isOpenFunding(record, parent) && hasRegistryFunction(config, "pendingProposalForPosting")
-      ? read({ address: config.address, abi: config.abi, functionName: "pendingProposalForPosting", args: [expected.opportunityId] }) : null,
-    client.getBlock({ blockNumber }),
+  const [values, [active, invalidated, count, pendingProposalEntityId, block], milestones] = await Promise.all([
+    Promise.all(names.map(functionName => read({ address: escrow.address, abi: config.escrow.escrowAbi, functionName }))),
+    Promise.all([
+      read({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, escrow.address] }),
+      read({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, escrow.address] }),
+      read({ address: config.address, abi: config.abi, functionName: "fundingAnchorCount", args: [expected.entityId] }),
+      !isOpenFunding(record, parent) && hasRegistryFunction(config, "pendingProposalForPosting")
+        ? read({ address: config.address, abi: config.abi, functionName: "pendingProposalForPosting", args: [expected.opportunityId] }) : null,
+      client.getBlock({ blockNumber }),
+    ]),
+    Promise.all(expected.fundingTerms.trancheBps.map((_, index) => read({ address: escrow.address,
+      abi: config.escrow.escrowAbi, functionName: "milestoneAt", args: [BigInt(index)] }))),
   ]);
+  const data = Object.fromEntries(names.map((name, i) => [name, values[i]]));
   if (typeof block?.timestamp !== "bigint" || block.timestamp < 0n || block.timestamp > BigInt(Math.floor(Number.MAX_SAFE_INTEGER / 1000))) {
     throw new Error("Escrow reconciliation mismatch: confirmed block time cannot be verified.");
   }
-  const milestones = await Promise.all(expected.fundingTerms.trancheBps.map((_, index) => read({ address: escrow.address,
-    abi: config.escrow.escrowAbi, functionName: "milestoneAt", args: [BigInt(index)] })));
   const token = config.escrow.tokens.find(item => same(item.address, expected.fundingTerms.token));
   const summary = { proposalId: record.id, problemId: record.problemId, title: record.title || "Proposal", postingTitle: parent.title || "Posting",
     postingOwnerId: parent.ownerId, researcherId: record.researcherId, registryAddress: config.address.toLowerCase(),
@@ -572,8 +578,8 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
         tx.update(parentRef, { escrowSelection: null, updatedAt: now });
       }
     });
-    for (const position of positions) await saveFundingSnapshot({ db, collection: FUNDING_POSITIONS,
-      id: `${jobKey(config, proposalId)}_${position.uid}`, snapshot: { ...position, confirmedAt: now.toDate().toISOString() } });
+    await boundedMap(positions, position => saveFundingSnapshot({ db, collection: FUNDING_POSITIONS,
+      id: `${jobKey(config, proposalId)}_${position.uid}`, snapshot: { ...position, confirmedAt: now.toDate().toISOString() } }), 4);
     return getEscrowFundingHistory({ db, config, uid, proposalId });
   } catch (error) {
     await db.runTransaction(async tx => {
@@ -621,6 +627,8 @@ export async function startEscrowSettlement(options) {
 }
 
 export async function getEscrowFundingSummary({ db, client, config, uid }) {
+  if (client) client = createRequestReadClient(client, { chainId: config.chainId });
+  const readDocument = createRequestDocumentReader();
   const [sets, records] = await Promise.all([
     Promise.all(["postingOwnerId", "researcherId"].map(field => db.collection(FUNDING_SUMMARIES)
       .where(field, "==", uid).where("registryAddress", "==", config.address.toLowerCase()).limit(50).get())),
@@ -630,26 +638,27 @@ export async function getEscrowFundingSummary({ db, client, config, uid }) {
   const saved = new Map(sets.flatMap(set => set.docs).map(doc => doc.data())
     .filter(item => item.chainId === config.chainId).map(item => [item.proposalId, item]));
   const candidates = new Set(saved.keys());
+  readDocument.prime(records.flatMap(set => set.docs));
   for (const doc of records.flatMap(set => set.docs)) {
     const row = doc.data();
     if (!isIndependentProposal(row) && row.fundingTerms && row.audit?.status === "confirmed" && row.status !== "draft") candidates.add(doc.id);
   }
-  const items = [];
   let unavailableItems = 0;
-  for (const proposalId of [...candidates].slice(0, 50)) {
+  const rows = await boundedMap([...candidates].slice(0, 50), async proposalId => {
     let context;
-    try { context = await loadFundingContext({ db, uid, proposalId }); }
-    catch { continue; } // Removed or no longer visible; never expose an old projection.
+    try { context = await loadFundingContext({ db, uid, proposalId, readDocument }); }
+    catch { return null; } // Removed or no longer visible; never expose an old projection.
     let item = saved.get(proposalId);
     if (!isConfirmedSnapshot(item) || !same(context.record.researcherId, item.researcherId)
         || !same(context.parent.ownerId, item.postingOwnerId)) {
       try { item = (await refreshEscrowDashboardSnapshot({ db, client, config, uid, proposalId })).summary; }
-      catch { unavailableItems++; continue; }
+      catch { unavailableItems++; return null; }
     }
     // Saved settlement is display-only. Detail pages and every funding action
     // still verify current registry content and balances before proceeding.
-    items.push({ ...item, title: context.record.title || "Proposal", postingTitle: context.parent.title || "Posting" });
-  }
+    return { ...item, title: context.record.title || "Proposal", postingTitle: context.parent.title || "Posting" };
+  }, 4);
+  const items = rows.filter(Boolean);
   return { items, truncated: [...sets, ...records].some(set => set.size === 50) || candidates.size > 50, unavailableItems,
     blockNumber: items.length ? Math.min(...items.map(item => item.blockNumber)) : null };
 }

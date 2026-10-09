@@ -133,3 +133,36 @@ it("blocks new independent deposits on a page integrity mismatch without blockin
   fireEvent.click(screen.getByRole("button", { name: "Claim my refund" }));
   expect(p.onAction).toHaveBeenCalledWith("claimRefund", {});
 });
+
+
+it.each([false, true])("uses the verified sync response without another independent read (recovery=%s)", async recovery => {
+  const transactionHash = `0x${"3".repeat(64)}`;
+  const next = { ...props().snapshot, summary: { ...summary, proposalId: "fast-confirm", state: "Released",
+    totalDeposited: "2000000", totalReleased: "2000000", outstandingBalance: "0" }, actions: {} };
+  mocks.sync.mockResolvedValue(next);
+  mocks.write.mockResolvedValue({ transactionHash });
+  const changed = vi.fn();
+  render(<IndependentFundingPanel proposal={{ id: "fast-confirm" }} onStateChange={changed}
+    initialTransaction={recovery ? { transactionHash, action: "deposit" } : null} />);
+  fireEvent.click(await screen.findByRole("button", { name: recovery ? "Retry confirmation" : "Fund independent listing" }));
+  await screen.findByText("Fully paid");
+  expect(mocks.read).toHaveBeenCalledTimes(1);
+  expect(changed).toHaveBeenLastCalledWith(next);
+});
+
+it("does not apply a delayed independent sync result to another wallet", async () => {
+  let finish;
+  mocks.write.mockResolvedValue({ transactionHash: `0x${"3".repeat(64)}` });
+  mocks.sync.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const changed = vi.fn(), view = render(<IndependentFundingPanel proposal={{ id: "sync-switch" }} onStateChange={changed} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Fund independent listing" }));
+  await act(async () => {});
+  mocks.user = { id: `0x${"c".repeat(40)}` }; mocks.account = { ...mocks.account, address: mocks.user.id };
+  const current = { ...props().snapshot, summary: { ...summary, totalDeposited: "3000000", fundingTarget: "4000000" } };
+  mocks.read.mockResolvedValue(current);
+  view.rerender(<IndependentFundingPanel proposal={{ id: "sync-switch" }} onStateChange={changed} />);
+  await screen.findByText("3 USDT / 4 USDT");
+  await act(async () => finish({ ...props().snapshot, summary: { ...summary, state: "Released" } }));
+  expect(changed).toHaveBeenLastCalledWith(current);
+  expect(screen.queryByText("Fully paid")).toBeNull();
+});

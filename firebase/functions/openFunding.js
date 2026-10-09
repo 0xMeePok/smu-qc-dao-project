@@ -1,3 +1,5 @@
+import { createRequestReadClient } from "./requestReadClient.js";
+import { boundedMap } from "./boundedMap.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { decodeEventLog, encodeFunctionData, erc20Abi } from "viem";
@@ -54,6 +56,7 @@ function positiveUnits(value) {
 
 /** Immutable custody links and every balance are read at the same confirmed block. */
 export async function readOpenFunding({ db, client, config, uid, problemId, proposalId, blockNumber, includeSelections = true }) {
+  client = createRequestReadClient(client, { chainId: config.chainId });
   const context = await contextFor({ db, uid, problemId }), { record, profile } = context;
   if (!supportsOpenFunding(config)) return { supported: false, exists: false, problemId, title: record.title || "Open funding",
     owner: record.ownerId, selections: [], message: "Open funding grants require the updated smart contracts and deployment manifest." };
@@ -68,11 +71,12 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
       || !/^0x[0-9a-f]{64}$/i.test(record.audit?.transactionHash ?? "")) fail("failed-precondition", "Publish the opportunity and confirm its chain transaction before creating the grant pool.");
   const expected = expectedPosting(record, config), factoryAddress = requireAddress(config.escrow.factoryAddress, "Funding factory");
   const read = (address, abi, functionName, args = []) => client.readContract({ address, abi, functionName, args, blockNumber });
-  const [receipt, posting, factory, registry, poolAddress, block] = await Promise.all([
+  const [receipt, posting, factory, registry, poolAddress, block, paused] = await Promise.all([
     client.getTransactionReceipt({ hash: record.audit.transactionHash }),
     read(config.address, config.abi, "getOpportunity", [expected.entityId]),
     read(config.address, config.abi, "fundingFactory"), read(factoryAddress, config.escrow.factoryAbi, "auditRegistry"),
     read(factoryAddress, config.escrow.factoryAbi, "openFundingPoolForPosting", [expected.entityId]), client.getBlock({ blockNumber }),
+    read(config.address, config.abi, "postingFundingPaused", [expected.entityId]),
   ]);
   if (receipt.status !== "success" || !same(receipt.transactionHash, record.audit.transactionHash)
       || !same(receipt.to, config.address) || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > blockNumber) {
@@ -84,7 +88,6 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
       || !same(at(posting, "contentHash", 2), expected.contentHash) || !same(at(posting, "expiresAt", 5), expected.args[3])
       || !same(factory, factoryAddress) || !same(registry, config.address)) fail("failed-precondition", "The grant opportunity or custody factory differs from its verified registry record.");
   const closed = at(posting, "withdrawn", 6) || BigInt(at(posting, "expiresAt", 5)) <= block.timestamp;
-  const paused = await read(config.address, config.abi, "postingFundingPaused", [expected.entityId]);
   const live = !closed && !paused && !hidden(record) && ["submitted", "open"].includes(record.status);
   const isOwner = same(uid, record.ownerId);
   const base = { supported: true, exists: !same(poolAddress, ZERO_ADDRESS), problemId, title: record.title || "Open funding", owner: record.ownerId,
@@ -107,8 +110,10 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
     canWithdraw: isOwner && Boolean(closed) && BigInt(fields.availableBalance) > 0n });
   if (!includeSelections) return base;
   const count = BigInt(fields.proposalCount), cap = count > BigInt(MAX_PROPOSALS) ? MAX_PROPOSALS : Number(count);
-  const ids = await Promise.all(Array.from({ length: cap }, (_, i) => read(base.poolAddress, config.escrow.openFundingPoolAbi, "proposalAt", [BigInt(i)])));
-  const proposals = await db.collection("proposals").where("problemId", "==", problemId).limit(MAX_PROPOSALS + 1).get();
+  const [ids, proposals] = await Promise.all([
+    boundedMap(Array.from({ length: cap }, (_, i) => i), i => read(base.poolAddress, config.escrow.openFundingPoolAbi, "proposalAt", [BigInt(i)])),
+    db.collection("proposals").where("problemId", "==", problemId).limit(MAX_PROPOSALS + 1).get(),
+  ]);
   const docs = proposals.docs.slice(0, MAX_PROPOSALS);
   if (proposalId && !docs.some(doc => doc.id === proposalId)) {
     validId(proposalId);
@@ -127,10 +132,10 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
       if (!ids.some(id => same(id, expected.entityId))) ids.push(expected.entityId);
     } catch { /* Incomplete drafts have no escrow. */ }
   }
-  const offers = await Promise.all(ids.map(id => read(base.poolAddress, config.escrow.openFundingPoolAbi, "getOffer", [id])));
-  for (let index = 0; index < ids.length; index++) {
+  const offers = await boundedMap(ids, id => read(base.poolAddress, config.escrow.openFundingPoolAbi, "getOffer", [id]));
+  const selections = await boundedMap(ids, async (_, index) => {
     const candidate = records.get(ids[index].toLowerCase());
-    if (!candidate) continue;
+    if (!candidate) return null;
     const { row: proposal, expected } = candidate;
     const offer = offers[index], state = Number(at(offer, "state", 2)), deadline = BigInt(at(offer, "acceptanceDeadline", 1));
     if (!OFFER_STATES[state]) fail("failed-precondition", "The grant selection state cannot be verified.");
@@ -147,15 +152,16 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
       ]);
       if (!same(linkedPool, base.poolAddress) || !same(expected.fundingTerms.token, base.tokenAddress)
           || !same(at(actual, "researcher", 0), expected.expectedResearcher) || !same(at(actual, "opportunityId", 1), expected.opportunityId)
-          || !same(at(actual, "proposalHash", 4), expected.proposalHash) || !same(at(actual, "solutionHash", 5), expected.solutionHash)) continue;
+          || !same(at(actual, "proposalHash", 4), expected.proposalHash) || !same(at(actual, "solutionHash", 5), expected.solutionHash)) return null;
       deposited = BigInt(paid); active = fundingActive; invalidated = fundingInvalidated;
-    } catch { continue; }
-    base.selections.push({ proposalId: proposal.id, entityId: ids[index], title: proposal.title || "Proposal", researcherId: proposal.researcherId,
+    } catch { return null; }
+    return { proposalId: proposal.id, entityId: ids[index], title: proposal.title || "Proposal", researcherId: proposal.researcherId,
       escrowAddress, amountBaseUnits: state === 0 ? expected.fundingTerms.target.toString() : String(at(offer, "amount", 0)), acceptanceDeadline: deadline.toString(),
       status: expired ? "expired" : OFFER_STATES[state], canAccept: state === 1 && !expired && active && !hidden(proposal) && !hidden(record) && same(uid, proposal.researcherId),
       canVoid: state === 1 && (expired || invalidated), canSelect: isOwner && live && active && state === 0 && deposited === 0n
-        && expected.fundingTerms.target <= BigInt(base.available) && ["submitted", "under_review"].includes(proposal.status) && !hidden(proposal) });
-  }
+        && expected.fundingTerms.target <= BigInt(base.available) && ["submitted", "under_review"].includes(proposal.status) && !hidden(proposal) };
+  });
+  base.selections = selections.filter(Boolean);
   base.truncated = count > BigInt(MAX_PROPOSALS) || proposals.size > MAX_PROPOSALS;
   return base;
 }
@@ -174,21 +180,23 @@ export async function saveOpenFundingSnapshot({ db, config, summary, now = Times
   const metadata = { registryAddress: config.address.toLowerCase(), confirmedAt: now.toDate().toISOString() };
   await saveFundingSnapshot({ db, collection: OPEN_FUNDING_SUMMARIES,
     id: `${deploymentKey(config)}_${summary.problemId}`, snapshot: { ...totals, ...metadata } });
-  for (const selection of selections || []) {
+  await boundedMap(selections || [], async selection => {
     const { canAccept, canVoid, canSelect, ...saved } = selection;
     await saveFundingSnapshot({ db, collection: OPEN_FUNDING_SELECTIONS,
       id: `${deploymentKey(config)}_${selection.proposalId}`, snapshot: {
         ...saved, ...metadata, problemId: summary.problemId, owner: summary.owner, poolAddress: summary.poolAddress,
         chainId: config.chainId, blockNumber: summary.blockNumber,
       } });
-  }
+  });
 }
 
 /** Returns a reviewable wallet request. The backend never signs or moves grant funds. */
 export async function prepareOpenFundingAction(options) {
+  options = { ...options, client: createRequestReadClient(options.client, { chainId: options.config.chainId }) };
   const { db, client, config, uid, problemId, proposalId, action } = options;
-  await assertOpenFundingChain(client, config);
-  const summary = await readOpenFunding(options);
+  if (!supportsOpenFunding(config)) fail("failed-precondition", "Open funding grants require the updated smart contracts and deployment manifest. This deployment is read-only for grants.");
+  // Pool checks are always fresh; action-specific proposal checks follow below.
+  const summary = await readOpenFunding({ ...options, includeSelections: false });
   let address = summary.poolAddress, contractType = "pool", functionName, args, amountBaseUnits;
   let token = { tokenAddress: summary.tokenAddress, tokenSymbol: summary.tokenSymbol, tokenDecimals: summary.tokenDecimals };
   if (action === "create") {
@@ -207,26 +215,33 @@ export async function prepareOpenFundingAction(options) {
     if (context.record.problemId !== problemId) fail("failed-precondition", "This proposal belongs to another opportunity.");
     const expected = prepareStoredProposal(context.record, { registryConfig: config });
     const blockNumber = BigInt(summary.blockNumber), readContract = request => client.readContract({ ...request, blockNumber });
-    const escrow = await verifyProposalEscrow({ expected, config, readContract });
-    const proposal = await readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] });
+    const [escrow, proposal, offer] = await Promise.all([
+      verifyProposalEscrow({ expected, config, readContract }),
+      readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
+      readContract({ address, abi: config.escrow.openFundingPoolAbi, functionName: "getOffer", args: [expected.entityId] }),
+    ]);
     if (!same(at(proposal, "researcher", 0), expected.expectedResearcher) || !same(at(proposal, "opportunityId", 1), expected.opportunityId)
         || !same(at(proposal, "proposalHash", 4), expected.proposalHash) || !same(at(proposal, "solutionHash", 5), expected.solutionHash)) fail("failed-precondition", "The proposal differs from its verified registry content.");
-    const linkedPool = await readContract({ address: escrow.address, abi: config.escrow.escrowAbi, functionName: "openFundingPool" });
+    const [linkedPool, actionState] = await Promise.all([
+      readContract({ address: escrow.address, abi: config.escrow.escrowAbi, functionName: "openFundingPool" }),
+      action === "select"
+        ? readContract({ address: escrow.address, abi: config.escrow.escrowAbi, functionName: "totalDeposited" })
+        : readContract({ address: config.address, abi: config.abi, functionName: action === "accept" ? "isFundingActive" : "isFundingInvalidated", args: [expected.entityId, escrow.address] }),
+    ]);
     if (!same(linkedPool, summary.poolAddress) || !same(expected.fundingTerms.token, summary.tokenAddress)) fail("failed-precondition", "The proposal's escrow is not linked to this grant pool and token.");
-    const offer = await readContract({ address, abi: config.escrow.openFundingPoolAbi, functionName: "getOffer", args: [expected.entityId] });
     const state = Number(at(offer, "state", 2)), deadline = BigInt(at(offer, "acceptanceDeadline", 1));
     if (action === "select") {
       if (!summary.canSelect || hidden(context.record) || !["submitted", "under_review"].includes(context.record.status) || state !== 0) fail("permission-denied", "Only the owner can select an eligible proposal from available grant funding.");
-      const deposited = await readContract({ address: escrow.address, abi: config.escrow.escrowAbi, functionName: "totalDeposited" });
+      const deposited = actionState;
       if (deposited !== 0n || expected.fundingTerms.target > BigInt(summary.available)) fail("failed-precondition", "The requested grant must fit the available pool balance and its proposal escrow must be empty.");
       functionName = "selectProposal";
     } else if (action === "accept") {
       if (!same(uid, context.record.researcherId)) fail("permission-denied", "Only the selected proposal owner can accept the grant.");
-      const active = await readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, escrow.address] });
+      const active = actionState;
       if (state !== 1 || deadline <= BigInt(summary.timestamp) || !active || summary.withdrawn || summary.paused || hidden(context.record) || hidden(context.parent)) fail("failed-precondition", "The seven-day grant acceptance window has closed or this selection is inactive.");
       functionName = "acceptProposal";
     } else {
-      const invalidated = await readContract({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, escrow.address] });
+      const invalidated = actionState;
       if (state !== 1 || (deadline > BigInt(summary.timestamp) && !invalidated)) fail("failed-precondition", "The selected proposal can be voided after its acceptance deadline or the opportunity is invalidated.");
       functionName = "expireProposal";
     }
@@ -260,8 +275,9 @@ export async function prepareOpenFundingAction(options) {
 }
 
 export async function syncOpenFunding(options) {
+  options = { ...options, client: createRequestReadClient(options.client, { chainId: options.config.chainId }) };
   const { db, client, config, uid, problemId, transactionHash, now = Timestamp.now() } = options;
-  await assertOpenFundingChain(client, config);
+  if (!supportsOpenFunding(config)) fail("failed-precondition", "Open funding grants require the updated smart contracts and deployment manifest. This deployment is read-only for grants.");
   if (transactionHash !== undefined && !/^0x[0-9a-f]{64}$/i.test(transactionHash)) fail("invalid-argument", "A valid transaction hash is required.");
   const summary = await readOpenFunding(options);
   if (transactionHash) {

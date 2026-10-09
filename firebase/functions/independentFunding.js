@@ -1,3 +1,4 @@
+import { boundedMap } from "./boundedMap.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { decodeEventLog, decodeFunctionData, encodeAbiParameters, keccak256, parseUnits, stringToHex } from "viem";
@@ -400,24 +401,23 @@ export async function readIndependentFundingPortfolio({ db, config, uid }) {
   if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
   if (!independentFundingConfigured(config)) return { items: [], truncated: false, snapshotOnly: true };
   const rows = await db.collection(INDEPENDENT_FUNDING_POSITIONS).where("walletId", "==", uid).limit(51).get();
-  const items = [];
-  for (const row of rows.docs.slice(0, 50)) {
+  const items = await boundedMap(rows.docs.slice(0, 50), async row => {
     const position = row.data();
     if (position.chainId !== config.chainId || !same(position.registryAddress, config.address)
-        || !same(position.factoryAddress, config.independentFunding.factoryAddress)) continue;
+        || !same(position.factoryAddress, config.independentFunding.factoryAddress)) return null;
     const [summary, proposal] = await Promise.all([
       db.collection(INDEPENDENT_FUNDING_SUMMARIES).doc(independentFundingKey(config, position.proposalId)).get(),
       db.collection("proposals").doc(position.proposalId).get(),
     ]);
-    if (!summary.exists || !proposal.exists) continue;
+    if (!summary.exists || !proposal.exists) return null;
     const hidden = blocked(proposal.data());
     const stale = position.blockNumber < summary.data().blockNumber;
-    items.push({ ...summary.data(), title: hidden ? "Removed independent listing" : proposal.data().title,
+    return { ...summary.data(), title: hidden ? "Removed independent listing" : proposal.data().title,
       hidden, stale, detailRefreshRequired: stale, wallet: { deposited: position.deposited, refunded: position.refunded,
         claimable: stale ? null : position.claimable, lastKnownClaimable: position.claimable,
-        blockNumber: position.blockNumber, stale } });
-  }
-  return { items, truncated: rows.size > 50, snapshotOnly: true };
+        blockNumber: position.blockNumber, stale } };
+  });
+  return { items: items.filter(Boolean), truncated: rows.size > 50, snapshotOnly: true };
 }
 
 export async function assertIndependentPublicationUnlocked({ db, client, config, proposalId, record }) {

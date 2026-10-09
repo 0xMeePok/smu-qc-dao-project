@@ -324,6 +324,20 @@ describe("escrow funding service", () => {
     assert(!final.args.includes(owner)); // No caller-controlled recipient override.
   });
 
+  it("reuses identical pinned escrow fields within verification but reads fresh state on the next request", async () => {
+    const f = fixture();
+    const first = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    assert.equal(first.summary.totalReleased, "0");
+    assert.equal(f.reads.filter(read => read.functionName === "expiresAt").length, 1);
+    assert.deepEqual(f.reads.filter(read => read.functionName === "milestoneAt").map(read => read.args[0]), [0n, 1n]);
+    assert(f.reads.every(read => read.blockNumber === 100n));
+    f.reads.length = 0;
+    f.state.totalReleased = 100n;
+    const second = await readVerifiedFunding({ ...f, blockNumber: 101n });
+    assert.equal(second.summary.totalReleased, "100");
+    assert(f.reads.length > 0 && f.reads.every(read => read.blockNumber === 101n));
+  });
+
   it("requires full funding before reserving a main proposal and blocks siblings using the confirmed chain pending selection", async () => {
     const f = fixture(); f.config = currentMainConfig; f.state.totalDeposited = 10n;
     await assert.rejects(startEscrowSettlement({ ...f, uid: owner, proposalId: f.record.id }), /fully funded/);

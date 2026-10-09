@@ -150,7 +150,12 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
   const { address: connectedAddress, isConnected } = useAccount();
   const [posting, setPosting] = useState(null);
   const [matchingRefresh, setMatchingRefresh] = useState(0);
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setActiveTab] = useState(initialTab);
+  const [openedTabs, setOpenedTabs] = useState(() => new Set([initialTab]));
+  const setTab = (next) => {
+    setOpenedTabs(previous => previous.has(next) ? previous : new Set([...previous, next]));
+    setActiveTab(next);
+  };
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
@@ -180,6 +185,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
     setReasonError("");
     setAnchoredWithdrawal(null);
     setTab(initialTab);
+    setOpenedTabs(new Set([initialTab]));
 
     findPosting(postingId)
       .then((found) => {
@@ -433,9 +439,9 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
           {auditVerification?.kind === "mismatch" && <p className="error-banner" role="alert">This posting does not match its on-chain record. New funding and approval actions are blocked. Open Record to review the differences.</p>}
           {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
 
-          {/* One job per tab. Every panel stays mounted and only the active one is
-              shown, so a selection made under Proposals still refreshes the match
-              state that the sidebar and Match & funding read. */}
+          {/* Verification and financial state stay live on entry. Optional
+              lists/history mount on first use, then remain mounted so selections
+              continue to refresh the match state across tabs. */}
           <div className="posting-tabs">
             <div className="desk-tabs" role="tablist" aria-label="Posting sections">
               {tabs.map(([value, label]) => (
@@ -533,14 +539,14 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
           </div>
 
           <div className={panel("proposals")} role="tabpanel" id="posting-panel-proposals" aria-labelledby="posting-tab-proposals">
-            <PostingProposals
+            {openedTabs.has("proposals") && <PostingProposals
               posting={posting}
               viewerId={user?.id}
               isPoster={ownsPosting}
               proposalCount={proposalCount}
               onNavigate={onNavigate}
-            />
-            {showCollaboration && (
+            />}
+            {showCollaboration && openedTabs.has("proposals") && (
               <ProposalComparison
                 integrityBlocked={auditVerification?.kind === "mismatch"}
                 problemId={posting.id}
@@ -577,7 +583,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
               onVerify={verifyAudit}
               onRetry={!auditBusy && ownsPosting ? retryAudit : undefined}
             />
-            <OpportunityRevisionTrail postingId={posting.id} uid={user?.id} isOwner={ownsPosting} />
+            {openedTabs.has("record") && <OpportunityRevisionTrail postingId={posting.id} uid={user?.id} isOwner={ownsPosting} />}
             {activeTab === "record" && <ConsolidatedAuditTrail scope="problem" entityId={posting.id} onNavigate={onNavigate} />}
           </div>
         </article>

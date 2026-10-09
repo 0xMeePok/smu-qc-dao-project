@@ -1,14 +1,18 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderBare, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), user: { id: "researcher" } }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/lib/proposalQueues.js", async importOriginal => ({ ...await importOriginal(), listMyProposalQueue: (...args) => mocks.fetch(...args) }));
 import { ProposalTracker } from "../../src/components/ProposalTracker.jsx";
+let client;
+const wrapper = ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+const render = ui => renderBare(ui, { wrapper });
 const acceptance = "2099-10-09T00:00:00.000Z";
 const row = (id, grant) => ({ id, title: `Grant ${id}`, problemId: "grant-call", status: "submitted", workflowStatus: "expired",
   createdAt: "2026-10-01T00:00:00.000Z", recommendations: [], posting: { title: "Grant call", status: "expired", expiresAt: "2020-01-01T00:00:00.000Z" }, grant });
-beforeEach(() => { mocks.user = { id: "researcher" }; mocks.fetch.mockReset().mockResolvedValue({ items: [] }); });
-afterEach(cleanup);
+beforeEach(() => { client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); mocks.user = { id: "researcher" }; mocks.fetch.mockReset().mockResolvedValue({ items: [] }); });
+afterEach(() => { cleanup(); client.clear(); });
 
 it("uses the verified grant deadline and acceptance action after the posting has closed", async () => {
   const go = vi.fn(); mocks.fetch.mockResolvedValue({ items: [row("pending", { status: "pending", canAccept: true,
@@ -154,4 +158,22 @@ it("retains unavailable escrow verification warnings when no proposals could be 
   expect(await screen.findByText(/1 escrow records could not be verified/)).toBeTruthy();
   expect(screen.getByText("Verified proposal records are temporarily unavailable. Refresh to retry.")).toBeTruthy();
   expect(screen.queryByText(/No proposals yet/)).toBeNull();
+});
+
+
+it("reuses the overview's verified queue and keeps it visible through a manual refresh", async () => {
+  client.setQueryData(["developerDashboard", "researcher"], { items: [row("cached", { status: "accepted" })] });
+  const view = render(<ProposalTracker onNavigate={() => {}} />);
+  expect(screen.getByText("Grant cached")).toBeTruthy();
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  let finish;
+  mocks.fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh proposals" }));
+  expect(screen.getByText("Grant cached")).toBeTruthy();
+  await act(async () => finish({ items: [row("updated", { status: "accepted" })] }));
+  await screen.findByText("Grant updated");
+  view.unmount();
+  render(<ProposalTracker onNavigate={() => {}} />);
+  expect(screen.getByText("Grant updated")).toBeTruthy();
+  expect(mocks.fetch).toHaveBeenCalledTimes(1);
 });

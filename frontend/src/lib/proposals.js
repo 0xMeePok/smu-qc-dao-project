@@ -355,9 +355,10 @@ export async function listIndependentListings({ cursor = null } = {}) {
   return (await httpsCallable(functions, "listIndependentListings")(cursor ? { cursor } : {})).data;
 }
 
-export async function listProposals(field, uid) {
+export async function listProposals(field, uid, { draftsOnly = false } = {}) {
   requireFirebase();
-  const snapshot = await getDocs(query(collection(db, "proposals"), where(field, "==", uid.toLowerCase())));
+  const snapshot = await getDocs(query(collection(db, "proposals"), where(field, "==", uid.toLowerCase()),
+    ...(draftsOnly ? [where("status", "==", PROPOSAL_STATUS_DRAFT)] : [])));
   return withMatchingState(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
 }
 

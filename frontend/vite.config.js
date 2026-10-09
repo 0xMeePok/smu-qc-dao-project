@@ -20,12 +20,18 @@ export default defineConfig({
     // Required because outDir sits outside Vite's project root; without it Vite
     // refuses to clear the directory and stale assets accumulate between builds.
     emptyOutDir: true,
-    // This is a single-entry app. Ship the small deferred viem helpers with the
-    // entry so tabs kept open across a Hosting deploy never need an old ccip or
-    // signing chunk after its hashed URL has been removed. viem loads ccip even
-    // when handling ordinary contract reverts, before checking its CCIP setting.
+    // Pages load on navigation. Keep the vendor graph together so viem's CCIP
+    // and signing helpers are already loaded before any wallet operation: an
+    // open tab must not fetch a deleted helper chunk after a Hosting release.
+    // LazyPage handles a stale *page* URL without automatically reloading an
+    // open wallet session or discarding a draft.
     rollupOptions: {
-      output: { inlineDynamicImports: true },
+      output: {
+        manualChunks(id) {
+          if (id.includes("/node_modules/")) return "vendor";
+          if (/\/src\/lib\/(escrow|independentEscrow)\.js$/.test(id)) return "wallet-actions";
+        },
+      },
     },
   },
 });

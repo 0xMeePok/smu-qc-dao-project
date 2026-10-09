@@ -380,6 +380,14 @@
       "collectionGroup": "proposals",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "researcherId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "proposals",
+      "queryScope": "COLLECTION",
+      "fields": [
         {
           "fieldPath": "proposalKind",
           "order": "ASCENDING"
