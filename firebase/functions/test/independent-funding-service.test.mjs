@@ -392,13 +392,13 @@ it("independent funding signals change for balances and votes but not repeated v
   const f = fixture();
   const path = `proposals/${f.record.id}/activity/latest`;
   await syncIndependentFunding(f.options(funder));
-  assert.deepEqual(f.db.records.get(path), { funding: 1 });
+  assert.deepEqual(f.db.records.get(path), { funding: 1, fundingSnapshot: null });
   await syncIndependentFunding(f.options(researcher));
-  assert.deepEqual(f.db.records.get(path), { funding: 1 }, "Another caller reading the same state must not loop listeners");
+  assert.deepEqual(f.db.records.get(path), { funding: 1, fundingSnapshot: null }, "Another caller reading the same state must not loop listeners");
   f.state.totalDeposited = 2_000_000n; f.state.outstandingBalance = 2_000_000n;
   await syncIndependentFunding(f.options(funder));
-  assert.deepEqual(f.db.records.get(path), { funding: 2 });
+  assert.deepEqual(f.db.records.get(path), { funding: 2, fundingSnapshot: null });
   f.state.yesWeight = 1_000_000n;
   await syncIndependentFunding(f.options(funder));
-  assert.deepEqual(f.db.records.get(path), { funding: 3 });
+  assert.deepEqual(f.db.records.get(path), { funding: 3, fundingSnapshot: null });
 });

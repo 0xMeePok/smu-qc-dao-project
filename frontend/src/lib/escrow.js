@@ -96,9 +96,27 @@ function assertProposalContent(registered, expected) {
   }
 }
 
-// Upfront approval needs no token allowance, depositor history, refunds or voting data.
-// Keep full canonical verification and fresh approval guards before wallet simulation.
-async function readUpfrontApproval({ proposal, account, adapters, config }) {
+const VERIFIED_USER_ACTIONS = new Set(["deposit", "approveSelection", "submitMilestone", "approveMilestone", "voteMilestone"]);
+
+function reviewEligibility({ snapshot, account, active, timestamp, currentMilestone, contribution = 0n, hasVoted = false }) {
+  const problemOwner = Boolean(account && same(account, snapshot.problemOwner));
+  const proposalOwner = Boolean(account && same(account, snapshot.proposalOwner));
+  const reviewOpen = active && timestamp < BigInt(snapshot.approvalDeadline);
+  const upfront = Number(snapshot.state) === ESCROW_STATE.Locked && Number(snapshot.currentTranche) === 0;
+  const final = Number(snapshot.state) === ESCROW_STATE.Active && Number(snapshot.currentTranche) === 1;
+  const evidenceReady = Boolean(currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH));
+  const needsOwnerApproval = (problemOwner && !snapshot.ownerApproved) || (proposalOwner && !snapshot.solutionApproved);
+  return {
+    approveSelection: upfront && reviewOpen && needsOwnerApproval,
+    submitMilestone: final && reviewOpen && proposalOwner,
+    approveMilestone: final && reviewOpen && evidenceReady && needsOwnerApproval,
+    voteMilestone: final && reviewOpen && evidenceReady && snapshot.funderVoting && contribution > 0n && !hasVoted,
+  };
+}
+
+// Verify the complete canonical record, then fetch only the current action's guards.
+// Dashboard accounting, refunds and unrelated wallet reads must not delay a signature.
+async function readUserAction({ proposal, account, action, adapters, config }) {
   deployment(config);
   const expected = isIndependentProposal(proposal)
     ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
@@ -109,18 +127,44 @@ async function readUpfrontApproval({ proposal, account, adapters, config }) {
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
   ]);
   assertProposalContent(registered, expected);
-  const names = ["state", "currentTranche", "selectionId", "approvalDeadline", "ownerApproved", "solutionApproved", "problemOwner", "proposalOwner"];
-  const [values, active] = await Promise.all([
-    Promise.all(names.map(functionName => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName }))),
+  const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
+  const names = action === "deposit"
+    ? ["state", "fundingTarget", "totalDeposited", "expiresAt", "tokenDecimals"]
+    : ["state", "currentTranche", "selectionId", "approvalDeadline", "ownerApproved", "solutionApproved", "problemOwner", "proposalOwner", "funderVoting"];
+  const tokenRead = (functionName, args = []) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
+  const [values, active, depositValues, contributionSummary] = await Promise.all([
+    Promise.all(names.map(name => read(name))),
     readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
+    action === "deposit" ? Promise.all([
+      tokenRead("decimals"),
+      readContract({ address: canonical.factoryAddress, abi: config.escrow.factoryAbi, functionName: "allowedTokens", args: [expected.fundingTerms.token] }),
+      tokenRead("balanceOf", [account]), tokenRead("allowance", [account, canonical.address]),
+    ]) : null,
+    action === "voteMilestone" ? read("depositorSummary", [account]) : null,
   ]);
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
-  const needsOwnerApproval = (same(account, snapshot.problemOwner) && !snapshot.ownerApproved)
-    || (same(account, snapshot.proposalOwner) && !snapshot.solutionApproved);
-  return { ...canonical, selectionId: snapshot.selectionId, can: {
-    approveSelection: Number(snapshot.state) === ESCROW_STATE.Locked && Number(snapshot.currentTranche) === 0
-      && active && block.timestamp < BigInt(snapshot.approvalDeadline) && needsOwnerApproval,
-  } };
+  if (action === "deposit") {
+    const [tokenDecimals, tokenListed, balance, allowance] = depositValues;
+    const decimals = Number(snapshot.tokenDecimals);
+    const remaining = BigInt(snapshot.fundingTarget) - BigInt(snapshot.totalDeposited);
+    return { ...canonical, decimals, remaining, token: expected.fundingTerms.token,
+      symbol: config.escrow.tokens.find(token => same(token.address, expected.fundingTerms.token))?.symbol ?? proposal.currency,
+      wallet: { balance: BigInt(balance), allowance: BigInt(allowance) },
+      can: { deposit: Boolean(account && proposal.opportunityType !== "open-funding" && Number(snapshot.state) === ESCROW_STATE.Open
+        && active && tokenListed && Number(tokenDecimals) === decimals && block.timestamp < BigInt(snapshot.expiresAt)
+        && remaining > 0n && BigInt(balance) > 0n) },
+    };
+  }
+  // milestoneAt is already cached by canonical verification; no additional RPC.
+  const currentTranche = Number(snapshot.currentTranche);
+  const currentMilestone = action !== "approveSelection" && currentTranche >= 0 && currentTranche < expected.fundingTerms.trancheBps.length
+    ? milestone(await read("milestoneAt", [BigInt(currentTranche)])) : null;
+  const hasVoted = action === "voteMilestone" && currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH)
+    ? await read("hasVoted", [BigInt(currentTranche), currentMilestone.evidenceHash, account]) : false;
+  return { ...canonical, selectionId: snapshot.selectionId, currentTranche, currentMilestone,
+    can: reviewEligibility({ snapshot, account, active, timestamp: block.timestamp, currentMilestone,
+      contribution: contributionSummary ? depositor(contributionSummary).deposited : 0n, hasVoted }),
+  };
 }
 
 /** A single-block snapshot, verified through the registry AND factory mappings.
@@ -131,6 +175,11 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
   if (usingConfiguredDeployment) config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
   deployment(config);
   const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
+  return readEscrowSnapshot({ proposal, account, adapters, config, isHistorical });
+}
+
+async function readEscrowSnapshot({ proposal, account, adapters, config, isHistorical = false }) {
+  deployment(config);
   const expected = isIndependentProposal(proposal)
     ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
     : prepareStoredProposal(proposal, { registryConfig: config });
@@ -196,17 +245,14 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
   const final = snapshot.state === ESCROW_STATE.Active && snapshot.currentTranche === 1;
   const reviewOpen = active && block.timestamp < snapshot.approvalDeadline;
   const evidenceReady = Boolean(currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH));
-  const needsOwnerApproval = (roles.problemOwner && !snapshot.ownerApproved) || (roles.proposalOwner && !snapshot.solutionApproved);
   const bothApproved = snapshot.ownerApproved && snapshot.solutionApproved;
   const majorityApproved = !snapshot.funderVoting || snapshot.yesWeight > snapshot.totalDeposited / 2n;
   const can = {
     deposit: Boolean(walletAddress && open && active && tokenListed && tokenPrecisionValid && block.timestamp < snapshot.expiresAt && remaining > 0n && wallet.balance > 0n),
     lockSelection: roles.platform && open && active && block.timestamp < snapshot.expiresAt && remaining === 0n,
-    approveSelection: upfront && reviewOpen && needsOwnerApproval,
+    ...reviewEligibility({ snapshot, account: walletAddress, active, timestamp: block.timestamp, currentMilestone,
+      contribution: wallet.contribution, hasVoted: wallet.hasVoted }),
     rejectSelection: supportsSelectionRejection && proposal.opportunityType !== "open-funding" && upfront && reviewOpen && (roles.problemOwner || roles.proposalOwner),
-    submitMilestone: final && reviewOpen && roles.proposalOwner,
-    approveMilestone: final && reviewOpen && evidenceReady && needsOwnerApproval,
-    voteMilestone: final && reviewOpen && evidenceReady && snapshot.funderVoting && roles.funder && !wallet.hasVoted,
     release: upfront && reviewOpen && roles.platform && bothApproved,
     releaseMilestone: final && reviewOpen && roles.platform && bothApproved && evidenceReady && majorityApproved,
     claimRefund: Boolean(walletAddress && wallet.depositor?.claimable > 0n),
@@ -311,12 +357,16 @@ export async function claimRemovedProposalFunds({ proposalId, account }) {
 export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve, reason,
   onProgress, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
   onProgress?.({ status: "preparing", action });
-  if (config === AUDIT_REGISTRY_CONFIG) {
+  const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
+  if (usingConfiguredDeployment) {
     config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
     if (!["claimRefund", "expire", "refundInvalidated"].includes(action)) assertActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
   }
+  const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
   const walletAddress = requireAddress(account, "Connected wallet");
-  const snapshot = await (action === "approveSelection" ? readUpfrontApproval : readEscrow)({ proposal, account: walletAddress, adapters, config });
+  const snapshot = await (VERIFIED_USER_ACTIONS.has(action) ? readUserAction : readEscrowSnapshot)({
+    proposal, account: walletAddress, action, adapters, config, isHistorical,
+  });
   if (!Object.hasOwn(snapshot.can, action) || !snapshot.can[action]) throw new Error("This escrow action is not available to the connected wallet in the current state. Refresh and try again.");
   const send = async (functionName, args, { address = snapshot.address, abi = config.escrow.escrowAbi, label = functionName } = {}) => {
     let transactionHash;

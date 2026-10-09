@@ -27,3 +27,14 @@ it("supports combined channels and safely falls back when listener setup fails",
   mocks.onSnapshot.mockImplementation(() => { throw new Error("SDK unavailable"); });
   expect(() => subscribeToActivity({ problemId: "offline" }, "all", refresh)()).not.toThrow();
 });
+
+it("passes the changed funding snapshot and treats old deployments as unversioned", () => {
+  let receive; mocks.onSnapshot.mockImplementation((_ref, callback) => { receive = callback; return vi.fn(); });
+  const refresh = vi.fn(); const stop = subscribeToActivity({ proposalId: "versioned" }, "funding", refresh);
+  receive({ exists: () => true, data: () => ({ funding: 1 }) });
+  const fundingSnapshot = { blockNumber: 100, verified: true };
+  receive({ exists: () => true, data: () => ({ funding: 2, fundingSnapshot }) });
+  expect(refresh).toHaveBeenLastCalledWith({ fundingSnapshot });
+  receive({ exists: () => true, data: () => ({ funding: 3 }) });
+  expect(refresh).toHaveBeenLastCalledWith({ fundingSnapshot: null }); stop();
+});

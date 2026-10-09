@@ -61,3 +61,28 @@ it("does no work when disabled and recovers after a failed refresh", async () =>
   view.rerender(<Page onRefresh={refresh} />); act(() => mocks.handlers[0]()); await tick(250);
   act(() => mocks.handlers[0]()); await tick(2000); expect(refresh).toHaveBeenCalledTimes(2);
 });
+
+it("distinguishes push-only bursts from timer/focus refreshes without losing the latter", async () => {
+  const refresh = vi.fn(); const view = render(<Page blocked onRefresh={refresh} />);
+  act(() => { mocks.handlers[0](); mocks.handlers[0](); });
+  view.rerender(<Page onRefresh={refresh} />); await tick(250);
+  expect(refresh).toHaveBeenLastCalledWith({ activityOnly: true, activitySnapshots: [null, null] });
+  view.rerender(<Page blocked onRefresh={refresh} />);
+  act(() => { window.dispatchEvent(new Event("focus")); mocks.handlers[0](); });
+  view.rerender(<Page onRefresh={refresh} />); await tick(2000);
+  expect(refresh).toHaveBeenLastCalledWith(expect.objectContaining({ activityOnly: false }));
+  await tick(60000);
+  expect(refresh).toHaveBeenLastCalledWith(expect.objectContaining({ activityOnly: false }));
+});
+
+it("retains uncovered events and forces a full read when a burst exceeds the metadata bound", async () => {
+  const refresh = vi.fn(); const view = render(<Page blocked onRefresh={refresh} />);
+  act(() => { mocks.handlers[0]({ fundingSnapshot: { blockNumber: 100 } }); mocks.handlers[0](); });
+  view.rerender(<Page onRefresh={refresh} />); await tick(250);
+  expect(refresh).toHaveBeenLastCalledWith({ activityOnly: true, activitySnapshots: [{ blockNumber: 100 }, null] });
+  view.rerender(<Page blocked onRefresh={refresh} />);
+  act(() => { for (let i = 0; i < 20; i++) mocks.handlers[0]({ fundingSnapshot: { blockNumber: i } }); });
+  view.rerender(<Page onRefresh={refresh} />); await tick(2000);
+  expect(refresh.mock.calls.at(-1)[0].activityOnly).toBe(false);
+  expect(refresh.mock.calls.at(-1)[0].activitySnapshots).toHaveLength(8);
+});

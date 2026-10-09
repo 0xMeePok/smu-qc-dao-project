@@ -3,6 +3,9 @@ import { describe, it } from "node:test";
 import { encodeFunctionData, keccak256, stringToHex } from "viem";
 import { confirmEscrowTransaction, ESCROW_STATE, escrowErrorMessage, hashEscrowEvidence, hashEscrowSelectionRejection, readEscrow, readPostingFundingStarted, writeEscrowAction } from "../../src/lib/escrow.js";
 import { escrowAddress, escrowClient, escrowConfig, escrowRecord, owner, researcher, txHash } from "../../../firebase/functions/test/fixtures/escrowAuditFixture.js";
+import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
+import historicalRegistries from "../../../firebase/functions/auditRegistry.history.json" with { type: "json" };
+import { proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
 import { opportunityEntityId } from "../../../firebase/functions/auditCanonical.js";
 
 const funder = `0x${"1".repeat(40)}`, platform = `0x${"2".repeat(40)}`;
@@ -158,13 +161,147 @@ describe("Canonical escrow wallet integration", () => {
     }
   });
 
+  it("uses only verified action data for deposits, evidence submission, completion approvals and votes", async t => {
+    for (const { action, account, changes, input } of [
+      { action: "deposit", account: funder, changes: { allowance: target }, input: { amount: "1" } },
+      { action: "submitMilestone", account: researcher, changes: { evidenceHash: zeroHash }, input: { evidence, evidenceHash } },
+      { action: "approveMilestone", account: owner, changes: {}, input: { evidenceHash, selectionId } },
+      { action: "approveMilestone", account: researcher, changes: {}, input: { evidenceHash, selectionId } },
+      { action: "voteMilestone", account: funder, changes: { depositor: { deposited: 10n } }, input: { evidenceHash, selectionId, approve: true } },
+    ]) {
+      const make = action === "deposit" ? fixture : finalFixture;
+      const full = make(changes);
+      assert.equal((await readEscrow({ ...full, account })).can[action], true);
+      const omitted = ["feeBps", "feePaid", "totalReleased", "totalRefunded", "refundAvailableAt", "refundsEnabled", "yesWeight", "noWeight", "outstandingBalance", "funderCount", "platformSigner", "postingFundingPaused", "isFundingInvalidated"];
+      if (action !== "deposit") omitted.push("balanceOf", "allowance", "decimals", "allowedTokens");
+      if (action !== "voteMilestone") omitted.push("depositorSummary", "hasVoted");
+      const f = make({ ...changes, read: request => {
+        if (omitted.includes(request.functionName)) throw new Error(`Unrelated read: ${request.functionName}`);
+      } });
+      await writeEscrowAction({ ...f, account, action, ...input });
+      assert.equal(f.writes.at(-1).functionName, action);
+      assert(f.reads.every(request => request.blockNumber === 100n && request.chainId === 421614));
+      assert(f.reads.length < full.reads.length);
+      t.diagnostic(`${action}: ${f.reads.length} action reads versus ${full.reads.length} dashboard reads`);
+    }
+  });
+
+  it("preserves every deposit eligibility guard without requiring depositor history", async () => {
+    for (const changes of [
+      { active: false }, { tokenListed: false }, { balance: 0n }, { timestamp: 2_000_000_000n },
+      { state: { state: ESCROW_STATE.Locked } }, { state: { totalDeposited: target } },
+      { opportunityType: "open-funding", funderVoting: false },
+      { read: request => request.functionName === "decimals" ? 18 : undefined },
+    ]) {
+      const f = fixture(changes);
+      assert.equal((await readEscrow({ ...f, account: funder })).can.deposit, false);
+      await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" }), /not available/);
+      assert.equal(f.writes.length, 0);
+    }
+  });
+
+  it("keeps final review eligibility aligned with the dashboard for every wallet action", async () => {
+    for (const action of ["submitMilestone", "approveMilestone", "voteMilestone"]) {
+      const account = action === "submitMilestone" ? researcher : action === "approveMilestone" ? owner : funder;
+      for (const changes of [
+        { active: false }, { timestamp: 1_900_086_400n }, { state: { state: ESCROW_STATE.Locked } },
+        { state: { currentTranche: 0n } }, { state: { ownerApproved: true } },
+        { funderVoting: false }, { hasVoted: true }, { depositor: { deposited: 0n } },
+      ]) {
+        const options = { depositor: { deposited: 10n }, evidenceHash: action === "submitMilestone" ? zeroHash : evidenceHash, ...changes };
+        const expected = (await readEscrow({ ...finalFixture(options), account })).can[action];
+        const f = finalFixture(options);
+        const promise = writeEscrowAction({ ...f, account, action, evidence, evidenceHash, selectionId, approve: true });
+        if (expected) { await promise; assert.equal(f.writes.length, 1); }
+        else { await assert.rejects(promise, /not available/); assert.equal(f.writes.length, 0); }
+      }
+    }
+  });
+
+  it("waits for required deposit and final-review reads before requesting signatures", async () => {
+    for (const [action, blockedName, value] of [
+      ["deposit", "allowance", target], ["deposit", "allowedTokens", true],
+      ["approveMilestone", "ownerApproved", false], ["voteMilestone", "hasVoted", false],
+    ]) {
+      let releaseRead;
+      const gate = new Promise(resolve => { releaseRead = resolve; });
+      const f = (action === "deposit" ? fixture : finalFixture)({ depositor: { deposited: 10n }, read: request =>
+        request.functionName === blockedName ? gate : undefined });
+      const account = action === "approveMilestone" ? owner : funder;
+      const promise = writeEscrowAction({ ...f, action, account, amount: "1", evidenceHash, selectionId, approve: true });
+      await new Promise(resolve => setImmediate(resolve));
+      assert(f.reads.some(request => request.functionName === blockedName));
+      assert.equal(f.writes.length, 0);
+      releaseRead(value);
+      await promise;
+      assert.equal(f.writes.at(-1).functionName, action);
+    }
+  });
+
+  it("blocks final actions on failed canonical checks, changed evidence, stale selection and failed vote reads", async () => {
+    for (const action of ["submitMilestone", "approveMilestone", "voteMilestone"]) {
+      for (const read of [
+        request => request.functionName === "escrowForProposal" ? funder : undefined,
+        request => request.functionName === "getProposal" ? { proposalHash: zeroHash, solutionHash: zeroHash } : undefined,
+        request => request.functionName === "milestoneAt" ? { bps: 1n, reviewWindow: 1n, descriptionHash: zeroHash, grossAmount: 1n } : undefined,
+      ]) {
+        const f = finalFixture({ read, depositor: { deposited: 10n } });
+        await assert.rejects(writeEscrowAction({ ...f, action, account: action === "submitMilestone" ? researcher : action === "voteMilestone" ? funder : owner,
+          evidence, evidenceHash, selectionId, approve: true }), /Mismatch/);
+        assert.equal(f.writes.length, 0);
+      }
+    }
+    for (const action of ["approveMilestone", "voteMilestone"]) {
+      for (const input of [{ evidenceHash: zeroHash }, { selectionId: zeroHash }]) {
+        const f = finalFixture({ depositor: { deposited: 10n } });
+        await assert.rejects(writeEscrowAction({ ...f, action, account: action === "voteMilestone" ? funder : owner,
+          evidenceHash, selectionId, approve: true, ...input }), /changed/);
+        assert.equal(f.writes.length, 0);
+      }
+    }
+    const f = finalFixture({ depositor: { deposited: 10n }, read: request => request.functionName === "hasVoted"
+      ? Promise.reject(new Error("Vote RPC unavailable")) : undefined });
+    await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "voteMilestone", evidenceHash, approve: true }), /Vote RPC unavailable/);
+    assert.equal(f.writes.length, 0);
+  });
+
+  it("resolves the audit deployment once before full-snapshot writes and retains historical write restrictions", async () => {
+    const historical = { ...AUDIT_REGISTRY_CONFIG, address: `0x${"9".repeat(40)}` };
+    historicalRegistries.push(historical);
+    try {
+      for (const [action, config, blocked] of [
+        ["release", AUDIT_REGISTRY_CONFIG, false], ["claimRefund", AUDIT_REGISTRY_CONFIG, false],
+        ["deposit", AUDIT_REGISTRY_CONFIG, false], ["approveMilestone", AUDIT_REGISTRY_CONFIG, false],
+        ["deposit", historical, true], ["approveMilestone", historical, true],
+        ["claimRefund", historical, false],
+      ]) {
+        let resolutions = 0, blocks = 0;
+        const proposal = { ...escrowRecord(), currency: config.escrow.tokens[0].symbol,
+          audit: { transactionHash: txHash, chainId: config.chainId } };
+        proposal.fundingTerms = proposalFundingTerms({ form: proposal, currency: proposal.currency, config });
+        // Stop at the block read: deployment resolution must already be single-shot,
+        // with historical financial writes rejected before constructing a snapshot.
+        const adapters = {
+          getTransaction: async () => { resolutions++; return { hash: txHash, to: config.address, chainId: config.chainId }; },
+          getBlock: async () => { blocks++; throw new Error("Reached verified snapshot"); },
+        };
+        await assert.rejects(writeEscrowAction({ proposal, account: owner, action, adapters }),
+          blocked ? /earlier AuditRegistry/ : /Reached verified snapshot/);
+        assert.equal(resolutions, 1);
+        assert.equal(blocks, blocked ? 0 : 1);
+      }
+    } finally {
+      historicalRegistries.pop();
+    }
+  });
+
   it("overlaps wallet reads with live state but waits for all verification before opening the wallet", async () => {
     let releaseState;
     const stateGate = new Promise(resolve => { releaseState = resolve; });
     const f = fixture({ allowance: target, read: request => request.functionName === "state" ? stateGate : undefined });
     const action = writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" });
     await new Promise(resolve => setImmediate(resolve));
-    for (const functionName of ["balanceOf", "allowance", "depositorSummary"]) {
+    for (const functionName of ["balanceOf", "allowance"]) {
       assert(f.reads.some(request => request.functionName === functionName), `${functionName} starts before state resolves`);
     }
     assert(f.reads.every(request => request.blockNumber === 100n));
@@ -175,7 +312,7 @@ describe("Canonical escrow wallet integration", () => {
   });
 
   it("does not open the wallet when a concurrent wallet-state read fails", async () => {
-    const f = fixture({ read: request => request.functionName === "depositorSummary"
+    const f = fixture({ read: request => request.functionName === "balanceOf"
       ? Promise.reject(new Error("Wallet state RPC unavailable")) : undefined });
     await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" }), /Wallet state RPC unavailable/);
     assert.equal(f.writes.length, 0);

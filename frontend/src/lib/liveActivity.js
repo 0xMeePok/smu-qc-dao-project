@@ -22,7 +22,7 @@ export function subscribeToActivity({ proposalId, problemId, identity = "" }, ch
       for (const subscriber of entry.subscribers) {
         if (subscriber.channel === "all"
           ? next.comments !== previous.comments || next.funding !== previous.funding
-          : next[subscriber.channel] !== previous[subscriber.channel]) subscriber.onChange();
+          : next[subscriber.channel] !== previous[subscriber.channel]) subscriber.onChange({ fundingSnapshot: data.fundingSnapshot ?? null });
       }
     }, () => { /* Visible-page fallback covers old deployments and reconnects. */ });
     } catch { /* An unavailable SDK/listener must not disable the ordinary reader. */ }

@@ -12,7 +12,7 @@ export function useLiveActivity({ proposalId, problemId, identity = "", channel,
   useEffect(() => {
     if (!enabled || !(proposalId || problemId)) return undefined;
     let disposed = false, dirty = false, running = false, scheduled = null, stop = null;
-    let lastRun = -Infinity;
+    let lastRun = -Infinity, activityOnly = false, activitySnapshots = [];
     const schedule = () => {
       if (disposed || !dirty || running || scheduled || latest.current.blocked || !visible()) return;
       scheduled = setTimeout(run, Math.max(250, 2000 - (Date.now() - lastRun)));
@@ -20,14 +20,22 @@ export function useLiveActivity({ proposalId, problemId, identity = "", channel,
     const run = async () => {
       scheduled = null;
       if (disposed || running || latest.current.blocked || !visible()) return;
-      dirty = false; running = true; lastRun = Date.now();
-      try { await latest.current.onRefresh?.(); }
+      const refreshReason = { activityOnly, activitySnapshots };
+      dirty = false; activityOnly = false; activitySnapshots = []; running = true; lastRun = Date.now();
+      try { await latest.current.onRefresh?.(refreshReason); }
       catch { /* Readers retain their own existing retry/error UI. */ }
       finally { running = false; if (!disposed) schedule(); }
     };
-    const changed = () => { dirty = true; schedule(); };
+    const changed = (fromActivity = false, snapshot = null) => {
+      activityOnly = dirty ? activityOnly && fromActivity : fromActivity;
+      // Bound bursts. If any event lacks a trustworthy snapshot, the reader
+      // must refresh; do not let a later event overwrite that requirement.
+      if (!fromActivity || activitySnapshots.length >= 8) activityOnly = false;
+      if (fromActivity && activitySnapshots.length < 8) activitySnapshots.push(snapshot);
+      dirty = true; schedule();
+    };
     const connect = () => {
-      if (visible() && !stop) stop = subscribeToActivity({ proposalId, problemId, identity }, channel, changed);
+      if (visible() && !stop) stop = subscribeToActivity({ proposalId, problemId, identity }, channel, event => changed(true, event?.fundingSnapshot ?? null));
     };
     const visibility = () => {
       if (visible()) { connect(); changed(); }

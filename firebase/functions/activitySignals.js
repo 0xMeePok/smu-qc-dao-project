@@ -2,10 +2,10 @@ import { FieldValue } from "firebase-admin/firestore";
 
 /** Content-free invalidations. Clients must re-read through the normal verified
  * APIs; these counters never establish visibility, integrity or payment state. */
-export function signalActivity(tx, db, { proposalId, problemId }, topic) {
+export function signalActivity(tx, db, { proposalId, problemId }, topic, proposalMetadata = {}) {
   for (const [collection, id] of [["proposals", proposalId], ["problems", problemId]]) {
     if (id) tx.set(db.collection(`${collection}/${id}/activity`).doc("latest"), {
-      [topic]: FieldValue.increment(1),
+      [topic]: FieldValue.increment(1), ...(collection === "proposals" ? proposalMetadata : {}),
     }, { merge: true });
   }
 }
@@ -26,5 +26,14 @@ export function fundingActivityChanged(previous, next) {
   return !previous || FINANCIAL_FIELDS.some(key => previous[key] !== next[key]);
 }
 export function signalFundingChange(tx, db, previous, next) {
-  if (fundingActivityChanged(previous, next)) signalActivity(tx, db, next, "funding");
+  if (!fundingActivityChanged(previous, next)) return;
+  // Only confirmed main-escrow projections can acknowledge a display refresh.
+  // No balances or content are exposed; older/other workflows force normal reads.
+  const fundingSnapshot = next.proposalId && /^0x[0-9a-f]{40}$/i.test(next.escrowAddress ?? "")
+    && /^0x[0-9a-f]{40}$/i.test(next.registryAddress ?? "") && Number.isSafeInteger(next.chainId)
+    && Number.isSafeInteger(next.blockNumber)
+    && next.blockNumber >= 0 && next.reconciliation?.complete === true && next.reconciliation?.matched === true
+    ? { proposalId: next.proposalId, chainId: next.chainId, registryAddress: next.registryAddress,
+      escrowAddress: next.escrowAddress, blockNumber: next.blockNumber, verified: true } : null;
+  signalActivity(tx, db, next, "funding", { fundingSnapshot });
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { signalActivity } from "../activitySignals.js";
+import { signalActivity, signalFundingChange } from "../activitySignals.js";
 import { memoryDb } from "./memoryDb.mjs";
 import { saveFundingSnapshot, OPEN_FUNDING_SELECTIONS } from "../fundingSnapshots.js";
 import { deploymentKey } from "../escrowFunding.js";
@@ -50,7 +50,7 @@ it("emits atomic funding counters only for meaningful verified changes, not refr
   const options = { db, collection: "escrowFundingSummaries", id: "current" };
   const initial = { proposalId: "p", problemId: "problem", blockNumber: 100, totalDeposited: "100", totalReleased: "0", fundingActivityVersion: 1 };
   await saveFundingSnapshot({ ...options, snapshot: initial });
-  for (const path of ["proposals/p/activity/latest", "problems/problem/activity/latest"]) assert.deepEqual(db.records.get(path), { funding: 1 });
+  for (const path of ["proposals/p/activity/latest", "problems/problem/activity/latest"]) assert.deepEqual(db.records.get(path), path.startsWith("proposals/") ? { funding: 1, fundingSnapshot: null } : { funding: 1 });
   await saveFundingSnapshot({ ...options, snapshot: { ...initial, blockNumber: 101, timestamp: 123, confirmedAt: "later", snapshotVerified: true } });
   assert.equal(db.records.get("proposals/p/activity/latest").funding, 1);
   await saveFundingSnapshot({ ...options, snapshot: { ...initial, blockNumber: 99, totalDeposited: "1" } });
@@ -90,4 +90,20 @@ it("separate activity counters merge atomically and roll back with a failed tran
     throw new Error("Snapshot write failed");
   }), /Snapshot write failed/);
   assert.deepEqual(db.records.get("proposals/atomic/activity/latest"), { comments: 2, funding: 1 });
+});
+
+it("emits only confirmed block identities with proposal signals and clears unsupported metadata", async () => {
+  const db = memoryDb();
+  const snapshot = { proposalId: "p", problemId: "parent", escrowAddress: `0x${"a".repeat(40)}`,
+    registryAddress: `0x${"b".repeat(40)}`, chainId: 421614, blockNumber: 100,
+    reconciliation: { complete: true, matched: true }, totalDeposited: "100", title: "Private title" };
+  await db.runTransaction(async tx => signalFundingChange(tx, db, null, snapshot));
+  const expected = { proposalId: "p", chainId: 421614, registryAddress: snapshot.registryAddress,
+    escrowAddress: snapshot.escrowAddress, blockNumber: 100, verified: true };
+  assert.deepEqual(db.records.get("proposals/p/activity/latest"), { funding: 1, fundingSnapshot: expected });
+  assert.deepEqual(db.records.get("problems/parent/activity/latest"), { funding: 1 }, "Parent readers never receive a private proposal identifier");
+  await db.runTransaction(async tx => signalFundingChange(tx, db, snapshot, { ...snapshot, totalDeposited: "200", reconciliation: { complete: false } }));
+  assert.deepEqual(db.records.get("proposals/p/activity/latest"), { funding: 2, fundingSnapshot: null });
+  await assert.rejects(db.runTransaction(async tx => { signalFundingChange(tx, db, null, snapshot); throw new Error("abort"); }), /abort/);
+  assert.equal(db.records.get("proposals/p/activity/latest").funding, 2);
 });

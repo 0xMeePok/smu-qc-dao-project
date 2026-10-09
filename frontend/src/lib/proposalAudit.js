@@ -13,16 +13,15 @@ import { prepareStoredProposal } from "../../../firebase/functions/proposalAudit
 import { asProposalUpdate, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
 
 async function anchorProposal(prepared, options) {
-  let operation = prepared;
-  try {
-    operation = withOpportunityRevisionIndex(
-      prepared,
-      await readOpportunityRevisionIndex(prepared.opportunityId, options),
-    );
-  } catch {
-    // Missing parent: commitProposal / updateHashes will revert with a mapped error.
-  }
-  if (!await readProposalIsAnchored(operation.entityId, options)) {
+  // Both registry lookups are independent. Attach rejection handlers together so
+  // a failed proposal lookup cannot escape while the parent read is still pending.
+  const [operation, anchored] = await Promise.all([
+    readOpportunityRevisionIndex(prepared.opportunityId, options)
+      .then(index => withOpportunityRevisionIndex(prepared, index))
+      .catch(() => prepared), // Missing parent: the contract supplies its mapped error.
+    readProposalIsAnchored(prepared.entityId, options),
+  ]);
+  if (!anchored) {
     return commitProposalAudit(operation, options);
   }
   await assertAmendmentIsNew(operation, options);

@@ -12,7 +12,7 @@ import { confirmEscrowTransaction, escrowErrorMessage, hashEscrowEvidence, readE
 import { loadEscrowEvidence, saveEscrowEvidence } from "../lib/escrowEvidence.js";
 import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
-import { getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
+import { fundingActivityCovered, getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
 import { EscrowFundingHistory } from "./EscrowFundingHistory.jsx";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { ACTION_ITEMS_KEY } from "../lib/proposalQueues.js";
@@ -170,6 +170,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refre
   const current = useRef({ proposal, onStateChange, onConfirmed }); current.current = { proposal, onStateChange, onConfirmed };
   const currentStorageKey = useRef(storageKey); currentStorageKey.current = storageKey;
   const generation = useRef(0), writing = useRef(false), periodicRefresh = useRef(null);
+  const lastVerified = useRef(null);
   useEffect(() => { setUnresolvedTransaction(savedTransaction(storageKey)); }, [storageKey]);
   const walletReady = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
   const roles = user?.roles ?? (user?.role ? [user.role] : []);
@@ -185,25 +186,17 @@ export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refre
   const walletMessage = !isConnected ? "Connect your signed-in wallet to fund, approve or claim refunds."
     : address?.toLowerCase() !== user?.id?.toLowerCase() ? "Connect the wallet belonging to your signed-in account."
       : "Switch your wallet to Arbitrum Sepolia to continue.";
-  const refresh = useCallback(async ({ includeHistory = true } = {}) => {
+  const refresh = useCallback(async ({ includeHistory = true, activityOnly = false, activitySnapshots = [] } = {}) => {
     const request = ++generation.current;
     const requestedProposal = current.current.proposal;
+    const startedAt = Date.now();
     setLoading(true);
     // History and evidence cannot delay an independently verified balance. Each
     // result is scoped to this refresh so navigation cannot apply an old record.
     const records = includeHistory && user?.id
       ? getEscrowFundingHistory({ proposalId: requestedProposal.id }).then(data => ({ data }), err => ({ error: err.message })) : null;
-    try {
-      const next = await readEscrow({ proposal: requestedProposal, account: address });
-      if (request !== generation.current) return;
-      setState(next); setError(""); setLoading(false);
-      setEvidence(saved => saved?.hash === next.currentMilestone?.evidenceHash ? saved : null);
-      current.current.onStateChange?.(next);
-      if (next.isHistorical) { setHistory(null); setHistoryError(""); }
-      else if (records) void records.then(result => {
-        if (request === generation.current) { setHistory(result.data ?? null); setHistoryError(result.error || ""); }
-      });
-      if (nonzero(next.currentMilestone?.evidenceHash)) void loadEscrowEvidence(requestedProposal.id, next.currentMilestone.evidenceHash).then(raw => {
+    const observeEvidence = (pending, next) => {
+      void pending.then(raw => {
         if (request !== generation.current) return;
         setEvidence(raw && hashEscrowEvidence(raw) === next.currentMilestone.evidenceHash ? { ...raw, hash: next.currentMilestone.evidenceHash } : null);
       }).catch(() => {
@@ -212,12 +205,45 @@ export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refre
           setError("Delivery evidence could not be loaded. Refresh before approving; escrow balances and refunds remain available.");
         }
       });
+    };
+    try {
+      // Only coalesce a push notification against a very recent verified read.
+      // Manual refresh, focus/reconnect and periodic checks always read the chain.
+      const previous = lastVerified.current;
+      if (activityOnly && activitySnapshots.length && previous?.scope === storageKey
+          && startedAt >= previous.startedAt && startedAt - previous.startedAt < 5000
+          && activitySnapshots.every(snapshot => fundingActivityCovered(previous.snapshot, snapshot,
+            { proposalId: requestedProposal.id, config: AUDIT_REGISTRY_CONFIG }))) {
+        if (records) void records.then(result => {
+          if (request === generation.current) { setHistory(result.data ?? null); setHistoryError(result.error || ""); }
+        });
+        // Re-observe a pending evidence read under this generation; the prior
+        // observer is now stale, but its request and verified digest are reusable.
+        if (previous.evidencePromise) observeEvidence(previous.evidencePromise, previous.snapshot);
+        return previous.snapshot;
+      }
+      const next = await readEscrow({ proposal: requestedProposal, account: address });
+      if (request !== generation.current) return;
+      lastVerified.current = { scope: storageKey, snapshot: next, startedAt };
+      setState(next); setError(""); setLoading(false);
+      setEvidence(saved => saved?.hash === next.currentMilestone?.evidenceHash ? saved : null);
+      current.current.onStateChange?.(next);
+      if (next.isHistorical) { setHistory(null); setHistoryError(""); }
+      else if (records) void records.then(result => {
+        if (request === generation.current) { setHistory(result.data ?? null); setHistoryError(result.error || ""); }
+      });
+      if (nonzero(next.currentMilestone?.evidenceHash)) {
+        const evidencePromise = loadEscrowEvidence(requestedProposal.id, next.currentMilestone.evidenceHash);
+        lastVerified.current.evidencePromise = evidencePromise;
+        observeEvidence(evidencePromise, next);
+      }
       return next;
     } catch (err) {
-      if (request === generation.current) { setState(null); setEvidence(null); setError(escrowErrorMessage(err)); current.current.onStateChange?.(null); }
+      if (request === generation.current) { lastVerified.current = null; setState(null); setEvidence(null); setError(escrowErrorMessage(err)); current.current.onStateChange?.(null); }
     } finally { if (request === generation.current) setLoading(false); }
-  }, [proposal.id, address, user?.id]);
+  }, [proposal.id, address, user?.id, storageKey]);
   useEffect(() => {
+    lastVerified.current = null;
     setState(null); setEvidence(null); setSettlement(null); setHistory(null);
     refresh();
     // Preserve recovery of a known platform settlement; ordinary reads use live activity.

@@ -15,6 +15,7 @@ vi.mock("../../src/lib/escrow.js", () => ({ readEscrow: (...args) => mocks.read(
 vi.mock("../../src/lib/escrowEvidence.js", () => ({ loadEscrowEvidence: (...args) => mocks.load(...args), saveEscrowEvidence: (...args) => mocks.save(...args) }));
 vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet connection dialog</p> }));
 import { EscrowFundingPanel, EscrowFundingView } from "../../src/components/EscrowFundingPanel.jsx";
+import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`, selectionId = `0x${"3".repeat(64)}`;
 const proposal = { id: "proposal1", researcherId: account, fundingTerms: { trancheBps: [5000, 5000] } };
@@ -515,4 +516,82 @@ it("refreshes verified balances and history on live activity without clearing co
   expect(live.options).toMatchObject({ proposalId: proposal.id, identity: account, channel: "funding", blocked: false });
   expect(mocks.write).not.toHaveBeenCalled();
   expect(confirmed).not.toHaveBeenCalled();
+});
+
+const coveredSummary = (overrides = {}) => ({ proposalId: proposal.id, chainId: AUDIT_REGISTRY_CONFIG.chainId,
+  registryAddress: AUDIT_REGISTRY_CONFIG.address, escrowAddress: model().address, blockNumber: 100,
+  verified: true, ...overrides });
+const blockModel = (overrides = {}) => model({ chainId: AUDIT_REGISTRY_CONFIG.chainId, blockNumber: 100n, ...overrides });
+it("coalesces a payment activity echo already covered by the freshly verified block while updating history", async () => {
+  mocks.read.mockResolvedValue(blockModel());
+  await ready();
+  fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "25" } });
+  fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
+  await waitFor(() => expect(mocks.sync).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Refresh escrow" }).disabled).toBe(false));
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+  mocks.history.mockResolvedValue({ events: [], summary: coveredSummary() });
+  await act(async () => { await live.options.onRefresh({ activityOnly: true, activitySnapshots: [coveredSummary()] }); });
+  expect(mocks.history).toHaveBeenCalledTimes(2);
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+  expect(mocks.write).toHaveBeenCalledTimes(1);
+  // Focus/fallback/manual reads are never suppressed by a recent snapshot.
+  await act(async () => { await live.options.onRefresh({ activityOnly: false }); });
+  expect(mocks.read).toHaveBeenCalledTimes(3);
+});
+it.each([
+  ["newer block", coveredSummary({ blockNumber: 101 })],
+  ["missing summary", null],
+  ["unverified snapshot", coveredSummary({ verified: false })],
+  ["different proposal", coveredSummary({ proposalId: "other" })],
+  ["different deployment", coveredSummary({ registryAddress: `0x${"f".repeat(40)}` })],
+  ["different escrow", coveredSummary({ escrowAddress: `0x${"f".repeat(40)}` })],
+  ["different chain", coveredSummary({ chainId: 1 })],
+  ["malformed block", coveredSummary({ blockNumber: "100" })],
+])("keeps a fresh chain read for activity with %s", async (_label, summary) => {
+  mocks.read.mockResolvedValue(blockModel()); await ready();
+  mocks.history.mockResolvedValue({ events: [] });
+  await act(async () => { await live.options.onRefresh({ activityOnly: true, activitySnapshots: [summary] }); });
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+});
+it("never treats an aged or historical snapshot as covering new activity", async () => {
+  const now = vi.spyOn(Date, "now").mockReturnValue(10000);
+  try {
+    mocks.read.mockResolvedValue(blockModel()); await ready();
+    mocks.history.mockResolvedValue({ events: [], summary: coveredSummary() });
+    now.mockReturnValue(15001);
+    await act(async () => { await live.options.onRefresh({ activityOnly: true, activitySnapshots: [coveredSummary()] }); });
+    expect(mocks.read).toHaveBeenCalledTimes(2);
+    mocks.read.mockResolvedValue(blockModel({ isHistorical: true }));
+    await act(async () => { await live.options.onRefresh(); });
+    await act(async () => { await live.options.onRefresh({ activityOnly: true, activitySnapshots: [coveredSummary()] }); });
+    expect(mocks.read).toHaveBeenCalledTimes(4);
+  } finally { now.mockRestore(); }
+});
+it("keeps independent chain verification when an unversioned signal has a history error", async () => {
+  mocks.read.mockResolvedValue(blockModel()); await ready();
+  mocks.history.mockRejectedValue(new Error("History unavailable"));
+  await act(async () => { await live.options.onRefresh({ activityOnly: true, activitySnapshots: [null] }); });
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+});
+
+it("preserves a pending evidence read across a covered activity echo", async () => {
+  const evidence = deferred(); mocks.load.mockReturnValue(evidence.promise);
+  mocks.read.mockResolvedValue(blockModel({ state: 6, currentTranche: 1, roles: { problemOwner: true },
+    currentMilestone: { evidenceHash: hash }, can: { approveMilestone: true } }));
+  render(<EscrowFundingPanel proposal={proposal} />);
+  await screen.findByText("Delivery in progress");
+  expect(screen.getByRole("button", { name: "Accept as delivered" }).disabled).toBe(true);
+  await act(async () => { await live.options.onRefresh({ activityOnly: true, activitySnapshots: [coveredSummary()] }); });
+  expect(mocks.read).toHaveBeenCalledTimes(1); expect(mocks.load).toHaveBeenCalledTimes(1);
+  await act(async () => { evidence.resolve({ summary: "Delivery complete", url: "https://example.com/delivery" }); });
+  expect(screen.getByRole("button", { name: "Accept as delivered" }).disabled).toBe(false);
+});
+it("does not let delayed history hold up a covered activity echo", async () => {
+  mocks.read.mockResolvedValue(blockModel()); await ready();
+  const history = deferred(); mocks.history.mockReturnValue(history.promise);
+  await act(async () => { await live.options.onRefresh({ activityOnly: true, activitySnapshots: [coveredSummary()] }); });
+  expect(mocks.read).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "Refresh escrow" }).disabled).toBe(false);
+  await act(async () => { history.resolve({ events: [] }); });
 });
