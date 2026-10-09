@@ -7,6 +7,8 @@ import { problemIsMemberBrowsable } from "./moderation.js";
 import { WORKFLOW_STATUS, proposalWorkflowStatus, recommendationCounts, recommendationEntries } from "./workflowStatus.js";
 import { readEscrowQueueActions, readGrantQueueMetadata } from "./escrowQueueMetadata.js";
 import { readIndependentFundingQueueMetadata } from "./independentFundingQueueMetadata.js";
+import { createRequestReadClient } from "./requestReadClient.js";
+import { createRequestDocumentReader } from "./requestDocuments.js";
 
 // QCDAO-62/63 read the queues out of the records that already exist: proposals,
 // their parent problems and the comments collection. Nothing new is stored.
@@ -151,6 +153,8 @@ async function activeProfile(db, uid) {
  * evaluator-feedback progress and comment count.
  */
 export async function listMyProposals({ db, uid, client, config }) {
+  if (client) client = createRequestReadClient(client, { chainId: config?.chainId });
+  const readDocument = createRequestDocumentReader();
   await activeProfile(db, uid);
   const rows = await db.collection("proposals").where("researcherId", "==", uid).limit(MINE_CAP + 1).get();
   const docs = rows.docs.slice(0, MINE_CAP);
@@ -162,8 +166,9 @@ export async function listMyProposals({ db, uid, client, config }) {
       : [],
   ]);
   const latestByProposal = new Map(latestReviews.filter((snap) => snap.exists).map((snap) => [snap.ref.path.split("/")[1], snap.data()]));
-  const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs, parents: problems });
-  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs, blockNumber: grantState.blockNumber });
+  readDocument.prime(docs);
+  const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs, parents: problems, readDocument });
+  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs, blockNumber: grantState.blockNumber, readDocument });
   const independentState = await readIndependentFundingQueueMetadata({ db, uid, config, docs });
   const items = docs.map((doc) => {
     const data = doc.data();
@@ -286,6 +291,8 @@ function actionView(doc, data, problemId, problem, extra = {}) {
  * owners select or review, researchers answer a selection, evaluators recommend.
  */
 export async function listActionItems({ db, uid, client, config, now = Timestamp.now() }) {
+  if (client) client = createRequestReadClient(client, { chainId: config?.chainId });
+  const readDocument = createRequestDocumentReader();
   const profile = await activeProfile(db, uid);
   const [owned, mine, receivedEscrows] = await Promise.all([
     db.collection("problems").where("ownerId", "==", uid).limit(OWNED_CAP).get(),
@@ -332,12 +339,13 @@ export async function listActionItems({ db, uid, client, config, now = Timestamp
       { deadlineAt: iso(doc.data().matching.deadlineAt) })));
 
   const grantParents = await problemsById(db, [...new Set(mine.docs.map(doc => doc.data().problemId).filter(Boolean))]);
-  const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs: mine.docs, parents: grantParents });
+  readDocument.prime([...mine.docs, ...receivedEscrows.docs, ...owned.docs]);
+  const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs: mine.docs, parents: grantParents, readDocument });
   const grantSelectionsToAccept = newestFirst(mine.docs.filter(doc => grantState.grants.get(doc.id)?.canAccept)
     .map(doc => actionView(doc, doc.data(), doc.data().problemId, grantParents.get(doc.data().problemId),
       { grant: grantState.grants.get(doc.id), deadlineAt: grantState.grants.get(doc.id).deadlineAt })));
   const escrowDocs = [...new Map([...mine.docs, ...receivedEscrows.docs].map(doc => [doc.id, doc])).values()];
-  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs: escrowDocs, blockNumber: grantState.blockNumber });
+  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs: escrowDocs, blockNumber: grantState.blockNumber, readDocument });
   const independentState = await readIndependentFundingQueueMetadata({ db, uid, config, docs: mine.docs, now });
   const escrowActionIds = new Set(escrowState.actions.map(item => item.id));
   const displayedAwaitingReview = awaitingReview.filter(item => !escrowActionIds.has(item.id)

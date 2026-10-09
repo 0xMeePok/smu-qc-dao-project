@@ -100,25 +100,44 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
   const [pending, setPending] = useState(null), [walletPrompt, setWalletPrompt] = useState(false);
   const actionBusy = useRef(false);
   const key = storageKey(problemId, user?.id);
-  const activeKey = useRef(key); activeKey.current = key;
-  const refresh = useCallback(async () => {
-    const currentKey = key;
+  const viewKey = `${key}:${proposalId || ""}`;
+  const activeKey = useRef(viewKey); activeKey.current = viewKey;
+  const version = useRef(0), inFlight = useRef(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const currentPanel = () => alive.current && activeKey.current === viewKey;
+  const refresh = useCallback(() => {
+    if (inFlight.current?.key === viewKey) return inFlight.current.promise;
+    const current = ++version.current;
     setLoading(true);
-    try {
-      const next = openFundingSupported() ? await getOpenFundingSummary({ problemId, proposalId })
-        : { supported: false, message: "The current contract deployment does not yet support grant pools. Grant transactions will be available after deployment." };
-      if (activeKey.current === currentKey) setData(next);
-    } catch (err) { if (activeKey.current === currentKey) { setData(null); setError(escrowErrorMessage(err)); } }
-    finally { if (activeKey.current === currentKey) setLoading(false); }
-  }, [problemId, proposalId, key]);
-  useEffect(() => { setData(null); setError(""); setNotice(""); setAmount(""); setWithdrawalAmount(""); setPending(stored(key)); void refresh(); }, [refresh, key]);
+    const promise = Promise.resolve().then(async () => {
+      try {
+        const next = openFundingSupported() ? await getOpenFundingSummary({ problemId, proposalId })
+          : { supported: false, message: "The current contract deployment does not yet support grant pools. Grant transactions will be available after deployment." };
+        if (alive.current && activeKey.current === viewKey && current === version.current) { setData(next); setError(""); }
+      } catch (err) { if (alive.current && activeKey.current === viewKey && current === version.current) { setData(null); setError(escrowErrorMessage(err)); } }
+      finally {
+        if (alive.current && activeKey.current === viewKey && current === version.current) setLoading(false);
+        if (inFlight.current?.promise === promise) inFlight.current = null;
+      }
+    });
+    inFlight.current = { key: viewKey, promise };
+    return promise;
+  }, [problemId, proposalId, viewKey]);
+  const applySynced = async next => {
+    if (!currentPanel()) return;
+    if (next?.supported && Array.isArray(next.selections) && (!next.problemId || next.problemId === problemId)) {
+      ++version.current; setData(next); setLoading(false); setError("");
+    } else await refresh(); // Rolling deployments may still return a legacy sync response.
+  };
+  useEffect(() => { setData(null); setError(""); setNotice(""); setAmount(""); setWithdrawalAmount(""); setPending(stored(key)); void refresh(); return () => { ++version.current; inFlight.current = null; }; }, [refresh, key]);
   useEffect(() => {
     if (!openFundingSupported()) return undefined;
     const timer = setInterval(() => { if (!actionBusy.current) void refresh(); }, 20_000);
     return () => clearInterval(timer);
   }, [refresh]);
   const walletReady = Boolean(user?.id && isConnected && same(address, user.id) && chainId === AUDIT_REGISTRY_CONFIG.chainId);
-  const remember = value => { save(key, value); if (activeKey.current === key) setPending(value); };
+  const remember = value => { save(key, value); if (currentPanel()) setPending(value); };
   const act = async (action, selectedProposalId) => {
     if (actionBusy.current || pending || !walletReady || (integrityBlocked && !["withdraw", "void"].includes(action))) return;
     actionBusy.current = true; setBusy(true); setError(""); setNotice("");
@@ -131,15 +150,14 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
         } });
       remember({ transactionHash: result.transactionHash, action, proposalId: selectedProposalId });
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
-      try { await syncOpenFunding({ problemId, proposalId: selectedProposalId, transactionHash: result.transactionHash }); invalidateFundingDashboardSummaries(queryClient); }
-      finally { if (activeKey.current === key) onChange?.({ proposalId: selectedProposalId, action, transactionHash: result.transactionHash }); }
+      try { const next = await syncOpenFunding({ problemId, proposalId: selectedProposalId, transactionHash: result.transactionHash }); invalidateFundingDashboardSummaries(queryClient); await applySynced(next); }
+      finally { if (currentPanel()) onChange?.({ proposalId: selectedProposalId, action, transactionHash: result.transactionHash }); }
       remember(null);
-      if (activeKey.current === key) { setAmount(""); setWithdrawalAmount(""); setNotice(action === "select" ? "Offer recorded. The researcher has seven days to accept." : action === "accept" ? "Grant accepted. The requested funds are now in proposal escrow." : action === "withdraw" ? "Withdrawal confirmed. Unreserved funds have returned to your wallet." : "Grant pool updated."); }
-      await refresh();
+      if (currentPanel()) { setAmount(""); setWithdrawalAmount(""); setNotice(action === "select" ? "Offer recorded. The researcher has seven days to accept." : action === "accept" ? "Grant accepted. The requested funds are now in proposal escrow." : action === "withdraw" ? "Withdrawal confirmed. Unreserved funds have returned to your wallet." : "Grant pool updated."); }
     } catch (err) {
       if (err.terminal || err.transactionSettled) remember(null);
-      if (activeKey.current === key) setError(escrowErrorMessage(err));
-    } finally { actionBusy.current = false; setBusy(false); }
+      if (currentPanel()) setError(escrowErrorMessage(err));
+    } finally { actionBusy.current = false; if (alive.current) setBusy(false); }
   };
   const confirm = async () => {
     if (!pending || actionBusy.current) return;
@@ -147,10 +165,10 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
     try {
       const result = await confirmEscrowTransaction(pending.transactionHash, { confirmations: 2 });
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
-      try { await syncOpenFunding({ problemId, proposalId: pending.proposalId, transactionHash: result.transactionHash }); invalidateFundingDashboardSummaries(queryClient); }
-      finally { if (activeKey.current === key) onChange?.({ proposalId: pending.proposalId, action: pending.action, transactionHash: result.transactionHash }); }
-      remember(null); setNotice("Transaction confirmed. The grant pool has been refreshed."); await refresh();
-    } catch (err) { if (err.terminal) remember(null); setError(escrowErrorMessage(err)); }
+      try { const next = await syncOpenFunding({ problemId, proposalId: pending.proposalId, transactionHash: result.transactionHash }); invalidateFundingDashboardSummaries(queryClient); await applySynced(next); }
+      finally { if (currentPanel()) onChange?.({ proposalId: pending.proposalId, action: pending.action, transactionHash: result.transactionHash }); }
+      remember(null); if (currentPanel()) setNotice("Transaction confirmed. The grant pool has been refreshed.");
+    } catch (err) { if (err.terminal) remember(null); if (currentPanel()) setError(escrowErrorMessage(err)); }
     finally { actionBusy.current = false; setBusy(false); }
   };
   return <><OpenFundingView {...{ data, loading, error, notice, busy, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, proposalId, onNavigate, integrityBlocked }}

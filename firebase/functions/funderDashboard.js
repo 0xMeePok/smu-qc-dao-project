@@ -8,6 +8,9 @@ import { same } from "./escrowFundingEvents.js";
 import { isIndependentProposal } from "./independentProposal.js";
 import { readIndependentFundingPortfolio } from "./independentFunding.js";
 import { FUNDING_POSITIONS, OPEN_FUNDING_SELECTIONS, fundingAllocationBasis } from "./fundingSnapshots.js";
+import { createRequestReadClient } from "./requestReadClient.js";
+import { createRequestDocumentReader } from "./requestDocuments.js";
+import { boundedMap } from "./boundedMap.js";
 
 const CAP = 50, APPROACH_CAP = 200;
 const iso = value => value?.toDate?.().toISOString?.() ?? null;
@@ -24,7 +27,9 @@ const fail = (code, message) => { throw new HttpsError(code, message); };
 /** QCDAO-94: member's opportunities, approaches and saved confirmed commitments.
  * Exact token base units are grouped by chain and token; currencies never mix. */
 export async function getFunderDashboard({ db, client, config, uid, now = Timestamp.now() }) {
-  const profile = await db.collection("users").doc(uid).get();
+  if (client) client = createRequestReadClient(client, { chainId: config.chainId });
+  const readDocument = createRequestDocumentReader();
+  const profile = await readDocument(db.collection("users").doc(uid));
   if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
   const [owned, deposits, approachesPage, positionsPage] = await Promise.all([
     db.collection("problems").where("ownerId", "==", uid).where("opportunityType", "==", "open-funding").limit(CAP + 1).get(),
@@ -34,6 +39,18 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
     db.collection(FUNDING_POSITIONS).where("uid", "==", uid).limit(APPROACH_CAP + 1).get(),
   ]);
   const opportunities = [], ownedById = new Map(owned.docs.map(doc => [doc.id, doc.data()]));
+  readDocument.prime([...owned.docs, ...approachesPage.docs]);
+  const visibleApproaches = approachesPage.docs.slice(0, APPROACH_CAP).filter(doc => {
+    const data = doc.data();
+    return !isIndependentProposal(data) && data.status !== "draft" && !hidden(data);
+  });
+  // Fetch known display documents in batches; authorization is still checked
+  // below for every parent and commitment before it enters the response.
+  const parentIds = [...new Set(visibleApproaches.map(doc => doc.data().problemId).filter(id => id && !ownedById.has(id)))];
+  const displayRefs = [...parentIds.map(id => db.collection("problems").doc(id)),
+    ...visibleApproaches.map(doc => db.collection(`proposals/${doc.id}/ownerReviewLatest`).doc("current"))];
+  const batches = Array.from({ length: Math.ceil(displayRefs.length / 100) }, (_, index) => displayRefs.slice(index * 100, index * 100 + 100));
+  await boundedMap(batches, async refs => readDocument.prime(await db.getAll(...refs)));
   let unavailablePools = 0;
   // Saved rows avoid RPC work. Missing snapshots are filled once through the
   // same verification as details, without settlement or transaction submission.
@@ -46,6 +63,19 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
     positions.set(row.proposalId, row);
     if (units(row.committed) && BigInt(row.committed) > 0n) commitmentIds.add(row.proposalId);
   }
+  const knownProposals = new Set(approachesPage.docs.map(doc => doc.id));
+  const commitmentRefs = [...commitmentIds].slice(0, CAP)
+    .filter(id => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id) && !knownProposals.has(id))
+    .map(id => db.collection("proposals").doc(id));
+  if (commitmentRefs.length) {
+    try {
+      const proposals = await db.getAll(...commitmentRefs);
+      readDocument.prime(proposals);
+      const parents = [...new Set(proposals.filter(doc => doc.exists).map(doc => doc.data().problemId)
+        .filter(id => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id) && !ownedById.has(id) && !parentIds.includes(id)))];
+      if (parents.length) readDocument.prime(await db.getAll(...parents.map(id => db.collection("problems").doc(id))));
+    } catch { /* Per-record checks below retain their existing availability handling. */ }
+  }
   const prefix = deploymentKey(config), summaryCache = new Map();
   const readSaved = async (collection, id) => {
     const key = `${collection}/${id}`;
@@ -55,6 +85,35 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
     }));
     return summaryCache.get(key);
   };
+  const savedRefs = new Map();
+  const prefetchSaved = (collection, id) => {
+    if (typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+      savedRefs.set(`${collection}/${id}`, { collection, ref: db.collection(collection).doc(`${prefix}_${id}`) });
+    }
+  };
+  for (const doc of owned.docs.slice(0, CAP)) {
+    if (supportsOpenFunding(config) && /^0x[0-9a-f]{64}$/i.test(doc.data().audit?.transactionHash || "")) prefetchSaved(OPEN_FUNDING_SUMMARIES, doc.id);
+  }
+  for (const doc of visibleApproaches) {
+    const data = doc.data();
+    const parent = ownedById.get(data.problemId) ?? (await readDocument(db.collection("problems").doc(data.problemId))).data();
+    if (!parent || !same(parent.ownerId, uid)) continue;
+    if (parent.opportunityType === "open-funding" && supportsOpenFunding(config)) {
+      prefetchSaved(OPEN_FUNDING_SUMMARIES, data.problemId);
+      if (data.audit?.status === "confirmed" && data.fundingTerms) prefetchSaved(OPEN_FUNDING_SELECTIONS, doc.id);
+    } else if (data.audit?.status === "confirmed" && data.fundingTerms) prefetchSaved(FUNDING_SUMMARIES, doc.id);
+  }
+  for (const id of [...commitmentIds].slice(0, CAP)) prefetchSaved(FUNDING_SUMMARIES, id);
+  const savedEntries = [...savedRefs];
+  await boundedMap(Array.from({ length: Math.ceil(savedEntries.length / 100) }, (_, i) => savedEntries.slice(i * 100, i * 100 + 100)), async batch => {
+    let snapshots;
+    try { snapshots = await db.getAll(...batch.map(([, value]) => value.ref)); }
+    catch { return; } // Fall back to per-record reads and their existing error handling.
+    snapshots.forEach((snapshot, index) => {
+      const [key, { collection }] = batch[index], row = snapshot.data();
+      summaryCache.set(key, scoped(row, config) && (collection !== FUNDING_SUMMARIES || confirmed(row)) ? row : null);
+    });
+  });
   const poolFills = new Map(), escrowFills = new Map();
   const fillPool = async (id, proposalId) => {
     const key = `${id}/${proposalId || ""}`;
@@ -107,14 +166,14 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
     if (isIndependentProposal(data) || data.status === "draft" || hidden(data)) continue;
     let parent = ownedById.get(data.problemId);
     if (!parent) {
-      const snap = await db.collection("problems").doc(data.problemId).get();
+      const snap = await readDocument(db.collection("problems").doc(data.problemId));
       if (!snap.exists || !same(snap.data().ownerId, uid)) continue;
       parent = snap.data();
     }
     const row = { proposalId: doc.id, problemId: data.problemId, title: data.title || "Proposal", researcherId: data.researcherId,
       postingTitle: parent.title || "Posting", opportunityType: parent.opportunityType || "business-problem", amount: data.amount ?? 0,
       currency: data.currency || "", status: data.status, recordStatus: data.status, createdAt: iso(data.createdAt) };
-    const review = await db.collection(`proposals/${doc.id}/ownerReviewLatest`).doc("current").get();
+    const review = await readDocument(db.collection(`proposals/${doc.id}/ownerReviewLatest`).doc("current"));
     const ownerReview = ownerReviewSummary(review.data());
     approaches.push(row);
     let selection = parent.opportunityType === "open-funding" ? null
@@ -175,10 +234,10 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
   const ids = [...commitmentIds].slice(0, CAP);
   for (const proposalId of ids) {
     let context;
-    try { context = await loadFundingContext({ db, uid, proposalId }); }
+    try { context = await loadFundingContext({ db, uid, proposalId, readDocument }); }
     catch { continue; }
     if (isIndependentProposal(context.record)) continue;
-    if (!await canReadContent({ get: ref => ref.get() }, db, "proposal", context.record, uid, profile.data())) continue;
+    if (!await canReadContent({ get: readDocument }, db, "proposal", context.record, uid, profile.data())) continue;
     try {
       let snapshot = positions.get(proposalId);
       const aggregate = await readSaved(FUNDING_SUMMARIES, proposalId);

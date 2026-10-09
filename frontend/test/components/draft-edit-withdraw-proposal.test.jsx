@@ -290,6 +290,7 @@ describe("the edit trail", () => {
       { id: "rev1", actor: account, changedFields: ["timeline", "amount"], previousStatus: "submitted", status: "submitted", at: new Date("2026-09-08T11:00:00Z") },
     ];
     render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Record" }));
     expect(await screen.findByRole("heading", { name: "Edit history" })).toBeTruthy();
     expect(screen.getByText("Edited after submission")).toBeTruthy();
     expect(screen.getByText("Withdrawn from evaluation")).toBeTruthy();
@@ -301,6 +302,7 @@ describe("the edit trail", () => {
   it("stays out of the way when nothing has been edited", async () => {
     render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
     await screen.findByRole("heading", { name: submittedProposal.title });
+    fireEvent.click(screen.getByRole("tab", { name: "Record" }));
     await waitFor(() => expect(screen.queryByText("Loading edit history…")).toBeNull());
     expect(screen.queryByRole("heading", { name: "Edit history" })).toBeNull();
   });

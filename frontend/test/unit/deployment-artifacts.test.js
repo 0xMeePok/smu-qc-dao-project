@@ -10,7 +10,7 @@ import { build } from "vite";
 const frontendDirectory = fileURLToPath(new URL("../../", import.meta.url));
 const repositoryDirectory = path.resolve(frontendDirectory, "..");
 
-it("the shipped app includes viem's contract-error helpers without deferred chunks", { timeout: 120_000 }, async () => {
+it("the shipped app defers pages but never wallet helpers needed after a deployment", { timeout: 120_000 }, async () => {
   // Exercise the production config and real dependency graph. A missing lazy
   // helper masks ordinary registry reverts in tabs kept open during a deploy.
   const result = await build({
@@ -23,8 +23,21 @@ it("the shipped app includes viem's contract-error helpers without deferred chun
   assert.ok(chunks.some((chunk) => chunk.isEntry), "Expected a built application entry");
   assert.ok(chunks.some((chunk) => Object.keys(chunk.modules).some((id) => /viem\/.*\/ccip\.js$/.test(id))),
     "The real viem CCIP error path must be included in the build");
-  for (const chunk of chunks) {
-    assert.deepEqual(chunk.dynamicImports, [], `${chunk.fileName} must not need files removed by a later deploy`);
+  const entry = chunks.find(chunk => chunk.isEntry);
+  assert.ok(entry.dynamicImports.length > 0, "Page code must be deferred until navigation");
+  for (const chunk of chunks.filter(chunk => !chunk.isEntry)) {
+    assert.deepEqual(chunk.dynamicImports, [], `${chunk.fileName} must not fetch wallet helpers mid-operation`);
+  }
+  const initial = new Set();
+  const visit = file => {
+    if (initial.has(file)) return;
+    initial.add(file);
+    chunks.find(chunk => chunk.fileName === file)?.imports.forEach(visit);
+  };
+  visit(entry.fileName);
+  for (const page of ["AdminPage.jsx", "ProposalDetailPage.jsx", "CreateProposalPage.jsx", "RoleViews.jsx"]) {
+    const chunk = chunks.find(chunk => Object.keys(chunk.modules).some(id => id.endsWith(`/${page}`)));
+    assert.ok(chunk && !initial.has(chunk.fileName), `${page} must not be in the initial download`);
   }
 });
 

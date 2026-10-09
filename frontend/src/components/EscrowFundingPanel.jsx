@@ -22,6 +22,7 @@ const explorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`
 const nonzero = value => value && !/^0x0{64}$/i.test(value);
 const instant = seconds => seconds > 0n ? new Date(Number(seconds) * 1000).toLocaleString() : "—";
 const refundActions = new Set(["claimRefund", "expire", "refundInvalidated"]);
+const pendingSettlement = new Set(["pending", "queued", "preparing", "retrying"]);
 const pendingTransactions = new Map();
 const pendingKey = (proposalId, account) => `qcdao:escrow-pending:${AUDIT_REGISTRY_CHAIN_ID}:${AUDIT_REGISTRY_CONFIG.address}:${proposalId}:${account?.toLowerCase() ?? ""}`;
 function savedTransaction(key) {
@@ -165,7 +166,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   const [notice, setNotice] = useState("");
   const current = useRef({ proposal, onStateChange }); current.current = { proposal, onStateChange };
   const currentStorageKey = useRef(storageKey); currentStorageKey.current = storageKey;
-  const generation = useRef(0), writing = useRef(false);
+  const generation = useRef(0), writing = useRef(false), periodicRefresh = useRef(null);
   useEffect(() => { setUnresolvedTransaction(savedTransaction(storageKey)); }, [storageKey]);
   const walletReady = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
   const roles = user?.roles ?? (user?.role ? [user.role] : []);
@@ -181,47 +182,80 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   const walletMessage = !isConnected ? "Connect your signed-in wallet to fund, approve or claim refunds."
     : address?.toLowerCase() !== user?.id?.toLowerCase() ? "Connect the wallet belonging to your signed-in account."
       : "Switch your wallet to Arbitrum Sepolia to continue.";
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ includeHistory = true } = {}) => {
     const request = ++generation.current;
+    const requestedProposal = current.current.proposal;
     setLoading(true);
+    // History and evidence cannot delay an independently verified balance. Each
+    // result is scoped to this refresh so navigation cannot apply an old record.
+    const records = includeHistory && user?.id
+      ? getEscrowFundingHistory({ proposalId: requestedProposal.id }).then(data => ({ data }), err => ({ error: err.message })) : null;
     try {
-      const [next, records] = await Promise.all([
-        readEscrow({ proposal: current.current.proposal, account: address }),
-        user?.id ? getEscrowFundingHistory({ proposalId: current.current.proposal.id }).then(data => ({ data }), err => ({ error: err.message })) : null,
-      ]);
-      let saved = null, evidenceError = "";
-      if (nonzero(next.currentMilestone?.evidenceHash)) {
-        try {
-          const raw = await loadEscrowEvidence(current.current.proposal.id, next.currentMilestone.evidenceHash);
-          if (raw && hashEscrowEvidence(raw) === next.currentMilestone.evidenceHash) saved = { ...raw, hash: next.currentMilestone.evidenceHash };
-        } catch { evidenceError = "Delivery evidence could not be loaded. Refresh before approving; escrow balances and refunds remain available."; }
-      }
+      const next = await readEscrow({ proposal: requestedProposal, account: address });
       if (request !== generation.current) return;
-      setState(next); setEvidence(saved); setError(evidenceError);
-      if (next.isHistorical) { setHistory(null); setHistoryError(""); }
-      else if (records) { setHistory(records.data ?? null); setHistoryError(records.error || ""); }
+      setState(next); setError(""); setLoading(false);
+      setEvidence(saved => saved?.hash === next.currentMilestone?.evidenceHash ? saved : null);
       current.current.onStateChange?.(next);
+      if (next.isHistorical) { setHistory(null); setHistoryError(""); }
+      else if (records) void records.then(result => {
+        if (request === generation.current) { setHistory(result.data ?? null); setHistoryError(result.error || ""); }
+      });
+      if (nonzero(next.currentMilestone?.evidenceHash)) void loadEscrowEvidence(requestedProposal.id, next.currentMilestone.evidenceHash).then(raw => {
+        if (request !== generation.current) return;
+        setEvidence(raw && hashEscrowEvidence(raw) === next.currentMilestone.evidenceHash ? { ...raw, hash: next.currentMilestone.evidenceHash } : null);
+      }).catch(() => {
+        if (request === generation.current) {
+          setEvidence(null);
+          setError("Delivery evidence could not be loaded. Refresh before approving; escrow balances and refunds remain available.");
+        }
+      });
+      return next;
     } catch (err) {
       if (request === generation.current) { setState(null); setEvidence(null); setError(escrowErrorMessage(err)); current.current.onStateChange?.(null); }
     } finally { if (request === generation.current) setLoading(false); }
   }, [proposal.id, address, user?.id]);
   useEffect(() => {
-    setState(null); setEvidence(null);
+    setState(null); setEvidence(null); setSettlement(null); setHistory(null);
     refresh();
-    const timer = setInterval(() => { if (!writing.current) refresh(); }, 30_000);
+    const timer = setInterval(() => { if (!writing.current) periodicRefresh.current?.(); }, 30_000);
     return () => { generation.current += 1; clearInterval(timer); };
   }, [refresh, refreshVersion]);
+  const recordSynchronized = result => {
+    invalidateFundingDashboardSummaries(queryClient);
+    setHistory(result); setSettlement(result.settlement); setSyncError("");
+  };
+  const synchronizeConfirmed = async (args = {}, initialResult) => {
+    const key = storageKey;
+    let result = initialResult ?? await syncEscrowFunding({ proposalId: proposal.id, ...args });
+    if (currentStorageKey.current !== key) return;
+    recordSynchronized(result);
+    // Platform release is a second transaction. Follow its known hash once;
+    // never ask the wallet to repeat the already-confirmed user transaction.
+    if (result.settlement?.status === "pending" && result.settlement.transactionHash) {
+      setSettlement({ ...result.settlement, message: "The platform action is awaiting confirmation." });
+      await confirmEscrowTransaction(result.settlement.transactionHash);
+      if (currentStorageKey.current !== key) return;
+      const updated = refresh({ includeHistory: false });
+      try {
+        result = await syncEscrowFunding({ proposalId: proposal.id });
+        if (currentStorageKey.current === key) recordSynchronized(result);
+      } finally { await updated; }
+    }
+    return result;
+  };
   const act = async (action, extra = {}) => {
     if (!walletReady || writing.current || unresolvedTransaction || (action === "deposit" && fundingBlockReason) || ((moderated || integrityBlocked) && !refundActions.has(action))) return;
+    const requestedProposal = current.current.proposal;
     writing.current = true; setBusy(true); setError(""); setProgress({ status: "preparing", action }); setNotice("");
     const remember = hash => { saveTransaction(storageKey, hash); if (currentStorageKey.current === storageKey) setUnresolvedTransaction(hash); };
     try {
       // Revalidate current membership and posting eligibility immediately before any deposit signature.
       if (action === "deposit") await prepareEscrowDeposit({ proposalId: proposal.id });
-      const payload = { proposal: current.current.proposal, account: address, action, selectionId: state?.selectionId, ...extra, onProgress: next => {
-        setProgress(next);
+      if (currentStorageKey.current !== storageKey) return;
+      const payload = { proposal: requestedProposal, account: address, action, selectionId: state?.selectionId, ...extra, onProgress: next => {
         if (next.status === "pending") remember(next.transactionHash);
         if (next.status === "confirmed") remember(null);
+        if (currentStorageKey.current === storageKey) setProgress(next);
       } };
       if (action === "submitMilestone") {
         payload.evidence = { summary: delivery.summary.trim().normalize("NFC"), url: delivery.url.trim() };
@@ -231,22 +265,27 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
         if (!evidence || evidence.hash !== state?.currentMilestone?.evidenceHash) throw new Error("Refresh and review the current delivery evidence first.");
         payload.evidenceHash = evidence.hash;
       } else if (action === "lockSelection") payload.selectionId = keccak256(stringToHex(crypto.randomUUID()));
+      if (currentStorageKey.current !== storageKey) return;
       const result = await writeEscrowAction(payload);
+      remember(null);
+      if (currentStorageKey.current !== storageKey) return;
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
       if (action === "deposit") setNotice("Deposit confirmed. Your tokens are held in escrow until an approved payment or an available refund.");
       if (action === "rejectSelection") { setNotice("Selection rejected. This proposal’s full contribution balance is refundable; other eligible proposals reopen."); setRejectionReason(""); }
+      const updated = refresh({ includeHistory: false });
       try { if (!state?.isHistorical) {
-        const synchronized = await syncEscrowFunding({ proposalId: proposal.id, ...(result?.transactionHash ? { transactionHash: result.transactionHash } : {}) });
-        invalidateFundingDashboardSummaries(queryClient);
-        setHistory(synchronized); setSettlement(synchronized.settlement); setSyncError("");
-      } } catch (err) { setSyncError(`The wallet transaction confirmed, but funding records could not be synchronized: ${err.message}. Use Reconcile funding records to retry.`); }
-      await refresh();
-      if (action === "deposit") setAmount("");
+        setSettlement({ status: "preparing", message: "Your transaction is confirmed. Updating funding records and checking payment readiness…" });
+        await synchronizeConfirmed(result?.transactionHash ? { transactionHash: result.transactionHash } : {});
+      } } catch (err) { if (currentStorageKey.current === storageKey) setSyncError(`The wallet transaction confirmed, but funding records could not be synchronized: ${err.message}. Use Reconcile funding records to retry.`); }
+      await updated;
+      if (action === "deposit" && currentStorageKey.current === storageKey) setAmount("");
     } catch (err) {
-      setError(escrowErrorMessage(err));
-      if (!err.transactionHash) setProgress(null);
       if (err.transactionHash && !err.transactionSettled) remember(err.transactionHash);
-      if (err.transactionSettled) { remember(null); setProgress(null); }
+      if (err.transactionSettled) remember(null);
+      if (currentStorageKey.current === storageKey) {
+        setError(escrowErrorMessage(err));
+        if (!err.transactionHash || err.transactionSettled) setProgress(null);
+      }
     } finally { writing.current = false; setBusy(false); }
   };
   const confirmPending = async () => {
@@ -255,30 +294,39 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
     const settled = () => { saveTransaction(storageKey, null); if (currentStorageKey.current === storageKey) { setUnresolvedTransaction(null); setProgress(null); } };
     try {
       await confirmEscrowTransaction(unresolvedTransaction); settled();
+      if (currentStorageKey.current !== storageKey) return;
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
+      const updated = refresh({ includeHistory: false });
       try { if (!state?.isHistorical) {
-        // A recovered hash can belong to the ERC20 approval step rather than the deposit.
-        // Reconcile the canonical proposal stream instead of treating that token receipt as an escrow event.
-        const synchronized = await syncEscrowFunding({ proposalId: proposal.id });
-        invalidateFundingDashboardSummaries(queryClient);
-        setHistory(synchronized); setSettlement(synchronized.settlement); setSyncError("");
+        // A recovered hash may be an ERC20 approval, not an escrow event.
+        await synchronizeConfirmed();
       } }
-      catch (err) { setSyncError(`Transaction confirmed. Funding records could not be synchronized: ${err.message}`); }
-      await refresh();
+      catch (err) { if (currentStorageKey.current === storageKey) setSyncError(`Transaction confirmed. Funding records could not be synchronized: ${err.message}`); }
+      await updated;
     }
-    catch (err) { setError(escrowErrorMessage(err)); if (err.transactionSettled) settled(); }
+    catch (err) { if (currentStorageKey.current === storageKey) setError(escrowErrorMessage(err)); if (err.transactionSettled) settled(); }
     finally { writing.current = false; setBusy(false); }
   };
   const synchronize = async (select = false) => {
     if (writing.current || !user?.id || (select && (!walletReady || integrityBlocked)) || unresolvedTransaction) return;
     writing.current = true; setBusy(true); setSyncError("");
     try {
-      const result = await (select ? startEscrowSettlement : syncEscrowFunding)({ proposalId: proposal.id });
+      if (select) {
+        const result = await startEscrowSettlement({ proposalId: proposal.id });
+        if (currentStorageKey.current !== storageKey) return;
+        const updated = refresh({ includeHistory: false });
+        try { await synchronizeConfirmed({}, result); } finally { await updated; }
+      } else {
+        const updated = refresh({ includeHistory: false });
+        try { await synchronizeConfirmed(); } finally { await updated; }
+      }
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
-      invalidateFundingDashboardSummaries(queryClient);
-      setHistory(result); setSettlement(result.settlement); await refresh();
-    } catch (err) { setSyncError(err.message || "Funding status could not be updated. Retry when ready."); }
+    } catch (err) { if (currentStorageKey.current === storageKey) setSyncError(err.message || "Funding status could not be updated. Retry when ready."); }
     finally { writing.current = false; setBusy(false); }
+  };
+  periodicRefresh.current = () => {
+    if (pendingSettlement.has((settlement ?? history?.settlement)?.status) && user?.id && !state?.isHistorical) void synchronize();
+    else void refresh();
   };
   return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit, integrityBlocked }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize(true)} onSync={() => synchronize()}

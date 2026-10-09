@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), supported: true, account: null, user: null }));
@@ -167,4 +167,48 @@ it("blocks deposits and selection on an integrity mismatch while allowing a conf
   expect(screen.getByRole("button", { name: "Select for funding" }).disabled).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Withdraw funds" }));
   expect(action).toHaveBeenCalledWith("withdraw");
+});
+
+
+it.each([false, true])("renders the verified grant sync response without another summary read (recovery=%s)", async recovery => {
+  mocks.sync.mockResolvedValue(model({ problemId: "grant", totalReserved: "50000000000", available: "50000000000",
+    selections: [{ ...proposal, status: "pending", canSelect: false }] }));
+  if (recovery) mocks.write.mockImplementation(async input => {
+    input.onProgress({ status: "pending", transactionHash: hash, action: "select" }); throw new Error("Confirmation unavailable");
+  });
+  render(<OpenFundingPanel problemId="grant" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Select for funding" }));
+  if (recovery) fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
+  await screen.findByText(recovery ? "Transaction confirmed. The grant pool has been refreshed." : "Offer recorded. The researcher has seven days to accept.");
+  expect(mocks.read).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: "Select for funding" })).toBeNull();
+});
+
+it("does not apply a delayed grant sync response to another wallet", async () => {
+  let finish;
+  mocks.sync.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const view = render(<OpenFundingPanel problemId="grant" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Select for funding" }));
+  await waitFor(() => expect(mocks.sync).toHaveBeenCalledTimes(1));
+  mocks.user = { id: `0x${"d".repeat(40)}` }; mocks.account = { ...mocks.account, address: mocks.user.id };
+  mocks.read.mockResolvedValue(model({ selections: [], canDeposit: false }));
+  view.rerender(<OpenFundingPanel problemId="grant" />);
+  await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+  await act(async () => finish(model()));
+  expect(screen.queryByRole("button", { name: "Select for funding" })).toBeNull();
+  expect(screen.queryByText("Offer recorded. The researcher has seven days to accept.")).toBeNull();
+  expect(screen.getByRole("button", { name: "Refresh grant pool" }).disabled).toBe(false);
+});
+
+it("keeps a slow grant read single-flight across polling ticks", async () => {
+  vi.useFakeTimers();
+  let finish;
+  mocks.read.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  try {
+    const view = render(<OpenFundingPanel problemId="slow-grant" />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(mocks.read).toHaveBeenCalledTimes(1);
+    await act(async () => finish(model()));
+    view.unmount();
+  } finally { vi.useRealTimers(); }
 });

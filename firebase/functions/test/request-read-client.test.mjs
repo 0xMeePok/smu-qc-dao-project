@@ -10,6 +10,20 @@ const abi = [{ type: "function", name: "value", inputs: [], outputs: [{ type: "u
 const request = (overrides = {}) => ({ address: "0x1234", abi, functionName: "value", blockNumber: 100n, ...overrides });
 
 describe("request-scoped pinned reads", () => {
+  it("caps actual pinned RPC concurrency and drains the queue after a failed read", async () => {
+    let active = 0, peak = 0;
+    const client = createRequestReadClient({ readContract: async req => {
+      active++; peak = Math.max(peak, active);
+      await new Promise(resolve => setImmediate(resolve));
+      active--;
+      if (req.args[0] === 2n) throw new Error("temporary RPC failure");
+      return req.args[0];
+    } }, { concurrency: 3 });
+    const results = await Promise.allSettled(Array.from({ length: 20 }, (_, index) => client.readContract(request({ args: [BigInt(index)] }))));
+    assert.equal(peak, 3); assert.equal(active, 0);
+    assert.equal(results.filter(result => result.status === "rejected").length, 1);
+    assert.equal(results.at(-1).value, 19n);
+  });
   it("shares concurrent identical reads and normalizes implicit chain and empty arguments", async () => {
     let calls = 0;
     const client = createRequestReadClient({ readContract: async () => ({ calls: ++calls }) }, { chainId: 421614 });
@@ -119,6 +133,20 @@ function completePositionReads(f) {
 }
 
 describe("funder dashboard saved projections", () => {
+  it("falls back to per-record snapshot reads if a display prefetch batch fails", async () => {
+    const f = businessFixture(); await seedDashboardSnapshots(f);
+    const getAll = f.db.getAll;
+    f.db.getAll = async (...refs) => {
+      if (refs.some(ref => ref.path.startsWith("escrowFundingSummaries/"))) throw new Error("batch unavailable");
+      return getAll(...refs);
+    };
+    const counts = instrument(f.client);
+    const result = await getFunderDashboard(f);
+    assert.equal(result.commitments.length, 2);
+    assert.equal(result.totals[0].committed, "100000000000");
+    assert.equal(result.totalsPartial, false);
+    assert.deepEqual(counts, {});
+  });
   it("does not call any RPC and preserves exact commitments and authorization", async () => {
     const f = businessFixture(); await seedDashboardSnapshots(f);
     const counts = instrument(f.client), before = JSON.stringify([...f.db.records]);

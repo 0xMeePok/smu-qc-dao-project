@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
@@ -24,36 +25,26 @@ import {
 /** QCDAO-62 - every submitted proposal with where it stands, without asking anyone. */
 export function ProposalTracker({ onNavigate }) {
   const { user } = useAuth();
-  const generation = useRef(0);
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [status, setStatus] = useState("all");
   const [sort, setSort] = useState("closing");
-  const [summary, setSummary] = useState({});
+  // The overview requests this same verified queue. Switching tabs must not
+  // discard it and repeat every escrow read; wallet changes use a separate key.
+  const queue = useQuery({
+    queryKey: ["developerDashboard", user?.id],
+    queryFn: listMyProposalQueue,
+    enabled: Boolean(user?.id),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const rows = useMemo(() => user?.id
+    ? (queue.data?.items ?? []).filter((item) => item.status !== PROPOSAL_STATUS_DRAFT)
+    : [], [user?.id, queue.data]);
+  const summary = user?.id ? queue.data ?? {} : {};
+  const loading = Boolean(user?.id) && queue.isPending;
+  const error = user?.id && queue.error ? queueError(queue.error) : "";
+  const load = () => queue.refetch({ cancelRefetch: false });
 
-  const load = useCallback(async () => {
-    const request = ++generation.current;
-    setRows([]); setSummary({}); setLoading(Boolean(user?.id)); setError("");
-    if (!user?.id) return;
-    try {
-      const data = await listMyProposalQueue();
-      if (request !== generation.current) return;
-      setRows((data?.items ?? []).filter((item) => item.status !== PROPOSAL_STATUS_DRAFT));
-      setSummary({ unavailableGrantOffers: data?.unavailableGrantOffers ?? 0,
-        unavailableEscrows: data?.unavailableEscrows ?? 0, truncated: data?.truncated });
-    } catch (err) {
-      if (request === generation.current) setError(queueError(err));
-    } finally {
-      if (request === generation.current) setLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    setStatus("all");
-    void load();
-    return () => { generation.current += 1; };
-  }, [load]);
+  useEffect(() => { setStatus("all"); }, [user?.id]);
 
   const visible = useMemo(() => sortProposalRows(filterProposalRows(rows, status), sort), [rows, status, sort]);
   const statuses = useMemo(() => statusOptions(rows), [rows]);
@@ -62,7 +53,7 @@ export function ProposalTracker({ onNavigate }) {
     <div className="table-header">
       <h3>My proposals {rows.length > 0 && <span className="count-pill">{rows.length}</span>}</h3>
       <div className="table-header-actions">
-        <button className="secondary small" type="button" disabled={loading} onClick={load}>Refresh proposals</button>
+        <button className="secondary small" type="button" disabled={queue.isFetching} onClick={load}>Refresh proposals</button>
         <button className="secondary small" type="button" onClick={() => onNavigate("discover")}>Browse opportunities</button>
         <button className="primary small" type="button" onClick={() => onNavigate("create-proposal")}>Publish independent proposal</button>
       </div>

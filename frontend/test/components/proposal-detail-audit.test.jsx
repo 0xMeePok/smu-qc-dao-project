@@ -1,7 +1,7 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ connected: false, anchor: vi.fn(), find: vi.fn(), verify: vi.fn() }));
+const mocks = vi.hoisted(() => ({ connected: false, anchor: vi.fn(), find: vi.fn(), verify: vi.fn(), revisions: vi.fn(async () => []) }));
 const account = `0x${"a".repeat(40)}`;
 vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
@@ -9,7 +9,7 @@ vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RelatedAuditReceiptPane: () => null,
 }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}` } }) }));
-vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.find(...args), withdrawProposal: vi.fn(), listProposalRevisions: async () => [] }));
+vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.find(...args), withdrawProposal: vi.fn(), listProposalRevisions: (...args) => mocks.revisions(...args) }));
 vi.mock("../../src/lib/ownerReviews.js", () => ({
   listOwnerReviews: async () => ({ items: [] }),
   recordOwnerReview: vi.fn(),
@@ -32,7 +32,7 @@ import ProposalDetailPage from "../../src/pages/ProposalDetailPage.jsx";
 const record = { id: "proposal1", researcherId: account, title: "Saved routing study", summary: "Baseline and validation", amount: 1200.25,
   currency: "USDC", category: "quantum-annealing", status: "submitted", createdAt: new Date(),
   audit: { schemaVersion: 1, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, attemptCount: 0, status: "queued", transactionHash: "" } };
-beforeEach(() => { mocks.connected = false; mocks.anchor.mockReset(); mocks.find.mockReset().mockResolvedValue(record);
+beforeEach(() => { mocks.revisions.mockClear(); mocks.connected = false; mocks.anchor.mockReset(); mocks.find.mockReset().mockResolvedValue(record);
   mocks.verify.mockReset().mockRejectedValue(new Error("execution reverted: InvalidInput")); });
 afterEach(() => { vi.useRealTimers(); cleanup(); });
 it("shows a concise rejection banner and clears it on retry without losing the proposal", async () => {
@@ -145,4 +145,23 @@ it("shows a content mismatch on the overview without opening the audit tab", asy
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={() => {}} />);
   expect(await screen.findByText(/This proposal does not match its on-chain record/)).toBeTruthy();
   expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
+});
+
+
+it("verifies eagerly but requests proposal revisions only on first opening Record", async () => {
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+  await screen.findByRole("heading", { name: record.title });
+  await waitFor(() => expect(mocks.verify).toHaveBeenCalled());
+  expect(mocks.revisions).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+  await waitFor(() => expect(mocks.revisions).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+  expect(mocks.revisions).toHaveBeenCalledTimes(1);
+});
+
+it("opens requested revision history immediately for a Record deep link", async () => {
+  render(<ProposalDetailPage proposalId="proposal1" initialTab="record" onNavigate={vi.fn()} />);
+  await waitFor(() => expect(mocks.revisions).toHaveBeenCalledTimes(1));
+  expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");
 });

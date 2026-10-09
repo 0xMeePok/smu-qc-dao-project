@@ -89,6 +89,29 @@ function legacySelectionFixture(changes = {}) {
 }
 
 describe("Canonical escrow wallet integration", () => {
+  it("overlaps wallet reads with live state but waits for all verification before opening the wallet", async () => {
+    let releaseState;
+    const stateGate = new Promise(resolve => { releaseState = resolve; });
+    const f = fixture({ allowance: target, read: request => request.functionName === "state" ? stateGate : undefined });
+    const action = writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" });
+    await new Promise(resolve => setImmediate(resolve));
+    for (const functionName of ["balanceOf", "allowance", "depositorSummary"]) {
+      assert(f.reads.some(request => request.functionName === functionName), `${functionName} starts before state resolves`);
+    }
+    assert(f.reads.every(request => request.blockNumber === 100n));
+    assert.equal(f.writes.length, 0);
+    releaseState(ESCROW_STATE.Open);
+    await action;
+    assert.deepEqual(f.writes.map(request => request.functionName), ["deposit"]);
+  });
+
+  it("does not open the wallet when a concurrent wallet-state read fails", async () => {
+    const f = fixture({ read: request => request.functionName === "depositorSummary"
+      ? Promise.reject(new Error("Wallet state RPC unavailable")) : undefined });
+    await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" }), /Wallet state RPC unavailable/);
+    assert.equal(f.writes.length, 0);
+  });
+
   it("does not offer permanent withdrawal refunds during a reversible funding pause", async () => {
     const f = fixture({ active: false, invalidated: false, paused: true });
     // This also validates the new getters before deployment manifests are regenerated.

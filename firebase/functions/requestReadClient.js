@@ -23,13 +23,28 @@ function keyFor(value) {
  * receipt, transaction, and signing methods pass through unchanged. Rejected
  * reads are evicted so a later attempt can recover. Nothing survives a request.
  */
-export function createRequestReadClient(client, { chainId = client?.chain?.id } = {}) {
+export function createRequestReadClient(client, { chainId = client?.chain?.id, concurrency = 8 } = {}) {
+  if (!Number.isInteger(concurrency) || concurrency < 1) throw new TypeError("A positive read concurrency is required.");
   const reads = new Map(), abiIds = new WeakMap();
   let nextAbiId = 0;
+  let active = 0;
+  const waiting = [];
+  // Limit actual read calls, not just proposals: each verifier fans out into
+  // several independent fields. This queue is local to one request.
+  const schedule = call => new Promise((resolve, reject) => {
+    const run = () => {
+      active++;
+      Promise.resolve().then(call).then(resolve, reject).finally(() => {
+        active--;
+        waiting.shift()?.();
+      });
+    };
+    if (active < concurrency) run(); else waiting.push(run);
+  });
   const share = (key, call) => {
     if (key === null) return call();
     if (reads.has(key)) return reads.get(key);
-    const promise = Promise.resolve().then(call);
+    const promise = schedule(call);
     reads.set(key, promise);
     promise.catch(() => { if (reads.get(key) === promise) reads.delete(key); });
     return promise;

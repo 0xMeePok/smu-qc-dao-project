@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   downloadShouldFail: null,
   posting: null,
   user: null,
+  revisions: vi.fn(async () => []),
+  comparisonMounts: vi.fn(),
 }));
 
 vi.mock("wagmi", () => ({
@@ -39,7 +41,7 @@ vi.mock("../../src/lib/postings.js", () => ({
     if (mocks.postingError) throw mocks.postingError;
     return mocks.posting;
   },
-  listOpportunityRevisions: async () => [],
+  listOpportunityRevisions: (...args) => mocks.revisions(...args),
 }));
 vi.mock("../../src/lib/moderation.js", async (importOriginal) => {
   const actual = await importOriginal();
@@ -76,7 +78,7 @@ vi.mock("../../src/components/MatchingPanel.jsx", () => ({
   MatchingPanel: ({ onNavigate }) => <section id="proposal-funding"><button onClick={() => onNavigate("proposal/proposal1")}>View funded proposal</button></section>,
 }));
 vi.mock("../../src/components/ProposalComparison.jsx", () => ({
-  ProposalComparison: () => <section id="proposal-comparison" />,
+  ProposalComparison: () => { mocks.comparisonMounts(); return <section id="proposal-comparison" />; },
 }));
 
 const { default: PostingDetailPage } = await import("../../src/pages/PostingDetailPage.jsx");
@@ -104,6 +106,9 @@ function publishedPosting(overrides = {}) {
 const downloadButton = () => screen.getByRole("button", { name: /^download$/i });
 
 beforeEach(() => {
+  mocks.revisions.mockClear();
+  mocks.comparisonMounts.mockClear();
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   mocks.downloadArgs = [];
   mocks.saved = [];
   mocks.downloadShouldFail = null;
@@ -204,9 +209,9 @@ describe("proposal funding on a problem detail page", () => {
     const onNavigate = vi.fn();
     render(<PostingDetailPage postingId="posting777" onNavigate={onNavigate} />);
     const review = await screen.findByRole("button", { name: "Review proposals" });
-    const panel = document.getElementById("proposal-comparison");
-    panel.scrollIntoView = vi.fn();
+    expect(document.getElementById("proposal-comparison")).toBeNull();
     fireEvent.click(review);
+    const panel = document.getElementById("proposal-comparison");
     expect(panel.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
     fireEvent.click(screen.getByRole("button", { name: "View funded proposal" }));
     expect(onNavigate).toHaveBeenCalledWith("proposal/proposal1");
@@ -232,9 +237,9 @@ describe("proposal funding on a problem detail page", () => {
     expect(document.getElementById("posting-panel-record").textContent).toContain("posting777");
 
     // An in-page action opens the tab that holds its section.
-    const panel = document.getElementById("proposal-comparison");
-    panel.scrollIntoView = vi.fn();
+    expect(document.getElementById("proposal-comparison")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Review proposals" }));
+    const panel = document.getElementById("proposal-comparison");
     expect(screen.getByRole("tab", { name: "Proposals (2)" }).getAttribute("aria-selected")).toBe("true");
     expect(panel.scrollIntoView).toHaveBeenCalled();
   });
@@ -291,3 +296,33 @@ describe("a removed problem statement", () => {
   });
 });
 
+
+
+it("defers optional comparison and revisions, then retains them while financial state stays mounted", async () => {
+  render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+  await screen.findByRole("heading", { name: "Cold-chain route optimisation" });
+  expect(mocks.comparisonMounts).not.toHaveBeenCalled();
+  expect(mocks.revisions).not.toHaveBeenCalled();
+  expect(document.getElementById("proposal-funding")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Proposals" }));
+  const comparison = document.getElementById("proposal-comparison");
+  expect(comparison).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+  await waitFor(() => expect(mocks.revisions).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  expect(document.getElementById("proposal-comparison")).toBe(comparison);
+  fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+  expect(mocks.revisions).toHaveBeenCalledTimes(1);
+});
+
+
+it("starts optional comparison for a proposal deep link and resets deferred reads for the next posting", async () => {
+  const view = render(<PostingDetailPage postingId="posting777" initialTab="proposals" onNavigate={() => {}} />);
+  await screen.findByRole("heading", { name: "Cold-chain route optimisation" });
+  expect(document.getElementById("proposal-comparison")).toBeTruthy();
+  mocks.posting = publishedPosting({ id: "posting-next", title: "Next problem" });
+  view.rerender(<PostingDetailPage postingId="posting-next" initialTab="overview" onNavigate={() => {}} />);
+  await screen.findByRole("heading", { name: "Next problem" });
+  expect(document.getElementById("proposal-comparison")).toBeNull();
+  expect(mocks.revisions).not.toHaveBeenCalled();
+});

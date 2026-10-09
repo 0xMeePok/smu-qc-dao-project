@@ -2,6 +2,8 @@ import { readOpenFunding, supportsOpenFunding } from "./openFunding.js";
 import { fundingBlockReason, loadFundingContext, readVerifiedFunding } from "./escrowFunding.js";
 import { same } from "./escrowFundingEvents.js";
 import { isIndependentProposal } from "./independentProposal.js";
+import { boundedMap } from "./boundedMap.js";
+import { createRequestReadClient } from "./requestReadClient.js";
 
 const at = (row, name, index) => row?.[name] ?? row?.[index];
 const blocked = row => row?.moderated || ["hidden", "removed"].includes(row?.moderationStatus);
@@ -12,13 +14,14 @@ const ESCROW_WORKFLOW = Object.freeze({ Open: "submitted", Locked: "pending_appr
 
 /** Grant queue state is read-only and scoped to proposals authored by this uid.
  * Stored proposal status remains a delivery projection, not proof of an offer. */
-export async function readGrantQueueMetadata({ db, client, config, uid, docs, parents }) {
+export async function readGrantQueueMetadata({ db, client, config, uid, docs, parents, readDocument }) {
   const grants = new Map(), unavailable = new Set();
   if (!client || !supportsOpenFunding(config)) return { grants, unavailable };
   const candidates = docs.filter(doc => !isIndependentProposal(doc.data()) && doc.data().researcherId === uid && doc.data().status !== "draft"
     && doc.data().fundingTerms && doc.data().audit?.status === "confirmed"
     && parents.get(doc.data().problemId)?.opportunityType === "open-funding");
   if (!candidates.length) return { grants, unavailable };
+  client = createRequestReadClient(client, { chainId: config.chainId });
   let blockNumber;
   try {
     if (await client.getChainId() !== config.chainId) throw new Error("Incorrect chain");
@@ -26,7 +29,7 @@ export async function readGrantQueueMetadata({ db, client, config, uid, docs, pa
     if (blockNumber < 0n) throw new Error("No confirmed block");
   } catch { return { grants, unavailable: new Set(candidates.map(doc => doc.id)) }; }
   const pools = new Map();
-  for (const doc of candidates) {
+  await boundedMap(candidates, async doc => {
     const data = doc.data();
     try {
       if (!pools.has(data.problemId)) {
@@ -39,9 +42,9 @@ export async function readGrantQueueMetadata({ db, client, config, uid, docs, pa
         grants.set(doc.id, { status: "none", canAccept: false, poolAddress: null, tokenAddress: pool.tokenAddress,
           tokenSymbol: pool.tokenSymbol, tokenDecimals: pool.tokenDecimals, amountBaseUnits: String(data.fundingTerms.target),
           acceptanceDeadline: "0", deadlineAt: null, blockNumber: Number(blockNumber) });
-        continue;
+        return;
       }
-      const context = await loadFundingContext({ db, uid, proposalId: doc.id });
+      const context = await loadFundingContext({ db, uid, proposalId: doc.id, readDocument });
       const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
       const [offer, linkedPool] = await Promise.all([
         client.readContract({ address: pool.poolAddress, abi: config.escrow.openFundingPoolAbi,
@@ -61,12 +64,12 @@ export async function readGrantQueueMetadata({ db, client, config, uid, docs, pa
         poolAddress: pool.poolAddress, tokenAddress: pool.tokenAddress, tokenSymbol: pool.tokenSymbol,
         tokenDecimals: pool.tokenDecimals, blockNumber: Number(blockNumber) });
     } catch { unavailable.add(doc.id); }
-  }
+  }, 2);
   return { grants, unavailable, blockNumber };
 }
 
 /** A member's required escrow actions. No keeper/signing path is called here. */
-export async function readEscrowQueueActions({ db, client, config, uid, docs, blockNumber }) {
+export async function readEscrowQueueActions({ db, client, config, uid, docs, blockNumber, readDocument }) {
   const actions = [], unavailable = new Set(), states = new Map();
   if (!client || config?.contractName !== "EscrowAuditRegistry" || !config.escrow?.escrowAbi?.length) return { actions, unavailable, states };
   const candidates = docs.filter(doc => !isIndependentProposal(doc.data()) && doc.data().fundingTerms && doc.data().status !== "draft"
@@ -77,13 +80,14 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
     blockNumber ??= await client.getBlockNumber({ cacheTime: 0 }) - 1n;
     if (blockNumber < 0n) throw new Error("No confirmed block");
   } catch { return { actions, unavailable: new Set(candidates.map(doc => doc.id)), states }; }
-  for (const doc of candidates) {
+  client = createRequestReadClient(client, { chainId: config.chainId });
+  await boundedMap(candidates, async (doc, index) => {
     try {
-      const context = await loadFundingContext({ db, uid, proposalId: doc.id });
+      const context = await loadFundingContext({ db, uid, proposalId: doc.id, readDocument });
       const receipt = await client.getTransactionReceipt({ hash: context.record.audit.transactionHash });
       // Historical deployments retain their own read/refund screens and must
       // never yield new active-deployment actions in this queue.
-      if (!same(receipt.to, config.address)) continue;
+      if (!same(receipt.to, config.address)) return;
       if (receipt.status !== "success" || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > blockNumber
           || !same(receipt.transactionHash, context.record.audit.transactionHash)) throw new Error("Unconfirmed publication");
       const { summary, data, milestones } = await readVerifiedFunding({ client, config, ...context, blockNumber });
@@ -112,13 +116,13 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
       states.set(doc.id, { state: summary.state, workflowStatus, action, approvalDeadline: deadline.toString(),
         deadlineAt: relevantDeadline !== null && relevantDeadline > 0n ? isoDeadline(relevantDeadline) : null,
         blockNumber: Number(blockNumber) });
-      if (action) actions.push({ id: doc.id, problemId: context.record.problemId, title: context.record.title || "Proposal",
+      if (action) actions[index] = { id: doc.id, problemId: context.record.problemId, title: context.record.title || "Proposal",
         posting: { id: context.parent.id, title: context.parent.title || "Posting", status: context.parent.status },
         action, escrowState: summary.state, approvalDeadline: action === "select" ? summary.expiresAt : deadline.toString(),
         deadlineAt: isoDeadline(action === "select" ? summary.expiresAt : deadline),
         workflowStatus: action === "select" ? "submitted" : action === "approve_upfront" ? "pending_approval" : "accepted",
-        blockNumber: Number(blockNumber) });
+        blockNumber: Number(blockNumber) };
     } catch { unavailable.add(doc.id); }
-  }
-  return { actions, unavailable, states };
+  }, 2);
+  return { actions: actions.filter(Boolean), unavailable, states };
 }

@@ -1,9 +1,5 @@
-import CreateProposalPage from "./pages/CreateProposalPage.jsx";
-import CreateIndependentProposalPage from "./pages/CreateIndependentProposalPage.jsx";
-import IndependentListingsPage from "./pages/IndependentListingsPage.jsx";
-import ProposalDetailPage from "./pages/ProposalDetailPage.jsx";
-import FundingApproachDetailPage from "./pages/FundingApproachDetailPage.jsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazyPage, PageLoading } from "./components/LazyPage.jsx";
 import { opportunityTypes } from "./data.js";
 import { POSTING_CATEGORIES } from "./config/postingCategories.js";
 import { ROLES } from "./config/roles.js";
@@ -21,24 +17,9 @@ import { AccessDenied } from "./components/AccessDenied.jsx";
 import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
 import { NetworkBanner } from "./components/NetworkBanner.jsx";
-import ProfilePage from "./pages/ProfilePage.jsx";
-import PublicProfilePage from "./pages/PublicProfilePage.jsx";
 import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
-import {
-  ActionNeeded,
-  MyProblems,
-  ResearcherProposals,
-  EvaluatorQueue,
-  FundingPortfolio,
-} from "./components/RoleViews.jsx";
 import { useActionItems } from "./lib/actionItems.js";
-import AdminPage from "./pages/AdminPage.jsx";
 import HomePage from "./pages/HomePage.jsx";
-import ArchitectureHelpPage from "./pages/ArchitectureHelpPage.jsx";
-import CreatePostingPage from "./pages/CreatePostingPage.jsx";
-import CreateFundingOpportunityPage from "./pages/CreateFundingOpportunityPage.jsx";
-import OpportunityEditPage from "./pages/OpportunityEditPage.jsx";
-import PostingDetailPage from "./pages/PostingDetailPage.jsx";
 import { usePublishedPostings } from "./lib/usePublishedPostings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
 import { toRemovedOpportunityListItem } from "./lib/opportunityPresentation.js";
@@ -62,6 +43,25 @@ import {
   hasActiveDiscoveryFilters,
   parseDiscoveryParams,
 } from "./lib/opportunityDiscovery.js";
+
+const CreateProposalPage = lazyPage(() => import("./pages/CreateProposalPage.jsx"));
+const CreateIndependentProposalPage = lazyPage(() => import("./pages/CreateIndependentProposalPage.jsx"));
+const IndependentListingsPage = lazyPage(() => import("./pages/IndependentListingsPage.jsx"));
+const ProposalDetailPage = lazyPage(() => import("./pages/ProposalDetailPage.jsx"));
+const FundingApproachDetailPage = lazyPage(() => import("./pages/FundingApproachDetailPage.jsx"));
+const ProfilePage = lazyPage(() => import("./pages/ProfilePage.jsx"));
+const PublicProfilePage = lazyPage(() => import("./pages/PublicProfilePage.jsx"));
+const ActionNeeded = lazyPage(() => import("./components/RoleViews.jsx"), "ActionNeeded");
+const MyProblems = lazyPage(() => import("./components/RoleViews.jsx"), "MyProblems");
+const ResearcherProposals = lazyPage(() => import("./components/RoleViews.jsx"), "ResearcherProposals");
+const EvaluatorQueue = lazyPage(() => import("./components/RoleViews.jsx"), "EvaluatorQueue");
+const FundingPortfolio = lazyPage(() => import("./components/RoleViews.jsx"), "FundingPortfolio");
+const AdminPage = lazyPage(() => import("./pages/AdminPage.jsx"));
+const ArchitectureHelpPage = lazyPage(() => import("./pages/ArchitectureHelpPage.jsx"));
+const CreatePostingPage = lazyPage(() => import("./pages/CreatePostingPage.jsx"));
+const CreateFundingOpportunityPage = lazyPage(() => import("./pages/CreateFundingOpportunityPage.jsx"));
+const OpportunityEditPage = lazyPage(() => import("./pages/OpportunityEditPage.jsx"));
+const PostingDetailPage = lazyPage(() => import("./pages/PostingDetailPage.jsx"));
 
 function parseHash() {
   if (typeof window !== "undefined") {
@@ -864,7 +864,7 @@ function AppContent() {
     <>
       <NetworkBanner />
       <SuspensionBanner />
-      <Shell route={section}>{pageComponent}</Shell>
+      <Shell route={section}><Suspense fallback={<PageLoading />}>{pageComponent}</Suspense></Shell>
       <OnboardingModal />
     </>
   );

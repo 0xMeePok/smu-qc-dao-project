@@ -319,3 +319,38 @@ describe("funder dashboard saved accounting", () => {
     assert.equal(result.unavailableDecisions, 2); assert.equal(result.totalsPartial, true);
   });
 });
+
+
+it("prepares a pool deposit without scanning proposal selections or unrelated escrows", async () => {
+  const f = openFundingFixture();
+  let chainChecks = 0;
+  f.client.getChainId = async () => { chainChecks++; return f.config.chainId; };
+  await prepareOpenFundingAction({ ...f, action: "deposit", amountBaseUnits: "1000000" });
+  assert.equal(chainChecks, 1);
+  assert.equal(f.calls.some(call => ["proposalAt", "getOffer", "getProposal", "escrowForProposal"].includes(call.functionName)), false);
+  assert(f.calls.some(call => call.functionName === "getOpportunity"));
+  assert(f.calls.some(call => call.functionName === "availableBalance"));
+});
+
+it("prepares a grant selection by verifying only its target at the same confirmed block", async () => {
+  const f = openFundingFixture();
+  await prepareOpenFundingAction({ ...f, action: "select", proposalId: f.proposals[0].id });
+  const proposals = f.calls.filter(call => call.functionName === "getProposal");
+  assert.equal(proposals.length, 1);
+  assert.deepEqual(proposals[0].args, [f.expected[0].entityId]);
+  assert.equal(f.calls.some(call => call.address === f.addresses[1]), false);
+  assert(f.calls.every(call => call.blockNumber === 100n));
+});
+
+it("bounds grant summary RPC concurrency and preserves selection order", async () => {
+  const f = openFundingFixture(), read = f.client.readContract;
+  let active = 0, maximum = 0;
+  f.client.readContract = async request => {
+    active++; maximum = Math.max(maximum, active);
+    try { await new Promise(resolve => setTimeout(resolve, request.functionName === "getOffer" ? 2 : 1)); return await read(request); }
+    finally { active--; }
+  };
+  const result = await getOpenFundingSummary(f);
+  assert(maximum > 1); assert(maximum <= 8);
+  assert.deepEqual(result.selections.map(row => row.proposalId), f.proposals.map(row => row.id));
+});

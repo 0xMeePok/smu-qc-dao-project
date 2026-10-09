@@ -313,3 +313,40 @@ describe("independent funding receipt synchronization and bounded caches", () =>
     assert.equal(f.db.records.get(outboxPath).status, "idle");
   });
 });
+
+
+it("loads independent portfolio records concurrently with bounded reads and stable masking", async () => {
+  const f = fixture(); await syncIndependentFunding(f.options(funder));
+  const key = independentFundingKey(f.config, f.record.id);
+  const savedSummary = f.db.records.get(`independentFundingSummaries/${key}`);
+  const savedPosition = [...f.db.records.entries()].find(([path]) => path.startsWith("independentFundingPositions/"))[1];
+  for (let index = 0; index < 8; index++) {
+    const proposalId = `portfolio-${index}`;
+    f.db.records.set(`proposals/${proposalId}`, { ...f.record, id: proposalId, title: `Listing ${index}`,
+      ...(index === 2 ? { moderationStatus: "removed" } : {}) });
+    f.db.records.set(`independentFundingSummaries/${independentFundingKey(f.config, proposalId)}`, { ...savedSummary, proposalId });
+    f.db.records.set(`independentFundingPositions/position-${index}`, { ...savedPosition, proposalId });
+  }
+  f.client.getChainId = async () => { throw new Error("Portfolio must not call RPC"); };
+  const collection = f.db.collection;
+  let active = 0, maximum = 0;
+  f.db.collection = name => {
+    const value = collection(name);
+    if (!["proposals", "independentFundingSummaries"].includes(name)) return value;
+    const doc = value.doc;
+    value.doc = id => {
+      const ref = doc(id), get = ref.get;
+      ref.get = async () => {
+        active++; maximum = Math.max(maximum, active);
+        try { await new Promise(resolve => setTimeout(resolve, 1)); return await get(); }
+        finally { active--; }
+      };
+      return ref;
+    };
+    return value;
+  };
+  const result = await readIndependentFundingPortfolio(f.options(funder));
+  assert(maximum > 2); assert(maximum <= 8);
+  assert.deepEqual(result.items.map(row => row.proposalId), [f.record.id, ...Array.from({ length: 8 }, (_, index) => `portfolio-${index}`)]);
+  assert.equal(result.items.find(row => row.proposalId === "portfolio-2").title, "Removed independent listing");
+});

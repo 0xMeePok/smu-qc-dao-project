@@ -73,6 +73,10 @@ export function normaliseOpportunityMetrics(value = {}) {
 
 async function findOpportunityMetrics(postingId, fallback = {}) {
   const snapshot = await getDoc(opportunityMetricsRef(postingId));
+  return opportunityMetricsFromSnapshot(snapshot, fallback);
+}
+
+function opportunityMetricsFromSnapshot(snapshot, fallback = {}) {
   const data = snapshot.exists() ? snapshot.data() : fallback;
   // Historical totals can contain client-authored funding. Do not display that
   // amount while the bounded server migration replaces the projection.
@@ -183,9 +187,15 @@ export async function updatePostingAudit({ postingId, audit }) {
 
 export async function findPosting(postingId, { fromServer = false } = {}) {
   requireFirebase();
+  // Both IDs are known before either read. Capture a metric failure so a
+  // missing/inaccessible posting keeps its original result and error precedence.
+  const metricsRead = getDoc(opportunityMetricsRef(postingId))
+    .then(snapshot => ({ snapshot }), error => ({ error }));
   const snapshot = await (fromServer ? getDocFromServer : getDoc)(postingRef(postingId));
   if (!snapshot.exists()) return null;
-  const metrics = await findOpportunityMetrics(snapshot.id, snapshot.data());
+  const result = await metricsRead;
+  if (result.error) throw result.error;
+  const metrics = opportunityMetricsFromSnapshot(result.snapshot, snapshot.data());
   return postingFromSnapshot(snapshot, metrics);
 }
 

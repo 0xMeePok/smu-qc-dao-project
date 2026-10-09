@@ -60,7 +60,12 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   // withdrawProposal that would revert — and so the anchored reason cannot be
   // edited into something the receipt no longer describes.
   const [anchoredWithdrawal, setAnchoredWithdrawal] = useState(null);
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setActiveTab] = useState(initialTab);
+  const [openedTabs, setOpenedTabs] = useState(() => new Set([initialTab]));
+  const setTab = (next) => {
+    setOpenedTabs(previous => previous.has(next) ? previous : new Set([...previous, next]));
+    setActiveTab(next);
+  };
   const [escrowState, setEscrowState] = useState(null);
   const [fundingRefreshVersion, setFundingRefreshVersion] = useState(0);
   const [author, setAuthor] = useState(null);
@@ -81,6 +86,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
     setAuditVerification(null);
     setLoading(true); setProposal(null); setEscrowState(null); setError(""); setConfirm(false);
     setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab);
+    setOpenedTabs(new Set([initialTab]));
     setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
@@ -344,7 +350,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       <div className={panel("record")} role="tabpanel" id="proposal-panel-record" aria-labelledby="proposal-tab-record">
         <AuditReceipt onVerificationChange={setAuditVerification} anchorId="entity-audit-receipt" entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
         {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
-        {reviewers && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
+        {reviewers && openedTabs.has("record") && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
         {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("overview")); highlightWhenPresent(`comment-${item.commentId}`); }} />}
       </div>
     </article><aside className="context-panel"><span className="eyebrow">{independent ? "Crowdfunding target" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl>
