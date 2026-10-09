@@ -77,6 +77,52 @@ function depositor(value) {
     .map((name, index) => [name, name === "status" ? Number(field(value, name, index)) : BigInt(field(value, name, index))]));
 }
 
+// Request-local cache: every verification and eligibility read uses the same fresh block.
+async function escrowBlockReader(adapters, config) {
+  const block = await adapters.getBlock({ chainId: config.chainId, blockTag: "latest" });
+  if (typeof block?.number !== "bigint" || typeof block?.timestamp !== "bigint") throw new Error("Could not read the current escrow block. Please refresh.");
+  const cache = new Map();
+  const readContract = request => {
+    const key = JSON.stringify([request.address.toLowerCase(), request.functionName, request.args ?? []], (_, value) => typeof value === "bigint" ? value.toString() : value);
+    if (!cache.has(key)) cache.set(key, adapters.readContract({ ...request, chainId: config.chainId, blockNumber: block.number }));
+    return cache.get(key);
+  };
+  return { block, readContract };
+}
+
+function assertProposalContent(registered, expected) {
+  if (!same(field(registered, "proposalHash", 4), expected.proposalHash) || !same(field(registered, "solutionHash", 5), expected.solutionHash)) {
+    throw new Error("Mismatch detected: this proposal differs from its current on-chain record. Refresh before continuing.");
+  }
+}
+
+// Upfront approval needs no token allowance, depositor history, refunds or voting data.
+// Keep full canonical verification and fresh approval guards before wallet simulation.
+async function readUpfrontApproval({ proposal, account, adapters, config }) {
+  deployment(config);
+  const expected = isIndependentProposal(proposal)
+    ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
+    : prepareStoredProposal(proposal, { registryConfig: config });
+  const { block, readContract } = await escrowBlockReader(adapters, config);
+  const [canonical, registered] = await Promise.all([
+    verifyProposalEscrow({ expected, config, readContract }),
+    readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
+  ]);
+  assertProposalContent(registered, expected);
+  const names = ["state", "currentTranche", "selectionId", "approvalDeadline", "ownerApproved", "solutionApproved", "problemOwner", "proposalOwner"];
+  const [values, active] = await Promise.all([
+    Promise.all(names.map(functionName => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName }))),
+    readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
+  ]);
+  const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
+  const needsOwnerApproval = (same(account, snapshot.problemOwner) && !snapshot.ownerApproved)
+    || (same(account, snapshot.proposalOwner) && !snapshot.solutionApproved);
+  return { ...canonical, selectionId: snapshot.selectionId, can: {
+    approveSelection: Number(snapshot.state) === ESCROW_STATE.Locked && Number(snapshot.currentTranche) === 0
+      && active && block.timestamp < BigInt(snapshot.approvalDeadline) && needsOwnerApproval,
+  } };
+}
+
 /** A single-block snapshot, verified through the registry AND factory mappings.
  * Amounts and timestamps are bigint; state/currentTranche/decimals/feeBps are numbers.
  */
@@ -89,14 +135,7 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
     ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
     : prepareStoredProposal(proposal, { registryConfig: config });
   const walletAddress = account ? requireAddress(account, "Wallet address") : null;
-  const block = await adapters.getBlock({ chainId: config.chainId, blockTag: "latest" });
-  if (typeof block?.number !== "bigint" || typeof block?.timestamp !== "bigint") throw new Error("Could not read the current escrow block. Please refresh.");
-  const cache = new Map();
-  const readContract = request => {
-    const key = JSON.stringify([request.address.toLowerCase(), request.functionName, request.args ?? []], (_, value) => typeof value === "bigint" ? value.toString() : value);
-    if (!cache.has(key)) cache.set(key, adapters.readContract({ ...request, chainId: config.chainId, blockNumber: block.number }));
-    return cache.get(key);
-  };
+  const { block, readContract } = await escrowBlockReader(adapters, config);
   const canonical = await verifyProposalEscrow({ expected, config, readContract });
   const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
   const names = ["state", "platformSigner", "problemOwner", "proposalOwner", "fundingTarget", "tokenDecimals", "funderVoting",
@@ -121,9 +160,7 @@ export async function readEscrow({ proposal, account, adapters = createWagmiEscr
       read("depositorSummary", [walletAddress]),
     ]) : null,
   ]);
-  if (!same(field(registered, "proposalHash", 4), expected.proposalHash) || !same(field(registered, "solutionHash", 5), expected.solutionHash)) {
-    throw new Error("Mismatch detected: this proposal differs from its current on-chain record. Refresh before continuing.");
-  }
+  assertProposalContent(registered, expected);
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
   let grantEscrow = false;
   if (proposal.opportunityType === "open-funding" && config.escrow.openFundingPoolAbi?.length
@@ -279,7 +316,7 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
     if (!["claimRefund", "expire", "refundInvalidated"].includes(action)) assertActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
   }
   const walletAddress = requireAddress(account, "Connected wallet");
-  const snapshot = await readEscrow({ proposal, account: walletAddress, adapters, config });
+  const snapshot = await (action === "approveSelection" ? readUpfrontApproval : readEscrow)({ proposal, account: walletAddress, adapters, config });
   if (!Object.hasOwn(snapshot.can, action) || !snapshot.can[action]) throw new Error("This escrow action is not available to the connected wallet in the current state. Refresh and try again.");
   const send = async (functionName, args, { address = snapshot.address, abi = config.escrow.escrowAbi, label = functionName } = {}) => {
     let transactionHash;

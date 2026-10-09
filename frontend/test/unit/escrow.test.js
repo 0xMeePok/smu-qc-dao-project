@@ -89,6 +89,75 @@ function legacySelectionFixture(changes = {}) {
 }
 
 describe("Canonical escrow wallet integration", () => {
+  it("approves upfront for either owner with fewer reads and no unrelated wallet/reporting requests", async t => {
+    const omitted = ["balanceOf", "allowance", "depositorSummary", "hasVoted", "totalRefunded", "refundAvailableAt", "yesWeight", "noWeight", "allowedTokens", "decimals"];
+    for (const account of [owner, researcher]) {
+      const full = fixture({ state: { state: ESCROW_STATE.Locked } });
+      const fullSnapshot = await readEscrow({ ...full, account });
+      assert.equal(fullSnapshot.can.approveSelection, true);
+      const f = fixture({ state: { state: ESCROW_STATE.Locked }, read: request => {
+        if (omitted.includes(request.functionName)) throw new Error(`Unrelated read: ${request.functionName}`);
+      } });
+      await writeEscrowAction({ ...f, account, action: "approveSelection", selectionId });
+      assert.deepEqual(f.writes.map(request => [request.functionName, request.args]), [["approveSelection", [selectionId]]]);
+      t.diagnostic(`${f.reads.length} approval reads versus ${full.reads.length} dashboard reads`);
+      assert(f.reads.length < full.reads.length, `${f.reads.length} approval reads versus ${full.reads.length} dashboard reads`);
+      assert(f.reads.every(request => request.blockNumber === 100n && request.chainId === 421614));
+      assert.equal(f.reads.filter(request => request.functionName === "problemOwner").length, 1);
+      assert.equal(f.reads.filter(request => request.functionName === "proposalOwner").length, 1);
+    }
+  });
+
+  it("does not open the approval wallet before canonical, content and eligibility checks settle", async () => {
+    for (const blockedName of ["milestoneAt", "getProposal", "isFundingActive"]) {
+      let releaseRead;
+      const gate = new Promise(resolve => { releaseRead = resolve; });
+      const base = escrowClient(escrowRecord());
+      const f = fixture({ state: { state: ESCROW_STATE.Locked }, read: request => request.functionName === blockedName
+        ? gate.then(() => blockedName === "isFundingActive" ? true : base.readContract(request)) : undefined });
+      const action = writeEscrowAction({ ...f, account: owner, action: "approveSelection", selectionId });
+      await new Promise(resolve => setImmediate(resolve));
+      assert(f.reads.some(request => request.functionName === blockedName));
+      // Content verification starts alongside canonical reads, even if a milestone is slow.
+      assert(f.reads.some(request => request.functionName === "getProposal"));
+      assert.equal(f.writes.length, 0);
+      releaseRead();
+      await action;
+      assert.equal(f.writes.length, 1);
+    }
+  });
+
+  it("preserves upfront approval eligibility for both owners and blocks stale selections", async () => {
+    for (const changes of [
+      { account: owner, state: { ownerApproved: true } },
+      { account: researcher, state: { solutionApproved: true } },
+      { account: funder }, { active: false },
+      { timestamp: 1_900_086_400n }, { state: { state: ESCROW_STATE.Open } },
+      { state: { state: ESCROW_STATE.Active } }, { state: { currentTranche: 1n } },
+      { selected: zeroHash },
+    ]) {
+      const f = fixture({ ...changes, state: { state: ESCROW_STATE.Locked, ...changes.state } });
+      await assert.rejects(writeEscrowAction({ ...f, account: changes.account ?? owner, action: "approveSelection",
+        selectionId: changes.selected ?? selectionId }), /not available|selected proposal changed/);
+      assert.equal(f.writes.length, 0);
+    }
+  });
+
+  it("still blocks upfront approval for canonical/content mismatches or failed required reads", async () => {
+    for (const read of [
+      request => request.functionName === "escrowForProposal" ? funder : undefined,
+      request => request.functionName === "fundingTarget" ? 7n : undefined,
+      request => request.functionName === "proposalOwner" ? funder : undefined,
+      request => request.functionName === "getProposal" ? { proposalHash: zeroHash, solutionHash: zeroHash } : undefined,
+      request => request.functionName === "milestoneAt" ? { bps: 1n, reviewWindow: 1n, descriptionHash: zeroHash, grossAmount: 1n } : undefined,
+      request => request.functionName === "ownerApproved" ? Promise.reject(new Error("Approval RPC unavailable")) : undefined,
+    ]) {
+      const f = fixture({ state: { state: ESCROW_STATE.Locked }, read });
+      await assert.rejects(writeEscrowAction({ ...f, account: owner, action: "approveSelection", selectionId }), /Mismatch|Approval RPC unavailable/);
+      assert.equal(f.writes.length, 0);
+    }
+  });
+
   it("overlaps wallet reads with live state but waits for all verification before opening the wallet", async () => {
     let releaseState;
     const stateGate = new Promise(resolve => { releaseState = resolve; });
