@@ -1,3 +1,4 @@
+import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
@@ -131,11 +132,8 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
     } else await refresh(); // Rolling deployments may still return a legacy sync response.
   };
   useEffect(() => { setData(null); setError(""); setNotice(""); setAmount(""); setWithdrawalAmount(""); setPending(stored(key)); void refresh(); return () => { ++version.current; inFlight.current = null; }; }, [refresh, key]);
-  useEffect(() => {
-    if (!openFundingSupported()) return undefined;
-    const timer = setInterval(() => { if (!actionBusy.current) void refresh(); }, 20_000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+  useLiveActivity({ problemId, channel: "funding", identity: user?.id, onRefresh: refresh,
+    enabled: Boolean(problemId) && openFundingSupported(), blocked: busy || loading });
   const walletReady = Boolean(user?.id && isConnected && same(address, user.id) && chainId === AUDIT_REGISTRY_CONFIG.chainId);
   const remember = value => { save(key, value); if (currentPanel()) setPending(value); };
   const act = async (action, selectedProposalId) => {

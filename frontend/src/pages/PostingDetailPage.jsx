@@ -1,5 +1,6 @@
+import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { proposalBlockReason } from "../lib/proposalValidation.js";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -149,6 +150,9 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
   const { isAuthenticated, user } = useAuth();
   const { address: connectedAddress, isConnected } = useAccount();
   const [posting, setPosting] = useState(null);
+  const liveScope = `${postingId}:${user?.id || ""}`;
+  const activeLiveScope = useRef(liveScope); activeLiveScope.current = liveScope;
+  useEffect(() => { activeLiveScope.current = liveScope; return () => { activeLiveScope.current = null; }; }, [liveScope]);
   const [matchingRefresh, setMatchingRefresh] = useState(0);
   const [tab, setActiveTab] = useState(initialTab);
   const [openedTabs, setOpenedTabs] = useState(() => new Set([initialTab]));
@@ -222,6 +226,15 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
       .catch(() => { if (!cancelled) setPoster(null); });
     return () => { cancelled = true; };
   }, [posting?.ownerId]);
+
+  const reloadPosting = async () => {
+    try {
+      const found = await findPosting(postingId, { fromServer: true });
+      if (activeLiveScope.current === liveScope) setPosting(found && isRemovedProblem(found) ? removedProblemShell(found) : found);
+    } catch { /* Keep the current record visible during a temporary read failure. */ }
+  };
+  useLiveActivity({ problemId: postingId, channel: "all", identity: user?.id, onRefresh: reloadPosting,
+    enabled: Boolean(posting), blocked: auditBusy || withdrawing });
 
   const download = async (attachment) => {
     setError(null);
@@ -559,7 +572,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
 
           {showCollaboration && (
             <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
-              {isOpenFunding ? <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} onNavigate={onNavigate} /> : <>
+              {isOpenFunding ? <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} onNavigate={onNavigate} onChange={reloadPosting} /> : <>
                 <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
                 <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
               </>}

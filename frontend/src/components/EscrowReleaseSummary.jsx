@@ -1,3 +1,4 @@
+import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext.jsx";
 import { escrowFundingAmount, getEscrowFundingSummary } from "../lib/escrowFunding.js";
@@ -11,11 +12,11 @@ export function EscrowReleaseSummary({ onNavigate }) {
   // The wallet key prevents
   // another account's payments from appearing during sign-in or switching.
   const payments = useQuery({
+    ...LIVE_DASHBOARD_OPTIONS,
     queryKey: ["escrowFundingSummary", user?.id?.toLowerCase()],
     queryFn: getEscrowFundingSummary,
     enabled: Boolean(user?.id),
     staleTime: 0,
-    refetchOnWindowFocus: false,
     retry: false,
   });
   const { data } = payments;

@@ -1,3 +1,4 @@
+import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -19,21 +20,19 @@ export function FunderDashboard({ onNavigate }) {
   const { user } = useAuth();
   const wallet = user?.id?.toLowerCase();
   const dashboard = useQuery({
+    ...LIVE_DASHBOARD_OPTIONS,
     queryKey: ["funderDashboard", wallet],
     queryFn: () => getFunderDashboard(),
     enabled: Boolean(wallet),
     staleTime: 0,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
     retry: false,
   });
   const approaches = useQuery({
+    ...LIVE_DASHBOARD_OPTIONS,
     queryKey: ["funderSentApproaches", wallet],
     queryFn: () => listFundingApproaches(),
     enabled: Boolean(wallet),
     staleTime: 0,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
     retry: false,
   });
   const data = dashboard.data;

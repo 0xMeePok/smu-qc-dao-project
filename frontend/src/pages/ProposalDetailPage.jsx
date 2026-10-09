@@ -1,3 +1,4 @@
+import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
 import { EscrowFundingPanel } from "../components/EscrowFundingPanel.jsx";
@@ -78,6 +79,9 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       setError("Funding or matching has started. This proposal can no longer be withdrawn.");
     }
   }, [confirm, proposal?.matching, proposal?.problemMatching, proposal?.fundingTerms, escrowState, anchoredWithdrawal, withdrawing]);
+  const liveScope = `${proposalId}:${user?.id || ""}`;
+  const activeLiveScope = useRef(liveScope); activeLiveScope.current = liveScope;
+  useEffect(() => { activeLiveScope.current = liveScope; return () => { activeLiveScope.current = null; }; }, [liveScope]);
   const anchorInFlight = useRef(new Set());
   const activeProposalId = useRef(proposalId);
   activeProposalId.current = proposalId;
@@ -139,11 +143,13 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   }, [proposalId, Boolean(proposal), auditBusy, proposal?.audit?.status]);
   // Keeps the evaluation badges in step with a recommendation just filed below.
   const reloadProposal = () => findProposal(proposalId, { fromServer: true }).then((current) => {
-    if (current) setProposal((previous) => ({ ...current,
+    if (activeLiveScope.current === liveScope && current) setProposal((previous) => ({ ...current,
       matching: mergeMatchingState(previous?.matching, current.matching),
       problemMatching: current.problemMatching || previous?.problemMatching,
     }));
   }).catch(() => { /* The badges catch up on the next load. */ });
+  useLiveActivity({ proposalId, channel: "all", identity: user?.id, onRefresh: reloadProposal,
+    enabled: Boolean(proposal), blocked: auditBusy || withdrawing });
   const withdraw = async () => {
     const withdrawalReason = (anchoredWithdrawal?.reason ?? reason).trim();
     if (!anchoredWithdrawal) {
@@ -334,10 +340,10 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
         {isOpenFunding && <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate}
-          onChange={(change) => { if (activeProposalId.current === change.proposalId) setFundingRefreshVersion(previous => previous + 1); }} />}
-        {independent ? <IndependentFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState}
+          onChange={(change) => { if (activeProposalId.current === change.proposalId) { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); } }} />}
+        {independent ? <IndependentFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal}
           initialTransaction={pendingFundingTransaction} refreshVersion={fundingRefreshVersion} />
-          : proposal.fundingTerms ? <EscrowFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} refreshVersion={fundingRefreshVersion} /> : !isOpenFunding && <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
+          : proposal.fundingTerms ? <EscrowFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal} refreshVersion={fundingRefreshVersion} /> : !isOpenFunding && <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
           if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...current.matching, ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
         }} />}

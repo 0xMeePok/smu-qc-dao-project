@@ -1,3 +1,4 @@
+import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
@@ -98,7 +99,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
   </section>;
 }
 
-export function IndependentFundingPanel({ proposal, onStateChange, refreshVersion = 0, initialTransaction = null, integrityBlocked = false }) {
+export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, refreshVersion = 0, initialTransaction = null, integrityBlocked = false }) {
   const { user } = useAuth(), { address, isConnected, chainId } = useAccount();
   const queryClient = useContext(QueryClientContext);
   const [snapshot, setSnapshot] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
@@ -122,6 +123,8 @@ export function IndependentFundingPanel({ proposal, onStateChange, refreshVersio
   useEffect(() => { setSnapshot(null); setNotice(""); setProgress(null); setBusy(false); setUnresolved(initialTransaction || pendingTransaction(key));
     if (initialTransaction) savePending(key, initialTransaction); void load();
     return () => { ++version.current; }; }, [load, key, refreshVersion]);
+  useLiveActivity({ proposalId: proposal.id, channel: "funding", identity: user?.id, onRefresh: load,
+    enabled: Boolean(proposal.id), blocked: busy || loading });
   const currentPanel = () => alive.current && activeKey.current === key;
   const remember = value => { savePending(key, value); if (currentPanel()) setUnresolved(value); };
   const sync = async (transactionHash, action) => {
@@ -136,6 +139,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, refreshVersio
         ++version.current; setSnapshot(next); setLoading(false); setError(""); change.current?.(next);
       } else await load(); // Approvals and older backend responses still need a fresh read.
     }
+    if (currentPanel()) onConfirmed?.();
     queryClient?.invalidateQueries({ queryKey: ["actionItems"] });
     queryClient?.invalidateQueries({ queryKey: ["developerDashboard"] });
   };

@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), user: { id: "researcher" } }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
@@ -102,4 +102,23 @@ it("shares an in-flight summary request between simultaneous mounts", async () =
     <EscrowReleaseSummary onNavigate={() => {}} />
   </QueryClientProvider>);
   await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(1));
+});
+
+
+it("refreshes payment changes automatically while visible and catches up after returning", async () => {
+  vi.useFakeTimers(); focusManager.setFocused(true);
+  try {
+    renderSummary();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(screen.getByText("Upfront 50%: paid · Final 50%: pending")).toBeTruthy();
+    mocks.fetch.mockResolvedValue({ items: [{ ...item, finalReleased: true, totalReleased: "50000000000", outstandingBalance: "0" }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(screen.getByText("Upfront 50%: paid · Final 50%: paid")).toBeTruthy();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    act(() => focusManager.setFocused(false));
+    await act(async () => { await vi.advanceTimersByTimeAsync(180000); });
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    await act(async () => { focusManager.setFocused(true); await vi.advanceTimersByTimeAsync(10); });
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+  } finally { cleanup(); queryClient.clear(); focusManager.setFocused(undefined); vi.useRealTimers(); }
 });

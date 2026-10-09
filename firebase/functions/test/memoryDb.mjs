@@ -1,14 +1,22 @@
+import { FieldValue } from "firebase-admin/firestore";
 export function memoryDb(initial = {}) {
   const records = new Map(Object.entries(initial));
   let reads = 0;
   let queue = Promise.resolve();
+  const incrementType = FieldValue.increment(1).constructor;
+  const write = (path, data, merge = false) => {
+    const previous = records.get(path) || {};
+    const resolved = Object.fromEntries(Object.entries(data).map(([key, value]) => [key,
+      value instanceof incrementType ? (typeof previous[key] === "number" ? previous[key] : 0) + value.operand : value]));
+    records.set(path, merge ? { ...previous, ...resolved } : resolved);
+  };
   const snapshot = (path) => {
     const value = records.get(path);
     return { id: path.split("/").at(-1), ref: reference(path), exists: records.has(path), data: () => value };
   };
   const reference = (path) => ({ path, id: path.split("/").at(-1),
     get: async () => { reads++; return snapshot(path); },
-    set: async (data) => records.set(path, data),
+    set: async (data, options) => write(path, data, options?.merge),
     update: async (data) => records.set(path, { ...(records.get(path) || {}), ...data }),
     delete: async () => records.delete(path),
   });
@@ -40,7 +48,7 @@ export function memoryDb(initial = {}) {
         const writes = [];
         return Promise.resolve(fn({ get: (ref) => ref.get(),
           create: (ref, data) => { if (records.has(ref.path)) throw new Error("Document already exists"); writes.push(() => records.set(ref.path, data)); },
-          set: (ref, data) => writes.push(() => records.set(ref.path, data)),
+          set: (ref, data, options) => writes.push(() => write(ref.path, data, options?.merge)),
           update: (ref, data) => writes.push(() => records.set(ref.path, { ...records.get(ref.path), ...data })),
           delete: (ref) => writes.push(() => records.delete(ref.path)),
         })).then((result) => { writes.forEach((write) => write()); return result; });

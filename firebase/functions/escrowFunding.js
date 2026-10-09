@@ -1,3 +1,4 @@
+import { signalFundingChange } from "./activitySignals.js";
 import { configuredFundingToken, fundingAmountUnits } from "./escrowProposalTerms.js";
 import { fundingAmountError } from "./fundingAmountPolicy.js";
 import { randomUUID } from "node:crypto";
@@ -200,6 +201,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     upfrontReleased: milestoneValue(milestones[0], "paid", 6) === true,
     finalReleased: milestoneValue(milestones.at(-1), "paid", 6) === true, active, invalidated,
     proposalEntityId: expected.entityId, pendingProposalEntityId,
+    fundingActivityVersion: Number(count),
     timestamp: Number(block.timestamp), blockNumber: Number(blockNumber), currentTranche: Number(data.currentTranche) };
   summary.fundingBlockReason = fundingBlockReason(record, parent, summary, summary.timestamp * 1000, { deposit: true });
   return { expected, escrow, data, summary, milestones, anchorCount: Number(count) };
@@ -572,9 +574,11 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
           && !((selectionConsumed || unpaidTerminal) && same(current.data().selectionId, job.selectionId)),
         lastTransactionHash: lastHash, reconciliation, settlement, leaseUntil: timestamp(0),
         status: terminal && complete ? "complete" : "pending", nextAttemptAt: timestamp(now.toMillis() + 60_000), updatedAt: now });
-      if (complete && Number(savedSummary?.data()?.blockNumber ?? -1) <= verified.summary.blockNumber) tx.set(summaryRef, {
-        ...verified.summary, transactionHash: lastHash, confirmedAt: now.toDate().toISOString(), reconciliation,
-      });
+      if (complete && Number(savedSummary?.data()?.blockNumber ?? -1) <= verified.summary.blockNumber) {
+        const snapshot = { ...verified.summary, transactionHash: lastHash, confirmedAt: now.toDate().toISOString(), reconciliation };
+        tx.set(summaryRef, snapshot);
+        signalFundingChange(tx, db, savedSummary?.data(), snapshot);
+      }
       if (!independent && !isOpenFunding(context.record, context.parent) && complete && verified.summary.upfrontReleased && parent?.exists && parent.data().acceptedProposalId !== proposalId) {
         tx.update(parentRef, { acceptedProposalId: proposalId, hasAcceptedSolution: true, updatedAt: now });
       }

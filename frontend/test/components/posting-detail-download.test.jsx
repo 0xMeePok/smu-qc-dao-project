@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const OWNER = `0x${"8".repeat(40)}`;
 const VIEWER = `0x${"9".repeat(40)}`;
 
+const live = vi.hoisted(() => ({ channels: {} }));
+vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.channels[options.channel] = options; } }));
 const mocks = vi.hoisted(() => ({
   downloadArgs: [],
   saved: [],
@@ -325,4 +327,16 @@ it("starts optional comparison for a proposal deep link and resets deferred read
   await screen.findByRole("heading", { name: "Next problem" });
   expect(document.getElementById("proposal-comparison")).toBeNull();
   expect(mocks.revisions).not.toHaveBeenCalled();
+});
+
+
+it("refreshes a problem record on remote activity while retaining its selected tab", async () => {
+  mocks.posting = publishedPosting();
+  render(<PostingDetailPage postingId="posting777" onNavigate={vi.fn()} />);
+  await screen.findByRole("heading", { name: mocks.posting.title });
+  fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+  mocks.posting = publishedPosting({ title: "Updated cold-chain study" });
+  await act(async () => { await live.channels.all.onRefresh(); });
+  expect(screen.getByRole("heading", { name: "Updated cold-chain study" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");
 });

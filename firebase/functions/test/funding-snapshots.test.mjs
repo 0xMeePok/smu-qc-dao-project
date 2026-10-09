@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import { signalActivity } from "../activitySignals.js";
 import { memoryDb } from "./memoryDb.mjs";
 import { saveFundingSnapshot, OPEN_FUNDING_SELECTIONS } from "../fundingSnapshots.js";
 import { deploymentKey } from "../escrowFunding.js";
@@ -42,4 +43,51 @@ it("older pool and selection snapshots cannot restore a spent reservation", asyn
   const prefix = deploymentKey(f.config);
   assert.equal(f.db.records.get(`${OPEN_FUNDING_SUMMARIES}/${prefix}_${f.problemId}`).totalReserved, "0");
   assert.equal(f.db.records.get(`${OPEN_FUNDING_SELECTIONS}/${prefix}_${f.proposals[0].id}`).status, "accepted");
+});
+
+it("emits atomic funding counters only for meaningful verified changes, not refreshes or old blocks", async () => {
+  const db = memoryDb();
+  const options = { db, collection: "escrowFundingSummaries", id: "current" };
+  const initial = { proposalId: "p", problemId: "problem", blockNumber: 100, totalDeposited: "100", totalReleased: "0", fundingActivityVersion: 1 };
+  await saveFundingSnapshot({ ...options, snapshot: initial });
+  for (const path of ["proposals/p/activity/latest", "problems/problem/activity/latest"]) assert.deepEqual(db.records.get(path), { funding: 1 });
+  await saveFundingSnapshot({ ...options, snapshot: { ...initial, blockNumber: 101, timestamp: 123, confirmedAt: "later", snapshotVerified: true } });
+  assert.equal(db.records.get("proposals/p/activity/latest").funding, 1);
+  await saveFundingSnapshot({ ...options, snapshot: { ...initial, blockNumber: 99, totalDeposited: "1" } });
+  assert.equal(db.records.get("proposals/p/activity/latest").funding, 1);
+  await saveFundingSnapshot({ ...options, snapshot: { ...initial, blockNumber: 102, fundingActivityVersion: 2 } });
+  assert.equal(db.records.get("proposals/p/activity/latest").funding, 2, "Anchored milestone or approval changes invalidate even without a balance change");
+  await saveFundingSnapshot({ ...options, snapshot: { ...initial, blockNumber: 103, fundingActivityVersion: 2, totalReleased: "50" } });
+  assert.equal(db.records.get("proposals/p/activity/latest").funding, 3);
+});
+
+it("grant-pool snapshots ignore caller permissions but signal a reservation change to both affected pages", async () => {
+  const f = openFundingFixture();
+  const initial = await getOpenFundingSummary(f);
+  const path = `problems/${f.problemId}/activity/latest`;
+  const counter = f.db.records.get(path).funding;
+  await saveOpenFundingSnapshot({ ...f, summary: { ...initial, blockNumber: initial.blockNumber,
+    timestamp: initial.timestamp + 10, canCreate: true, canDeposit: false, canSelect: false, canWithdraw: true } });
+  assert.equal(f.db.records.get(path).funding, counter);
+  f.select(0);
+  await getOpenFundingSummary(f);
+  assert.ok(f.db.records.get(path).funding > counter);
+  assert.ok(f.db.records.get(`proposals/${f.proposals[0].id}/activity/latest`).funding > 0);
+});
+
+
+it("separate activity counters merge atomically and roll back with a failed transaction", async () => {
+  const db = memoryDb();
+  const entity = { proposalId: "atomic", problemId: "parent" };
+  await Promise.all(["comments", "funding", "comments"].map(topic => db.runTransaction(async tx => {
+    signalActivity(tx, db, entity, topic);
+  })));
+  for (const path of ["proposals/atomic/activity/latest", "problems/parent/activity/latest"]) {
+    assert.deepEqual(db.records.get(path), { comments: 2, funding: 1 });
+  }
+  await assert.rejects(db.runTransaction(async tx => {
+    signalActivity(tx, db, entity, "funding");
+    throw new Error("Snapshot write failed");
+  }), /Snapshot write failed/);
+  assert.deepEqual(db.records.get("proposals/atomic/activity/latest"), { comments: 2, funding: 1 });
 });

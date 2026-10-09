@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+const live = vi.hoisted(() => ({ options: null }));
+vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(), load: vi.fn(), save: vi.fn(), prepare: vi.fn(), sync: vi.fn(), history: vi.fn(), start: vi.fn(), account: null, user: null }));
 vi.mock("../../src/lib/escrowFunding.js", async importOriginal => ({ ...await importOriginal(),
   prepareEscrowDeposit: (...args) => mocks.prepare(...args), syncEscrowFunding: (...args) => mocks.sync(...args),
@@ -40,14 +42,16 @@ function ActionCount({ read }) {
 
 describe("wallet escrow funding panel", () => {
   it("refreshes an active action count after the owner confirms upfront approval", async () => {
+    const confirmed = vi.fn();
     let total = 1;
     mocks.read.mockResolvedValue(model({ state: 1, roles: { problemOwner: true }, can: { approveSelection: true } }));
     mocks.write.mockImplementation(async () => { total = 0; return { transactionHash: hash }; });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
-    render(<QueryClientProvider client={client}><ActionCount read={async () => ({ total })} /><EscrowFundingPanel proposal={proposal} /></QueryClientProvider>);
+    render(<QueryClientProvider client={client}><ActionCount read={async () => ({ total })} /><EscrowFundingPanel proposal={proposal} onConfirmed={confirmed} /></QueryClientProvider>);
     await screen.findByText("Verified action count: 1");
     fireEvent.click(await screen.findByRole("button", { name: "Approve upfront payment" }));
     await screen.findByText("Verified action count: 0");
+    expect(confirmed).toHaveBeenCalledTimes(1);
     expect(mocks.write).toHaveBeenCalledTimes(1);
     client.clear();
   });
@@ -495,4 +499,20 @@ it("keeps invalid precision, tiny partial amounts and dusty remainders out of th
   fireEvent.change(input, { target: { value: "19" } });
   expect(screen.queryByRole("alert")).toBeNull();
   expect(fund.disabled).toBe(false);
+});
+
+
+it("refreshes verified balances and history on live activity without clearing contribution input", async () => {
+  const confirmed = vi.fn();
+  render(<EscrowFundingPanel proposal={proposal} onConfirmed={confirmed} />);
+  await screen.findByText("Open for funding");
+  fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "25" } });
+  mocks.read.mockResolvedValue(model({ totalDeposited: 25000000n, remaining: 975000000n }));
+  await act(async () => { await live.options.onRefresh(); });
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+  expect(mocks.history).toHaveBeenCalledTimes(2);
+  expect(screen.getByLabelText("Contribution (USDC)").value).toBe("25");
+  expect(live.options).toMatchObject({ proposalId: proposal.id, identity: account, channel: "funding", blocked: false });
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(confirmed).not.toHaveBeenCalled();
 });

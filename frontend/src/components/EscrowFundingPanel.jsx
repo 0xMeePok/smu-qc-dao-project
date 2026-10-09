@@ -1,3 +1,4 @@
+import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
@@ -151,7 +152,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   </section>;
 }
 
-export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0, integrityBlocked = false }) {
+export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refreshVersion = 0, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
   const { address, isConnected, chainId } = useAccount();
@@ -166,7 +167,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   const [history, setHistory] = useState(null), [historyError, setHistoryError] = useState("");
   const [syncError, setSyncError] = useState(""), [settlement, setSettlement] = useState(null);
   const [notice, setNotice] = useState("");
-  const current = useRef({ proposal, onStateChange }); current.current = { proposal, onStateChange };
+  const current = useRef({ proposal, onStateChange, onConfirmed }); current.current = { proposal, onStateChange, onConfirmed };
   const currentStorageKey = useRef(storageKey); currentStorageKey.current = storageKey;
   const generation = useRef(0), writing = useRef(false), periodicRefresh = useRef(null);
   useEffect(() => { setUnresolvedTransaction(savedTransaction(storageKey)); }, [storageKey]);
@@ -219,12 +220,14 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   useEffect(() => {
     setState(null); setEvidence(null); setSettlement(null); setHistory(null);
     refresh();
-    const timer = setInterval(() => { if (!writing.current) periodicRefresh.current?.(); }, 30_000);
+    // Preserve recovery of a known platform settlement; ordinary reads use live activity.
+    const timer = setInterval(() => { if (!writing.current && document.visibilityState !== "hidden") periodicRefresh.current?.(); }, 30_000);
     return () => { generation.current += 1; clearInterval(timer); };
   }, [refresh, refreshVersion]);
   const recordSynchronized = result => {
     invalidateFundingDashboardSummaries(queryClient);
     setHistory(result); setSettlement(result.settlement); setSyncError("");
+    current.current.onConfirmed?.();
   };
   const synchronizeConfirmed = async (args = {}, initialResult) => {
     const key = storageKey;
@@ -328,8 +331,9 @@ export function EscrowFundingPanel({ proposal, onStateChange, refreshVersion = 0
   };
   periodicRefresh.current = () => {
     if (pendingSettlement.has((settlement ?? history?.settlement)?.status) && user?.id && !state?.isHistorical) void synchronize();
-    else void refresh();
   };
+  useLiveActivity({ proposalId: proposal.id, channel: "funding", identity: user?.id, onRefresh: refresh,
+    enabled: Boolean(proposal.id), blocked: busy || loading });
   return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit, integrityBlocked }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize(true)} onSync={() => synchronize()}
     onAction={act} onRefresh={refresh} onConnect={() => setConnect(true)} onConfirm={confirmPending} />

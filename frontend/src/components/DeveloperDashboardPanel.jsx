@@ -1,3 +1,4 @@
+import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { DashboardAttention, DashboardCount } from "./DashboardAttention.jsx";
@@ -113,12 +114,14 @@ export function DeveloperDashboardPanel({ onNavigate }) {
   const { user } = useAuth();
   const [receiptId, setReceiptId] = useState(null);
   const queue = useQuery({
+    ...LIVE_DASHBOARD_OPTIONS,
     queryKey: ["developerDashboard", user?.id],
     queryFn: listMyProposalQueue,
     enabled: Boolean(user?.id),
     staleTime: 30_000,
   });
   const approaches = useQuery({
+    ...LIVE_DASHBOARD_OPTIONS,
     queryKey: ["fundingApproaches", user?.id],
     queryFn: listFundingApproaches,
     enabled: Boolean(user?.id),

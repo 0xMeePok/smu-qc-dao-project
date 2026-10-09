@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const live = vi.hoisted(() => ({ options: null }));
+vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(),
   user: { id: `0x${"a".repeat(40)}` }, account: { address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614 } }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
@@ -141,12 +143,13 @@ it.each([false, true])("uses the verified sync response without another independ
     totalDeposited: "2000000", totalReleased: "2000000", outstandingBalance: "0" }, actions: {} };
   mocks.sync.mockResolvedValue(next);
   mocks.write.mockResolvedValue({ transactionHash });
-  const changed = vi.fn();
-  render(<IndependentFundingPanel proposal={{ id: "fast-confirm" }} onStateChange={changed}
+  const changed = vi.fn(), confirmed = vi.fn();
+  render(<IndependentFundingPanel proposal={{ id: "fast-confirm" }} onStateChange={changed} onConfirmed={confirmed}
     initialTransaction={recovery ? { transactionHash, action: "deposit" } : null} />);
   if (!recovery) fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
   fireEvent.click(await screen.findByRole("button", { name: recovery ? "Retry confirmation" : "Fund independent listing" }));
   await screen.findByText("Fully paid");
+  expect(confirmed).toHaveBeenCalledTimes(1);
   expect(mocks.read).toHaveBeenCalledTimes(1);
   expect(changed).toHaveBeenLastCalledWith(next);
 });
@@ -203,4 +206,17 @@ it.each([["0.25", "250000"], ["0.000001", "1"]])("lets exact final balances fini
   expect(fund.disabled).toBe(false);
   fireEvent.click(fund);
   expect(p.onAction).toHaveBeenCalledWith("deposit", { amount });
+});
+
+
+it("refreshes an independent balance from live activity and preserves an unfinished contribution", async () => {
+  render(<IndependentFundingPanel proposal={{ id: "live-independent" }} />);
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  mocks.read.mockResolvedValue(props({ snapshot: { exists: true, configured: true, summary: { ...summary,
+    totalDeposited: "1500000" }, wallet: {}, actions: { deposit: true } } }).snapshot);
+  await act(async () => { await live.options.onRefresh(); });
+  expect(mocks.read).toHaveBeenCalledTimes(2);
+  expect(screen.getByLabelText("Contribution (USDT)").value).toBe("1");
+  expect(live.options).toMatchObject({ proposalId: "live-independent", channel: "funding", identity: mocks.user.id, blocked: false });
+  expect(mocks.write).not.toHaveBeenCalled();
 });

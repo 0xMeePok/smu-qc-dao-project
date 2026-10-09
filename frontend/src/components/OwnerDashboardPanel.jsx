@@ -1,3 +1,4 @@
+import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { DashboardAttention, DashboardCount } from "./DashboardAttention.jsx";
@@ -153,6 +154,7 @@ function PostingRollup({ posting, onNavigate }) {
 export function OwnerDashboardPanel({ onNavigate }) {
   const { user } = useAuth();
   const dashboard = useQuery({
+    ...LIVE_DASHBOARD_OPTIONS,
     queryKey: [...OWNER_DASHBOARD_KEY, user?.id],
     queryFn: listOwnerDashboard,
     enabled: Boolean(user?.id),

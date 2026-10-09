@@ -387,3 +387,18 @@ it("verifies and activates a new independent cent target with exact token units"
   assert.equal(action.args[2], "2010000");
   assert.equal(f.simulations.length, 1);
 });
+
+it("independent funding signals change for balances and votes but not repeated verification", async () => {
+  const f = fixture();
+  const path = `proposals/${f.record.id}/activity/latest`;
+  await syncIndependentFunding(f.options(funder));
+  assert.deepEqual(f.db.records.get(path), { funding: 1 });
+  await syncIndependentFunding(f.options(researcher));
+  assert.deepEqual(f.db.records.get(path), { funding: 1 }, "Another caller reading the same state must not loop listeners");
+  f.state.totalDeposited = 2_000_000n; f.state.outstandingBalance = 2_000_000n;
+  await syncIndependentFunding(f.options(funder));
+  assert.deepEqual(f.db.records.get(path), { funding: 2 });
+  f.state.yesWeight = 1_000_000n;
+  await syncIndependentFunding(f.options(funder));
+  assert.deepEqual(f.db.records.get(path), { funding: 3 });
+});

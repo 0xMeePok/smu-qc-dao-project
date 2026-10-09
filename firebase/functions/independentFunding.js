@@ -1,3 +1,4 @@
+import { signalFundingChange } from "./activitySignals.js";
 import { fundingAmountError, fundingTargetError } from "./fundingAmountPolicy.js";
 import { boundedMap } from "./boundedMap.js";
 import { Timestamp } from "firebase-admin/firestore";
@@ -363,6 +364,7 @@ async function persistSnapshot({ db, config, verified, events = [], now = Timest
     if ((old.data()?.blockNumber ?? 0) > response.summary.blockNumber) return;
     const summary = { ...response.summary, updatedAt: now, confirmedAt: now.toDate().toISOString() };
     tx.set(summaryRef, summary);
+    signalFundingChange(tx, db, old.data(), summary);
     tx.update(proposalRef, { independentFunding: { activated: true, locked: true, ...summary }, updatedAt: now });
     if (positionRef && (position.data()?.blockNumber ?? 0) <= response.summary.blockNumber) tx.set(positionRef, {
       walletId: uid, proposalId: record.id, summaryKey: key, registryAddress: summary.registryAddress,

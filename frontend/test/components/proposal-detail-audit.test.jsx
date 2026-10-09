@@ -1,6 +1,8 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const live = vi.hoisted(() => ({ channels: {} }));
+vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.channels[options.channel] = options; } }));
 const mocks = vi.hoisted(() => ({ connected: false, anchor: vi.fn(), find: vi.fn(), verify: vi.fn(), revisions: vi.fn(async () => []) }));
 const account = `0x${"a".repeat(40)}`;
 vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
@@ -164,4 +166,16 @@ it("opens requested revision history immediately for a Record deep link", async 
   render(<ProposalDetailPage proposalId="proposal1" initialTab="record" onNavigate={vi.fn()} />);
   await waitFor(() => expect(mocks.revisions).toHaveBeenCalledTimes(1));
   expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");
+});
+
+
+it("updates the proposal after remote activity without resetting the selected tab or starting a wallet action", async () => {
+  render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
+  await screen.findByRole("heading", { name: record.title });
+  fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+  mocks.find.mockResolvedValue({ ...record, title: "Updated routing study" });
+  await act(async () => { await live.channels.all.onRefresh(); });
+  expect(screen.getByRole("heading", { name: "Updated routing study" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Record" }).getAttribute("aria-selected")).toBe("true");
+  expect(mocks.anchor).not.toHaveBeenCalled();
 });
