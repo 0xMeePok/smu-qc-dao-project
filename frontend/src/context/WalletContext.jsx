@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
-import { useCreateWallet, useLogin, usePrivy, useSignMessage, useWallets } from "@privy-io/react-auth";
+import { useCreateWallet, useLogin, usePrivy, useSendTransaction, useSignMessage, useWallets } from "@privy-io/react-auth";
 import { EXPECTED_CHAIN_ID } from "../lib/chain.js";
 import { setActiveEmbeddedWallet, WalletUnavailableError } from "../lib/embeddedWallet.js";
 import { SIGN_IN_CANCELLED } from "../lib/errors.js";
@@ -55,6 +55,7 @@ function PrivyWalletProvider({ children }) {
   const { wallets, ready: walletsReady } = useWallets();
   const { createWallet } = useCreateWallet();
   const { signMessage: signWithPrivy } = useSignMessage();
+  const { sendTransaction: sendWithPrivy } = useSendTransaction();
 
   const signedIn = ready && authenticated;
   const linked = signedIn ? linkedEmbeddedWallet(user) : null;
@@ -145,9 +146,13 @@ function PrivyWalletProvider({ children }) {
       chainId,
       switchChain: (id) => wallet.switchChain(id),
       getEthereumProvider: () => wallet.getEthereumProvider(),
+      // QCDAO-144: the app pays every member's gas through Privy's paymaster,
+      // so a new wallet holding no ETH can still publish, propose and fund.
+      // Privy's confirmation screen still opens for each transaction.
+      sendSponsoredTransaction: (transaction) => sendWithPrivy(transaction, { address: wallet.address, sponsor: true }),
     } : null);
     return () => setActiveEmbeddedWallet(null);
-  }, [wallet, chainId]);
+  }, [wallet, chainId, sendWithPrivy]);
 
   /**
    * Resolves to the embedded wallet address once its signer has loaded. Privy's

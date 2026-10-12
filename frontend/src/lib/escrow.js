@@ -3,7 +3,7 @@ import { erc20Abi, keccak256, stringToHex } from "viem";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG, getAuditRegistryAddress } from "../config/auditRegistry.js";
 import { createWalletAuditAdapters, waitForAuditReceipt } from "./auditRegistry.js";
 import {
-  isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection,
+  isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection, walletOutcomeError,
   redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE, TRANSACTION_FEE_TOO_LOW_MESSAGE,
 } from "./errors.js";
 import { assertBytes32, prepareOpportunityCommit } from "../../../firebase/functions/auditCanonical.js";
@@ -293,6 +293,8 @@ const REVERT_MESSAGES = {
 
 export function escrowErrorMessage(error) {
   if (isWalletRejection(error)) return "The wallet transaction was declined. You can retry when ready.";
+  const outcome = walletOutcomeError(error);
+  if (outcome) return outcome.message;
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
   if (error?.code === "AUDIT_TRANSACTION_CANCELLED") return "The escrow transaction was cancelled in your wallet.";
   let current = error;

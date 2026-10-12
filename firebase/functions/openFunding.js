@@ -11,6 +11,7 @@ import { verifyProposalEscrow, requireAddress } from "./escrowAudit.js";
 import { deploymentKey, enqueueEscrowFunding, loadFundingContext } from "./escrowFunding.js";
 import { same } from "./escrowFundingEvents.js";
 import { OPEN_FUNDING_SELECTIONS, saveFundingSnapshot } from "./fundingSnapshots.js";
+import { memberCallFromReceipt } from "./memberCall.js";
 export { OPEN_FUNDING_SELECTIONS } from "./fundingSnapshots.js";
 
 export const OPEN_FUNDING_SUMMARIES = "openFundingSummaries";
@@ -79,7 +80,7 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
     read(config.address, config.abi, "postingFundingPaused", [expected.entityId]),
   ]);
   if (receipt.status !== "success" || !same(receipt.transactionHash, record.audit.transactionHash)
-      || !same(receipt.to, config.address) || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > blockNumber) {
+      || !same((await memberCallFromReceipt(client, receipt, { sender: record.ownerId }))?.to, config.address) || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > blockNumber) {
     fail("failed-precondition", "The opportunity's publication transaction is not confirmed on this registry deployment.");
   }
   const receiptBlock = await client.getBlock({ blockNumber: receipt.blockNumber });

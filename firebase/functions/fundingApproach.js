@@ -7,6 +7,7 @@ import { fundingApproachAccepted, independentListingWindowOpen, isIndependentPro
 import { memberNoticeFields } from "./moderation.js";
 import { deadlinePassed, instantMs } from "./opportunityExpiry.js";
 import independentFundingConfig from "./independentFunding.contract.json" with { type: "json" };
+import { memberCallFromReceipt } from "./memberCall.js";
 
 export const FUNDING_APPROACHES = "fundingApproaches";
 export const FUNDING_APPROACH_SLOTS = "fundingApproachSlots";
@@ -543,8 +544,9 @@ export async function saveFundingApproachAnchor({ db, client, config, uid, appro
   }
   const receipt = await client.getTransactionReceipt({ hash: transactionHash });
   if (receipt.status !== "success") fail("failed-precondition", "The anchor transaction was not confirmed.");
-  if (!same(receipt.from, funderId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
-  if (!same(receipt.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
+  const call = await memberCallFromReceipt(client, receipt, { sender: funderId });
+  if (!same(call?.from, funderId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
+  if (!same(call.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
   let matched = null;
   for (const log of receipt.logs) {
     if (!same(log.address, config.address)) continue;
@@ -587,8 +589,9 @@ export async function saveFundingApproachDecisionAnchors({ db, client, config, u
   });
   const receipt = await client.getTransactionReceipt({ hash: transactionHash });
   if (receipt.status !== "success") fail("failed-precondition", "The anchor transaction was not confirmed.");
-  if (!same(receipt.from, researcherId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
-  if (!same(receipt.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
+  const call = await memberCallFromReceipt(client, receipt, { sender: researcherId });
+  if (!same(call?.from, researcherId)) fail("permission-denied", "The anchor transaction was sent by a different wallet.");
+  if (!same(call.to, config.address)) fail("failed-precondition", "The anchor was not sent to the audit registry.");
   const found = new Map();
   let anchoredAt = null;
   for (const log of receipt.logs) {

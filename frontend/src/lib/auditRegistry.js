@@ -7,7 +7,7 @@ import {
 } from "../config/auditRegistry.js";
 import { embeddedWalletClient } from "./embeddedWallet.js";
 import { browserPublicClient } from "./rpc.js";
-import { isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
+import { isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection, walletOutcomeError } from "./errors.js";
 import { isEscrowRegistry, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
 import { knownAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
@@ -211,6 +211,9 @@ export function classifyAuditError(error, { attempt = 0, maxRetries = 0 } = {}) 
     category = "transaction-cancelled";
   } else if (isWalletRejection(error)) {
     category = "user-rejected";
+  } else if (walletOutcomeError(error)) {
+    // Never "transient": retrying a sponsored send could submit it twice.
+    category = { reverted: "contract-reverted", pending: "pending", "sponsorship-unavailable": "sponsorship-unavailable" }[walletOutcomeError(error).walletOutcome] ?? "unknown";
   } else if (isTransactionFeeTooLow(error)) {
     category = "fee-too-low";
   } else if (isRpcUnreachable(error) || isRpcQuotaExceeded(error)) {

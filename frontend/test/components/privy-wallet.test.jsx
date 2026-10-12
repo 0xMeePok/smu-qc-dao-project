@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   wallets: null,
   createWallet: null,
   signMessage: null,
+  sendTransaction: null,
   login: null,
   loginCallbacks: null,
 }));
@@ -20,6 +21,7 @@ vi.mock("@privy-io/react-auth", () => ({
   useWallets: () => mocks.wallets,
   useCreateWallet: () => ({ createWallet: mocks.createWallet }),
   useSignMessage: () => ({ signMessage: mocks.signMessage }),
+  useSendTransaction: () => ({ sendTransaction: mocks.sendTransaction }),
   // Privy's login modal: `login` opens it, the callbacks report how it ended.
   useLogin: (callbacks) => {
     mocks.loginCallbacks = callbacks;
@@ -35,7 +37,12 @@ vi.mock("../../src/lib/privy.js", async (importOriginal) => ({
 
 const { WalletProvider, useWallet } = await import("../../src/context/WalletContext.jsx");
 const { privyConfig, chainIdOf, connectedEmbeddedWallet, linkedEmbeddedWallet } = await import("../../src/lib/privy.js");
-const { embeddedWalletClient, getActiveEmbeddedWallet, setActiveEmbeddedWallet } = await import("../../src/lib/embeddedWallet.js");
+const {
+  embeddedWalletClient, getActiveEmbeddedWallet, sendSponsoredTransaction, setActiveEmbeddedWallet, sponsoredProvider,
+  SPONSORSHIP_UNAVAILABLE_MESSAGE, SPONSORED_PENDING_MESSAGE,
+} = await import("../../src/lib/embeddedWallet.js");
+const { auditErrorMessage } = await import("../../src/lib/errors.js");
+const { sponsoredTransaction } = await import("../../../firebase/functions/test/sponsoredTx.mjs");
 
 const linked = (address = ADDRESS) => ({ type: "wallet", chainType: "ethereum", walletClientType: "privy", address });
 const connected = (overrides = {}) => ({
@@ -102,6 +109,7 @@ describe("WalletProvider", () => {
     mocks.wallets = { ready: true, wallets: [connected()] };
     mocks.createWallet = vi.fn(async () => ({ address: ADDRESS }));
     mocks.signMessage = vi.fn(async () => ({ signature: "0xsignature" }));
+    mocks.sendTransaction = vi.fn(async () => ({ hash: "" }));
     mocks.login = vi.fn();
     mocks.loginCallbacks = null;
   });
@@ -189,6 +197,13 @@ describe("WalletProvider", () => {
     expect(getActiveEmbeddedWallet()).toBeNull();
   });
 
+  it("[QCDAO-144] asks Privy to sponsor the gas of every transaction the wallet sends", async () => {
+    render(tree());
+    const transaction = { to: OTHER, data: "0x1234", chainId: arbitrumSepolia.id };
+    await getActiveEmbeddedWallet().sendSponsoredTransaction(transaction);
+    expect(mocks.sendTransaction).toHaveBeenCalledExactlyOnceWith(transaction, { address: ADDRESS, sponsor: true });
+  });
+
   it("opens Privy's login modal once and waits for it to finish", async () => {
     mocks.privy = { ...mocks.privy, authenticated: false, user: null };
     render(tree());
@@ -258,5 +273,66 @@ describe("embeddedWalletClient", () => {
     expect(wallet.switchChain.mock.invocationCallOrder[0]).toBeLessThan(wallet.getEthereumProvider.mock.invocationCallOrder[0]);
     expect(client.chain.id).toBe(arbitrumSepolia.id);
     expect(client.account.address).toBe(ADDRESS);
+  });
+});
+
+describe("[QCDAO-144] sponsored transactions", () => {
+  const HASH = `0x${"1".repeat(64)}`;
+  const REGISTRY = `0x${"e5".repeat(20)}`;
+  const request = { from: ADDRESS, to: REGISTRY, data: "0x1234", value: "0x0" };
+  const wallet = (send) => ({ address: ADDRESS, sendSponsoredTransaction: vi.fn(send) });
+  const chain = ({ success = true, logs } = {}) => {
+    const { receipt } = sponsoredTransaction({ hash: HASH, calls: [{ sender: ADDRESS.toLowerCase(), to: REGISTRY, input: "0x1234", success }] });
+    return {
+      getBlockNumber: vi.fn(async () => 100n),
+      getLogs: vi.fn(async () => logs ?? [{ transactionHash: HASH, blockNumber: 101n, logIndex: 3 }]),
+      waitForTransactionReceipt: vi.fn(async () => receipt),
+    };
+  };
+
+  it("sends without gas fields and returns the hash once the member's call has run", async () => {
+    const member = wallet(async () => ({ hash: HASH })), publicClient = chain();
+    await expect(sendSponsoredTransaction({ ...request, maxFeePerGas: "0x5" }, { wallet: member, publicClient })).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledExactlyOnceWith({ to: REGISTRY, data: "0x1234", chainId: arbitrumSepolia.id });
+    expect(publicClient.getLogs).not.toHaveBeenCalled();
+  });
+
+  it("finds the mined transaction from the EntryPoint log when Privy returns no hash yet", async () => {
+    const publicClient = chain();
+    await expect(sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: "" })), publicClient })).resolves.toBe(HASH);
+    expect(publicClient.getLogs).toHaveBeenCalledWith(expect.objectContaining({ args: { sender: ADDRESS }, fromBlock: 100n }));
+  });
+
+  it("reports a call that failed inside a mined sponsored transaction as a revert", async () => {
+    const error = await sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: HASH })), publicClient: chain({ success: false }) })
+      .catch((caught) => caught);
+    expect(error.walletOutcome).toBe("reverted");
+    expect(error.transactionHash).toBe(HASH);
+  });
+
+  it("explains an unavailable sponsorship, and leaves a declined confirmation as a decline", async () => {
+    const unavailable = await sendSponsoredTransaction(request, { wallet: wallet(async () => { throw new Error("Gas sponsorship is not enabled for this chain"); }), publicClient: chain() })
+      .catch((caught) => caught);
+    expect(unavailable.message).toBe(SPONSORSHIP_UNAVAILABLE_MESSAGE);
+    // viem wraps a provider error; the member still reads our sentence, not viem's.
+    expect(auditErrorMessage(Object.assign(new Error("Contract call failed. Details: unknown RPC error"), { cause: { cause: unavailable } })))
+      .toBe(SPONSORSHIP_UNAVAILABLE_MESSAGE);
+    const declined = await sendSponsoredTransaction(request, { wallet: wallet(async () => { throw Object.assign(new Error("User exited the modal"), { code: 4001 }); }), publicClient: chain() })
+      .catch((caught) => caught);
+    expect(declined.code).toBe(4001);
+  });
+
+  it("stops waiting without resending when a sponsored transaction is slow to confirm", async () => {
+    const error = await sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: "" })), publicClient: chain({ logs: [] }), timeoutMs: 1 })
+      .catch((caught) => caught);
+    expect(error.message).toBe(SPONSORED_PENDING_MESSAGE);
+  });
+
+  it("routes only transaction sending through sponsorship; reads stay on Privy's provider", async () => {
+    const provider = { request: vi.fn(async () => "0x66eee") };
+    const routed = sponsoredProvider(provider, { wallet: wallet(async () => ({ hash: HASH })), publicClient: chain() });
+    await expect(routed.request({ method: "eth_chainId" })).resolves.toBe("0x66eee");
+    await expect(routed.request({ method: "eth_sendTransaction", params: [request] })).resolves.toBe(HASH);
+    expect(provider.request).toHaveBeenCalledOnce();
   });
 });

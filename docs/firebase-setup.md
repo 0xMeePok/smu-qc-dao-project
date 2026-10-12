@@ -171,17 +171,29 @@ the account.
    allows passkey login, Privy's modal shows "I have a passkey" whatever the app's
    config says, so that toggle must be off here.
 3. **Wallets → Embedded wallets**: enable **Ethereum (EVM)** wallets. Leave smart wallets
-   off — the server verifies sign-in signatures from a plain embedded wallet.
+   off: gas sponsorship upgrades the embedded wallet in place (EIP-7702, same address),
+   so the account never moves to a separate smart-wallet address.
 4. **App settings → Domains → Allowed origins**: add every origin that serves the app —
    `https://YOUR_PROJECT_ID.web.app`, `https://YOUR_PROJECT_ID.firebaseapp.com`, each
    Hosting preview channel URL you test on (Privy does not accept a `*.web.app`
    wildcard), and `http://localhost:5173` / `http://127.0.0.1:5173` while developing.
-5. Optional, for repeatable testing: **User management → Authentication → Advanced →
+5. **Fee sponsorship** (QCDAO-144): turn on **Sponsor gas fees**, add **Arbitrum
+   Sepolia** under **Supported chains**, and turn on **Allow transactions from the
+   client** (the app requests sponsorship from the browser with `sponsor: true`).
+   Sponsorship needs Privy's TEE execution: the app's config reports
+   `embedded_wallet_config.mode: "user-controlled-server-wallets-only"` when it is on
+   (see Privy's [TEE migration guide](https://docs.privy.io/recipes/tee-wallet-migration-guide)
+   for an app still on on-device execution). Testnet gas costs nothing; mainnet
+   sponsorship needs prepaid credits.
+6. Optional, for repeatable testing: **User management → Authentication → Advanced →
    Enable test accounts** gives a fixed `test-XXXX@privy.io` address and code.
 
-Signing in costs no gas — the embedded wallet signs a message, not a transaction. Wallet
-*transactions* (publishing audits, funding) do need Arbitrum Sepolia ETH in the member's
-embedded wallet.
+Signing in costs no gas: it sends no transaction at all. Every member transaction
+(publishing audits, proposals, funding approvals and deposits) is gas-sponsored, so a
+new embedded wallet holding no ETH can take part. A sponsored transaction is sent by a
+bundler to the ERC-4337 EntryPoint, so the Cloud Functions verify the member's own call
+inside it (`firebase/functions/memberCall.js`) instead of the transaction's sender.
+Funding still needs the test token itself in the funder's wallet.
 
 ---
 

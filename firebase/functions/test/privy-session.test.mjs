@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assertNamedAddress, embeddedWalletAddress, PrivySessionError } from "../privySession.js";
+import { assertNamedAddress, embeddedWalletAddress, frontendPrivyAppId, privyAppId, PrivySessionError } from "../privySession.js";
 
 const ADDRESS = `0x${"ab".repeat(20)}`;
 const OTHER = `0x${"cd".repeat(20)}`;
@@ -55,5 +55,27 @@ describe("embedded wallet resolution", () => {
       embeddedWalletAddress(user([email(), embedded(OTHER, { imported: true }), embedded(ADDRESS)])),
       ADDRESS,
     );
+  });
+});
+
+describe("Privy app id", () => {
+  const files = (map) => (name) => {
+    if (!(name in map)) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    return map[name];
+  };
+
+  it("reads the frontend's VITE_PRIVY_APP_ID with Vite's precedence", () => {
+    assert.equal(frontendPrivyAppId({ readFile: files({ ".env": "VITE_PRIVY_APP_ID=from-env\n" }) }), "from-env");
+    assert.equal(frontendPrivyAppId({ readFile: files({ ".env": "VITE_PRIVY_APP_ID=from-env", ".env.local": "# local\nVITE_PRIVY_APP_ID=\"from-local\"\n" }) }), "from-local");
+    assert.equal(frontendPrivyAppId({ readFile: files({ ".env.local": "VITE_PRIVY_APP_ID=", ".env": "VITE_PRIVY_APP_ID=from-env" }) }), "from-env");
+    assert.equal(frontendPrivyAppId({ readFile: files({}) }), "");
+  });
+
+  it("uses the frontend's app id only in the emulator; deployed functions use PRIVY_APP_ID", () => {
+    const readFrontend = () => "frontend-id";
+    assert.equal(privyAppId({ env: { FUNCTIONS_EMULATOR: "true", PRIVY_APP_ID: "functions-id" }, readFrontend }), "frontend-id");
+    assert.equal(privyAppId({ env: { FUNCTIONS_EMULATOR: "true", PRIVY_APP_ID: "functions-id" }, readFrontend: () => "" }), "functions-id");
+    assert.equal(privyAppId({ env: { PRIVY_APP_ID: " functions-id " }, readFrontend }), "functions-id");
+    assert.equal(privyAppId({ env: {}, readFrontend }), "");
   });
 });

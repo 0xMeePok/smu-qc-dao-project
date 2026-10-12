@@ -516,7 +516,8 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
  * Sign-in. Verifies the Privy access token, resolves that user's embedded
  * wallet, and mints a Firebase custom token whose uid is the wallet address.
  * The browser does not name the account. PRIVY_SECRET is the functions secret
- * the operator set; PRIVY_APP_ID is public and comes from the functions env.
+ * the operator set. PRIVY_APP_ID is public: the functions env when deployed,
+ * frontend/.env.local's VITE_PRIVY_APP_ID in the emulator (see privyAppId).
  */
 export const exchangePrivySession = onCall({
   region: REGION,
@@ -923,6 +924,14 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
     totalPages: Math.ceil(total / safePageSize) || 1,
   };
 });
+
+/** The admin callables take a member's wallet address as the Firestore user id. */
+function normaliseAddress(value) {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
+    throw new HttpsError("invalid-argument", "A valid wallet address is required.");
+  }
+  return value.toLowerCase();
+}
 
 /**
  * Admin: Change a user's role assignment with written reason and audit recording.

@@ -17,6 +17,7 @@ import { FUNDING_POSITIONS, fundingAllocationBasis, saveFundingSnapshot } from "
 import { createRequestReadClient } from "./requestReadClient.js";
 import { boundedMap } from "./boundedMap.js";
 import { createRequestDocumentReader } from "./requestDocuments.js";
+import { isEntryPoint, memberCall, memberCallFromReceipt } from "./memberCall.js";
 export { FUNDING_POSITIONS } from "./fundingSnapshots.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
@@ -247,19 +248,22 @@ async function saveEvent({ db, event, record, summary, now }) {
 async function initialBlock(record, client, config) {
   const hash = record.audit?.transactionHash;
   const receipt = await client.getTransactionReceipt({ hash });
-  if (receipt.status !== "success" || !same(receipt.to, config.address)) fail("failed-precondition", "This proposal belongs to a different or unconfirmed registry deployment.");
   const deploymentBlock = BigInt(config.deployment?.blockNumber ?? 0);
   const transaction = await client.getTransaction({ hash });
+  const call = memberCall(transaction, receipt, { sender: record.researcherId });
+  // The receipt names a direct transaction's target; a sponsored one's is unwrapped.
+  const target = isEntryPoint(receipt.to) ? call?.to : receipt.to;
+  if (receipt.status !== "success" || !same(target, config.address)) fail("failed-precondition", "This proposal belongs to a different or unconfirmed registry deployment.");
   // A confirmed audit may describe an amendment. Only the exact proposal's
   // creation transaction can safely exclude earlier registry history.
-  if (same(transaction.to, config.address) && same(transaction.from, record.researcherId)
+  if (call && same(call.to, config.address) && same(call.from, record.researcherId)
       && same(transaction.hash, hash) && same(receipt.transactionHash, hash)
-      && Number(transaction.chainId) === config.chainId
+      && Number(call.chainId) === config.chainId
       && typeof receipt.blockNumber === "bigint" && receipt.blockNumber >= deploymentBlock
       && transaction.blockNumber === receipt.blockNumber && receipt.blockHash
       && same(transaction.blockHash, receipt.blockHash)) {
     let decoded;
-    try { decoded = decodeFunctionData({ abi: config.abi, data: transaction.input }); } catch { /* keep the deployment checkpoint */ }
+    try { decoded = decodeFunctionData({ abi: config.abi, data: call.input }); } catch { /* keep the deployment checkpoint */ }
     if (["commitProposalWithEscrow", "commitProposal"].includes(decoded?.functionName)) {
       const expected = isIndependentProposal(record)
         ? prepareIndependentEscrowCommit(record, { registryConfig: config })
@@ -806,7 +810,7 @@ export async function reconcilePostingFundingPause({ db, client, config, getWall
   const record = parent.data(), desired = desiredPostingPause(record);
   // Never project an old posting onto a fresh deployment with a coincident ID.
   const receipt = await client.getTransactionReceipt({ hash: record.audit?.transactionHash });
-  if (!same(receipt.to, config.address)) {
+  if (!same((await memberCallFromReceipt(client, receipt, { sender: record.ownerId }))?.to, config.address)) {
     await updatePauseJob({ db, config, job, changes: { status: "historical", updatedAt: now } });
     return;
   }

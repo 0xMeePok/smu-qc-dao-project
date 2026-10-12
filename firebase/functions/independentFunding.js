@@ -12,6 +12,7 @@ import { isIndependentProposal } from "./independentProposal.js";
 import { opportunityEntityId, toUnixSeconds } from "./auditCanonical.js";
 import { submitPlatformAction, resumePlatformTransaction } from "./escrowFunding.js";
 import { enqueueIndependentFundingCancellation, INDEPENDENT_FUNDING_CANCELLATIONS } from "./independentFundingModeration.js";
+import { memberCall } from "./memberCall.js";
 
 export { enqueueIndependentFundingCancellation, INDEPENDENT_FUNDING_CANCELLATIONS };
 export const INDEPENDENT_FUNDING_SUMMARIES = "independentFundingSummaries";
@@ -307,11 +308,13 @@ export async function prepareIndependentFundingAction({ action, amount, evidence
 async function verifiedReceipt({ client, config, verified, transactionHash, uid }) {
   if (!validHash(transactionHash)) fail("invalid-argument", "A valid funding transaction hash is required.");
   const [receipt, transaction] = await Promise.all([client.getTransactionReceipt({ hash: transactionHash }), client.getTransaction({ hash: transactionHash })]);
-  const funding = config.independentFunding, factoryCall = same(transaction.to, funding.factoryAddress);
+  // A sponsored transaction is unwrapped to the member's own call; null fails below.
+  const call = memberCall(transaction, receipt, { sender: uid });
+  const funding = config.independentFunding, factoryCall = same(call?.to, funding.factoryAddress);
   if (receipt.status === "reverted") fail("failed-precondition", "The independent funding transaction reverted.");
-  if (receipt.status !== "success" || !same(transaction.hash, transactionHash) || !same(receipt.transactionHash, transactionHash)
-      || Number(transaction.chainId) !== config.chainId || (uid !== undefined && !same(transaction.from, uid))
-      || (!factoryCall && !same(transaction.to, verified.response.summary?.escrowAddress))
+  if (receipt.status !== "success" || !call || !same(transaction.hash, transactionHash) || !same(receipt.transactionHash, transactionHash)
+      || Number(call.chainId) !== config.chainId || (uid !== undefined && !same(call.from, uid))
+      || (!factoryCall && !same(call.to, verified.response.summary?.escrowAddress))
       || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > verified.blockNumber
       || receipt.blockNumber !== transaction.blockNumber || !same(receipt.blockHash, transaction.blockHash)) {
     fail("failed-precondition", "The funding transaction is not a confirmed action for this wallet and listing.");
@@ -319,11 +322,11 @@ async function verifiedReceipt({ client, config, verified, transactionHash, uid 
   const [block, next] = await Promise.all([client.getBlock({ blockNumber: receipt.blockNumber }), client.getBlock({ blockNumber: receipt.blockNumber + 1n })]);
   if (!same(block.hash, receipt.blockHash) || !same(next.parentHash, receipt.blockHash)) fail("unavailable", "The funding transaction needs canonical confirmations. Retry the same receipt shortly.");
   const abi = factoryCall ? funding.factoryAbi : funding.escrowAbi;
-  const decoded = decodeFunctionData({ abi, data: transaction.input });
+  const decoded = decodeFunctionData({ abi, data: call.input });
   if (factoryCall) {
     const expected = verified.expected;
     const args = [expected.prepared.entityId, expected.token.address, expected.target, expected.reviewDays, expected.termsHash];
-    if (decoded.functionName !== "createEscrow" || !same(transaction.from, verified.record.researcherId)
+    if (decoded.functionName !== "createEscrow" || !same(call.from, verified.record.researcherId)
         || decoded.args.length !== args.length || args.some((value, index) => !same(value, decoded.args[index]))) {
       fail("failed-precondition", "The escrow creation transaction differs from this listing's canonical terms.");
     }
@@ -341,7 +344,7 @@ async function verifiedReceipt({ client, config, verified, transactionHash, uid 
       || !same(event.args.escrow, verified.response.summary?.escrowAddress) || !same(event.args.researcher, verified.record.researcherId))) continue;
     if (log.transactionHash && !same(log.transactionHash, transactionHash)) fail("failed-precondition", "The funding receipt contains inconsistent transaction events.");
     events.push({ id: `${config.chainId}_${funding.factoryAddress.toLowerCase()}_${transactionHash.toLowerCase()}_${safeInteger(log.logIndex, "event index")}`,
-      eventType: event.eventName, actorId: transaction.from.toLowerCase(),
+      eventType: event.eventName, actorId: call.from.toLowerCase(),
       args: Object.fromEntries(Object.entries(event.args).map(([key, value]) => [key, serialized(value)])),
       transactionHash, blockNumber: safeInteger(receipt.blockNumber, "transaction block"), timestamp: safeInteger(block.timestamp, "transaction time") });
   }

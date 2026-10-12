@@ -162,8 +162,21 @@ export function isWalletRejection(error) {
   return false;
 }
 
+/**
+ * The sponsored-transaction outcome (embeddedWallet.js) behind an error, or
+ * null. viem nests the provider's error a few causes deep.
+ */
+export function walletOutcomeError(error) {
+  for (let current = error, depth = 0; current && typeof current === "object" && depth < 10; current = current.cause, depth++) {
+    if (current.walletOutcome) return current;
+  }
+  return null;
+}
+
 export function auditErrorMessage(error) {
   if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
+  const outcome = walletOutcomeError(error);
+  if (outcome) return outcome.message;
   if (error?.code === "AUDIT_TRANSACTION_CANCELLED") {
     return "The pending verification transaction was cancelled in your wallet. This submission was not completed. Your entries are still here; submit again when ready.";
   }
@@ -175,7 +188,7 @@ export function auditErrorMessage(error) {
   const text = String(error?.message ?? "");
   // These phrases are OUR OWN copy, written by auditRevertMessage and the
   // pre-flight checks, so echoing them is showing a reviewed message back.
-  if (/already anchored|updateOpportunity, not a second commit|updateHashes, not a second commit|already been withdrawn|cannot be edited|cannot be amended|cannot be withdrawn|cannot be filed|not on the configured AuditRegistry|Sign in with the account that owns/i.test(text)) {
+  if (/already anchored|updateOpportunity, not a second commit|registry refused this proposal|already been withdrawn|cannot be edited|cannot be amended|cannot be withdrawn|cannot be filed|not on the configured AuditRegistry|Sign in with the account that owns|could not cover the network fee|has not confirmed yet/i.test(text)) {
     return text;
   }
   // Before the revert check: a transport failure wraps the contract call, so its

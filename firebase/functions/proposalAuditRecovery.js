@@ -7,6 +7,7 @@ import { isIndependentProposal } from "./independentProposal.js";
 import { fundingTermsHash, isEscrowRegistry, verifyProposalEscrow } from "./escrowAudit.js";
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { isActiveAuditDeployment, resolveAuditDeployment } from "./auditDeployments.js";
+import { memberCall } from "./memberCall.js";
 
 export const AUDIT_JOBS = "proposalAuditJobs";
 export const RETRY_LIMIT = 3;
@@ -59,9 +60,10 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
   onDeploymentResolved?.(registryConfig);
   let expected = prepareStoredProposal(record, { registryConfig });
   const address = registryAddress(registryConfig);
-  if (!same(transaction.to, address) || !same(transaction.from, record.researcherId)
+  const call = memberCall(transaction, receipt, { sender: record.researcherId });
+  if (!same(call?.to, address) || !same(call.from, record.researcherId)
       || !same(receipt.transactionHash, hash) || !same(transaction.hash, hash)
-      || Number(transaction.chainId) !== registryConfig.chainId) {
+      || Number(call.chainId) !== registryConfig.chainId) {
     throw new Error("The transaction does not belong to this researcher and AuditRegistry.");
   }
   if (typeof receipt.blockNumber !== "bigint" || typeof transaction.blockNumber !== "bigint"
@@ -77,7 +79,7 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
       || !same(confirmationBlock.parentHash, receipt.blockHash)) {
     throw new Error("The transaction is not final yet; confirmation will be checked again.");
   }
-  const decoded = decodeFunctionData({ abi: registryConfig.abi, data: transaction.input });
+  const decoded = decodeFunctionData({ abi: registryConfig.abi, data: call.input });
   const independent = isIndependentProposal(record);
   // The registry enforces the live parent revision at transaction time. Verify
   // that same revision in the current proposal instead of assuming revision zero.

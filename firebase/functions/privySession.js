@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { PrivyClient } from "@privy-io/node";
 import { arbitrumSepolia } from "viem/chains";
 
@@ -72,8 +73,38 @@ export function assertNamedAddress(named, resolved) {
 
 let cachedClient = null;
 
+const FRONTEND_DIR = new URL("../../frontend/", import.meta.url);
+
+/**
+ * VITE_PRIVY_APP_ID from the frontend's env files, with Vite's precedence:
+ * .env.local over .env. Empty when neither file sets it.
+ */
+export function frontendPrivyAppId({ readFile = (name) => readFileSync(new URL(name, FRONTEND_DIR), "utf8") } = {}) {
+  for (const name of [".env.local", ".env"]) {
+    let text;
+    try { text = readFile(name); } catch { continue; }
+    const value = text.match(/^\s*VITE_PRIVY_APP_ID\s*=(.*)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
+    if (value) return value;
+  }
+  return "";
+}
+
+/**
+ * The Privy app id this server verifies access tokens against. Deployed, it is
+ * PRIVY_APP_ID from the functions env (CI writes it). In the local emulator it
+ * is the frontend's VITE_PRIVY_APP_ID, so a developer keeps one env file and
+ * the server always checks tokens from the same Privy app the browser uses.
+ */
+export function privyAppId({ env = process.env, readFrontend = frontendPrivyAppId } = {}) {
+  if (env.FUNCTIONS_EMULATOR === "true") {
+    const local = readFrontend();
+    if (local) return local;
+  }
+  return env.PRIVY_APP_ID?.trim() ?? "";
+}
+
 function privyClient() {
-  const appId = process.env.PRIVY_APP_ID?.trim();
+  const appId = privyAppId();
   const appSecret = process.env.PRIVY_SECRET?.trim();
   if (!appId || !appSecret) {
     throw new PrivySessionError("failed-precondition", "Sign-in is not configured.");

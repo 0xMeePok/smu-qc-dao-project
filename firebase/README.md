@@ -191,8 +191,10 @@ App Check outside the emulator.
 
 Do **not** put the Privy app secret in `frontend/.env` or in
 `functions/.env.<project>`. It is the functions secret `PRIVY_SECRET`. The app
-id is public: `PRIVY_APP_ID` in the functions env, from the same value as
-`VITE_PRIVY_APP_ID`.
+id is public: deployed functions read `PRIVY_APP_ID` from the functions env,
+which CI and the preview script write from `VITE_PRIVY_APP_ID`. The local
+emulator reads `VITE_PRIVY_APP_ID` straight from `frontend/.env.local` (or
+`frontend/.env`), so local development needs no functions env file for it.
 
 ### Session invalidation policy
 

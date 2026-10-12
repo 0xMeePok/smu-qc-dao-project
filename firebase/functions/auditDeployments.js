@@ -1,5 +1,6 @@
 import activeRegistry from "./auditRegistry.contract.json" with { type: "json" };
 import historicalRegistries from "./auditRegistry.history.json" with { type: "json" };
+import { decodeMemberCall } from "./memberCall.js";
 
 const same = (left, right) => String(left).toLowerCase() === String(right).toLowerCase();
 const HASH = /^0x[0-9a-f]{64}$/i;
@@ -29,7 +30,7 @@ export async function resolveAuditDeployment(record, {
   if (!tx || !same(tx.hash, hash) || Number(tx.chainId) !== chainId) {
     throw new Error("The transaction does not belong to this audit receipt and chain.");
   }
-  return knownAuditDeployment(tx.to, chainId, { activeConfig, history });
+  return knownAuditDeployment(decodeMemberCall(tx, { sender: record.researcherId ?? record.ownerId })?.to, chainId, { activeConfig, history });
 }
 
 export function assertActiveAuditDeployment(config, activeConfig = activeRegistry) {
