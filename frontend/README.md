@@ -172,7 +172,7 @@ npm run preview
 
 ```
 src/
-├── lib/            # Firebase/Privy setup, validation, SIWE client calls, roles, stats,
+├── lib/            # Firebase/Privy setup, validation, email sign-in, roles, stats,
 │                  #   profile.js (writes users/ + publicProfiles/ in one batch)
 ├── context/         # WalletContext (Privy + embedded wallet), SessionContext — the
 │                    #   Privy login -> verified -> onboarding/signed-in state machine

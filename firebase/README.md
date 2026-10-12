@@ -11,7 +11,7 @@ for anyone editing `firestore.rules` or `functions/index.js` and redeploying.
 ```
 firebase/
 ├── deploy.sh                    # One-shot production setup - see "Deploy" below
-├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, siweNonces/
+├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, emailAccounts/
 ├── storage.rules                # Authorisation for posting attachments (QCDAO-58)
 ├── storage.cors.json            # Bucket CORS allow-list - see "Posting attachments"
 ├── firestore.indexes.json       # Discover query indexes (QCDAO-52/53)
@@ -30,7 +30,7 @@ firebase/
     ├── scripts/mock_data.mjs    # Seeds three sample postings - see below
     ├── package.json
     └── test/
-        ├── siwe.test.mjs        # Adversarial replay, signature, origin, and quota tests
+        ├── privy-session.test.mjs # Embedded-wallet resolution for Privy email sign-in
         ├── attachmentSweeper.test.mjs
         ├── opportunityExpiry.test.mjs
         └── opportunityExpiryService.test.mjs
@@ -168,7 +168,7 @@ If functions fail to load with `Cannot find module 'firebase-functions'`, you sk
 # Firestore rules — boots its own emulator, needs Java
 npm test
 
-# Cloud Functions — adversarial signature tests. Boots its own emulator; no setup:
+# Cloud Functions — Privy sign-in and workflow tests. Boots its own emulator; no setup:
 npm --prefix functions test
 FUNCTIONS_BASE_URL=https://asia-southeast1-<project-id>.cloudfunctions.net npm --prefix functions test
 ```
@@ -176,7 +176,7 @@ FUNCTIONS_BASE_URL=https://asia-southeast1-<project-id>.cloudfunctions.net npm -
 The rules suite checks things like: a wallet can only create its own
 profile and can only read its own, `stats` can never be written non-zero at signup,
 the user base cannot be enumerated, `role` never leaks through `publicProfiles`, and
-`siweNonces` is unreachable from any client.
+`emailAccounts` and `privyIdentities` are unreachable from any client.
 
 The functions suite checks that sign-in uses the embedded wallet Privy reports
 for the email, and refuses an external wallet, a missing wallet, or an address
@@ -184,8 +184,8 @@ the browser merely names.
 
 ### Allowed sign-in origins
 
-Sign-in no longer checks a SIWE allow-list. Privy's dashboard allowed origins
-are what let the email modal run on a site. Add each preview channel URL there,
+Privy's dashboard allowed origins are what let the email modal run on a site.
+Add each preview channel URL there,
 and on the reCAPTCHA Enterprise key. `exchangePrivySession` still requires
 App Check outside the emulator.
 
@@ -301,9 +301,9 @@ undeployed. `--backend` deploys `firestore:rules`, `firestore:indexes` and
 `storage` before the channel, and deploys every function — which is what ships a
 newly added trigger on a repeat deploy to an existing channel.
 
-Without `--backend` the script does not redeploy functions. Sign-in no longer
-depends on a SIWE allow-list. A new `exchangePrivySession` reaches the channel
-only after a functions deploy (`--backend`, or `npx firebase deploy --only functions`).
+Without `--backend` the script does not redeploy functions. A new
+`exchangePrivySession` reaches the channel only after a functions deploy
+(`--backend`, or `npx firebase deploy --only functions`).
 
 It is opt-in because it writes to the **shared** project for everyone, not just
 your channel. Without it the script says so rather than leaving you to guess.
@@ -312,16 +312,14 @@ Three things gate a preview, and each fails closed:
 
 | Gate | Effect when missing | Handled by |
 | --- | --- | --- |
-| `SIWE_ALLOWED_HOSTS` | sign-in refused: "not available from this origin" | the script — regenerates `functions/.env.<project>` and redeploys functions only when it changed |
+| Privy allowed origins | email sign-in refused by Privy's modal | **you**, in the Privy dashboard, for each preview origin |
 | Storage CORS | attachment upload/download blocked by the browser | the script — applies `storage.cors.json` plus the live preview origins |
 | reCAPTCHA domains | every call 401s on App Check | **you**, in the Firebase console |
 
-No preview host is committed anywhere. Both lists are derived from
+No preview host is committed anywhere. Bucket CORS is derived from
 `hosting:channel:list` on every run, so a new channel is picked up and an expired
 one drops off by itself. `storage.cors.json` holds only the permanent origins.
-
-Hostname shape alone is not proof that a Firebase site belongs to this project, so
-`resolveDomain()` matches the full host and never a pattern.
+Privy origins are not in that list: add each preview origin in the Privy dashboard.
 
 Two more things to know:
 
@@ -368,9 +366,10 @@ You should see `exchangePrivySession` and `revokeOwnSessions` in `asia-southeast
 
 | Collection | Who can read | Contents |
 |---|---|---|
-| `users/{address}` | the owning wallet only (`get`, never `list`) | the full profile, including `role` |
-| `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation`, `biography`, `expertise` — nothing else |
-| `siweNonces/{challengeId}` | nobody; Admin SDK only | pending sign-in challenges, one per attempt |
+| `users/{address}` | the owning wallet only (`get`, never `list`) | the full profile, including `role`, plus server-written `email` and `privyUserId` |
+| `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation`, `biography`, `expertise` — nothing else. No email |
+| `emailAccounts/{email}` | nobody; Admin SDK only | one email → one wallet. The document id is the normalised email |
+| `privyIdentities/{address}` | nobody; Admin SDK only | sign-in binding copied onto `users/{address}` at onboarding |
 
 Postings live in `problems/{problemId}`. A submitted or open posting is readable by
 any active member; a **draft is private to its owner**. Their PDF attachments live in
@@ -392,12 +391,14 @@ batch, so an account can never end up half-created.
 
 | Field | Type | Notes |
 |---|---|---|
-| `address` | string | lowercase `0x…`, must equal the document id |
+| `address` | string | lowercase `0x…`, must equal the document id and the Firebase uid |
+| `email` | string | server-written, normalised lowercase. Clients cannot set or change it. One email per account, enforced by `emailAccounts/{email}` |
+| `privyUserId` | string | server-written `did:privy:…`. Clients cannot set or change it |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
 | `biography` | string | optional; maximum 500 chars |
 | `expertise` | list | optional; maximum 12 entries |
-| `role` | number | `0` (user) or `1` (administrator). Fixed to `0` on create and immutable on every client update — the only way to grant `1` is by hand in the Firestore console (or via the Admin SDK), never through the app |
+| `role` | number | `0` (user), `1` (administrator) or `2` (evaluator). Fixed to `0` on create and immutable on every client update. Role `1` is granted by `ADMIN_BOOTSTRAP_EMAILS` on sign-in, or by an administrator, never by the client |
 | `chainId` | number | must be `421614` (Arbitrum Sepolia); immutable after creation |
 | `walletVerified` | bool | must be `true` at creation — only reachable after server-side verification |
 | `stats` | map | `comments`, `businessProblems`, `openFunding`, `fundingRequests`, `karma`, `reputation` — all `0` at creation, frozen against every client write |
@@ -406,7 +407,9 @@ batch, so an account can never end up half-created.
 
 No other fields are allowed — `create` and `update` both reject a document with any
 field outside this list, so a client can't smuggle in something like a self-granted
-`isAdmin` for later code to trust by accident.
+`isAdmin` for later code to trust by accident. `email` and `privyUserId` are in
+the list so a profile the server has stamped can still be edited. A client
+create that includes them is rejected, and an update cannot change them.
 
 ## Posting attachments (QCDAO-58)
 

@@ -50,8 +50,8 @@ export function validateTerms(accepted) {
   return null;
 }
 
-// The signature itself is verified on the server before any of this runs, so all
-// that is left to check here is that we actually have a verified address to write to.
+// The address is the embedded wallet from the Privy session. This only checks
+// that onboarding has one, and that it is an Ethereum address.
 export function validateWallet(address) {
   if (!address) return "Connect and verify your wallet before continuing.";
   if (!isAddress(address)) return "That wallet address is not a valid Ethereum address.";

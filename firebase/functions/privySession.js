@@ -2,6 +2,15 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { PrivyClient } from "@privy-io/node";
 import { arbitrumSepolia } from "viem/chains";
+import {
+  PrivySessionError,
+  accountEmail,
+  accountPrivyId,
+  bindPrivyAccount,
+  bootstrapAdminEmails,
+} from "./privyAccount.js";
+
+export { PrivySessionError };
 
 /**
  * Sign-in after Privy email login.
@@ -16,14 +25,6 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const RATE_COLLECTION = "privySessionRateLimits";
 const RATE_WINDOW_MS = 60_000;
 const RATE_PER_SOURCE = 30;
-
-export class PrivySessionError extends Error {
-  constructor(code, message) {
-    super(message);
-    this.name = "PrivySessionError";
-    this.code = code;
-  }
-}
 
 function accountsOf(user) {
   return Array.isArray(user?.linked_accounts) ? user.linked_accounts : [];
@@ -187,10 +188,24 @@ export async function exchangePrivySession(request, { db, getAuth, Timestamp }) 
   const address = embeddedWalletAddress(user);
   assertNamedAddress(request.data?.address, address);
 
+  // Checked before the Privy id is required, so a suspended account is refused
+  // even when a test fixture has not yet grown an id. bindPrivyAccount checks
+  // again inside the transaction.
   const profile = await db.collection("users").doc(address).get();
   if (profile.exists && profile.data()?.suspended) {
     throw new PrivySessionError("permission-denied", "This account has been suspended by an administrator.");
   }
+
+  const email = accountEmail(user);
+  const privyUserId = accountPrivyId(user);
+  await bindPrivyAccount({
+    db,
+    Timestamp,
+    address,
+    email,
+    privyUserId,
+    adminEmails: bootstrapAdminEmails(),
+  });
 
   const token = await getAuth().createCustomToken(address, {
     wallet: address,

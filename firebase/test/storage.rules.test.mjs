@@ -371,7 +371,7 @@ describe("storage rules: attachments follow the posting's visibility", () => {
   });
 
   it("[BIT-OPD-137] refuses a signed-in wallet with no profile from downloading", async () => {
-    // Membership gate: a SIWE token alone is not enough, a /users profile is.
+    // Membership gate: a Firebase session alone is not enough, a /users profile is.
     const NO_PROFILE = `0x${"21".repeat(20)}`;
     const storage = env.authenticatedContext(NO_PROFILE).storage();
     await assertFails(getBytes(ref(storage, objectPath(OWNER, PUBLIC_POSTING, "public.pdf"))));

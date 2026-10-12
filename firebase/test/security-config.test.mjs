@@ -29,9 +29,11 @@ describe("security deployment configuration", () => {
     assert.equal(policy.includes("wss://*.googleapis.com"), false);
   });
 
-  it("[QCDAO-123] enforces App Check for production nonce calls", () => {
-    assert.match(functionsSource, /enforceAppCheck:\s*process\.env\.FUNCTIONS_EMULATOR !== "true"/);
-    assert.match(functionsSource, /consumeAppCheckToken:\s*false/);
+  it("[QCDAO-123] enforces App Check for production Privy sign-in", () => {
+    assert.match(
+      functionsSource,
+      /export const exchangePrivySession = onCall\(\{[^}]*enforceAppCheck:\s*process\.env\.FUNCTIONS_EMULATOR !== "true"/,
+    );
   });
 
   it("[QCDAO-141] allows Privy email sign-in and no wallet-connection services", () => {
@@ -189,11 +191,11 @@ describe("security deployment configuration", () => {
     assert.match(writer, /\.doc\(eventId\)/);
   });
 
-  it("enables TTL cleanup for nonce and rate-limit documents", () => {
+  it("enables TTL cleanup for publication attempt documents", () => {
     const ttlGroups = indexes.fieldOverrides
       .filter((entry) => entry.fieldPath === "expiresAt" && entry.ttl === true)
       .map((entry) => entry.collectionGroup)
       .sort();
-    assert.deepEqual(ttlGroups, ["publicationAttempts", "siweNonces", "siweRateLimits"]);
+    assert.deepEqual(ttlGroups, ["publicationAttempts"]);
   });
 });

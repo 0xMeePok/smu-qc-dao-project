@@ -3,8 +3,8 @@
 A blockchain-enabled Proof of Concept platform for coordinating quantum and
 quantum-adjacent solution funding workflows across organisations. Problem owners and
 funders post problem statements, researchers submit proposals, and evaluators review
-submissions through a shared web application. Sign-in is wallet-only: there is no
-email or password anywhere in the system.
+submissions through a shared web application. Sign-in is an email code through
+Privy. The account id is the embedded wallet that Privy creates for that email.
 
 ## Overview
 
@@ -57,7 +57,7 @@ smu-qc-dao-project/
 │   │   ├── components/      # Modals, role views, RouteGuard, and UI components
 │   │   ├── config/          # Role definitions, route permissions, feature flags
 │   │   ├── context/         # AuthContext and SessionContext state machines
-│   │   ├── lib/             # Firebase/Privy setup, validation, SIWE client calls
+│   │   ├── lib/             # Firebase/Privy setup, validation, email sign-in
 │   │   ├── pages/           # AdminPage (only reachable with role == 1)
 │   │   ├── App.jsx          # Main application shell and dynamic routing
 │   │   └── styles.css       # Core design system and styles
@@ -360,7 +360,7 @@ boundaries, cost controls, and the later switch from Fireworks AI to OpenAI.
 
 ## Current implementation status
 
-Implemented: wallet sign-in with server-verified signatures, onboarding (name +
+Implemented: Privy email sign-in with a server-minted Firebase session, onboarding (name +
 organisation), a multi-role access control model and admin audit capabilities, an
 admin-only page shell, and the Firestore schema for user profiles — split into a
 private `users` record and a minimal public `publicProfiles` record — including

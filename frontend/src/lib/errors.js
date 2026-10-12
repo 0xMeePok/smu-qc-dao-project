@@ -37,11 +37,11 @@ const FUNCTIONS_MESSAGES = {
   "functions/unauthenticated":
     "The sign-in server rejected the request as unauthenticated. Confirm the functions allow unauthenticated invocation.",
   "functions/failed-precondition":
-    "No sign-in request is pending for this wallet. Start the sign-in again.",
+    "Sign-in could not be completed. Start again.",
   "functions/deadline-exceeded":
     "The sign-in server took too long to respond. Please try again.",
   "functions/resource-exhausted":
-    "A sign-in request was just issued for this wallet. Wait a few seconds and try again.",
+    "Too many sign-in attempts. Wait a minute, then try again.",
 };
 
 const FIRESTORE_MESSAGES = {

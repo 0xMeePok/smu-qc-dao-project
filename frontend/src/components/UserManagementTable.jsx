@@ -68,7 +68,7 @@ export function UserManagementTable({
             </svg>
             <input
               type="text"
-              placeholder="Search by name, address, or org..."
+              placeholder="Search by name, email, address, or org..."
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
               aria-label="Search platform users"
@@ -165,6 +165,7 @@ export function UserManagementTable({
                         <strong>{u.fullName || "Unnamed User"}</strong>
                         {isSelf && <span className="self-tag">You</span>}
                       </div>
+                      {u.email && <span className="user-email">{u.email}</span>}
                       <code className="wallet-code" title={u.address}>
                         {shortenAddress(u.address)}
                       </code>

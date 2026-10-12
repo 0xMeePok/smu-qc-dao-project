@@ -5,11 +5,11 @@ import { messageForProposalError } from "../../src/lib/proposalValidation.js";
 import { escrowErrorMessage } from "../../src/lib/escrow.js";
 
 describe("publication errors stay separate from sign-in errors", () => {
-  it("does not interpret a publication precondition as a missing sign-in nonce", () => {
+  it("does not treat a publication precondition as a failed sign-in", () => {
     const error = { code: "functions/failed-precondition", message: "The content could not be verified against its mined transaction. Wait for confirmation and retry." };
     assert.match(messageForPublicationSaveError(error), /server could not verify this submission/);
     assert.doesNotMatch(messageForPublicationSaveError(error), /sign.in/);
-    assert.match(messageForFirebaseError(error), /No sign-in request/);
+    assert.doesNotMatch(messageForFirebaseError(error), /nonce|pending for this wallet/);
   });
   for (const [message, expected] of [
     ["Registry maintenance or retirement prevents publication.", /maintenance/],
@@ -20,7 +20,7 @@ describe("publication errors stay separate from sign-in errors", () => {
   });
   it("maps only actual authentication failures to sign-in guidance", () => {
     assert.match(messageForPublicationSaveError({ code: "functions/unauthenticated" }), /session has expired/);
-    assert.doesNotMatch(messageForPublicationSaveError({ code: "functions/internal" }), /sign.in|nonce/);
+    assert.doesNotMatch(messageForPublicationSaveError({ code: "functions/internal" }), /sign.in/);
   });
 });
 

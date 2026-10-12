@@ -7,12 +7,12 @@ people skip, and skipping it produces a misleading CORS error.
 
 ## Before you start
 
-You need the **Blaze (pay-as-you-go)** plan. Sign-in verifies wallet signatures on the
-server, that runs in Cloud Functions, and Cloud Functions is not available on Spark.
+You need the **Blaze (pay-as-you-go)** plan. Sign-in verifies the Privy access
+token in Cloud Functions, and Cloud Functions is not available on Spark.
 
 The free allowance (2M invocations/month) means a demo costs effectively nothing, but
-a card is required. There is no fool-proof alternative: verifying a signature in the
-browser proves nothing, because an attacker just skips the browser.
+a card is required. The browser never chooses the account: the server reads the
+embedded wallet from Privy and mints the Firebase session.
 
 If you only want to develop locally, skip to [Local development](#local-development-no-cloud-project)
 — the emulators run fine on Spark.
@@ -62,7 +62,9 @@ reference, the schema is:
 
 | Field | Type | Notes |
 |---|---|---|
-| `address` | string | lowercase `0x…`, equals the document id |
+| `address` | string | lowercase `0x…`, equals the document id and the Firebase uid |
+| `email` | string | server-written on sign-in. One email per account. Clients cannot write it |
+| `privyUserId` | string | server-written `did:privy:…`. Clients cannot write it |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
 | `role` | number | `0` (user) or `1` (administrator) access level |
@@ -77,8 +79,11 @@ The whole `stats` map is **frozen against client writes** — the rules require 
 byte-identical on update, so nobody can award themselves karma. Only Admin SDK code can
 move those numbers.
 
-**`siweNonces/{challengeId}`** — one pending sign-in challenge per attempt, written and
-consumed by the Cloud Functions, denied to all clients. Manages itself; ignore it.
+**`emailAccounts/{email}`** — the uniqueness lock, one document per normalised
+email, holding the wallet address. Admin SDK only.
+
+**`privyIdentities/{address}`** — the sign-in binding, copied onto `users/{address}`
+when onboarding creates the profile. Admin SDK only.
 
 ## Step 5 — Register the web app **[YOU]**
 
@@ -123,7 +128,7 @@ firebase deploy --only firestore:rules,firestore:indexes,functions --project YOU
 ```
 
 **Both halves are mandatory.** Without the rules, production mode denies every write.
-Without the functions, nothing can verify a signature and nobody can sign in.
+Without the functions, nothing can verify a Privy session and nobody can sign in.
 
 The first deploy asks to enable the `cloudfunctions`, `cloudbuild`, `artifactregistry`,
 `eventarc`, and `cloudscheduler` APIs — accept. It takes several minutes.
@@ -225,9 +230,57 @@ signInWithCustomToken()
                                         #/role-selection
 ```
 
-`request.auth.uid` **is** the wallet address, and a uid can only exist because the
-server verified a signature. That is what makes the rule `request.auth.uid == address`
+`request.auth.uid` **is** the wallet address. Email is stored on the same
+`users/{address}` document by the server (`email`, `privyUserId`), and
+`emailAccounts/{email}` refuses a second wallet for that email. The rules
+reject a client write of either field. That is what makes the rule `request.auth.uid == address`
 a real proof of ownership rather than a claim the browser made about itself.
+
+## Administrator bootstrap (QCDAO-152)
+
+The wallet address does not exist until the administrator signs in, so the grant
+is keyed by email. Put their address in `ADMIN_BOOTSTRAP_EMAILS` on the functions
+environment before they finish onboarding:
+
+```bash
+# firebase/functions/.env.qcdao-a0c7a  (gitignored)
+ADMIN_BOOTSTRAP_EMAILS=you@smu.edu.sg
+```
+
+Redeploy functions, then sign in with that email and complete onboarding. The
+server sets `role` to `1` on the new `users/{wallet}` document. A later sign-in
+grants it again if the role is still `0`, which covers setting the variable
+after the first signup. Remove the email from the list before demoting that
+account to a normal user, or the next sign-in promotes it again.
+
+The emulator reads the same variable from the process environment or
+`firebase/functions/.env`.
+
+## Reset development data (QCDAO-152)
+
+`firebase/functions/scripts/reset-dev-data.mjs` deletes every Firestore root
+collection (including subcollections), every Storage object, and every Auth
+user. Dry run is the default. `--confirm` must be the project id or nothing is
+deleted.
+
+This repository's tests run it only against the emulator. The live site is
+`qcdao-a0c7a`; run that yourself, after a dry run:
+
+```bash
+cd firebase/functions
+
+# Emulator. Start it first, then:
+node scripts/reset-dev-data.mjs --project qcdao-a0c7a
+node scripts/reset-dev-data.mjs --project qcdao-a0c7a --confirm qcdao-a0c7a
+
+# Live project. Application Default Credentials. Emulator host variables must be unset.
+node scripts/reset-dev-data.mjs --target production --project qcdao-a0c7a
+node scripts/reset-dev-data.mjs --target production --project qcdao-a0c7a --confirm qcdao-a0c7a
+```
+
+The script refuses a production reset of any project other than `qcdao-a0c7a`,
+and refuses production while `FIRESTORE_EMULATOR_HOST`,
+`FIREBASE_AUTH_EMULATOR_HOST` or `FIREBASE_STORAGE_EMULATOR_HOST` is set.
 
 ---
 
@@ -250,9 +303,7 @@ If that fails with a billing error, you are still on Spark — do step 2.
 If `curl` returns `403`, the functions deployed but are not publicly invokable. Grant it:
 
 ```bash
-gcloud run services add-iam-policy-binding getsiwenonce \
-  --region=asia-southeast1 --member=allUsers --role=roles/run.invoker
-gcloud run services add-iam-policy-binding verifysiwesignature \
+gcloud run services add-iam-policy-binding exchangeprivysession \
   --region=asia-southeast1 --member=allUsers --role=roles/run.invoker
 ```
 
@@ -265,11 +316,12 @@ that region or change `REGION` and `FUNCTIONS_REGION` (step 4) to match what you
 
 The rules are not deployed: `firebase deploy --only firestore:rules`.
 
-### The wallet connects but no onboarding popup appears
+### Email sign-in succeeds but no onboarding popup appears
 
-Sign-in never completed. The popup only opens once the server has verified your
-signature. Check the browser console for the specific error — an undeployed function
-now reports itself in plain language rather than failing silently.
+The Firebase session never completed. The popup opens only after
+`exchangePrivySession` has minted a custom token. Check the browser console for
+the specific error — an undeployed function reports itself in plain language
+rather than failing silently.
 
 ---
 
@@ -339,5 +391,5 @@ only `apiKey`, `projectId` and `appId` are required.
 
 No. They ship in the JS bundle and are visible to anyone who opens devtools. They are
 identifiers, not credentials. Your data is protected by Firestore rules and by
-server-side signature verification. Keep the env file out of git anyway so each person
+the server checking the Privy access token. Keep the env file out of git anyway so each person
 uses their own project.

@@ -82,12 +82,6 @@ describe("wallet validation", () => {
   it("accepts a verified address", () => {
     assert.equal(validateWallet(VALID_ADDRESS), null);
   });
-
-  // The signature itself is checked by firebase/functions/index.js before the client
-  // ever holds a session, so there is nothing signature-shaped left to validate here.
-  it("does not ask the client to vouch for a signature", () => {
-    assert.equal(validateWallet(VALID_ADDRESS), null);
-  });
 });
 
 describe("whole-form validation", () => {

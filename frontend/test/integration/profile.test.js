@@ -15,6 +15,8 @@ const profile = {
   role: 0,
   chainId: 421614,
   walletVerified: true,
+  email: "ashley@example.com",
+  privyUserId: "did:privy:ashley",
   stats: {
     comments: 0,
     businessProblems: 0,
@@ -106,6 +108,8 @@ describe("Integration Tests: Profile Access & Maintenance", () => {
     assert.equal(updated.role, profile.role);
     assert.equal(updated.chainId, profile.chainId);
     assert.equal(updated.walletVerified, profile.walletVerified);
+    assert.equal(updated.email, profile.email);
+    assert.equal(updated.privyUserId, profile.privyUserId);
     assert.deepEqual(updated.stats, profile.stats);
   });
 
@@ -117,7 +121,7 @@ describe("Integration Tests: Profile Access & Maintenance", () => {
       biography: profile.biography,
       expertise: profile.expertise,
     };
-    const privateFields = ["role", "stats", "chainId", "walletVerified", "termsAcceptedAt", "createdAt", "updatedAt"];
+    const privateFields = ["role", "stats", "chainId", "walletVerified", "email", "privyUserId", "termsAcceptedAt", "createdAt", "updatedAt"];
 
     assert.deepEqual(Object.keys(publicProfile).sort(), [
       "address", "biography", "expertise", "fullName", "organisation",

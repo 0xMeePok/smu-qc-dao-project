@@ -226,6 +226,16 @@ describe("users/{address} create", () => {
     );
   });
 
+  it("[QCDAO-152] blocks a client from writing email or privyUserId at signup", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { email: "member@example.com" })),
+    );
+    await assertFails(
+      setDoc(doc(db, "users", OTHER), baseProfile(null, OTHER, { privyUserId: "did:privy:member" })),
+    );
+  });
+
   it("blocks setting suspended at signup", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(
@@ -572,6 +582,37 @@ describe("users/{address} update", () => {
     await assertFails(
       updateDoc(doc(db, "users", OTHER), { address: ADDRESS, updatedAt: new Date() }),
     );
+  });
+
+  it("[QCDAO-152] allows a profile edit to keep server-written email and privyUserId", async () => {
+    const id = `0x${"c".repeat(40)}`;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", id), baseProfile(null, id, {
+        email: "member@example.com",
+        privyUserId: "did:privy:member",
+      }));
+      await setDoc(doc(ctx.firestore(), "publicProfiles", id), {
+        address: id,
+        fullName: "Ashley Chung",
+        organisation: "Singapore Management University",
+      });
+    });
+
+    const db = env.authenticatedContext(id).firestore();
+    const batch = writeBatch(db);
+    batch.update(doc(db, "users", id), {
+      organisation: "New Employer Pte Ltd", updatedAt: serverTimestamp(),
+    });
+    batch.update(doc(db, "publicProfiles", id), {
+      organisation: "New Employer Pte Ltd",
+    });
+    await assertSucceeds(batch.commit());
+    await assertFails(updateDoc(doc(db, "users", id), {
+      email: "other@example.com", updatedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(db, "users", id), {
+      privyUserId: "did:privy:other", updatedAt: serverTimestamp(),
+    }));
   });
 
   it("blocks self-promoting walletVerified", async () => {
@@ -1384,10 +1425,12 @@ describe("collections outside the schema", () => {
     await assertFails(getDoc(doc(db, "secrets", "x")));
   });
 
-  it("hides sign-in nonces from every client", async () => {
+  it("[QCDAO-152] hides the email lock and the Privy binding from every client", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertFails(getDoc(doc(db, "siweNonces", ADDRESS)));
-    await assertFails(setDoc(doc(db, "siweNonces", ADDRESS), { consumed: false }));
+    await assertFails(getDoc(doc(db, "emailAccounts", "member@example.com")));
+    await assertFails(setDoc(doc(db, "emailAccounts", "member@example.com"), { address: ADDRESS }));
+    await assertFails(getDoc(doc(db, "privyIdentities", ADDRESS)));
+    await assertFails(setDoc(doc(db, "privyIdentities", ADDRESS), { email: "member@example.com" }));
   });
 
   it("hides session revocation cutoffs from every client", async () => {

@@ -1124,18 +1124,6 @@
   ],
   "fieldOverrides": [
     {
-      "collectionGroup": "siweNonces",
-      "fieldPath": "expiresAt",
-      "ttl": true,
-      "indexes": []
-    },
-    {
-      "collectionGroup": "siweRateLimits",
-      "fieldPath": "expiresAt",
-      "ttl": true,
-      "indexes": []
-    },
-    {
       "collectionGroup": "publicationAttempts",
       "fieldPath": "expiresAt",
       "ttl": true,

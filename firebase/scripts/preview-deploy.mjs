@@ -4,9 +4,10 @@
  * production backend, then brings the two backend allow-lists into line with
  * whatever preview channels currently exist.
  *
- * Nothing about a channel is hardcoded or committed: the SIWE allow-list and the
- * bucket CORS origins are both derived from `hosting:channel:list` on every run,
- * so a new channel is picked up and an expired one drops off by itself.
+ * Nothing about a channel is hardcoded or committed: bucket CORS origins are
+ * derived from `hosting:channel:list` on every run, so a new channel is picked
+ * up and an expired one drops off by itself. Privy allowed origins are set in
+ * the Privy dashboard, not by this script.
  *
  * Firestore and Storage rules are project-global: a preview channel runs against
  * whatever is live, so a branch that changes rules cannot be tested on one until
@@ -144,9 +145,9 @@ const previewUrls = channels
 const previewHosts = previewUrls.map((u) => new URL(u).host);
 console.log(`[preview] ${previewHosts.length} live preview channel(s).`);
 
-// Sign-in no longer uses a SIWE allow-list. The generated env keeps the public
-// Privy app id so a later functions deploy can verify access tokens. The app
-// secret is the functions secret PRIVY_SECRET and is never written here.
+// The generated env keeps the public Privy app id so a later functions deploy
+// can verify access tokens. The app secret is the functions secret PRIVY_SECRET
+// and is never written here.
 const envPath = path.join(firebaseDir, "functions", `.env.${PROJECT}`);
 const currentEnv = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
 const appId = readPrivyAppId() || currentEnv.match(/^PRIVY_APP_ID=(.*)$/m)?.[1]?.trim() || "";

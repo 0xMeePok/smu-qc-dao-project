@@ -131,7 +131,10 @@ service cloud.firestore {
           'address', 'fullName', 'organisation', 'biography', 'expertise',
           'role', 'chainId', 'stats',
           'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt',
-          'suspended', 'sessionsValidAfterEpoch', 'tokenRevocationStatus', 'tokenRevokedAt'
+          'suspended', 'sessionsValidAfterEpoch', 'tokenRevocationStatus', 'tokenRevokedAt',
+          // Server-written by exchangePrivySession / stampPrivyIdentity. Present on
+          // a profile after the first sign-in binding; clients may not introduce them.
+          'email', 'privyUserId'
         ]);
       }
 
@@ -160,9 +163,9 @@ service cloud.firestore {
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
         // 0 = normal user. Every new account is one - there is no self-service path
-        // to 1 (administrator) anywhere in this rule. Becoming an admin means
-        // someone with Firestore console access edits this field by hand; nothing
-        // the client can send, at signup or ever after, can set it to 1 itself.
+        // to 1 (administrator) anywhere in this rule. The server grants 1 for an
+        // email in ADMIN_BOOTSTRAP_EMAILS, or an administrator changes it later.
+        // Nothing the client can send, at signup or ever after, can set it to 1.
         && request.resource.data.role == 0
         // Fixed testnet id for now; this becomes a real chain allow-list if the
         // platform ever supports more than one network.
@@ -175,7 +178,9 @@ service cloud.firestore {
         && request.resource.data.termsAcceptedAt == request.time
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
-        && !request.resource.data.keys().hasAny(['suspended']);
+        && !request.resource.data.keys().hasAny(['suspended'])
+        // email and privyUserId are copied on by the Admin SDK after this create.
+        && !request.resource.data.keys().hasAny(['email', 'privyUserId']);
 
       // Only the wallet itself may edit its profile, on any device, because the uid
       // is derived from a signature rather than from a per-browser session.
@@ -201,6 +206,7 @@ service cloud.firestore {
         && request.resource.data.get('sessionsValidAfterEpoch', 0) == resource.data.get('sessionsValidAfterEpoch', 0)
         && request.resource.data.get('tokenRevocationStatus', '') == resource.data.get('tokenRevocationStatus', '')
         && request.resource.data.get('tokenRevokedAt', null) == resource.data.get('tokenRevokedAt', null)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['email', 'privyUserId'])
         && isNonEmptyString(request.resource.data.fullName, 80)
         && isNonEmptyString(request.resource.data.organisation, 120)
         && existsAfter(/databases/$(database)/documents/publicProfiles/$(address))
@@ -275,10 +281,14 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Sign-in nonces are written and read only by the Admin SDK inside the callable
-    // functions. Exposing them to the browser would let an attacker read a pending
-    // nonce, or clear the `consumed` flag and replay a signature.
-    match /siweNonces/{challengeId} {
+    // One document per email. The id is the normalised email and address is the
+    // wallet. Clients cannot read it: knowing an email must not reveal a wallet.
+    match /emailAccounts/{email} {
+      allow read, write: if false;
+    }
+
+    // Sign-in binding for a wallet that has not finished onboarding yet.
+    match /privyIdentities/{address} {
       allow read, write: if false;
     }
 

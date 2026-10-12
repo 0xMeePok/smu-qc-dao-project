@@ -19,7 +19,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { initializeApp, cert, applicationDefault } from "firebase-admin/app";
+import { initializeApp, applicationDefault } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 
@@ -36,6 +37,24 @@ const STORAGE_BUCKET = process.env.MOCK_STORAGE_BUCKET ?? `${PROJECT_ID}.firebas
  * as, which is fine for browsing Discover and the detail page.
  */
 const OWNER = (process.env.MOCK_OWNER_ADDRESS ?? `0x${"d".repeat(40)}`).toLowerCase();
+
+/**
+ * Privy-style identity for the sample owner. The document id and Auth uid stay
+ * the wallet address. Email is the human identifier and is unique via
+ * emailAccounts/{email}. Override both when the sample postings should belong
+ * to a wallet you can actually sign in as.
+ */
+const OWNER_EMAIL = (process.env.MOCK_OWNER_EMAIL ?? "sample.owner@qcdao.example").trim().toLowerCase();
+const OWNER_PRIVY_ID = process.env.MOCK_OWNER_PRIVY_ID ?? "did:privy:seed-sample-owner";
+
+const ZERO_STATS = {
+  comments: 0,
+  businessProblems: 0,
+  openFunding: 0,
+  fundingRequests: 0,
+  karma: 0,
+  reputation: 0,
+};
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -204,6 +223,70 @@ export async function resetPostings({ db, bucket, logger = console }) {
   return snapshot.size;
 }
 
+/**
+ * Upserts the sample owner's account in the shape sign-in now writes:
+ * users/{wallet} carries email and privyUserId, and emailAccounts/{email}
+ * locks that email to this wallet. The Auth user (uid = wallet) is created
+ * only against the emulator; a live Privy sign-in creates the real one.
+ */
+export async function seedOwnerAccount({ db, auth = null, logger = console }) {
+  const userRef = db.collection("users").doc(OWNER);
+  const existing = await userRef.get();
+  const profile = {
+    address: OWNER,
+    email: OWNER_EMAIL,
+    privyUserId: OWNER_PRIVY_ID,
+    fullName: "Sample Owner",
+    organisation: "QC DAO Samples",
+    biography: "",
+    expertise: [],
+    chainId: 421614,
+    walletVerified: true,
+    termsVersion: "2026-08-24",
+    termsAcceptedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (!existing.exists) {
+    profile.role = 0;
+    profile.stats = { ...ZERO_STATS };
+    profile.createdAt = FieldValue.serverTimestamp();
+  }
+  await userRef.set(profile, { merge: true });
+  await db.collection("publicProfiles").doc(OWNER).set({
+    address: OWNER,
+    fullName: profile.fullName,
+    organisation: profile.organisation,
+    biography: "",
+    expertise: [],
+  }, { merge: true });
+  await db.collection("emailAccounts").doc(OWNER_EMAIL).set({
+    address: OWNER,
+    privyUserId: OWNER_PRIVY_ID,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  await db.collection("privyIdentities").doc(OWNER).set({
+    address: OWNER,
+    email: OWNER_EMAIL,
+    privyUserId: OWNER_PRIVY_ID,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  logger.info(`seeded Privy-style account users/${OWNER} <${OWNER_EMAIL}>`);
+
+  if (!auth) return OWNER_EMAIL;
+  try {
+    try {
+      await auth.updateUser(OWNER, { email: OWNER_EMAIL, emailVerified: true });
+    } catch (error) {
+      if (error?.code !== "auth/user-not-found") throw error;
+      await auth.createUser({ uid: OWNER, email: OWNER_EMAIL, emailVerified: true });
+    }
+    logger.info(`auth user ${OWNER} <${OWNER_EMAIL}>`);
+  } catch (error) {
+    logger.warn(`Auth user was not created (${error.message}). The Firestore account was still written.`);
+  }
+  return OWNER_EMAIL;
+}
+
 export async function seed({ db, bucket, logger = console }) {
   for (const posting of SAMPLE_POSTINGS) {
     const attachments = [];
@@ -267,6 +350,7 @@ async function main() {
   if (target === "emulator") {
     // Point the Admin SDK at the local emulators. Set before initializeApp.
     process.env.FIRESTORE_EMULATOR_HOST ??= "127.0.0.1:8080";
+    process.env.FIREBASE_AUTH_EMULATOR_HOST ??= "127.0.0.1:9099";
     process.env.FIREBASE_STORAGE_EMULATOR_HOST ??= "127.0.0.1:9199";
     console.log("Seeding the EMULATORS. Start them first, in another terminal.");
   } else {
@@ -281,6 +365,7 @@ async function main() {
 
   const db = getFirestore();
   const bucket = getStorage().bucket();
+  await seedOwnerAccount({ db, auth: target === "emulator" ? getAuth() : null });
 
   // Only ever against the emulator. Wiping the live marketplace because someone
   // ran a seed script is not a recoverable mistake.

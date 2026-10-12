@@ -4,11 +4,12 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { createPublicClient, fallback, http } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { defineSecret } from "firebase-functions/params";
 import { exchangePrivySession as mintPrivySession, PrivySessionError } from "./privySession.js";
+import { bootstrapAdminEmails, stampUserFromIdentity } from "./privyAccount.js";
 import { registerModerationCallables } from "./moderationFunctions.js";
 import { registerMatchingNotificationFunctions } from "./matchingNotifications.js";
 import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
@@ -121,7 +122,7 @@ function serializeOpportunityForAdmin(id, data) {
 // arrives - once instances are saturated, Cloud Run queues or fails fast rather than
 // autoscaling without limit. This adds no latency to normal traffic; a handful of
 // concurrent sign-ins never gets close to it.
-const NONCE_MAX_INSTANCES = 10;
+const SIGN_IN_MAX_INSTANCES = 10;
 
 // Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js and the Firestore
 // database location. Otherwise every sign-in crosses regions.
@@ -521,7 +522,7 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
  */
 export const exchangePrivySession = onCall({
   region: REGION,
-  maxInstances: NONCE_MAX_INSTANCES,
+  maxInstances: SIGN_IN_MAX_INSTANCES,
   secrets: [privySecret],
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
 }, async (request) => {
@@ -532,6 +533,26 @@ export const exchangePrivySession = onCall({
     throw new HttpsError("unavailable", "Sign-in could not be confirmed. Try again in a moment.");
   }
 });
+
+/**
+ * Onboarding creates users/{address} without email: rules forbid the client
+ * from writing it. This copies the binding exchangePrivySession stored, and
+ * grants role 1 when the email is on ADMIN_BOOTSTRAP_EMAILS.
+ */
+export const stampPrivyIdentity = onDocumentCreated(
+  { document: "users/{address}", region: REGION, retry: true, maxInstances: 5 },
+  async (event) => {
+    const address = String(event.params.address || "").toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return;
+    await stampUserFromIdentity({
+      db,
+      Timestamp,
+      address,
+      userData: event.data?.data() ?? {},
+      adminEmails: bootstrapAdminEmails(),
+    });
+  },
+);
 
 /**
  * Invalidates every refresh token for the current wallet before the browser clears
@@ -888,6 +909,7 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
     return {
       address: docSnap.id,
       fullName: data.fullName || "",
+      email: data.email || "",
       organisation: data.organisation || "",
       role: typeof data.role === "number" ? data.role : 0,
       suspended: Boolean(data.suspended),
@@ -903,6 +925,7 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
     const searchLower = search.trim().toLowerCase();
     users = users.filter((u) =>
       u.fullName.toLowerCase().includes(searchLower) ||
+      u.email.toLowerCase().includes(searchLower) ||
       u.address.toLowerCase().includes(searchLower) ||
       u.organisation.toLowerCase().includes(searchLower),
     );
