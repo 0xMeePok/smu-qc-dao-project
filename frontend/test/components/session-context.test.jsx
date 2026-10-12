@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   auth: { currentUser: null },
   authListener: null,
   profileListener: null,
+  profileError: null,
+  subscribeProfile: vi.fn(),
   accountAddress: null,
   disconnect: vi.fn(async () => {}),
   go: vi.fn(),
@@ -35,10 +37,10 @@ vi.mock("firebase/auth", () => ({
 }));
 vi.mock("firebase/firestore", () => ({
   doc: (_db, collection, id) => ({ collection, id }),
-  onSnapshot: (_ref, callback) => {
+  onSnapshot: (_ref, callback, onError) => {
     mocks.profileListener = callback;
-    callback({ exists: () => true, data: () => ({ fullName: "Ada", role: 0 }) });
-    return () => {};
+    mocks.profileError = onError;
+    return mocks.subscribeProfile(callback, onError);
   },
 }));
 vi.mock("../../src/lib/firebase.js", () => ({
@@ -89,6 +91,10 @@ describe("SessionProvider persistence and logout integration", () => {
       mocks.authListener?.(null);
     });
     mocks.revoke.mockResolvedValue({ success: true });
+    mocks.subscribeProfile.mockImplementation(callback => {
+      callback({ exists: () => true, data: () => ({ fullName: "Ada", role: 0 }) });
+      return () => {};
+    });
   });
 
   afterEach(() => cleanup());
@@ -124,6 +130,54 @@ describe("SessionProvider persistence and logout integration", () => {
     await act(async () => { sessionReady(); await pending; });
     expect(currentSession.signInPhase).toBeNull();
     expect(currentSession.isSignedIn).toBe(true);
+  });
+
+  it("recovers a failed profile listener when the same wallet signs in again without an auth-state event", async () => {
+    mocks.accountAddress = mocks.auth.currentUser.uid;
+    const unsubscribe = vi.fn();
+    mocks.subscribeProfile.mockImplementationOnce((_next, error) => {
+      error({ code: "permission-denied" });
+      return unsubscribe;
+    });
+    // Firebase need not notify onAuthStateChanged when the UID stays the same.
+    mocks.requestMessage.mockResolvedValue({ message: "Sign in", challengeId: "retry" });
+    mocks.signMessage.mockResolvedValue("signature");
+    mocks.exchangeSignature.mockResolvedValue(mocks.accountAddress);
+    mountProvider();
+    await waitFor(() => expect(currentSession?.error).toBeTruthy());
+    expect(currentSession.isSignedIn).toBe(false);
+
+    // A valid signature alone must not grant access: wait for the fresh profile.
+    mocks.subscribeProfile.mockImplementation(() => () => {});
+    await act(async () => { expect((await currentSession.signIn()).ok).toBe(true); });
+    expect(currentSession.isChecking).toBe(true);
+    expect(currentSession.isSignedIn).toBe(false);
+    expect(currentSession.signInPhase).toBeNull();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    await act(async () => {
+      mocks.profileListener({ exists: () => true, data: () => ({ fullName: "Ada", role: 0 }) });
+    });
+    expect(currentSession.isSignedIn).toBe(true);
+    expect(currentSession.isBusy).toBe(false);
+    expect(currentSession.error).toBeNull();
+  });
+
+  it("continues to deny access if the refreshed same-wallet profile read is rejected", async () => {
+    mocks.accountAddress = mocks.auth.currentUser.uid;
+    mocks.subscribeProfile.mockImplementation((_next, error) => {
+      error({ code: "permission-denied" });
+      return () => {};
+    });
+    mocks.requestMessage.mockResolvedValue({ message: "Sign in", challengeId: "retry" });
+    mocks.signMessage.mockResolvedValue("signature");
+    mocks.exchangeSignature.mockResolvedValue(mocks.accountAddress);
+    mountProvider();
+    await waitFor(() => expect(currentSession?.error).toBeTruthy());
+
+    await act(async () => { await currentSession.signIn(); });
+    expect(currentSession.isSignedIn).toBe(false);
+    expect(currentSession.isBusy).toBe(false);
+    expect(currentSession.error).toBeTruthy();
   });
 
   // Revocation already succeeded here, so the token is dead server-side. Staying
