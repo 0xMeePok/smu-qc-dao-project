@@ -160,15 +160,16 @@ describe("WalletProvider", () => {
     await expect(pending).resolves.toBe(ADDRESS);
   });
 
-  it("signs the sign-in challenge with the embedded wallet, without a second prompt", async () => {
+  it("asks Privy to confirm a message before the embedded wallet signs it", async () => {
     render(tree());
     let signature;
     await act(async () => { signature = await api.signMessage("Sign in to QC DAO", ADDRESS.toLowerCase()); });
     expect(signature).toBe("0xsignature");
     expect(mocks.signMessage).toHaveBeenCalledExactlyOnceWith(
       { message: "Sign in to QC DAO" },
-      { address: ADDRESS, uiOptions: { showWalletUIs: false } },
+      { address: ADDRESS },
     );
+    expect(mocks.signMessage.mock.calls[0][1]).not.toHaveProperty("uiOptions");
     await expect(api.signMessage("Sign in to QC DAO", OTHER)).rejects.toThrow(/not ready/);
   });
 
@@ -281,12 +282,15 @@ describe("[QCDAO-144] sponsored transactions", () => {
   const REGISTRY = `0x${"e5".repeat(20)}`;
   const request = { from: ADDRESS, to: REGISTRY, data: "0x1234", value: "0x0" };
   const wallet = (send) => ({ address: ADDRESS, sendSponsoredTransaction: vi.fn(send) });
-  const chain = ({ success = true, logs } = {}) => {
-    const { receipt } = sponsoredTransaction({ hash: HASH, calls: [{ sender: ADDRESS.toLowerCase(), to: REGISTRY, input: "0x1234", success }] });
+  const built = (hash = HASH, call = { sender: ADDRESS.toLowerCase(), to: REGISTRY, input: "0x1234" }, success = true) =>
+    sponsoredTransaction({ hash, calls: [{ ...call, success }] });
+  const chain = ({ success = true, logs, transactions } = {}) => {
+    const ours = built(HASH, undefined, success);
     return {
       getBlockNumber: vi.fn(async () => 100n),
       getLogs: vi.fn(async () => logs ?? [{ transactionHash: HASH, blockNumber: 101n, logIndex: 3 }]),
-      waitForTransactionReceipt: vi.fn(async () => receipt),
+      getTransaction: vi.fn(async ({ hash }) => (transactions ?? { [HASH]: ours.transaction })[hash]),
+      waitForTransactionReceipt: vi.fn(async ({ hash }) => (hash === HASH ? ours.receipt : built(hash).receipt)),
     };
   };
 
@@ -301,6 +305,35 @@ describe("[QCDAO-144] sponsored transactions", () => {
     const publicClient = chain();
     await expect(sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: "" })), publicClient })).resolves.toBe(HASH);
     expect(publicClient.getLogs).toHaveBeenCalledWith(expect.objectContaining({ args: { sender: ADDRESS }, fromBlock: 100n }));
+    expect(publicClient.getTransaction).toHaveBeenCalledWith({ hash: HASH });
+  });
+
+  it("ignores another operation from the same wallet and uses the one that carries this call", async () => {
+    const otherHash = `0x${"2".repeat(64)}`;
+    const other = built(otherHash, { sender: ADDRESS.toLowerCase(), to: OTHER, input: "0xabcd" });
+    const ours = built();
+    const publicClient = chain({
+      logs: [
+        { transactionHash: otherHash, blockNumber: 101n, logIndex: 1 },
+        { transactionHash: HASH, blockNumber: 101n, logIndex: 2 },
+      ],
+      transactions: { [otherHash]: other.transaction, [HASH]: ours.transaction },
+    });
+    await expect(sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: "" })), publicClient })).resolves.toBe(HASH);
+  });
+
+  it("sends one sponsored transaction at a time for the same wallet", async () => {
+    let release;
+    const held = new Promise((resolve) => { release = () => resolve({ hash: HASH }); });
+    const member = wallet(() => held);
+    const publicClient = chain();
+    const first = sendSponsoredTransaction(request, { wallet: member, publicClient });
+    const second = sendSponsoredTransaction({ ...request, data: "0x99" }, { wallet: member, publicClient });
+    await vi.waitFor(() => expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce());
+    release();
+    await expect(first).resolves.toBe(HASH);
+    await expect(second).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledTimes(2);
   });
 
   it("reports a call that failed inside a mined sponsored transaction as a revert", async () => {

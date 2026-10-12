@@ -185,13 +185,10 @@ function PrivyWalletProvider({ children }) {
     if (!current || (account && current.address.toLowerCase() !== account.toLowerCase())) {
       throw new WalletUnavailableError();
     }
-    // The sign-in challenge authorises nothing on-chain and the member has just
-    // proved their email, so it is signed without a second confirmation screen.
-    // Transactions keep Privy's confirmation prompt.
-    const { signature } = await signWithPrivy({ message }, {
-      address: current.address,
-      uiOptions: { showWalletUIs: false },
-    });
+    // Every signature shows Privy's confirmation screen. Sign-in does not use
+    // this; it exchanges Privy's access token. A silent signature would let any
+    // caller of signMessage obtain a signature the member never saw.
+    const { signature } = await signWithPrivy({ message }, { address: current.address });
     return signature;
   }, [signWithPrivy]);
 

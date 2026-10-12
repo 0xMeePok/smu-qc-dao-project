@@ -1,6 +1,6 @@
 import { createWalletClient, custom, parseAbiItem } from "viem";
 import { arbitrumSepolia } from "viem/chains";
-import { ENTRY_POINTS, userOperationSucceeded } from "../../../firebase/functions/memberCall.js";
+import { ENTRY_POINTS, decodeMemberCall, userOperationSucceeded } from "../../../firebase/functions/memberCall.js";
 import { browserPublicClient } from "./rpc.js";
 
 /**
@@ -64,17 +64,49 @@ function isRejection(error) {
 }
 
 /**
- * Privy reports a paymaster-sponsored transaction's hash as "" until it is
- * mined. The EntryPoint logs every operation with its sender, so the member's
- * transaction is the first one from their wallet after `fromBlock`.
+ * One sponsored send per wallet. A second action waits, so this tab cannot
+ * attribute another in-flight operation to the action that is still open.
  */
-async function findSponsoredTransaction({ publicClient, sender, fromBlock, timeoutMs = FIND_TIMEOUT_MS }) {
+const sendQueues = new Map();
+
+function enqueueSend(address, task) {
+  const key = String(address).toLowerCase();
+  const previous = sendQueues.get(key) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  // The queue must not reject on its own. The caller handles `run`.
+  const settled = run.then(() => {}, () => {});
+  settled.finally(() => {
+    if (sendQueues.get(key) === settled) sendQueues.delete(key);
+  });
+  sendQueues.set(key, settled);
+  return run;
+}
+
+const sameCall = (call, { to, data, value }) => {
+  if (!call?.sponsored || !same(call.to, to)) return false;
+  const wanted = (data ?? "0x").toLowerCase();
+  if (String(call.input ?? "0x").toLowerCase() !== wanted) return false;
+  const wantedValue = value === undefined || value === null ? 0n : BigInt(value);
+  return (call.value ?? 0n) === wantedValue;
+};
+
+/**
+ * Privy reports a paymaster-sponsored transaction's hash as "" until it is
+ * mined. Match the EntryPoint log whose user operation carries this exact
+ * call, not merely the first operation from the same wallet.
+ */
+async function findSponsoredTransaction({ publicClient, sender, fromBlock, to, data, value, timeoutMs = FIND_TIMEOUT_MS }) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const logs = await publicClient.getLogs({ address: [...ENTRY_POINTS], event: USER_OPERATION_EVENT, args: { sender }, fromBlock })
       .catch(() => []);
-    const first = logs.sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))[0];
-    if (first?.transactionHash) return first.transactionHash;
+    const ordered = [...logs].sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1));
+    for (const log of ordered) {
+      if (!TX_HASH.test(log.transactionHash ?? "")) continue;
+      const transaction = await publicClient.getTransaction({ hash: log.transactionHash }).catch(() => null);
+      const call = decodeMemberCall(transaction, { sender });
+      if (sameCall(call, { to, data, value })) return { hash: log.transactionHash, nonce: call.nonce };
+    }
     await wait(FIND_INTERVAL_MS);
   }
   throw Object.assign(new Error(SPONSORED_PENDING_MESSAGE), { walletOutcome: "pending" });
@@ -91,6 +123,10 @@ export async function sendSponsoredTransaction(request, { wallet = active, publi
   if (request.from && !same(request.from, wallet.address)) {
     throw new WalletUnavailableError("This action belongs to a different account from the one signed in. Sign in with that account's email, then try again.");
   }
+  return enqueueSend(wallet.address, () => submitSponsoredTransaction(request, { wallet, publicClient, timeoutMs }));
+}
+
+async function submitSponsoredTransaction(request, { wallet, publicClient, timeoutMs }) {
   const fromBlock = await publicClient.getBlockNumber();
   let result;
   try {
@@ -105,11 +141,15 @@ export async function sendSponsoredTransaction(request, { wallet = active, publi
     if (isRejection(error) || error instanceof WalletUnavailableError) throw error;
     throw new SponsorshipUnavailableError(error);
   }
-  const hash = TX_HASH.test(result?.hash ?? "")
-    ? result.hash
-    : await findSponsoredTransaction({ publicClient, sender: wallet.address, fromBlock, timeoutMs });
+  const reported = TX_HASH.test(result?.hash ?? "");
+  const found = reported
+    ? null
+    : await findSponsoredTransaction({
+      publicClient, sender: wallet.address, fromBlock, to: request.to, data: request.data, value: request.value, timeoutMs,
+    });
+  const hash = reported ? result.hash : found.hash;
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  const succeeded = userOperationSucceeded(receipt, wallet.address);
+  const succeeded = userOperationSucceeded(receipt, wallet.address, found?.nonce !== undefined ? { nonce: found.nonce } : {});
   if (receipt.status !== "success" || succeeded === false) {
     throw Object.assign(new Error(SPONSORED_REVERT_MESSAGE), { walletOutcome: "reverted", transactionHash: hash });
   }
