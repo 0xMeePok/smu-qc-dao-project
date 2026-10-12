@@ -108,7 +108,7 @@ approvals, votes and the connected wallet's refund at one block. The displayed
 state refreshes periodically and after confirmed transactions. Proposal and posting
 edit checks read on-chain funding rather than simulated matching balances.
 
-Connect the wallet for the signed-in account on Arbitrum Sepolia to act:
+Members act through the embedded wallet of the account they signed in with (by email) on Arbitrum Sepolia:
 
 1. **Funders** enter an exact token amount up to the remaining target. The wallet
    reuses a sufficient allowance; otherwise it approves the entered amount, first

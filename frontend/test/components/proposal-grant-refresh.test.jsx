@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   proposal: vi.fn(), grant: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), escrow: vi.fn(), history: vi.fn(),
 }));
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`;
-vi.mock("wagmi", async importOriginal => ({ ...await importOriginal(), useAccount: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614 }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614 }) }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}`, roles: ["researcher"] } }) }));
 vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.proposal(...args), withdrawProposal: vi.fn() }));
 vi.mock("../../src/lib/openFunding.js", () => ({
@@ -25,7 +25,6 @@ vi.mock("../../src/components/OwnerReviewPanel.jsx", () => ({ OwnerReviewPanel: 
 vi.mock("../../src/components/ProposalRevisionTrail.jsx", () => ({ ProposalRevisionTrail: () => null }));
 vi.mock("../../src/components/ReportableComments.jsx", () => ({ ReportableComments: () => null }));
 vi.mock("../../src/components/ReportContentButton.jsx", () => ({ ContentModerationNotice: () => null, ReportContentButton: () => null }));
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => null }));
 vi.mock("../../src/lib/proposalAudit.js", () => ({ proposalAuditReceipt: record => record.audit, anchorProposalAudit: vi.fn(), anchorProposalWithdrawal: vi.fn(), readProposalAudit: vi.fn() }));
 
 import ProposalDetailPage from "../../src/pages/ProposalDetailPage.jsx";

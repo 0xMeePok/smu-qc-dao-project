@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   auditShouldFail: false,
   connectedAddress: `0x${"a".repeat(40)}`,
+  signIn: vi.fn(async () => ({ ok: false, cancelled: true })),
   events: [],
   publications: [],
   resumed: null,
@@ -13,8 +14,8 @@ const mocks = vi.hoisted(() => ({
   uploader: { onPendingChange: null },
 }));
 
-vi.mock("wagmi", () => ({
-  useAccount: () => ({
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({
     address: mocks.connectedAddress,
     isConnected: Boolean(mocks.connectedAddress),
   }),
@@ -25,6 +26,7 @@ vi.mock("../../src/context/SessionContext.jsx", () => ({
     address: `0x${"a".repeat(40)}`,
     profile: { organisation: "Singapore Management University" },
   }),
+  useSignIn: () => mocks.signIn,
 }));
 
 vi.mock("../../src/lib/fundingOpportunities.js", () => ({
@@ -81,10 +83,6 @@ vi.mock("../../src/lib/fundingOpportunityAudit.js", () => ({
     options.onChange(audit);
     return audit;
   },
-}));
-
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
-  ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));
 
 vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
@@ -179,11 +177,13 @@ describe("[QCDAO-51] create open funding", () => {
 
   it("requires the signed-in wallet to be connected", async () => {
     mocks.connectedAddress = null;
+    mocks.signIn.mockClear();
     render(<CreateFundingOpportunityPage onNavigate={() => {}} />);
     fillForm();
     fireEvent.submit(document.querySelector("form"));
 
-    expect((await screen.findByRole("dialog")).textContent).toContain("Reconnect wallet");
+    // Privy's login modal opens through the session's sign-in.
+    await waitFor(() => expect(mocks.signIn).toHaveBeenCalledOnce());
     expect(mocks.events).toEqual([]);
   });
 });

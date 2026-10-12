@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { formatCountdown, formatInstant, isExpired } from "../lib/datetime.js";
 import { FundingApproachReceiptPane } from "./FundingApproachReceiptPane.jsx";
 import {
@@ -9,7 +9,7 @@ import {
 import { claimRemovedProposalFunds, escrowErrorMessage } from "../lib/escrow.js";
 import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { useAuth } from "../context/AuthContext.jsx";
-import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
+import { useSignIn } from "../context/SessionContext.jsx";
 import { Field } from "./Field.jsx";
 
 const money = (item) => `${item.currency || ""} ${Number(item.amount ?? 0).toLocaleString()}`.trim();
@@ -26,14 +26,14 @@ export function funderOutcome(item, status) {
 /** Claim the unpaid escrow balance after an administrator removes the listing. */
 export function ClaimRemovedFundsButton({ proposalId }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId } = useWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [connect, setConnect] = useState(false);
+  const signIn = useSignIn(setError);
   const ready = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
   const claim = async () => {
-    if (!ready) { setConnect(true); return; }
+    if (!ready) { void signIn(); return; }
     setBusy(true); setError(""); setNotice("");
     try {
       await claimRemovedProposalFunds({ proposalId, account: address });
@@ -47,7 +47,6 @@ export function ClaimRemovedFundsButton({ proposalId }) {
       <button className="secondary" type="button" disabled={busy} onClick={claim}>{busy ? "Claiming…" : "Claim funds"}</button>
       {error && <p role="alert" className="field-hint">{error}</p>}
       {notice && <p role="status" className="field-hint">{notice}</p>}
-      {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}
     </>
   );
 }
@@ -69,8 +68,8 @@ async function anchorDecisions(decisions, account) {
 /** Accept or decline, then ask the researcher's wallet to anchor the decision. */
 export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useAccount();
-  const [connect, setConnect] = useState(false);
+  const { address, isConnected, chainId } = useWallet();
+  const signIn = useSignIn((message) => setDraft((current) => (current?.id === draft.id ? { ...current, error: message } : current)));
   const declining = draft.decision === "decline";
   const submit = async (event) => {
     event.preventDefault();
@@ -79,7 +78,7 @@ export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError
       setDraft((current) => (current?.id === draft.id ? { ...current, error: fieldError } : current));
       return;
     }
-    if (!walletReady(user, address, isConnected, chainId)) { setConnect(true); return; }
+    if (!walletReady(user, address, isConnected, chainId)) { void signIn(); return; }
     setDraft((current) => (current?.id === draft.id ? { ...current, busy: true, error: "", phase: "saving" } : current));
     let decided;
     try {
@@ -132,7 +131,6 @@ export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError
           {draft.busy ? (draft.phase === "signing" ? "Waiting for your wallet…" : "Saving…") : declining ? "Decline approach" : "Accept approach"}
         </button>
       </div>
-      {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}
     </form>
   );
 }
@@ -140,11 +138,11 @@ export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError
 /** Signs every still-pending decision digest for one listing. */
 export function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId } = useWallet();
   const [busy, setBusy] = useState(false);
-  const [connect, setConnect] = useState(false);
+  const signIn = useSignIn(onError);
   const sign = async () => {
-    if (!walletReady(user, address, isConnected, chainId)) { setConnect(true); return; }
+    if (!walletReady(user, address, isConnected, chainId)) { void signIn(); return; }
     const batch = items.filter((item) => item.proposalId === proposalId && item.decisionAnchorStatus === "pending" && item.decisionAnchorId && item.decisionRecordHash)
       .map((item) => ({ approachId: item.id, decisionAnchorId: item.decisionAnchorId, recordHash: item.decisionRecordHash }));
     setBusy(true);
@@ -159,7 +157,6 @@ export function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
   return (
     <>
       <button type="button" className="primary" disabled={busy} onClick={sign}>{busy ? "Waiting for your wallet…" : "Sign decision anchor"}</button>
-      {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}
     </>
   );
 }

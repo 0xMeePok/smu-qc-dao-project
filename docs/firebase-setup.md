@@ -153,26 +153,54 @@ npm install --prefix frontend
 npm run dev --prefix frontend
 ```
 
-## Step 10 — Get a wallet **[YOU]**
+## Step 10 — Privy email sign-in **[YOU]**
 
-Install [MetaMask](https://metamask.io/download/). You do **not** need to add Arbitrum
-Sepolia in advance, and signing in costs no gas — it is a signature, not a transaction.
+<a id="privy-email-sign-in"></a>
+Members sign in through Privy's login modal with an email address and a one-time code.
+Nobody installs a wallet: Privy's modal creates an embedded wallet on the first sign-in
+(`createOnLogin: "users-without-wallets"` in `src/lib/privy.js`), and that address is
+the account.
+
+1. In the [Privy dashboard](https://dashboard.privy.io), create an app (or open the
+   existing one) and copy **App settings → Basics → App ID** into `frontend/.env` as
+   `VITE_PRIVY_APP_ID`. The app id is public; the app **secret** is never needed by the
+   frontend and must never go in a `VITE_` variable.
+2. **User management → Authentication**: enable **Email** only. Turn off wallet, SMS,
+   social and passkey login. The app limits Privy's modal to email in code
+   (`src/lib/privy.js`), but **passkeys are the exception**: whenever the dashboard
+   allows passkey login, Privy's modal shows "I have a passkey" whatever the app's
+   config says, so that toggle must be off here.
+3. **Wallets → Embedded wallets**: enable **Ethereum (EVM)** wallets. Leave smart wallets
+   off — the server verifies sign-in signatures from a plain embedded wallet.
+4. **App settings → Domains → Allowed origins**: add every origin that serves the app —
+   `https://YOUR_PROJECT_ID.web.app`, `https://YOUR_PROJECT_ID.firebaseapp.com`, each
+   Hosting preview channel URL you test on (Privy does not accept a `*.web.app`
+   wildcard), and `http://localhost:5173` / `http://127.0.0.1:5173` while developing.
+5. Optional, for repeatable testing: **User management → Authentication → Advanced →
+   Enable test accounts** gives a fixed `test-XXXX@privy.io` address and code.
+
+Signing in costs no gas — the embedded wallet signs a message, not a transaction. Wallet
+*transactions* (publishing audits, funding) do need Arbitrum Sepolia ETH in the member's
+embedded wallet.
 
 ---
 
 ## How sign-in works
 
 ```
-Sign in with Wallet
+Sign in with email
       |
       v
-wagmi connector picker   (wallets discovered via EIP-6963)
+Privy's login modal: email address, then the one-time code Privy sends to it
+      |
+      v
+embedded wallet created by the modal on first sign-in, loaded on every later one
       |
       v
 getSiweNonce()   ------>  server opens a challenge for THIS attempt and returns
       |                   the exact message to sign, plus its challengeId
       v
-wallet signs that message
+embedded wallet signs that message (no prompt: the member just proved their email)
       |
       v
 verifySiweSignature() -->  server looks up that challengeId, rebuilds the message
@@ -278,17 +306,18 @@ npm test --prefix firebase/functions
 
 ## FAQ
 
-### Do I still need a WalletConnect project id?
+### Do I still need a WalletConnect project id, or MetaMask?
 
-**No.** It has been removed. wagmi discovers browser wallets over EIP-6963 with no
-project id and no extra dependency, so MetaMask, Rabby, Coinbase's extension and others
-appear automatically.
+**No.** Browser wallets are gone: email through Privy is the only sign-in method, and
+external wallets (MetaMask, WalletConnect, Coinbase and the rest) are switched off in
+the Privy config. Delete `VITE_WALLETCONNECT_PROJECT_ID` from your env file; nothing
+reads it.
 
-You would only need one if you deliberately add the `walletConnect()` connector back for
-phone-QR sign-in. That currently pulls in `@reown/appkit → @base-org/account → axios`,
-which carries a high-severity advisory and adds noticeably to the bundle — the trade-off
-is documented in [`src/lib/wagmi.js`](../frontend/src/lib/wagmi.js). Delete
-`VITE_WALLETCONNECT_PROJECT_ID` from your env file; nothing reads it.
+### What ends a session?
+
+Signing out, 15 minutes of inactivity, or an administrator suspending the account. Each
+ends **both** the Privy session and the Firebase session. A Privy session found without a
+Firebase session beside it (after a reload, or a sign-out in another tab) is ended too.
 
 ### Do I still need `authDomain`?
 

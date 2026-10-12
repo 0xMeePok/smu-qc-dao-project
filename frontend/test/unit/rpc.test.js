@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { createConfig } from "wagmi";
-import { getPublicClient } from "wagmi/actions";
 import { custom } from "viem";
 import { arbitrumSepolia } from "viem/chains";
-import { createBrowserRpcTransport } from "../../src/lib/rpc.js";
-import { wagmiConfig } from "../../src/lib/wagmi.js";
+import { browserPublicClient, createBrowserPublicClient, createBrowserRpcTransport } from "../../src/lib/rpc.js";
 import { auditErrorMessage, RPC_UNREACHABLE_MESSAGE } from "../../src/lib/errors.js";
 import { classifyAuditError } from "../../src/lib/auditRegistry.js";
 
@@ -31,21 +28,22 @@ function fixture(failure) {
     if (method === "eth_blockNumber") return "0x64";
     throw new Error("Unexpected RPC method");
   } }, { retryCount: 0 });
-  const config = createConfig({ chains: [arbitrumSepolia], batch: { multicall: false }, transports: {
-    [arbitrumSepolia.id]: createBrowserRpcTransport({ http: fakeHttp, primaryUrl: primary,
-      backupUrls: backup, defaultBackupUrls: [] }),
-  } });
-  return { calls, client: getPublicClient(config) };
+  const client = createBrowserPublicClient({ batch: { multicall: false },
+    transport: createBrowserRpcTransport({ http: fakeHttp, primaryUrl: primary, backupUrls: backup, defaultBackupUrls: [] }) });
+  return { calls, client };
 }
 
-it("the shipped wagmi client uses failover with both public backup endpoints", () => {
-  const client = getPublicClient(wagmiConfig);
+it("the shipped browser client uses failover with both public backup endpoints", () => {
+  const client = browserPublicClient;
+  assert.equal(client.chain.id, arbitrumSepolia.id);
+  // wagmi's interval, not viem's 500 ms default for Arbitrum's fast blocks.
+  assert.equal(client.pollingInterval, 4_000);
   assert.equal(client.transport.type, "fallback");
   assert.ok(client.transport.transports.length >= 2);
   assert.ok(client.transport.rpcStatus);
 });
 
-it("wagmi contract reads recover on the backup and avoid the cooling-down primary on subsequent reads", async () => {
+it("contract reads recover on the backup and avoid the cooling-down primary on subsequent reads", async () => {
   const { client, calls } = fixture("unavailable");
   assert.equal(await client.readContract({ address: owner, abi: ownerAbi, functionName: "owner" }), owner);
   const initialPrimaryCalls = calls.filter(call => call.url === primary).length;
@@ -55,7 +53,7 @@ it("wagmi contract reads recover on the backup and avoid the cooling-down primar
   assert.equal(client.transport.rpcStatus.fallbackActive, true);
 });
 
-it("wagmi preserves contract reverts without consulting another provider", async () => {
+it("contract reverts are preserved without consulting another provider", async () => {
   const { client, calls } = fixture("revert");
   await assert.rejects(client.readContract({ address: owner, abi: ownerAbi, functionName: "owner" }), /reverted/);
   assert.equal(calls.some(call => call.url === backup), false);

@@ -6,7 +6,7 @@ vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(),
   user: { id: `0x${"a".repeat(40)}` }, account: { address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614 } }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
-vi.mock("wagmi", async importOriginal => ({ ...await importOriginal(), useAccount: () => mocks.account }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => mocks.account }));
 vi.mock("../../src/lib/independentEscrow.js", async importOriginal => ({ ...await importOriginal(),
   getIndependentFundingState: (...args) => mocks.read(...args), writeIndependentFundingAction: (...args) => mocks.write(...args),
   syncIndependentFunding: (...args) => mocks.sync(...args) }));

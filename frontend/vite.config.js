@@ -3,6 +3,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [
+      // Privy bundles a fiat on-ramp screen this app never shows, and Stripe's
+      // default entry starts downloading Stripe.js the moment it is evaluated -
+      // on every page view, from every visitor. The pure entry has the same API
+      // and loads nothing until a payment is actually started.
+      { find: /^@stripe\/crypto$/, replacement: "@stripe/crypto/pure" },
+    ],
+  },
   // Component tests need a DOM.
   test: {
     environment: "jsdom",
@@ -28,7 +37,10 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("/node_modules/")) return "vendor";
+          // Optional peer dependencies Privy never loads in this app (Farcaster
+          // mini-app wallets) resolve to Vite stubs outside node_modules. Kept
+          // with the vendor graph so no dependency is ever fetched lazily.
+          if (id.includes("/node_modules/") || id.startsWith("__vite-optional-peer-dep:")) return "vendor";
           if (/\/src\/lib\/(escrow|independentEscrow)\.js$/.test(id)) return "wallet-actions";
         },
       },

@@ -2,14 +2,14 @@ import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
-import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useSignIn } from "../context/SessionContext.jsx";
+import { useWallet } from "../context/WalletContext.jsx";
 import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { getIndependentFundingState, independentFundingAmount, independentFundingExplorer, independentFundingStatus,
   independentFundingDeploymentKey, independentFundingError, confirmIndependentFundingTransaction,
   syncIndependentFunding, writeIndependentFundingAction } from "../lib/independentEscrow.js";
-import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
 
 const pending = new Map();
@@ -43,7 +43,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
       : progress.status === "pending" ? "Transaction submitted. Waiting for confirmation…" : progress.status === "confirmed" ? "Transaction confirmed." : "Preparing verified crowdfunding action…"}</p>}
     {unresolved && <p role="alert">A wallet transaction is awaiting confirmation. <a href={independentFundingExplorer("tx", unresolved.transactionHash)} target="_blank" rel="noreferrer">View transaction</a>{" "}
       <button type="button" className="secondary small" disabled={busy} onClick={onConfirm}>Retry confirmation</button></p>}
-    {!walletReady && <p className="field-hint">Connect the wallet for your signed-in account on Arbitrum Sepolia. <button type="button" className="text-button" onClick={onConnect}>Connect wallet</button></p>}
+    {!walletReady && <p className="field-hint">Sign in with your email to use your QC DAO wallet. <button type="button" className="text-button" onClick={onConnect}>Sign in</button></p>}
     {!loading && snapshot?.configured === false && <p className="field-hint">Independent crowdfunding is awaiting its contract deployment.</p>}
     {!loading && snapshot?.hidden && <p className="field-hint">This listing's funding actions are unavailable. Any confirmed available refund can still be claimed.</p>}
     {!loading && snapshot?.configured !== false && snapshot?.exists === false && <div className="field-group">
@@ -100,12 +100,13 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
 }
 
 export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, refreshVersion = 0, initialTransaction = null, integrityBlocked = false }) {
-  const { user } = useAuth(), { address, isConnected, chainId } = useAccount();
+  const { user } = useAuth(), { address, isConnected, chainId } = useWallet();
   const queryClient = useContext(QueryClientContext);
   const [snapshot, setSnapshot] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
   const [busy, setBusy] = useState(false), [progress, setProgress] = useState(null), [notice, setNotice] = useState("");
-  const [amount, setAmount] = useState(""), [delivery, setDelivery] = useState({ summary: "", url: "" }), [connect, setConnect] = useState(false);
+  const [amount, setAmount] = useState(""), [delivery, setDelivery] = useState({ summary: "", url: "" });
   const [reason, setReason] = useState("");
+  const signIn = useSignIn(setError);
   const key = pendingKey(proposal.id, user?.id?.toLowerCase());
   const [unresolved, setUnresolved] = useState(() => initialTransaction || pendingTransaction(key));
   const activeKey = useRef(key); activeKey.current = key;
@@ -145,7 +146,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
   };
   const act = async (action, extra = {}) => {
     if (busy || unresolved || (integrityBlocked && !["claimRefund", "expire"].includes(action))) return;
-    if (!walletReady) { setConnect(true); return; }
+    if (!walletReady) { void signIn(); return; }
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await writeIndependentFundingAction({ proposalId: proposal.id, action, account: address, ...extra,
@@ -163,8 +164,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
     finally { if (currentPanel()) setBusy(false); }
   };
   return <><IndependentFundingView snapshot={snapshot} loading={loading} error={error} busy={busy} progress={progress} notice={notice}
-    walletReady={walletReady} onConnect={() => setConnect(true)} amount={amount} onAmount={setAmount} delivery={delivery} onDelivery={setDelivery}
+    walletReady={walletReady} onConnect={() => { void signIn(); }} amount={amount} onAmount={setAmount} delivery={delivery} onDelivery={setDelivery}
     reason={reason} onReason={setReason}
-    integrityBlocked={integrityBlocked} onAction={act} onRefresh={load} unresolved={unresolved} onConfirm={confirm} />
-    {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}</>;
+    integrityBlocked={integrityBlocked} onAction={act} onRefresh={load} unresolved={unresolved} onConfirm={confirm} /></>;
 }

@@ -17,14 +17,15 @@ vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
   ...await importOriginal(),
   getMockMatching: (...args) => mocks.matching(...args),
 }));
-vi.mock("wagmi", () => ({
-  useAccount: () => ({ isConnected: true, address: account }),
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({ isConnected: true, address: account }),
 }));
 vi.mock("../../src/context/SessionContext.jsx", () => ({
   useSession: () => ({
     address: account,
     profile: { organisation: "Singapore Management University" },
   }),
+  useSignIn: () => async () => ({ ok: false }),
 }));
 vi.mock("../../src/lib/postings.js", () => ({
   newPostingId: () => "posting1",
@@ -56,9 +57,6 @@ vi.mock("../../src/lib/attachments.js", () => ({
 }));
 vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
   AttachmentUploader: () => <div>Uploader</div>,
-}));
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
-  ConnectWalletModal: () => null,
 }));
 vi.mock("../../src/lib/fundingOpportunities.js", () => ({
   newFundingOpportunityId: () => "funding1",

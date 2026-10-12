@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({ anchor: vi.fn(), submit: vi.fn(), saveDraft: v
 const account = `0x${"a".repeat(40)}`;
 const listing = { status: "confirmed", transactionHash: `0x${"1".repeat(64)}`, blockNumber: 88 };
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}` } }) }));
-vi.mock("wagmi", async importOriginal => ({ ...await importOriginal(), useAccount: () => ({ isConnected: true, address: `0x${"a".repeat(40)}` }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => ({ isConnected: true, address: `0x${"a".repeat(40)}` }) }));
 vi.mock("../../src/lib/proposals.js", async importOriginal => ({
   ...await importOriginal(), newProposalId: () => "independent-form", findProposal: async () => null,
   submitIndependentProposal: (...args) => mocks.submit(...args),

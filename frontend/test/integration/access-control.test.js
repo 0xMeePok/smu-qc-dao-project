@@ -100,7 +100,7 @@ function runLoginComponent({ redirectTarget, authState, onNavigate }) {
     }
     return { isRedirected: true, destination };
   }
-  return { isRedirected: false, destination: null, rendered: "SignInWithWallet" };
+  return { isRedirected: false, destination: null, rendered: "SignInWithEmail" };
 }
 
 describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline", () => {
@@ -342,7 +342,7 @@ describe("Integration Tests: AuthContext, RouteGuard & Access Control Pipeline",
       });
 
       assert.equal(result.isRedirected, false);
-      assert.equal(result.rendered, "SignInWithWallet");
+      assert.equal(result.rendered, "SignInWithEmail");
       assert.equal(navigatedTo, null);
     });
 

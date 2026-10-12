@@ -1,16 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useAccount, useDisconnect, useSignMessage } from "wagmi";
-import { getConnection, switchChain } from "wagmi/actions";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
 import { exchangeSignatureForSession, requestSignInMessage, revokeOwnSessions } from "../lib/authFlow.js";
 import { createProfile, findProfileByAddress, updateProfile } from "../lib/profile.js";
-import { messageForFirebaseError } from "../lib/errors.js";
-import { EXPECTED_CHAIN_ID, EXPECTED_CHAIN_NAME } from "../lib/chain.js";
-import { wagmiConfig } from "../lib/wagmi.js";
+import { ACCOUNT_SUSPENDED_MESSAGE, isSignInCancelled, messageForFirebaseError, messageForSignInError } from "../lib/errors.js";
 import { isAdmin } from "../lib/roles.js";
 import { go } from "../lib/router.js";
+import { useWallet } from "./WalletContext.jsx";
 import {
   IDLE_CHECK_INTERVAL_MS,
   clearActivity,
@@ -21,23 +18,34 @@ import {
 
 export const SessionContext = createContext(null);
 
+const IDLE_MESSAGE = "You were signed out after 15 minutes of inactivity. Sign in again to continue.";
+
 /**
  * Session states:
- *   signed-out       no verified wallet
- *   verifying        signing the server's message and exchanging it for a token
+ *   signed-out       no verified account
+ *   verifying        a new sign-in: Privy's login modal is open, or the
+ *                    member's embedded wallet is loading, signing the server's
+ *                    message and exchanging it for a token
  *   checking         verified, looking the address up in Firestore
  *   needs-onboarding verified but no profile, so the onboarding modal opens
  *   signed-in        verified and a profile exists
  *
  * Nothing reaches Firestore until `verifying` has completed against the server.
+ *
+ * Two sessions back every sign-in: Privy's (the email login that unlocks the
+ * embedded wallet) and Firebase's (the custom token minted for that wallet's
+ * address). They start together, and sign-out, the idle timeout, suspension and
+ * a failed sign-in all end both. A Privy session with no Firebase session beside
+ * it - left by a reload, another tab, or a revoked token - is ended on sight.
  */
 export function SessionProvider({ children }) {
-  const { address } = useAccount();
-  const { disconnectAsync } = useDisconnect();
-  const { signMessageAsync } = useSignMessage();
+  const wallet = useWallet();
+  // Sign-in spans several renders: each step must use the wallet as it is now,
+  // not as it was when the callback was created.
+  const walletRef = useRef(wallet);
+  walletRef.current = wallet;
 
   const [status, setStatus] = useState("signed-out");
-  const [signInPhase, setSignInPhase] = useState(null);
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState(null);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
@@ -48,15 +56,26 @@ export function SessionProvider({ children }) {
   const [authResolved, setAuthResolved] = useState(!isFirebaseConfigured);
 
   const lookupToken = useRef(0);
+  const ending = useRef(false);
+  const current = useRef({});
+  current.current = { status, profile, verifiedAddress };
 
-  const reset = useCallback(() => {
+  // Clears the session but leaves `error` alone: Firebase reports a sign-out a
+  // render after endSession() has already explained why (idle, suspension),
+  // and that explanation must survive the report.
+  const clearSession = useCallback(() => {
     lookupToken.current += 1;
     setStatus("signed-out");
-    setSignInPhase(null);
     setProfile(null);
     setVerifiedAddress(null);
-    setError(null);
   }, []);
+
+  const reset = useCallback(() => {
+    clearSession();
+    setError(null);
+  }, [clearSession]);
+
+  const logoutOfPrivy = useCallback(() => walletRef.current.logout().catch(() => { }), []);
 
   // Firebase persists the custom-token session, so a reload restores it without
   // asking the user to sign again. The uid IS the wallet address.
@@ -77,93 +96,66 @@ export function SessionProvider({ children }) {
     });
   }, []);
 
-  // Returns { ok, rejected } instead of throwing, so callers (the connector picker,
-  // the direct sign-in button) can each decide how to react without an unhandled
-  // promise rejection - and so `error` in context is never the ONLY place a failure
-  // is visible.
-  const signIn = useCallback(
-    async (connectedAddress) => {
-      const target = (connectedAddress ?? address)?.toLowerCase();
-      if (!target) return { ok: false, rejected: false };
+  // One sign-in at a time, however many buttons ask for one.
+  const signInInFlight = useRef(null);
 
+  /**
+   * Opens Privy's login modal - email and a one-time code; Privy creates the
+   * embedded wallet on a first sign-in - then has that wallet sign the server's
+   * challenge and exchanges the signature for the Firebase session.
+   *
+   * Returns { ok, message } instead of throwing, so a caller can show a failure
+   * where the member is looking without an unhandled rejection. Closing Privy's
+   * modal is not a failure: { ok: false, cancelled: true }, with no message.
+   */
+  const signIn = useCallback(() => {
+    if (signInInFlight.current) return signInInFlight.current;
+
+    const run = async () => {
+      const before = current.current;
+      const privyWasSignedIn = walletRef.current.authenticated;
       setError(null);
-      setStatus("verifying");
-      setSignInPhase("preparing");
+      // A member who is already signed in keeps their session - and the page
+      // they are on - while Privy's modal is open. A new sign-in shows as
+      // `verifying`, which also stops the lockstep below from ending the Privy
+      // session the modal creates before the Firebase one exists.
+      if (!before.verifiedAddress) setStatus("verifying");
 
       try {
-        // `getConnection(config).chainId` - NOT `getChainId(config)`. wagmi keeps two
-        // separate ideas of "chain": a top-level `config.state.chainId` that is
-        // seeded from `chains[0]` at startup and is only ever touched by an explicit
-        // `switchChain()` call, and each connection's own `chainId`, set from what
-        // the wallet actually reported at connect time. `getChainId()` reads the
-        // first one, which is why it silently returned 421614 (our only configured
-        // chain) even while a wallet sitting on mainnet was connected - it was never
-        // wired to the real connection at all, not a matter of the value being stale.
-        //
-        // The network switch and the nonce fetch run CONCURRENTLY, not one after the
-        // other. They used to be sequential because the switch reads as a
-        // prerequisite for "the wallet should be on the right chain before it sees a
-        // message claiming Chain ID: 421614" - but that message text is static server
-        // side (see buildMessage() in functions/index.js) and never actually depends
-        // on what chain the wallet is on AT REQUEST TIME, only at signing time, which
-        // is still safely after both of these resolve. Running them together removes
-        // a whole network round trip from the critical path (the wallet's own
-        // wallet_addEthereumChain/wallet_switchEthereumChain RPC) every time a switch
-        // is needed - previously the getSiweNonce call (already the slowest single
-        // step here - a cross-region Cloud Functions request) didn't even START until
-        // that finished. wagmi's switchChain already falls back to
-        // `wallet_addEthereumChain` (using arbitrumSepolia's own defaults - no custom
-        // RPC/currency needed) when the wallet has never heard of the chain, so this
-        // one call still covers both "wrong network" and "network not added yet".
-        //
-        // If the user dismisses the switch prompt a challenge may already have
-        // been issued and left pending, but that costs them nothing: each attempt
-        // gets its own challenge, and an abandoned one simply expires.
-        const needsSwitch = getConnection(wagmiConfig).chainId !== EXPECTED_CHAIN_ID;
-        const [challenge] = await Promise.all([
-          requestSignInMessage(target),
-          needsSwitch ? switchChain(wagmiConfig, { chainId: EXPECTED_CHAIN_ID }) : null,
-        ]);
+        await walletRef.current.login();
+        // A returning member's wallet loads; a first sign-in's was just created.
+        // Either way it is the same address on every device for this email.
+        const target = (await walletRef.current.ensureWallet()).toLowerCase();
+        // That wallet's Firebase session already exists: it only had to load.
+        if (target === before.verifiedAddress) return { ok: true };
 
-        setSignInPhase("signing");
-        const signature = await signMessageAsync({ message: challenge.message, account: target });
-        setSignInPhase("checking");
+        const challenge = await requestSignInMessage(target);
+        const signature = await walletRef.current.signMessage(challenge.message, target);
         await exchangeSignatureForSession({ address: target, signature, challengeId: challenge.challengeId });
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
         setVerifiedAddress(target);
-        return { ok: true, rejected: false };
+        return { ok: true };
       } catch (caught) {
-        // A rejected signature or a declined network switch is a normal user choice,
-        // not a failure to report loudly.
-        const rejected = caught?.name === "UserRejectedRequestError" || caught?.code === 4001;
-        const failureMessage = rejected
-          ? null
-          : caught?.name === "SwitchChainNotSupportedError"
-            ? `Your wallet does not support switching networks automatically. Switch to ${EXPECTED_CHAIN_NAME} yourself, then try again.`
-            : messageForFirebaseError(caught);
+        // Lockstep: a sign-in that did not finish must not leave behind a Privy
+        // session it started.
+        if (!privyWasSignedIn && walletRef.current.authenticated) await logoutOfPrivy();
+        if (!before.verifiedAddress) setStatus("signed-out");
+        if (isSignInCancelled(caught)) return { ok: false, cancelled: true };
+        const failureMessage = messageForSignInError(caught);
         setError(failureMessage);
-        setStatus("signed-out");
-        await disconnectAsync().catch(() => { });
-        // The message is returned, not just set into context state, because a caller
-        // that awaits signIn() and immediately reads `error` off useSession() (as
-        // ConnectWalletModal used to) gets a STALE value: `error` was destructured
-        // from context at that component's last render, before this setError() call
-        // existed, and closures do not retroactively pick up a later state update.
-        // That bug meant every failure showed the same generic fallback string no
-        // matter what messageForFirebaseError actually produced.
-        return { ok: false, rejected, message: failureMessage };
-      } finally {
-        setSignInPhase(null);
+        return { ok: false, message: failureMessage };
       }
-    },
-    [address, signMessageAsync, disconnectAsync],
-  );
+    };
+
+    signInInFlight.current = run().finally(() => { signInInFlight.current = null; });
+    return signInInFlight.current;
+  }, [logoutOfPrivy]);
 
   // Once an address is verified, decide between onboarding and a normal sign-in.
   useEffect(() => {
     if (!verifiedAddress) {
-      if (status !== "verifying") reset();
+      if (status !== "verifying") clearSession();
       return;
     }
 
@@ -197,42 +189,7 @@ export function SessionProvider({ children }) {
     );
 
     return () => unsubscribe();
-  }, [verifiedAddress, reset]);
-
-  // If the wallet switches to a DIFFERENT account, the Firebase session belongs to
-  // the wrong address and has to go - otherwise a write could land under the wrong
-  // uid. This deliberately does NOT react to `isConnected` alone: some wallet
-  // extensions emit a transient `accountsChanged` (briefly empty, or a stale value)
-  // during their own internal session checks, unrelated to anything the user did.
-  // Treating every such blip as an account switch used to nuke an in-progress
-  // onboarding form - typing for ~20s was enough to hit one. The Firebase session
-  // is independent of wagmi's live connection status anyway: the uid was fixed by a
-  // signature at sign-in time, so a momentary "disconnected" reading from wagmi is
-  // not itself a reason to end it.
-  useEffect(() => {
-    if (!verifiedAddress) return undefined;
-    const switchedToADifferentAccount = address && address.toLowerCase() !== verifiedAddress;
-    if (!switchedToADifferentAccount) return undefined;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        if (isFirebaseConfigured && auth.currentUser) {
-          await signOut(auth);
-        }
-        if (cancelled) return;
-        clearActivity();
-        reset();
-      } catch (caught) {
-        if (cancelled) return;
-        setError(messageForFirebaseError(caught));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [address, verifiedAddress, reset]);
+  }, [verifiedAddress, clearSession]);
 
   const completeOnboarding = useCallback(
     async (form) => {
@@ -256,44 +213,67 @@ export function SessionProvider({ children }) {
   const endSession = useCallback(
     async ({ reason = null, redirectToLogin = false } = {}) => {
       setError(null);
+      // Suspension already revoked this account's credentials server side (see
+      // setUserSuspension), and a suspended account may not call back in.
+      if (reason !== "suspended") {
+        try {
+          if (isFirebaseConfigured && auth.currentUser) {
+            // Invalidate server credentials first. A failure here means the
+            // session is still live, so the UI must not claim logout.
+            await revokeOwnSessions();
+          }
+        } catch (caught) {
+          const message = messageForFirebaseError(caught);
+          setError(message);
+          return { ok: false, message };
+        }
+      }
+
+      // The token is dead server-side now. Local teardown therefore runs even if
+      // signOut throws: bailing out here would leave the app "signed in" holding
+      // a token every rule refuses, which fails as an unexplained 403 on the next
+      // read or upload.
+      ending.current = true;
       try {
         if (isFirebaseConfigured && auth.currentUser) {
-          // Invalidate server credentials first. A failure here means the session
-          // is still live, so the UI must not claim logout.
-          await revokeOwnSessions();
+          await signOut(auth).catch(() => { });
         }
-      } catch (caught) {
-        const message = messageForFirebaseError(caught);
-        setError(message);
-        return { ok: false, message };
+        await logoutOfPrivy();
+      } finally {
+        ending.current = false;
       }
-
-      // Revocation succeeded, so the token is already dead server-side. Local
-      // teardown therefore runs even if signOut throws: bailing out here would
-      // leave the app "signed in" holding a token every rule refuses, which
-      // fails as an unexplained 403 on the next read or upload.
-      if (isFirebaseConfigured && auth.currentUser) {
-        await signOut(auth).catch(() => { });
-      }
-
-      await disconnectAsync().catch(() => { });
       clearActivity();
       reset();
-      setError(
-        reason === "idle"
-          ? "You were signed out after 15 minutes of inactivity. Sign in again to continue."
-          : null,
-      );
+      setError(reason === "idle" ? IDLE_MESSAGE : reason === "suspended" ? ACCOUNT_SUSPENDED_MESSAGE : null);
       if (redirectToLogin) go("login");
       return { ok: true };
     },
-    [disconnectAsync, reset],
+    [logoutOfPrivy, reset],
   );
 
   const signOutOfSession = useCallback(
     () => endSession({ redirectToLogin: true }),
     [endSession],
   );
+
+  // An administrator suspended this account while it was signed in. Both
+  // sessions end at once; the server refuses to sign a suspended account back in.
+  const suspended = Boolean(verifiedAddress && profile?.suspended);
+  useEffect(() => {
+    if (suspended) endSession({ reason: "suspended" });
+  }, [suspended, endSession]);
+
+  // Lockstep, the other way round: never leave a Privy session without the
+  // Firebase session it exists to create. This catches a reload after the
+  // Firebase session was revoked or expired, a sign-out in another tab, and an
+  // abandoned sign-in. Not the reverse - Privy does not share login state
+  // between tabs, so ending Firebase whenever this tab's Privy looks signed out
+  // would sign every other tab out as well.
+  const privySignedIn = wallet.authenticated;
+  useEffect(() => {
+    if (!authResolved || verifiedAddress || status === "verifying" || ending.current) return;
+    if (privySignedIn) logoutOfPrivy();
+  }, [authResolved, verifiedAddress, status, privySignedIn, logoutOfPrivy]);
 
   // Idle timeout. Mounts only while a session exists, so nothing runs for a
   // signed-out visitor.
@@ -342,7 +322,6 @@ export function SessionProvider({ children }) {
   const value = useMemo(
     () => ({
       status,
-      signInPhase,
       profile,
       error,
       address: verifiedAddress,
@@ -362,7 +341,8 @@ export function SessionProvider({ children }) {
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
     }),
-    [status, signInPhase, profile, error, verifiedAddress, authResolved, signIn, completeOnboarding, saveProfile, signOutOfSession],
+    [status, profile, error, verifiedAddress, authResolved, signIn, completeOnboarding,
+      saveProfile, signOutOfSession],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
@@ -372,4 +352,22 @@ export function useSession() {
   const context = useContext(SessionContext);
   if (!context) throw new Error("useSession must be used inside a SessionProvider");
   return context;
+}
+
+/**
+ * Sign-in for a component that needs the member's wallet: the same flow as the
+ * header button, with a failure handed to `onError` so it shows where the
+ * member is looking. Outside a SessionProvider (an isolated component test)
+ * there is no session to sign in to, so it does nothing.
+ */
+export function useSignIn(onError) {
+  const signIn = useContext(SessionContext)?.signIn;
+  const report = useRef(onError);
+  report.current = onError;
+  return useCallback(async () => {
+    if (!signIn) return { ok: false };
+    const result = await signIn();
+    if (result.message) report.current?.(result.message);
+    return result;
+  }, [signIn]);
 }

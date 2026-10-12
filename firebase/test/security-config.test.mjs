@@ -34,6 +34,21 @@ describe("security deployment configuration", () => {
     assert.match(functionsSource, /consumeAppCheckToken:\s*false/);
   });
 
+  it("[QCDAO-141] allows Privy email sign-in and no wallet-connection services", () => {
+    const directives = Object.fromEntries(contentSecurityPolicy().split(";")
+      .map((part) => part.trim().split(/\s+/))
+      .filter(([name]) => name)
+      .map(([name, ...sources]) => [name, sources]));
+    // Privy's API, and the iframe that holds the embedded wallet's keys.
+    assert.ok(directives["connect-src"].includes("https://auth.privy.io"));
+    assert.ok(directives["frame-src"].includes("https://auth.privy.io"));
+    // The RPC Privy's embedded wallet uses on Arbitrum Sepolia, named exactly.
+    assert.ok(directives["connect-src"].includes("https://arbitrum-sepolia.rpc.privy.systems"));
+    assert.equal(contentSecurityPolicy().includes("*.rpc.privy.systems"), false);
+    // External wallets are switched off, so none of their relays are trusted.
+    assert.equal(/walletconnect|walletlink|metamask/i.test(contentSecurityPolicy()), false);
+  });
+
   it("[BUT-OPD-020] ships Storage rules and allows the Storage endpoint", () => {
     // The rules file has to be declared, or `firebase deploy --only storage` is a
     // no-op and the bucket keeps whatever rules it had - most likely none.

@@ -276,7 +276,7 @@ limits, after which the author starts verification from their proposal receipt.
 Browser receipt polling picks up server updates without reloading the page.
 
 There is **no platform signer** in this deployment: `commitProposal` binds the
-researcher to `msg.sender`. The connected wallet manages its own nonce and gas.
+researcher to `msg.sender`. The researcher's embedded wallet manages its own nonce and gas.
 Neither scheduled recovery nor administrators submit transactions or impersonate
 researchers, so concurrent recovery jobs do not allocate nonces or spend gas.
 Creating a platform signer, relaying researcher signatures, evaluation anchors and

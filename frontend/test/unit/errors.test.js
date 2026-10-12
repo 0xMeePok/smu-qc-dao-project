@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { auditErrorMessage, isModuleLoadError, isRpcQuotaExceeded, isRpcUnreachable, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, messageForPublicationSaveError, fieldForFirebaseError, OnboardingError, redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE } from "../../src/lib/errors.js";
+import { ACCOUNT_SUSPENDED_MESSAGE, auditErrorMessage, isModuleLoadError, isRpcQuotaExceeded, isRpcUnreachable, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, messageForPublicationSaveError, messageForSignInError, fieldForFirebaseError, OnboardingError, redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE } from "../../src/lib/errors.js";
 import { messageForProposalError } from "../../src/lib/proposalValidation.js";
 import { escrowErrorMessage } from "../../src/lib/escrow.js";
 
@@ -21,6 +21,19 @@ describe("publication errors stay separate from sign-in errors", () => {
   it("maps only actual authentication failures to sign-in guidance", () => {
     assert.match(messageForPublicationSaveError({ code: "functions/unauthenticated" }), /session has expired/);
     assert.doesNotMatch(messageForPublicationSaveError({ code: "functions/internal" }), /sign.in|nonce/);
+  });
+});
+
+describe("sign-in refused for a web address the server has not approved", () => {
+  it("names the web address rather than blaming administrator rights", () => {
+    const error = { code: "functions/permission-denied", message: "Sign-in is not available from this origin." };
+    assert.match(messageForSignInError(error), /web address is not approved for sign-in/);
+    assert.doesNotMatch(messageForSignInError(error), /Administrator/i);
+  });
+
+  it("still reports a suspended account as suspended", () => {
+    const error = { code: "functions/permission-denied", message: "This account has been suspended by an administrator." };
+    assert.equal(messageForSignInError(error), ACCOUNT_SUSPENDED_MESSAGE);
   });
 });
 

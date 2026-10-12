@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
-import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
-import { useSession } from "../context/SessionContext.jsx";
+import { useSession, useSignIn } from "../context/SessionContext.jsx";
 import {
   CURRENCIES,
   DEFAULT_EXPIRY_DAYS,
@@ -181,7 +180,7 @@ function formFromPosting(posting) {
 
 export default function CreatePostingPage({ postingId: resumeId, editPostingId, onNavigate }) {
   const { address, profile } = useSession();
-  const { address: connectedAddress, isConnected } = useAccount();
+  const { address: connectedAddress, isConnected } = useWallet();
 
   // Reserved up front: attachments are uploaded while the form is still being
   // filled in, and this id is part of their storage path.
@@ -209,7 +208,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
   const [baseline, setBaseline] = useState(null);
   // Attachments the saved draft already references, so discard leaves them alone.
   const savedAttachmentIds = useRef(new Set());
-  const [walletPromptOpen, setWalletPromptOpen] = useState(false);
+  const signIn = useSignIn(setSubmitError);
   const formTop = useRef(null);
   const wizard = useWizard(PROBLEM_STEPS);
   const pendingCountRef = useRef(0);
@@ -382,8 +381,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
     const sameWallet = isConnected
       && connectedAddress?.toLowerCase() === address?.toLowerCase();
     if (!sameWallet) {
-      setSubmitError("Reconnect the wallet used to sign in before submitting the on-chain audit.");
-      setWalletPromptOpen(true);
+      setSubmitError("Your QC DAO wallet is not ready. Sign in again with your email before submitting the on-chain audit.");
+      void signIn();
       return;
     }
 
@@ -890,10 +889,6 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             </p>
           )}
         </form>
-
-        {walletPromptOpen && (
-          <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />
-        )}
 
         <BriefPreview
           kind="Business problem"

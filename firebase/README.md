@@ -245,9 +245,8 @@ ID tokens whose `auth_time` is older than or equal to that cutoff, then Firebase
 are revoked so those sessions cannot renew. The browser clears its persistent
 Firebase session only after both server revocation and local `signOut` succeed. A
 failure remains visible and retryable instead of presenting a false signed-out
-state. Switching the connected wallet on this device also requires Firebase
-`signOut` to succeed before the UI clears; a persistence failure is shown and the
-previous session stays visible.
+state. Signing out also ends the member's Privy session, so neither the email login
+nor the Firebase session survives it (QCDAO-141).
 
 Do **not** add `localhost` to `SIWE_ALLOWED_HOSTS` on a deployed project to make local
 development work. It would let anyone forge `Origin: localhost:5173` and obtain a
@@ -339,9 +338,14 @@ runs against whatever rules are currently live. Deploy a branch that adds a
 status, a field or a collection and the channel will serve the new frontend
 against the old rules, which reads as the feature being broken rather than
 undeployed. `--backend` deploys `firestore:rules`, `firestore:indexes` and
-`storage` before the channel, and forces the functions deploy that is otherwise
-skipped when the SIWE allow-list has not changed — which is what would leave a
-newly added trigger unshipped on a repeat deploy to an existing channel.
+`storage` before the channel, and deploys every function — which is what ships a
+newly added trigger on a repeat deploy to an existing channel.
+
+Without `--backend` the script deploys only `getSiweNonce`, and only when the
+**server's** SIWE allow-list does not match the live channels. That happens after
+any functions deploy made without the gitignored `functions/.env.qcdao-a0c7a`
+(CI's, on every merge to main), and it shows up as a 403 from `getSiweNonce` on
+the channel; rerunning `npm run deploy:preview` puts the list back.
 
 It is opt-in because it writes to the **shared** project for everyone, not just
 your channel. Without it the script says so rather than leaving you to guess.

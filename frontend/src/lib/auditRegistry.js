@@ -1,19 +1,12 @@
-import {
-  estimateFeesPerGas as wagmiEstimateFeesPerGas,
-  getBlock as wagmiGetBlock,
-  getTransaction as wagmiGetTransaction,
-  readContract as wagmiReadContract,
-  simulateContract as wagmiSimulateContract,
-  waitForTransactionReceipt as wagmiWaitForTransactionReceipt,
-  writeContract as wagmiWriteContract,
-} from "wagmi/actions";
+import { arbitrumSepolia } from "viem/chains";
 import {
   AUDIT_REGISTRY_ABI,
   AUDIT_REGISTRY_CHAIN_ID,
   AUDIT_REGISTRY_CONFIG,
   getAuditRegistryAddress,
 } from "../config/auditRegistry.js";
-import { wagmiConfig } from "./wagmi.js";
+import { embeddedWalletClient } from "./embeddedWallet.js";
+import { browserPublicClient } from "./rpc.js";
 import { isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection } from "./errors.js";
 import { isEscrowRegistry, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
 import { knownAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
@@ -22,10 +15,10 @@ export * from "../../../firebase/functions/auditCanonical.js";
 import { MAX_AUDIT_RETRIES, MAX_ANCHOR_SCAN, assertBytes32, asOpportunityUpdate, prepareOpportunityCommit, prepareOpportunityUpdate, prepareOpportunityWithdrawal, prepareProposalCommit, prepareProposalUpdate, prepareProposalWithdrawal, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
 
 // Arbitrum has no priority auction, so estimateFeesPerGas legitimately returns a
-// zero tip on Sepolia - and MetaMask then refuses to send, with "Priority fee must
-// be greater than 0" in its own advanced-fee dialog. The transaction is fine; the
-// wallet's validation is not satisfied by a zero. 0.01 gwei is the smallest value
-// that clears it: at ~200k gas it costs about 2e-6 ETH of testnet funds.
+// zero tip on Sepolia - and wallets refuse to send one ("Priority fee must be
+// greater than 0"). The transaction is fine; the wallet's validation is not
+// satisfied by a zero. 0.01 gwei is the smallest value that clears it: at ~200k
+// gas it costs about 2e-6 ETH of testnet funds.
 const MIN_PRIORITY_FEE_WEI = 10_000_000n;
 
 function revertErrorName(error) {
@@ -49,7 +42,7 @@ export function auditRevertMessage(functionName, errorName) {
   if (errorName === "FundingTermsFrozen") return "Funding has started or these escrow terms are immutable. The registry cannot accept this change.";
   if (errorName === "FundingTermsRequired") return "This registry requires a proposal with escrow funding terms. Refresh the app before submitting.";
   if (errorName === "AccessDenied") {
-    return "Connect the wallet that owns this record on Arbitrum Sepolia.";
+    return "Sign in with the account that owns this record, then try again.";
   }
   const messages = {
     commitOpportunity: {
@@ -93,14 +86,26 @@ export function decorateAuditRevert(error, functionName) {
   return wrapped;
 }
 
-export function createWagmiAuditAdapters(config = wagmiConfig) {
+// Every client here is bound to Arbitrum Sepolia, so a request naming any other
+// chain is refused rather than silently answered from this one.
+function onAuditChain({ chainId, ...request } = {}) {
+  if (chainId !== undefined && Number(chainId) !== arbitrumSepolia.id) {
+    throw new Error(`QC DAO reads and signs on ${arbitrumSepolia.name} only, not chain ${chainId}.`);
+  }
+  return request;
+}
+
+/**
+ * Reads go through the browser's failover RPC client; writes are signed by the
+ * member's Privy embedded wallet. Both are injectable so tests drive the real
+ * preparation logic without a network or a wallet.
+ */
+export function createWalletAuditAdapters({ publicClient = browserPublicClient, walletClient = embeddedWalletClient } = {}) {
   return {
     writeContract: async (request, { onWalletRequest } = {}) => {
+      const call = onAuditChain(request);
       const estimateFeeCaps = async () => {
-        const { maxFeePerGas, maxPriorityFeePerGas } = await wagmiEstimateFeesPerGas(config, {
-          chainId: request.chainId,
-          type: "eip1559",
-        });
+        const { maxFeePerGas, maxPriorityFeePerGas } = await publicClient.estimateFeesPerGas({ type: "eip1559" });
         if (typeof maxFeePerGas !== "bigint" || maxFeePerGas <= 0n
             || typeof maxPriorityFeePerGas !== "bigint" || maxPriorityFeePerGas < 0n
             || maxPriorityFeePerGas > maxFeePerGas) {
@@ -118,44 +123,45 @@ export function createWagmiAuditAdapters(config = wagmiConfig) {
       };
       // Simulate before the wallet opens. A reverting call on Arbitrum does not
       // fail estimateGas cleanly — the node returns a block-sized gas limit, and
-      // MetaMask prices that as thousands of ETH. The registry write that should
+      // a wallet prices that as thousands of ETH. The registry write that should
       // run is still writeContract; simulation only refuses a call that cannot
       // succeed (wrong function for the id, wrong wallet, reused hash, expired).
       const simulate = async () => {
         try {
-          await wagmiSimulateContract(config, {
-            address: request.address,
-            abi: request.abi,
-            functionName: request.functionName,
-            args: request.args,
-            account: request.account,
-            chainId: request.chainId,
+          await publicClient.simulateContract({
+            address: call.address,
+            abi: call.abi,
+            functionName: call.functionName,
+            args: call.args,
+            account: call.account,
           });
         } catch (error) {
-          throw decorateAuditRevert(error, request.functionName);
+          throw decorateAuditRevert(error, call.functionName);
         }
       };
-      // These checks are independent. Start both immediately, but never open
-      // the wallet unless both succeed. This removes a serial RPC round trip
-      // without caching fees or skipping the protection against reverting calls.
-      const [feeCaps] = await Promise.all([estimateFeeCaps(), simulate()]);
-      // Keep UI callbacks outside the contract request so they never reach wagmi
-      // or the wallet RPC. Preparation is complete only at this boundary.
+      // These checks are independent. Start them all immediately, but never
+      // open the wallet unless every one succeeds. This removes serial round
+      // trips without caching fees or skipping the protection against reverting
+      // calls. The wallet lookup refuses a signer other than `account`.
+      const [feeCaps, , wallet] = await Promise.all([
+        estimateFeeCaps(),
+        simulate(),
+        walletClient({ account: call.account, chainId: request.chainId ?? arbitrumSepolia.id }),
+      ]);
+      // Keep UI callbacks outside the contract request so they never reach the
+      // wallet RPC. Preparation is complete only at this boundary.
       onWalletRequest?.();
-      return wagmiWriteContract(config, {
-        ...request,
-        ...feeCaps,
-      });
+      return wallet.writeContract({ ...call, ...feeCaps, chain: arbitrumSepolia });
     },
-    waitForTransactionReceipt: (request) => wagmiWaitForTransactionReceipt(config, request),
-    readContract: (request) => wagmiReadContract(config, request),
-    getBlock: (request) => wagmiGetBlock(config, request),
-    getTransaction: (request) => wagmiGetTransaction(config, request),
+    waitForTransactionReceipt: async (request) => publicClient.waitForTransactionReceipt(onAuditChain(request)),
+    readContract: async (request) => publicClient.readContract(onAuditChain(request)),
+    getBlock: async (request) => publicClient.getBlock(onAuditChain(request)),
+    getTransaction: async (request) => publicClient.getTransaction(onAuditChain(request)),
   };
 }
 
 function auditAdapters(adapters) {
-  const resolved = adapters ?? createWagmiAuditAdapters();
+  const resolved = adapters ?? createWalletAuditAdapters();
   for (const method of ["writeContract", "waitForTransactionReceipt", "readContract"]) {
     if (typeof resolved[method] !== "function") {
       throw new TypeError(`Audit adapter is missing ${method}().`);
@@ -392,7 +398,7 @@ export function updateOpportunityAudit(input, options) {
 /**
  * First publication is commitOpportunity. A later edit of the same entity id is
  * updateOpportunity — sending commit again reverts InvalidInput (id taken) and
- * is what made MetaMask show a multi-million-dollar gas estimate.
+ * is what made the wallet show a multi-million-dollar gas estimate.
  */
 export async function writeOpportunityAudit(input, options = {}) {
   const prepared = preparedFor(input, prepareOpportunityCommit, "commitOpportunity");

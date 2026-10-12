@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
@@ -10,21 +10,21 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { FundingMeta } from "./FundingMeta.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 import { StatusBadge } from "./StatusBadge.jsx";
-import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
+import { useSignIn } from "../context/SessionContext.jsx";
 import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
 const reasonLabel = moderationReasonLabel;
 
 function RemovedProposalRow({ item }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId } = useWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [connect, setConnect] = useState(false);
+  const signIn = useSignIn(setError);
   const ready = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
   const claim = async () => {
-    if (!ready) { setConnect(true); return; }
+    if (!ready) { void signIn(); return; }
     setBusy(true); setError(""); setNotice("");
     try {
       await claimRemovedProposalFunds({ proposalId: item.id, account: address });
@@ -44,7 +44,6 @@ function RemovedProposalRow({ item }) {
       {item.claimFunds && <div className="table-row-actions">
         <button className="secondary" type="button" disabled={busy} onClick={claim}>{busy ? "Claiming…" : "Claim funds"}</button>
       </div>}
-      {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}
     </div>
   );
 }

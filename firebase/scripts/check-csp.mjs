@@ -19,4 +19,16 @@ assert.ok(
   "The deployed CSP does not allow Cloud Storage, so posting attachments cannot upload or download",
 );
 
+// Email sign-in: Privy's API and wallet iframe, and the RPC its embedded wallet
+// uses on Arbitrum Sepolia. Exact origins only - never a wildcard.
+const directive = (name) => policy.split(";").map((part) => part.trim())
+  .find((part) => part.startsWith(`${name} `)) ?? "";
+assert.ok(directive("connect-src").includes("https://auth.privy.io"),
+  "The deployed CSP blocks Privy's API, so nobody can sign in with email");
+assert.ok(directive("connect-src").includes("https://arbitrum-sepolia.rpc.privy.systems"),
+  "The deployed CSP blocks the embedded wallet's RPC, so wallet transactions cannot be sent");
+assert.ok(directive("frame-src").includes("https://auth.privy.io"),
+  "The deployed CSP blocks Privy's wallet iframe, so the embedded wallet cannot sign");
+assert.equal(/\*\.(?:rpc\.)?privy\./.test(policy), false, "Privy wildcard remains live");
+
 console.log("Deployed CSP is present and restricted to documented endpoints.");

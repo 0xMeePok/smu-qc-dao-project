@@ -14,9 +14,8 @@ import { NotificationCentre } from "./components/ModerationNotifications.jsx";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
 import { AccessDenied } from "./components/AccessDenied.jsx";
-import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
+import { SignInWithEmail } from "./components/SignInWithEmail.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
-import { NetworkBanner } from "./components/NetworkBanner.jsx";
 import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import { useActionItems } from "./lib/actionItems.js";
 import HomePage from "./pages/HomePage.jsx";
@@ -256,7 +255,7 @@ function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
   return (
     <div className="account-controls">
       <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-      <SignInWithWallet />
+      <SignInWithEmail />
     </div>
   );
 }
@@ -862,7 +861,6 @@ function AppContent() {
 
   return (
     <>
-      <NetworkBanner />
       <SuspensionBanner />
       <Shell route={section}><Suspense fallback={<PageLoading />}>{pageComponent}</Suspense></Shell>
       <OnboardingModal />

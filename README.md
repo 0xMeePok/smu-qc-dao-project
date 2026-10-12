@@ -22,8 +22,15 @@ stakeholders an independently verifiable audit trail for the events that matter.
 
 ## How sign-in works
 
-There is no registration form and no public sign-up URL. Connecting a wallet **is**
-the account. Ensure you have MetaMask or Rabby installed.
+There is no registration form, no public sign-up URL and nothing to install. Members
+sign in through [Privy](https://privy.io)'s own login modal, with an email address and
+the one-time code Privy sends to it.
+The first sign-in creates a Privy embedded wallet for that email; its address **is**
+the account, and the same email reaches the same address on any device. The embedded
+wallet then signs the server's Sign-In with Ethereum challenge (`getSiweNonce` →
+`verifySiweSignature`), which starts the Firebase session keyed to that address.
+Signing out, the 15-minute idle timeout and an administrator suspension end both the
+Privy and the Firebase session.
 
 ## Tech Stack
 
@@ -33,7 +40,7 @@ the account. Ensure you have MetaMask or Rabby installed.
 | Backend / Off-chain Data | Firebase (Firestore, Auth, Storage) | Off-chain data store for user profiles, proposal drafts, and review feedback. |
 | Smart Contracts | Solidity (0.8.28), Arbitrum Sepolia | Verifiable audit log and hash anchoring (Chain ID: `421614`). |
 | Contract Tooling | Hardhat, Etherscan API v2 | Local testing, deployment pipelines, and automated Arbiscan verification. |
-| Wallet Integration | wagmi / viem / Web3 Provider | Wallet connectivity and cryptographic audit signing. |
+| Wallet Integration | Privy (email login + embedded wallets) / viem | Email sign-in, embedded-wallet signing and on-chain audit transactions. |
 
 ## Project Structure
 
@@ -49,7 +56,7 @@ smu-qc-dao-project/
 │   │   ├── components/      # Modals, role views, RouteGuard, and UI components
 │   │   ├── config/          # Role definitions, route permissions, feature flags
 │   │   ├── context/         # AuthContext and SessionContext state machines
-│   │   ├── lib/             # Firebase/wagmi setup, validation, SIWE client calls
+│   │   ├── lib/             # Firebase/Privy setup, validation, SIWE client calls
 │   │   ├── pages/           # AdminPage (only reachable with role == 1)
 │   │   ├── App.jsx          # Main application shell and dynamic routing
 │   │   └── styles.css       # Core design system and styles
@@ -81,8 +88,10 @@ smu-qc-dao-project/
 
   Skip this unless you are deploying a preview or changing the production bucket.
 - Java — needed by the Firestore emulator (local emulators **and** the rules test suite)
-- A browser wallet (MetaMask is the simplest) with Arbitrum Sepolia testnet ETH from
-  a faucet, for deploying/interacting with the QFT contract
+- A Privy app with **email** as its only login method; put its app id in
+  `frontend/.env` as `VITE_PRIVY_APP_ID` (see [Privy email sign-in](docs/firebase-setup.md#privy-email-sign-in))
+- A separate deployer wallet with Arbitrum Sepolia testnet ETH from a faucet, only if you
+  deploy or administer the QFT contracts (members never need one)
 
 ## Getting Started
 

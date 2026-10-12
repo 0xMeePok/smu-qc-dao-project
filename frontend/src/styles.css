@@ -1654,11 +1654,9 @@ footer > p { margin: 0 auto 0 0; }
   .account-status { text-align: left; }
 }
 
-/* ---------- Sign in with wallet ---------- */
-.wallet-button { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
-.wallet-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.wallet-icon circle { fill: currentColor; stroke: none; }
-.account-controls .wallet-button { min-height: 38px; padding: 0 14px; font-size: 13px; }
+/* ---------- Sign in with email ---------- */
+.signin-button { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+.account-controls .signin-button { min-height: 38px; padding: 0 14px; font-size: 13px; }
 
 /* ---------- Onboarding modal ---------- */
 /* flex + `margin: auto` rather than `place-items: center`: a grid-centred child that
@@ -1667,7 +1665,7 @@ footer > p { margin: 0 auto 0 0; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 24px; background: rgba(13, 27, 46, 0.45); overflow-y: auto; overscroll-behavior: contain; }
 .modal { display: flex; flex-direction: column; width: min(100%, 620px); max-height: calc(100dvh - 48px); margin: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-md); }
 .modal > form { display: flex; flex-direction: column; min-height: 0; }
-.modal-head, .modal-actions, .modal-foot-note { flex: none; }
+.modal-head, .modal-actions { flex: none; }
 .modal-head { display: flex; align-items: flex-start; gap: 14px; padding: 24px 24px 6px; }
 .modal-badge { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--success); color: white; font-weight: 700; }
 .modal-head h2 { margin: 0; font-size: 19px; }
@@ -1698,38 +1696,7 @@ footer > p { margin: 0 auto 0 0; }
   .modal-actions { flex-direction: column-reverse; }
 }
 
-/* ---------- Connector picker ---------- */
-.modal-narrow { width: min(100%, 460px); }
-.modal-badge-brand { background: var(--brand-soft); color: var(--brand); border: 1px solid var(--brand-line); }
-.modal-badge-brand .wallet-icon { width: 17px; height: 17px; }
-/* Wallet extensions announce themselves over EIP-6963, so this list is as long as
-   the number of wallets installed. Scroll it rather than the whole dialog, so the
-   heading and Cancel button stay visible. */
-.connector-list { display: grid; gap: 8px; min-height: 0; padding: 20px 24px 4px; overflow-y: auto; }
-.connector { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface); font-size: 14.5px; font-weight: 600; text-align: left; transition: border-color 160ms ease, background 160ms ease; }
-.connector:hover:not(:disabled) { border-color: var(--brand-line); background: var(--brand-soft); }
-.connector:disabled { opacity: 0.55; cursor: default; }
-.connector img { flex: none; border-radius: 5px; }
-.connector > span:not(.connector-mark) { margin-right: auto; }
-.connector small { color: var(--muted); font-size: 12px; font-weight: 500; }
-.connector-mark { display: grid; flex: none; place-items: center; width: 26px; height: 26px; border-radius: 6px; background: var(--surface-muted); color: var(--brand); }
-.connector-mark .wallet-icon { width: 15px; height: 15px; }
-.modal-foot-note { margin: 14px 24px 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
-.modal-foot-note a { color: var(--brand); }
-
-.connector-empty { display: grid; justify-items: start; gap: 14px; padding: 20px 24px 4px; }
-.connector-empty p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
-.connector-empty .wallet-button { text-decoration: none; }
-.connector-empty-links { display: flex; flex-wrap: wrap; gap: 10px; }
-
 .signin-error { max-width: 30ch; color: #b42318; font-size: 12px; font-weight: 500; line-height: 1.4; }
-
-/* ---------- Network banner ---------- */
-.network-banner { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; padding: 12px max(var(--gutter), calc((100vw - var(--container)) / 2)); border-bottom: 1px solid #fec84b; background: #fffaeb; color: #b54708; font-size: 13.5px; font-weight: 500; text-align: center; }
-.network-banner strong { font-weight: 700; }
-.network-banner-error { display: block; margin-top: 2px; font-weight: 600; }
-.network-banner .secondary { flex: none; min-height: 34px; padding: 0 14px; border-color: #fec84b; background: var(--surface); font-size: 13px; }
-.network-banner .secondary:hover { border-color: #b54708; background: #fffaeb; }
 
 @media (max-width: 680px) {
 }
@@ -3152,7 +3119,7 @@ footer > p { margin: 0 auto 0 0; }
   .topbar .user-session-info { min-width: 0; flex-direction: column; align-items: flex-start; gap: 6px; }
   .topbar .user-name { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
   .topbar .signout-btn { min-height: 44px; flex-shrink: 0; }
-  .topbar .account-controls .wallet-button { width: 100%; min-height: 44px; justify-content: center; }
+  .topbar .account-controls .signin-button { width: 100%; min-height: 44px; justify-content: center; }
 }
 
 /* QCDAO-57 - the post-submission edit trail on a proposal. */
@@ -3457,7 +3424,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .notification-centre-trigger.is-open { border: 0; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
 .notification-unread-count { top: 2px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border: 1.5px solid var(--surface-solid); background: var(--danger-fill); font-size: 10px; line-height: 13px; }
 .new-brief-button.primary.small { gap: 6px; min-height: 32px; padding: 6px 14px; font-size: 13px; font-weight: 500; }
-.account-controls .wallet-button { min-height: 32px; padding: 6px 14px; font-size: 13px; }
+.account-controls .signin-button { min-height: 32px; padding: 6px 14px; font-size: 13px; }
 
 .account-menu { position: relative; }
 .avatar-button { display: flex; align-items: center; gap: 10px; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--ink); font-size: 14px; }
@@ -3988,8 +3955,6 @@ footer.footer { justify-content: space-between; gap: 16px; min-height: 0; margin
 :root[data-theme="dark"] .audit-verification-unanchored { background: var(--warning-soft); color: var(--warning); }
 :root[data-theme="dark"] .admin-badge { border-color: rgba(255, 55, 95, 0.4); background: rgba(255, 55, 95, 0.14); color: #ff6482; }
 :root[data-theme="dark"] .evaluator-badge { border-color: var(--success-line); background: var(--success-soft); color: var(--success); }
-:root[data-theme="dark"] .network-banner { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
-:root[data-theme="dark"] .network-banner .secondary:hover { background: var(--surface-hover); }
 :root[data-theme="dark"] .attachment-error { background: var(--danger-soft); color: var(--danger); }
 :root[data-theme="dark"] .redirect-notice strong,
 :root[data-theme="dark"] .redirect-notice p,

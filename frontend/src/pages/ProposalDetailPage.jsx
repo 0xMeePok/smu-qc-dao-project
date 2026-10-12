@@ -9,8 +9,9 @@ import { OpenFundingPanel } from "../components/OpenFundingPanel.jsx";
 import { readEscrow } from "../lib/escrow.js";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useSignIn } from "../context/SessionContext.jsx";
+import { useWallet } from "../context/WalletContext.jsx";
 import { findProposal, withdrawProposal } from "../lib/proposals.js";
 import { findPublicProfileByAddress } from "../lib/profile.js";
 import { anchorProposalAudit, anchorProposalWithdrawal, proposalAuditReceipt, readProposalAudit } from "../lib/proposalAudit.js";
@@ -18,7 +19,6 @@ import { auditErrorMessage } from "../lib/errors.js";
 import { downloadAttachment, saveBlobAs } from "../lib/attachments.js";
 import { formatInstant } from "../lib/datetime.js";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
-import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
 import { OwnerReviewPanel } from "../components/OwnerReviewPanel.jsx";
@@ -45,14 +45,14 @@ import { PosterIdentity } from "../components/PosterIdentity.jsx";
 export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false, initialTab = "overview",
   fundingActivationError = "", pendingFundingTransaction = null }) {
   const { user } = useAuth();
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useWallet();
   const [proposal, setProposal] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditBusy, setAuditBusy] = useState(false);
   const [auditVerification, setAuditVerification] = useState(null);
   const [withdrawing, setWithdrawing] = useState(false);
-  const [walletPromptOpen, setWalletPromptOpen] = useState(false);
+  const signIn = useSignIn(setError);
   const [confirm, setConfirm] = useState(false);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState("");
@@ -118,8 +118,8 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
   const anchor = async (record = proposal, promptForWallet = true) => {
     if (!record || anchorInFlight.current.has(record.id)) return;
     if (!record.audit?.transactionHash && (!isConnected || address?.toLowerCase() !== record.researcherId)) {
-      setError("Your proposal is saved. Connect the wallet that submitted it to start verification.");
-      if (promptForWallet) setWalletPromptOpen(true);
+      setError("Your proposal is saved. Sign in with the email account that submitted it to start verification.");
+      if (promptForWallet) void signIn();
       return;
     }
     anchorInFlight.current.add(record.id);
@@ -156,9 +156,9 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       if (withdrawalReason.length < 2) { setReasonError("Give a reason for withdrawing this proposal."); return; }
       if (withdrawalReason.length > 1000) { setReasonError("Use 1,000 characters or fewer."); return; }
       // Both sides lowercased: comparing against a stored value that is not
-      // already lowercase told the author to connect the wallet they were on.
+      // already lowercase told the author to sign in with the account they were on.
       if (!isConnected || address?.toLowerCase() !== proposal.researcherId?.toLowerCase()) {
-        setReasonError("Connect the wallet that submitted this proposal to sign the withdrawal.");
+        setReasonError("Sign in with the email account that submitted this proposal to sign the withdrawal.");
         return;
       }
     }
@@ -379,7 +379,6 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       {owns && proposal.status === "withdrawn" && <button type="button" className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
       </div>
     </aside></div>
-    {walletPromptOpen && <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />}
     {confirm && <Modal labelledBy="withdraw-proposal-title" describedBy="withdraw-proposal-desc" onDismiss={() => { if (!withdrawing) setConfirm(false); }}>
       <div className="modal-head">
         <div>

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   auditShouldFail: false,
   auditError: null,
   connectedAddress: `0x${"a".repeat(40)}`,
+  signIn: vi.fn(async () => ({ ok: false, cancelled: true })),
   deleted: [],
   uploader: {
     onChange: null,
@@ -18,8 +19,8 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("wagmi", () => ({
-  useAccount: () => ({
+vi.mock("../../src/context/WalletContext.jsx", () => ({
+  useWallet: () => ({
     address: mocks.connectedAddress,
     isConnected: Boolean(mocks.connectedAddress),
   }),
@@ -115,16 +116,13 @@ vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
   },
 }));
 
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
-  ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
-}));
-
 vi.mock("../../src/context/SessionContext.jsx", () => ({
   useSession: () => ({
     address: `0x${"a".repeat(40)}`,
     profile: { organisation: "Singapore Management University" },
     isSignedIn: true,
   }),
+  useSignIn: () => mocks.signIn,
 }));
 
 const { default: CreatePostingPage } = await import("../../src/pages/CreatePostingPage.jsx");
@@ -316,12 +314,14 @@ describe("AuditRegistry integration", () => {
 
   it("requires the signed-in wallet to be actively connected", async () => {
     mocks.connectedAddress = null;
+    mocks.signIn.mockClear();
     render(<CreatePostingPage onNavigate={() => {}} />);
     fillRequired();
     fireEvent.submit(document.querySelector("form"));
 
-    expect((await screen.findByRole("dialog")).textContent).toContain("Reconnect wallet");
-    expect(screen.getByRole("alert").textContent).toContain("Reconnect the wallet used to sign in");
+    // Privy's login modal opens through the session's sign-in.
+    await waitFor(() => expect(mocks.signIn).toHaveBeenCalledOnce());
+    expect(screen.getByRole("alert").textContent).toContain("Sign in again with your email");
     expect(mocks.auditCalls).toHaveLength(0);
     expect(mocks.created).toHaveLength(0);
   });
