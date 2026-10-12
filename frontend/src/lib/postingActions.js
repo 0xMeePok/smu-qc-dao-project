@@ -44,7 +44,7 @@ export function postingActions(posting, user, { isAuthenticated = Boolean(user) 
   const roles = rolesOf(user);
   const owns = sameWallet(user?.id, posting.ownerId);
   const status = postingStatus(posting);
-  const blocked = proposalBlockReason(posting);
+  const blocked = proposalBlockReason(posting, undefined, { researcherId: user?.id });
   const deadlinePassed = isExpired(posting.expiresAt);
   const actions = [];
 

@@ -24,11 +24,10 @@ describe("publication errors stay separate from sign-in errors", () => {
   });
 });
 
-describe("sign-in refused for a web address the server has not approved", () => {
-  it("names the web address rather than blaming administrator rights", () => {
-    const error = { code: "functions/permission-denied", message: "Sign-in is not available from this origin." };
-    assert.match(messageForSignInError(error), /web address is not approved for sign-in/);
-    assert.doesNotMatch(messageForSignInError(error), /Administrator/i);
+describe("sign-in copy from the Privy exchange", () => {
+  it("shows the server's wallet message instead of a publication error", () => {
+    const error = { code: "functions/failed-precondition", message: "Your QC DAO wallet is not ready yet. Sign in again in a moment." };
+    assert.equal(messageForSignInError(error), error.message);
   });
 
   it("still reports a suspended account as suspended", () => {

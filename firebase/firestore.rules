@@ -3,10 +3,11 @@ rules_version = '2';
 // Server-side authorisation for wallet onboarding.
 //
 // The security model rests on one fact: `request.auth.uid` IS the lowercase wallet
-// address, and a uid can only exist because firebase/functions/index.js verified a
-// signature over a server-issued, single-use nonce before minting the custom token.
-// A browser cannot forge one. That is why `request.auth.uid == address` below is a
-// real proof of wallet ownership rather than a claim the client made about itself.
+// address. A uid can exist only because exchangePrivySession verified a Privy
+// access token and read that user's embedded wallet from Privy before minting
+// the custom token. The browser does not name the account. That is why
+// `request.auth.uid == address` below is a real binding to the email's wallet
+// rather than a claim the client made about itself.
 //
 // `role` is 0 (user), 1 (administrator), or 2 (assigned evaluator) - see
 // frontend/src/lib/roles.js. It is fixed to 0 on create and immutable on every

@@ -50,6 +50,13 @@ describe("QCDAO-59/60 proposals", () => {
     assert.equal(proposalBlockReason(posting), "");
     assert.ok(proposalBlockReason({ ...posting, expiresAt: new Date(100) }, new Date(100)));
   });
+  it("blocks the poster from proposing on their own opportunity, whatever the address case", () => {
+    const ownerId = `0x${"ab".repeat(20)}`;
+    const own = { ...posting, ownerId };
+    assert.match(proposalBlockReason(own, undefined, { researcherId: ownerId.toUpperCase().replace("0X", "0x") }), /You posted this opportunity/);
+    assert.equal(proposalBlockReason(own, undefined, { researcherId: `0x${"cd".repeat(20)}` }), "");
+    assert.equal(proposalBlockReason(own), "");
+  });
   it("stores the author, parent and sponsor linkage with submitted status", () => {
     const record = buildProposalDocument({ researcherId: "0xABC", posting, form });
     assert.equal(record.researcherId, "0xabc");

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, doc } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
-import { exchangeSignatureForSession, requestSignInMessage, revokeOwnSessions } from "../lib/authFlow.js";
+import { exchangePrivySession, revokeOwnSessions } from "../lib/authFlow.js";
 import { createProfile, findProfileByAddress, updateProfile } from "../lib/profile.js";
 import { ACCOUNT_SUSPENDED_MESSAGE, isSignInCancelled, messageForFirebaseError, messageForSignInError } from "../lib/errors.js";
 import { isAdmin } from "../lib/roles.js";
@@ -57,6 +57,10 @@ export function SessionProvider({ children }) {
 
   const lookupToken = useRef(0);
   const ending = useRef(false);
+  // From the click until Firebase and Privy have both cleared their sessions.
+  // The ref is for callbacks; the state drives "Signing out…" in the UI.
+  const signingOutRef = useRef(false);
+  const [signingOut, setSigningOut] = useState(false);
   const current = useRef({});
   current.current = { status, profile, verifiedAddress };
 
@@ -110,6 +114,11 @@ export function SessionProvider({ children }) {
    */
   const signIn = useCallback(() => {
     if (signInInFlight.current) return signInInFlight.current;
+    // A sign-out still clearing Privy's session would make the new sign-in look
+    // already done to Privy. The sign-in button is disabled meanwhile anyway.
+    if (signingOutRef.current) {
+      return Promise.resolve({ ok: false, message: "You are still being signed out. Sign in again in a moment." });
+    }
 
     const run = async () => {
       const before = current.current;
@@ -124,17 +133,19 @@ export function SessionProvider({ children }) {
       try {
         await walletRef.current.login();
         // A returning member's wallet loads; a first sign-in's was just created.
-        // Either way it is the same address on every device for this email.
-        const target = (await walletRef.current.ensureWallet()).toLowerCase();
-        // That wallet's Firebase session already exists: it only had to load.
-        if (target === before.verifiedAddress) return { ok: true };
+        // The server, not this address, decides who the Firebase session is.
+        const local = (await walletRef.current.ensureWallet()).toLowerCase();
+        if (local === before.verifiedAddress) return { ok: true };
 
-        const challenge = await requestSignInMessage(target);
-        const signature = await walletRef.current.signMessage(challenge.message, target);
-        await exchangeSignatureForSession({ address: target, signature, challengeId: challenge.challengeId });
+        const accessToken = await walletRef.current.accessToken();
+        const address = (await exchangePrivySession(accessToken)).toLowerCase();
+        if (address !== local) {
+          if (isFirebaseConfigured && auth.currentUser) await signOut(auth).catch(() => {});
+          throw new Error("The signed-in wallet does not match this account.");
+        }
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
-        setVerifiedAddress(target);
+        setVerifiedAddress(address);
         return { ok: true };
       } catch (caught) {
         // Lockstep: a sign-in that did not finish must not leave behind a Privy
@@ -182,7 +193,9 @@ export function SessionProvider({ children }) {
         }
       },
       (caught) => {
-        if (token !== lookupToken.current) return;
+        // Revoking the session on sign-out makes this listener fail at once;
+        // that is the sign-out working, not an error to show the member.
+        if (token !== lookupToken.current || signingOutRef.current) return;
         setError(messageForFirebaseError(caught));
         setStatus("signed-out");
       }
@@ -213,6 +226,8 @@ export function SessionProvider({ children }) {
   const endSession = useCallback(
     async ({ reason = null, redirectToLogin = false } = {}) => {
       setError(null);
+      signingOutRef.current = true;
+      setSigningOut(true);
       // Suspension already revoked this account's credentials server side (see
       // setUserSuspension), and a suspended account may not call back in.
       if (reason !== "suspended") {
@@ -223,17 +238,29 @@ export function SessionProvider({ children }) {
             await revokeOwnSessions();
           }
         } catch (caught) {
+          signingOutRef.current = false;
+          setSigningOut(false);
           const message = messageForFirebaseError(caught);
           setError(message);
           return { ok: false, message };
         }
       }
 
-      // The token is dead server-side now. Local teardown therefore runs even if
-      // signOut throws: bailing out here would leave the app "signed in" holding
-      // a token every rule refuses, which fails as an unexplained 403 on the next
-      // read or upload.
+      // The token is dead server-side now, so the member IS signed out: show it
+      // straight away. Firebase and Privy clear their local sessions after this,
+      // and the screen does not wait for them - Privy's logout alone can take 15
+      // seconds (it waits on its wallet iframe), and nothing either does matters
+      // for security once the server has revoked the session. `ending` is set
+      // first so the lockstep effect below does not start a second Privy logout.
       ending.current = true;
+      clearActivity();
+      reset();
+      setError(reason === "idle" ? IDLE_MESSAGE : reason === "suspended" ? ACCOUNT_SUSPENDED_MESSAGE : null);
+      if (redirectToLogin) go("login");
+
+      // Local teardown runs even if signOut throws: bailing out here would leave
+      // Firebase holding a token every rule refuses, which fails as an
+      // unexplained 403 on the next read or upload.
       try {
         if (isFirebaseConfigured && auth.currentUser) {
           await signOut(auth).catch(() => { });
@@ -241,11 +268,9 @@ export function SessionProvider({ children }) {
         await logoutOfPrivy();
       } finally {
         ending.current = false;
+        signingOutRef.current = false;
+        setSigningOut(false);
       }
-      clearActivity();
-      reset();
-      setError(reason === "idle" ? IDLE_MESSAGE : reason === "suspended" ? ACCOUNT_SUSPENDED_MESSAGE : null);
-      if (redirectToLogin) go("login");
       return { ok: true };
     },
     [logoutOfPrivy, reset],
@@ -335,13 +360,14 @@ export function SessionProvider({ children }) {
       isVerifying: status === "verifying",
       isChecking: status === "checking",
       isBusy: status === "verifying" || status === "checking",
+      isSigningOut: signingOut,
       signIn,
       completeOnboarding,
       saveProfile,
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
     }),
-    [status, profile, error, verifiedAddress, authResolved, signIn, completeOnboarding,
+    [status, profile, error, verifiedAddress, authResolved, signingOut, signIn, completeOnboarding,
       saveProfile, signOutOfSession],
   );
 

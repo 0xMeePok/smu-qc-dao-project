@@ -352,7 +352,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{proposalMatchingLocked(record) ? "Funding or matching has started. The proposal is locked to preserve the funders’ commitment." : `Its status is ${workflowStatusLabel(proposalWorkflowStatus(record))}. A proposal is locked once evaluation begins.`}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View proposal</button></section>;
   }
   const isOpenFunding = openFunding;
-  const blocked = proposalBlockReason(posting, now);
+  const blocked = proposalBlockReason(posting, now, { researcherId: user?.id });
   const disabled = busy || savingDraft || Boolean(blocked);
   const showForm = !(active && !editing && !draftExists);
   const textField = ([key, label, max]) => <Field key={key} htmlFor={`proposal-${key}`} label={label} error={errors[key]}>

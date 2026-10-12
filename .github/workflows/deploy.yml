@@ -152,6 +152,7 @@ jobs:
         env:
           ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
           ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
+          PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
         run: |
           if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
             echo "::error::ARBITRUM_SEPOLIA_RPC_URL is required for on-chain publication verification."
@@ -159,6 +160,11 @@ jobs:
           fi
           printf 'ARBITRUM_SEPOLIA_RPC_URL=%s\n' "$ARBITRUM_SEPOLIA_RPC_URL" > firebase/functions/.env
           printf 'ARBITRUM_SEPOLIA_RPC_BACKUP_URLS=%s\n' "$ARBITRUM_SEPOLIA_RPC_BACKUP_URLS" >> firebase/functions/.env
+          if [ -z "$PRIVY_APP_ID" ]; then
+            echo "::error::VITE_PRIVY_APP_ID is required so exchangePrivySession can verify Privy access tokens."
+            exit 1
+          fi
+          printf 'PRIVY_APP_ID=%s\n' "$PRIVY_APP_ID" >> firebase/functions/.env
 
       - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase

@@ -282,18 +282,12 @@ export function messageForSignInError(error) {
   if (privyMessage) return privyMessage;
   // Our own wallet-readiness copy, written to be shown as-is.
   if (error?.name === "WalletUnavailableError") return error.message;
-  // getSiweNonce refuses any site address missing from its allow-list. The
-  // generic permission copy blamed administrator rights instead, which sends
-  // someone testing a preview site looking in the wrong place entirely.
-  if (String(error?.code ?? "").endsWith("permission-denied") && ORIGIN_REFUSED.test(String(error?.message ?? ""))) {
-    return SIGN_IN_ORIGIN_REFUSED_MESSAGE;
+  const detail = String(error?.message ?? "");
+  if (/QC DAO wallet|email address for this account|does not match this account|Sign-in is not configured|could not be confirmed/i.test(detail)) {
+    return detail;
   }
   return messageForFirebaseError(error);
 }
-
-const ORIGIN_REFUSED = /approved (?:browser )?origin|not available from this origin/i;
-const SIGN_IN_ORIGIN_REFUSED_MESSAGE =
-  "This web address is not approved for sign-in. (A preview site is approved when npm run deploy:preview deploys it.)";
 
 // Transaction-level wallet failures (rejections, fee and RPC errors) are mapped
 // by auditErrorMessage and escrowErrorMessage. Sign-in failures go through

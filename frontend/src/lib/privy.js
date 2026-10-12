@@ -3,9 +3,8 @@ import { arbitrumSepolia } from "viem/chains";
 /**
  * Privy is the only way into the app: Privy's own login modal, limited to email
  * and a one-time code, and the embedded wallet Privy creates for that email on
- * its first sign-in. The account is still the wallet address - the embedded
- * wallet signs the same server-issued sign-in challenge a browser wallet used
- * to (see lib/authFlow.js).
+ * its first sign-in. The account is still the wallet address. The server reads
+ * that wallet from Privy when it mints the Firebase session (see lib/authFlow.js).
  *
  * The app id is public and ships in every bundle. The app secret never reaches
  * the browser.

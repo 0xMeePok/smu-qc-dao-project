@@ -38,22 +38,12 @@ firebase/
 
 ### What the Cloud Functions do
 
-Wallet sign-in is verified server-side, not in the browser — a client-side check
-proves nothing, since anyone can call Firestore directly and skip it. The uid
-Firebase ends up with **is** the lowercase wallet address, and that uid only exists
-because one of these functions verified a real signature first:
-
-1. **`getSiweNonce`** — opens a challenge for this attempt and returns the exact
-   message to sign plus its `challengeId`. The client never chooses this text. Each
-   request gets its own challenge, so another caller can neither replace a pending
-   sign-in nor spend its verification attempts.
-2. **`verifySiweSignature`** — takes that `challengeId`, rebuilds the message from
-   the challenge's own stored nonce, verifies the signature (`viem.verifyMessage`,
-   which also covers EIP-1271 smart contract wallets), burns the nonce, and mints a
-   Firebase custom token whose uid is the address. Attempts are counted against the
-   challenge, never against the wallet.
-3. **`revokeOwnSessions`** — records an immediate Firestore session cutoff and
-   revokes Firebase refresh tokens before the browser removes its persisted login.
+Wallet sign-in is verified server-side, not in the browser. The uid Firebase
+ends up with **is** the lowercase embedded-wallet address, and that uid only
+exists because `exchangePrivySession` verified a Privy access token and read
+that user's embedded wallet from Privy. The browser does not name the account.
+`revokeOwnSessions` records an immediate Firestore session cutoff and revokes
+Firebase refresh tokens before the browser removes its persisted login.
 
 Administrative role and suspension changes are also callable functions. They update
 the user and matching audit record transactionally; suspension additionally records
@@ -121,7 +111,7 @@ Verify the backend itself is reachable, independent of the frontend:
 ```bash
 curl -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" \
   --data '{"data":{"address":"0x0000000000000000000000000000000000000000"}}' \
-  https://asia-southeast1-<project-id>.cloudfunctions.net/getSiweNonce
+  https://asia-southeast1-<project-id>.cloudfunctions.net/exchangePrivySession
 ```
 
 `200` means it's up. If you get a CORS error in the browser console instead, it
@@ -188,52 +178,21 @@ profile and can only read its own, `stats` can never be written non-zero at sign
 the user base cannot be enumerated, `role` never leaks through `publicProfiles`, and
 `siweNonces` is unreachable from any client.
 
-The functions suite checks that a replayed signature, a signature from the
-wrong key, a fabricated signature, a signature over a different message, and a nonce
-request from an unrecognised origin are all rejected — and that a legitimate
-signature succeeds.
+The functions suite checks that sign-in uses the embedded wallet Privy reports
+for the email, and refuses an external wallet, a missing wallet, or an address
+the browser merely names.
 
 ### Allowed sign-in origins
 
-The SIWE message names a domain, and that name is what binds a signature to this
-site. `getSiweNonce` refuses to issue a message to a browser origin it does not
-recognise — otherwise anyone could request a message naming *their* domain, get a
-user to sign it, and exchange that signature here for a real session.
+Sign-in no longer checks a SIWE allow-list. Privy's dashboard allowed origins
+are what let the email modal run on a site. Add each preview channel URL there,
+and on the reCAPTCHA Enterprise key. `exchangePrivySession` still requires
+App Check outside the emulator.
 
-**This fails closed.** An unlisted origin gets `permission-denied`, which surfaces in
-the app as *"The sign-in server refused the request."* Recognised automatically, with
-no configuration:
-
-- `<project-id>.web.app` and `<project-id>.firebaseapp.com`
-- `localhost:5173` / `127.0.0.1:5173`, **only** under the emulator — never in a
-  deployed function, where allow-listing localhost would reopen the hole
-
-Additional origins (a custom domain) go in `functions/.env`, which is gitignored:
-
-```
-SIWE_DOMAIN=qcdao.example.edu
-SIWE_ALLOWED_HOSTS=qcdao.example.edu,www.qcdao.example.edu
-```
-
-Preview channels are not inferred from their hostname shape. Add the complete
-generated preview host to `SIWE_ALLOWED_HOSTS` before testing sign-in on it, then
-remove it when the channel expires.
-
-Production nonce calls also require Firebase App Check with a reCAPTCHA Enterprise
-score-based key (the Firebase console no longer accepts the legacy v3 provider).
-Create the key in Google Cloud (Fraud Defense / reCAPTCHA, type Website • score),
-register that same key on the web app in Firebase App Check, and set
-`VITE_FIREBASE_APP_CHECK_SITE_KEY` in the frontend build environment. The nonce
-endpoint uses cached App Check session tokens, applies a 100-request-per-source and
-1,000-request-global one-minute quota, and relies on the deployed Firestore TTL field
-configuration to delete expired nonce and quota documents. App Check replay protection
-is disabled because the nonce is already single-use and enabling it adds another
-attestation round trip to every sign-in.
-
-`SIWE_DOMAIN` is the canonical deployment name used by the emulator. Production
-requests without an `Origin` are rejected; there is no unauthenticated server-flow
-exception. `SIWE_ALLOWED_HOSTS` is a comma-separated list of additional browser
-origins allowed to request a message.
+Do **not** put the Privy app secret in `frontend/.env` or in
+`functions/.env.<project>`. It is the functions secret `PRIVY_SECRET`. The app
+id is public: `PRIVY_APP_ID` in the functions env, from the same value as
+`VITE_PRIVY_APP_ID`.
 
 ### Session invalidation policy
 
@@ -248,15 +207,14 @@ failure remains visible and retryable instead of presenting a false signed-out
 state. Signing out also ends the member's Privy session, so neither the email login
 nor the Firebase session survives it (QCDAO-141).
 
-Do **not** add `localhost` to `SIWE_ALLOWED_HOSTS` on a deployed project to make local
-development work. It would let anyone forge `Origin: localhost:5173` and obtain a
-signable message again. Use the emulator instead — see below.
+Do **not** put `PRIVY_SECRET` in a frontend env file. Sign-in against the live
+backend works from any origin Privy allows. Use the emulator when you do not
+want to call the live function.
 
 ### Local development against the emulator
 
-Because deployed functions refuse `localhost`, a local frontend pointed at the live
-backend will fail sign-in with *"The sign-in server refused the request."* Run the
-emulator instead, where dev origins are allowed automatically.
+A local frontend can sign in against the live backend when the Privy dashboard
+allows that origin. Use the emulator when you want to avoid the live project.
 
 From the **repo root**, install first, then two terminals:
 
@@ -341,11 +299,9 @@ undeployed. `--backend` deploys `firestore:rules`, `firestore:indexes` and
 `storage` before the channel, and deploys every function — which is what ships a
 newly added trigger on a repeat deploy to an existing channel.
 
-Without `--backend` the script deploys only `getSiweNonce`, and only when the
-**server's** SIWE allow-list does not match the live channels. That happens after
-any functions deploy made without the gitignored `functions/.env.qcdao-a0c7a`
-(CI's, on every merge to main), and it shows up as a 403 from `getSiweNonce` on
-the channel; rerunning `npm run deploy:preview` puts the list back.
+Without `--backend` the script does not redeploy functions. Sign-in no longer
+depends on a SIWE allow-list. A new `exchangePrivySession` reaches the channel
+only after a functions deploy (`--backend`, or `npx firebase deploy --only functions`).
 
 It is opt-in because it writes to the **shared** project for everyone, not just
 your channel. Without it the script says so rather than leaving you to guess.
@@ -404,7 +360,7 @@ Confirm it landed:
 firebase functions:list --project <project-id>
 ```
 
-You should see `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`.
+You should see `exchangePrivySession` and `revokeOwnSessions` in `asia-southeast1`.
 
 ## Collections
 

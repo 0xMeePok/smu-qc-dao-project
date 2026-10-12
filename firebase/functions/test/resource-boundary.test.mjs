@@ -3,6 +3,7 @@ import { before, describe, it } from "node:test";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { idTokenForAddress } from "./id-token.mjs";
 const projectId = process.env.GCLOUD_PROJECT || "qc-dao-demo";
 initializeApp({ projectId });
 const db = getFirestore();
@@ -17,15 +18,7 @@ async function call(name, data, auth = token) {
   return response.json();
 }
 before(async () => {
-  const nonce = await call("getSiweNonce", { address: uid });
-  const signed = await call("verifySiweSignature", {
-    address: uid, signature: await account.signMessage({ message: nonce.result.message }),
-    challengeId: nonce.result.challengeId,
-  });
-  const response = await fetch("http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: signed.result.token, returnSecureToken: true }),
-  });
-  token = (await response.json()).idToken;
+  token = await idTokenForAddress(uid);
   assert.ok(token);
   await db.collection("users").doc(uid).set({ address: uid, role: 0, fullName: "Resource test", organisation: "University", suspended: false });
 });

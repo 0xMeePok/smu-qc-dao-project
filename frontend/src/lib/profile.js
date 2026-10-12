@@ -10,7 +10,7 @@ import { ROLE_USER } from "./roles.js";
 export const TERMS_VERSION = "2026-08-24";
 
 // Profiles are keyed by lowercase wallet address, which is also the Firebase uid
-// minted by verifySiweSignature. Rules only have to check that the two match.
+// minted by exchangePrivySession. Rules only have to check that the two match.
 function profileRef(address) {
   return doc(db, "users", address.toLowerCase());
 }

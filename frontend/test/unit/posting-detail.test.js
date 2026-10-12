@@ -87,6 +87,12 @@ describe("[QCDAO-54] view posting detail page", () => {
     assert.ok(!actionIds({ ...OPEN_POSTING, moderated: true }, PARTICIPANT).includes("submit"));
   });
 
+  it("[FUT-OPD-124] hides submit from the member who posted the opportunity", () => {
+    const ids = actionIds(OPEN_POSTING, { ...PARTICIPANT, id: OWNER.toUpperCase().replace("0X", "0x") });
+    assert.ok(!ids.includes("submit"));
+    assert.ok(ids.includes("review-proposals"));
+  });
+
   it("[FUT-OPD-125] shows fund, evaluate, moderate and edit only where role and workflow allow it", () => {
     assert.ok(actionIds(OPEN_POSTING, PARTICIPANT).includes("fund"));
     assert.ok(actionIds(OPEN_POSTING, { ...PARTICIPANT, id: OWNER }).includes("fund"));

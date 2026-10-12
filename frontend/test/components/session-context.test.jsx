@@ -13,8 +13,7 @@ const mocks = vi.hoisted(() => ({
   go: vi.fn(),
   revoke: vi.fn(async () => ({ success: true })),
   signOut: vi.fn(),
-  requestMessage: vi.fn(),
-  exchangeSignature: vi.fn(),
+  exchangePrivy: vi.fn(),
 }));
 
 vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => mocks.wallet }));
@@ -28,7 +27,8 @@ vi.mock("firebase/auth", () => ({
 }));
 vi.mock("firebase/firestore", () => ({
   doc: (_db, collection, id) => ({ collection, id }),
-  onSnapshot: (_ref, callback) => {
+  onSnapshot: (_ref, callback, onError) => {
+    mocks.snapshotError = onError;
     callback({ exists: () => Boolean(mocks.profile), data: () => mocks.profile });
     return () => {};
   },
@@ -39,8 +39,7 @@ vi.mock("../../src/lib/firebase.js", () => ({
   isFirebaseConfigured: true,
 }));
 vi.mock("../../src/lib/authFlow.js", () => ({
-  exchangeSignatureForSession: (...args) => mocks.exchangeSignature(...args),
-  requestSignInMessage: (...args) => mocks.requestMessage(...args),
+  exchangePrivySession: (...args) => mocks.exchangePrivy(...args),
   revokeOwnSessions: (...args) => mocks.revoke(...args),
 }));
 vi.mock("../../src/lib/profile.js", () => ({
@@ -84,6 +83,7 @@ function privyWallet(overrides = {}) {
     chainId: undefined,
     login: vi.fn(async () => { wallet.authenticated = true; }),
     ensureWallet: vi.fn(async () => ADDRESS),
+    accessToken: vi.fn(async () => "header.payload.signature"),
     signMessage: vi.fn(async () => "0xsignature"),
     logout: vi.fn(async () => { wallet.authenticated = false; }),
     ...overrides,
@@ -109,8 +109,7 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
       mocks.authListener?.(null);
     });
     mocks.revoke.mockReset().mockResolvedValue({ success: true });
-    mocks.requestMessage.mockReset().mockResolvedValue({ message: "Sign in", challengeId: "nonce" });
-    mocks.exchangeSignature.mockReset().mockResolvedValue(ADDRESS);
+    mocks.exchangePrivy.mockReset().mockResolvedValue(ADDRESS);
   });
 
   afterEach(() => cleanup());
@@ -122,40 +121,33 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     expect(currentSession.profile.fullName).toBe("Ada");
   });
 
-  it("opens Privy's login modal, then has the embedded wallet sign the server challenge", async () => {
+  it("opens Privy's login modal, then exchanges Privy's token for the Firebase session", async () => {
     mocks.auth.currentUser = null;
     const mixedCase = `0x${"A".repeat(40)}`;
-    let loggedIn, walletReady, nonceReady, signatureReady, sessionReady;
+    let loggedIn, walletReady, tokenReady, sessionReady;
     mocks.wallet.login.mockReturnValue(new Promise(resolve => { loggedIn = resolve; }));
     mocks.wallet.ensureWallet.mockReturnValue(new Promise(resolve => { walletReady = resolve; }));
-    mocks.requestMessage.mockReturnValue(new Promise(resolve => { nonceReady = resolve; }));
-    mocks.wallet.signMessage.mockReturnValue(new Promise(resolve => { signatureReady = resolve; }));
-    mocks.exchangeSignature.mockReturnValue(new Promise(resolve => { sessionReady = resolve; }));
+    mocks.wallet.accessToken.mockReturnValue(new Promise(resolve => { tokenReady = resolve; }));
+    mocks.exchangePrivy.mockReturnValue(new Promise(resolve => { sessionReady = resolve; }));
     mountProvider();
     await waitFor(() => expect(currentSession?.isLoading).toBe(false));
 
     let pending;
     act(() => { pending = currentSession.signIn(); });
-    // Privy's modal is open: email, code and (first time) the wallet are its job.
     expect(mocks.wallet.login).toHaveBeenCalledOnce();
     expect(currentSession.isVerifying).toBe(true);
     expect(mocks.wallet.ensureWallet).not.toHaveBeenCalled();
 
     await act(async () => { loggedIn(); });
     expect(mocks.wallet.ensureWallet).toHaveBeenCalledOnce();
-    expect(mocks.requestMessage).not.toHaveBeenCalled();
+    expect(mocks.wallet.accessToken).not.toHaveBeenCalled();
 
     await act(async () => { walletReady(mixedCase); });
-    expect(mocks.requestMessage).toHaveBeenCalledExactlyOnceWith(ADDRESS);
+    expect(mocks.wallet.accessToken).toHaveBeenCalledOnce();
     expect(mocks.wallet.signMessage).not.toHaveBeenCalled();
 
-    await act(async () => { nonceReady({ message: "Sign in", challengeId: "nonce" }); });
-    expect(mocks.wallet.signMessage).toHaveBeenCalledExactlyOnceWith("Sign in", ADDRESS);
-
-    await act(async () => { signatureReady("0xsignature"); });
-    expect(mocks.exchangeSignature).toHaveBeenCalledExactlyOnceWith({
-      address: ADDRESS, signature: "0xsignature", challengeId: "nonce",
-    });
+    await act(async () => { tokenReady("header.payload.signature"); });
+    expect(mocks.exchangePrivy).toHaveBeenCalledExactlyOnceWith("header.payload.signature");
 
     let outcome;
     await act(async () => { sessionReady(ADDRESS); outcome = await pending; });
@@ -219,14 +211,13 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     await act(async () => { loggedIn(); outcome = await pending; });
     expect(outcome).toEqual({ ok: true });
     expect(mocks.wallet.ensureWallet).toHaveBeenCalledOnce();
-    expect(mocks.requestMessage).not.toHaveBeenCalled();
-    expect(mocks.exchangeSignature).not.toHaveBeenCalled();
+    expect(mocks.exchangePrivy).not.toHaveBeenCalled();
     expect(currentSession.isSignedIn).toBe(true);
   });
 
   it("ends the Privy session when the Firebase exchange refuses the sign-in", async () => {
     mocks.auth.currentUser = null;
-    mocks.exchangeSignature.mockRejectedValueOnce(suspendedError());
+    mocks.exchangePrivy.mockRejectedValueOnce(suspendedError());
     mountProvider();
     await waitFor(() => expect(currentSession?.isLoading).toBe(false));
 
@@ -240,7 +231,7 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
 
   it("signs in from the header button and explains a failure beside it", async () => {
     mocks.auth.currentUser = null;
-    mocks.exchangeSignature.mockRejectedValueOnce(suspendedError());
+    mocks.exchangePrivy.mockRejectedValueOnce(suspendedError());
     render(<SessionProvider><SignInWithEmail /></SessionProvider>);
 
     const button = await screen.findByRole("button", { name: "Sign in with email" });
@@ -260,6 +251,52 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     expect(mocks.revoke.mock.invocationCallOrder[0]).toBeLessThan(mocks.signOut.mock.invocationCallOrder[0]);
     expect(mocks.signOut.mock.invocationCallOrder[0]).toBeLessThan(mocks.wallet.logout.mock.invocationCallOrder[0]);
     expect(mocks.go).toHaveBeenCalledWith("login");
+  });
+
+  it("shows the member signed out once the server revokes the session, without waiting for Privy", async () => {
+    let privyLoggedOut;
+    mocks.wallet.logout.mockReturnValue(new Promise(resolve => { privyLoggedOut = resolve; }));
+    mountProvider();
+    await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
+
+    let finished;
+    act(() => { finished = currentSession.signOut(); });
+    expect(currentSession.isSigningOut).toBe(true);
+
+    // The server has revoked the session; Privy is still clearing its own.
+    await waitFor(() => expect(currentSession.isSignedIn).toBe(false));
+    expect(mocks.go).toHaveBeenCalledWith("login");
+    expect(mocks.wallet.logout).toHaveBeenCalledOnce();
+    expect(currentSession.isSigningOut).toBe(true);
+
+    // A sign-in now would find Privy still signed in, so it waits its turn.
+    let attempt;
+    await act(async () => { attempt = await currentSession.signIn(); });
+    expect(attempt).toMatchObject({ ok: false, message: expect.stringMatching(/still being signed out/) });
+    expect(mocks.wallet.login).not.toHaveBeenCalled();
+
+    let result;
+    await act(async () => { privyLoggedOut(); result = await finished; });
+    expect(result.ok).toBe(true);
+    expect(currentSession.isSigningOut).toBe(false);
+  });
+
+  it("does not show the permission error that revoking the session itself causes", async () => {
+    let revoked;
+    mocks.revoke.mockReturnValue(new Promise(resolve => { revoked = resolve; }));
+    mountProvider();
+    await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
+
+    let finished;
+    act(() => { finished = currentSession.signOut(); });
+    // The revocation marker makes Firestore reject the live profile listener.
+    act(() => { mocks.snapshotError({ code: "permission-denied", message: "Missing or insufficient permissions." }); });
+    expect(currentSession.error).toBeNull();
+    expect(currentSession.isSignedIn).toBe(true);
+
+    await act(async () => { revoked({ success: true }); await finished; });
+    expect(currentSession.isSignedIn).toBe(false);
+    expect(currentSession.error).toBeNull();
   });
 
   // Revocation already succeeded here, so the token is dead server-side. Staying

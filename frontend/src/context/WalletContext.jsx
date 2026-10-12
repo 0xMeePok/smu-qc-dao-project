@@ -28,6 +28,7 @@ export const UNCONFIGURED_WALLET = Object.freeze({
   login: notConfigured,
   ensureWallet: notConfigured,
   signMessage: notConfigured,
+  accessToken: notConfigured,
   logout: async () => {},
 });
 
@@ -50,7 +51,7 @@ export function WalletProvider({ children }) {
 }
 
 function PrivyWalletProvider({ children }) {
-  const { ready, authenticated, user, logout } = usePrivy();
+  const { ready, authenticated, user, logout, getAccessToken } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
   const { createWallet } = useCreateWallet();
   const { signMessage: signWithPrivy } = useSignMessage();
@@ -201,9 +202,10 @@ function PrivyWalletProvider({ children }) {
     login,
     ensureWallet,
     signMessage,
+    accessToken: getAccessToken,
     logout,
   }), [ready, authenticated, walletsReady, signedIn, user, address, chainId,
-    login, ensureWallet, signMessage, logout]);
+    login, ensureWallet, signMessage, getAccessToken, logout]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }

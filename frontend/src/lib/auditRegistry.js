@@ -57,7 +57,7 @@ export function auditRevertMessage(functionName, errorName) {
       InvalidState: "This opportunity has already been withdrawn on-chain.",
     },
     commitProposal: {
-      InvalidInput: "This proposal is already on-chain. An edit must call updateHashes, not a second commit.",
+      InvalidInput: "The registry refused this proposal. You cannot propose on an opportunity you posted, and a proposal that is already on-chain must be edited rather than submitted again.",
       InvalidState: "This proposal cannot be filed: the opportunity is closed, expired, or the revision changed.",
     },
     updateHashes: {

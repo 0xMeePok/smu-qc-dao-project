@@ -27,8 +27,15 @@ function newTargetError(amount, currency) {
   return fundingTargetInputError(amount, decimals, currency);
 }
 
-export function proposalBlockReason(posting, now = new Date()) {
+export const OWN_OPPORTUNITY_MESSAGE = "You posted this opportunity, so you cannot submit a proposal to it. The funding escrow requires the proposer and the poster to be different accounts.";
+
+export function proposalBlockReason(posting, now = new Date(), { researcherId } = {}) {
   if (!posting) return "This opportunity is not available.";
+  // FundingEscrow's constructor reverts when the problem owner and the proposal
+  // owner are the same wallet, so the commit could never succeed.
+  if (researcherId && String(researcherId).toLowerCase() === String(posting.ownerId ?? "").toLowerCase()) {
+    return OWN_OPPORTUNITY_MESSAGE;
+  }
   if (posting.matching?.status === "awaiting_confirmation") return "A selected proposal is awaiting creator acceptance. New proposals are paused during the acceptance window.";
   if (posting.matching?.status === "invalidated") return "This opportunity was invalidated and is closed to new proposals.";
   if (posting.matching?.status === "confirmed") return "This opportunity already has a confirmed match.";

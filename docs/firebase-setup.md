@@ -134,13 +134,13 @@ The first deploy asks to enable the `cloudfunctions`, `cloudbuild`, `artifactreg
 firebase functions:list --project YOUR_PROJECT_ID
 ```
 
-You want `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`. Then check the
+You want `exchangePrivySession` and `revokeOwnSessions` in `asia-southeast1`. Then check the
 endpoint is really reachable:
 
 ```bash
 curl -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" \
-  --data '{"data":{"address":"0x0000000000000000000000000000000000000000"}}' \
-  https://asia-southeast1-YOUR_PROJECT_ID.cloudfunctions.net/getSiweNonce
+  --data '{"data":{}}' \
+  https://asia-southeast1-YOUR_PROJECT_ID.cloudfunctions.net/exchangePrivySession
 ```
 
 `200` means deployed and working. **`404` means not deployed** — see
@@ -197,16 +197,10 @@ Privy's login modal: email address, then the one-time code Privy sends to it
 embedded wallet created by the modal on first sign-in, loaded on every later one
       |
       v
-getSiweNonce()   ------>  server opens a challenge for THIS attempt and returns
-      |                   the exact message to sign, plus its challengeId
-      v
-embedded wallet signs that message (no prompt: the member just proved their email)
-      |
-      v
-verifySiweSignature() -->  server looks up that challengeId, rebuilds the message
-      |   (+ challengeId)   from its OWN stored nonce, verifies the signature, burns
-      |                    the nonce, and mints a Firebase custom token whose uid IS
-      |                    the wallet address
+exchangePrivySession() -->  server verifies the Privy access token, reads that
+      |                      user's embedded wallet from Privy, and mints a Firebase
+      |                      custom token whose uid IS that address. The browser
+      |                      does not name the account.
       v
 signInWithCustomToken()
       |

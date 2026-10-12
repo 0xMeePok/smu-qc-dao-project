@@ -27,8 +27,9 @@ sign in through [Privy](https://privy.io)'s own login modal, with an email addre
 the one-time code Privy sends to it.
 The first sign-in creates a Privy embedded wallet for that email; its address **is**
 the account, and the same email reaches the same address on any device. The embedded
-wallet then signs the server's Sign-In with Ethereum challenge (`getSiweNonce` →
-`verifySiweSignature`), which starts the Firebase session keyed to that address.
+wallet then asks the server to exchange Privy's access token for a Firebase
+session keyed to that address (`exchangePrivySession`). The server reads the
+wallet from Privy. The browser does not name the account.
 Signing out, the 15-minute idle timeout and an administrator suspension end both the
 Privy and the Firebase session.
 
@@ -153,7 +154,7 @@ npx firebase emulators:start --only functions,firestore,auth,storage --project q
 ```
 
 Wait until you see `All emulators ready` **and** the functions loaded
-(`getSiweNonce`, `verifySiweSignature`). If you see `Cannot find module
+(`exchangePrivySession`, `revokeOwnSessions`). If you see `Cannot find module
 'firebase-functions'`, go back to step 2.
 
 Emulator UI: http://127.0.0.1:4000
