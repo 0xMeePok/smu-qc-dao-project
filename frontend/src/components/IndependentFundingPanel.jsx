@@ -11,6 +11,8 @@ import { getIndependentFundingState, independentFundingAmount, independentFundin
   syncIndependentFunding, writeIndependentFundingAction } from "../lib/independentEscrow.js";
 import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
+import { escrowCustodyLock } from "../../../firebase/functions/escrowCustody.js";
+import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
 
 const pending = new Map();
 const pendingKey = (id, wallet) => `qcdao:independent-funding:v1:${independentFundingDeploymentKey()}:${id}:${wallet ?? ""}`;
@@ -30,8 +32,10 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
   const remaining = summary ? BigInt(summary.fundingTarget ?? summary.target ?? 0) - BigInt(summary.totalDeposited ?? 0) : null;
   const amountError = summary ? contributionError({ amount, decimals: summary.tokenDecimals, symbol: summary.tokenSymbol, remaining }) : "";
   const money = value => independentFundingAmount(value, summary?.tokenDecimals, summary?.tokenSymbol);
+  const custodyLock = summary?.custodyLock ?? escrowCustodyLock(summary ?? {}, { independent: true });
+  const refundLocked = custodyLock.status === "locked";
   const button = (action, label, extra = {}) => actions[action] ? <button type="button" className="primary small"
-    disabled={disabled || (action === "deposit" && (!String(amount ?? "").trim() || Boolean(amountError))) || (integrityBlocked && !["claimRefund", "expire"].includes(action))} onClick={() => onAction(action, extra)}>{label}</button> : null;
+    disabled={disabled || (action === "claimRefund" && refundLocked) || (action === "deposit" && (!String(amount ?? "").trim() || Boolean(amountError))) || (integrityBlocked && !["claimRefund", "expire"].includes(action))} onClick={() => { if (action !== "claimRefund" || !refundLocked) onAction(action, extra); }}>{label}</button> : null;
   return <section className="card escrow-funding" aria-label="Independent crowdfunding">
     <div className="table-header"><div><h3>Independent crowdfunding</h3><p>50% on researcher acceptance · 50% after funder completion approval</p></div>
       <button type="button" className="secondary small" disabled={loading || busy} onClick={onRefresh}>Refresh crowdfunding</button></div>
@@ -62,6 +66,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
         <div className="settings-row"><dt>Fund and accept by</dt><dd>{instant(summary.expiresAt)}</dd></div>
         {Number(summary.completionDeadline) > 0 && <div className="settings-row"><dt>Complete and approve by</dt><dd>{instant(summary.completionDeadline)}</dd></div>}
       </dl>
+      <EscrowCustodyNotice summary={summary} independent />
       {actions.deposit && <div className="field-group">
         <Field htmlFor="independent-contribution" label={`Contribution (${summary.tokenSymbol})`} hint={`Still needed: ${money(remaining)}. Use up to 2 decimal places. Minimum 1 ${summary.tokenSymbol}, or the exact remaining balance. Your wallet approves only the entered amount, then deposits it into this listing's escrow.`} error={amountError}>
           {({ id, describedBy, invalid }) => <input id={id} aria-invalid={invalid} type="text" inputMode="decimal" value={amount} maxLength={160} disabled={disabled}

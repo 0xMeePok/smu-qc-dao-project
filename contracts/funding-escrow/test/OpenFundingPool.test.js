@@ -161,17 +161,27 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     const c = await grantFixture({ duration: 86400 });
     const p = await proposal(c, "reserved");
     await c.pool.connect(c.owner).selectProposal(p.id);
+    const offer = await c.pool.getOffer(p.id);
+    expect(offer.acceptanceDeadline).to.be.greaterThan(c.expiresAt);
+    await at(c, c.expiresAt - 1n);
     await expect(c.pool.connect(c.owner).withdrawAvailable(1)).to.be.revertedWithCustomError(c.pool, "WindowStillOpen");
+    expect(await c.pool.totalWithdrawn()).to.equal(0n);
+    expect(await c.pool.reservedAmount()).to.equal(c.target);
     await at(c, c.expiresAt);
+    const unreserved = GRANT - c.target;
+    const receipt = await (await c.pool.connect(c.owner).withdrawAvailable(unreserved)).wait();
+    expect(BigInt((await c.ethers.provider.getBlock(receipt.blockNumber)).timestamp)).to.equal(c.expiresAt);
+    expect(await c.pool.reservedAmount()).to.equal(c.target);
+    expect(await c.token.balanceOf(c.poolAddress)).to.equal(c.target);
     await c.pool.connect(c.owner).deposit(100n * UNIT);
-    const available = GRANT - c.target + 100n * UNIT;
+    const available = 100n * UNIT;
     await expect(c.pool.connect(c.owner).withdrawAvailable(available + 1n))
       .to.be.revertedWithCustomError(c.pool, "InsufficientAvailableFunding").withArgs(available);
     await c.pool.connect(c.owner).withdrawAvailable(available);
     expect(await c.pool.reservedAmount()).to.equal(c.target);
     expect(await c.token.balanceOf(c.poolAddress)).to.equal(c.target);
     await c.pool.connect(c.solution).acceptProposal(p.id);
-    expect(await c.pool.totalWithdrawn()).to.equal(available);
+    expect(await c.pool.totalWithdrawn()).to.equal(unreserved + available);
     expect(await c.pool.availableBalance()).to.equal(0);
   });
 

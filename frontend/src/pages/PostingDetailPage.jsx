@@ -57,6 +57,7 @@ import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { canEditOpportunity } from "../lib/opportunityEdit.js";
 import { OpportunityRevisionTrail } from "../components/OpportunityRevisionTrail.jsx";
 import { ConsolidatedAuditTrail } from "../components/ConsolidatedAuditTrail.jsx";
+import { PostingEscrowFunding } from "../components/PostingEscrowFunding.jsx";
 
 /**
  * QCDAO-48 - the posting the confirmation screen links to, and the place QCDAO-58
@@ -574,6 +575,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
             <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
               {isOpenFunding ? <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} onNavigate={onNavigate} onChange={reloadPosting} /> : <>
                 <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
+                {openedTabs.has("funding") && <PostingEscrowFunding problemId={posting.id} active={activeTab === "funding"} onNavigate={onNavigate} />}
                 <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
               </>}
             </div>

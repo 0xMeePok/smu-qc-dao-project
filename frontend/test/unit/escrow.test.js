@@ -26,6 +26,9 @@ function fixture(changes = {}) {
     ownerApproved: false, solutionApproved: false, yesWeight: 0n, noWeight: 0n, refundsEnabled: false,
     refundAvailableAt: 0n, outstandingBalance: 0n, funderCount: 0n, ...changes.state,
   };
+  if (changes.state?.outstandingBalance === undefined) {
+    state.outstandingBalance = state.totalDeposited - state.totalReleased - state.totalRefunded;
+  }
   const summary = { deposited: 0n, depositCount: 0n, refunded: 0n, claimable: 0n, released: 0n, status: 0, ...changes.depositor };
   const adapters = {
     getBlock: async () => ({ number: 100n, timestamp: changes.timestamp ?? 1_900_000_000n }),
@@ -92,6 +95,30 @@ function legacySelectionFixture(changes = {}) {
 }
 
 describe("Canonical escrow wallet integration", () => {
+  it("derives lock deadlines from the verified block and blocks early refund requests before opening the wallet", async () => {
+    const f = fixture({ timestamp: 1_999_999_999n, state: { totalDeposited: target / 2n },
+      depositor: { deposited: target / 2n } });
+    const snapshot = await readEscrow({ ...f, account: funder });
+    assert.equal(snapshot.custodyLock.status, "locked");
+    assert.equal(snapshot.custodyLock.unlockAt, "2000000000");
+    assert.equal(snapshot.can.claimRefund, false);
+    assert.equal(snapshot.can.expire, false);
+    await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "claimRefund" }));
+    assert.equal(f.writes.length, 0);
+  });
+
+  it("does not select a fully credited target with missing custody or count donated tokens as deposits", async () => {
+    const deficient = fixture({ state: { totalDeposited: target }, read: request => request.functionName === "balanceOf"
+      && request.args[0] === escrowAddress ? target - 1n : undefined });
+    const snapshot = await readEscrow({ ...deficient, account: platform });
+    assert.equal(snapshot.fundingRequirementMet, false);
+    assert.equal(snapshot.can.lockSelection, false);
+    await assert.rejects(writeEscrowAction({ ...deficient, account: platform, action: "lockSelection", selectionId }));
+    assert.equal(deficient.writes.length, 0);
+    const donated = fixture({ state: { totalDeposited: target / 2n }, balance: target * 2n });
+    assert.equal((await readEscrow({ ...donated, account: platform })).fundingRequirementMet, false);
+  });
+
   it("approves upfront for either owner with fewer reads and no unrelated wallet/reporting requests", async t => {
     const omitted = ["balanceOf", "allowance", "depositorSummary", "hasVoted", "totalRefunded", "refundAvailableAt", "yesWeight", "noWeight", "allowedTokens", "decimals"];
     for (const account of [owner, researcher]) {

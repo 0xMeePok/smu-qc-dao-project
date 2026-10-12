@@ -13,6 +13,7 @@ export const prepareRemovedProposalClaim = payload => call("prepareRemovedPropos
 export const syncEscrowFunding = payload => call("syncEscrowFunding", payload);
 export const getEscrowFundingHistory = payload => call("getEscrowFundingHistory", payload);
 export const getEscrowFundingSummary = () => call("getEscrowFundingSummary");
+export const getPostingEscrowFundingSummary = problemId => call("getEscrowFundingSummary", { problemId });
 export const startEscrowSettlement = payload => call("startEscrowSettlement", payload);
 
 export function escrowFundingAmount(amount, decimals, symbol = "") {

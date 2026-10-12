@@ -101,7 +101,7 @@ describe("QCDAO-93 discussion count", () => {
 describe("blocker labels", () => {
   it("names every blocker the owner dashboard can emit", () => {
     assert.deepEqual(Object.keys(BLOCKER_LABELS).sort(),
-      ["feedback_missing", "funding_short", "no_solutions"]);
+      ["feedback_missing", "funding_short", "funding_unavailable", "no_solutions", "selection_unavailable"]);
   });
 });
 

@@ -192,6 +192,29 @@ set a reversible posting funding pause when moderation hides a posting. A pause
 blocks funding and payments but does not itself permanently invalidate the escrow
 or open refunds; removing the pause restores the existing approval deadlines.
 
+### Custody locks (QCDAO-111)
+
+Depositing commits tokens to their canonical escrow. A funder cannot withdraw a
+partly or fully funded open contribution before the posting's immutable expiry;
+the contract rejects direct early `claimRefund()` calls independently of the UI.
+At expiry, a funder can apply expiry and claim their full unpaid entitlement in
+one transaction. Ordinary platform cancellation of a main proposal before
+payment preserves that original expiry through `refundAvailableAt`.
+
+Selection and accepted work have their own deadlines: a main selection keeps its
+full seven-day handshake, and active work keeps its current payment review or
+independent completion period. Explicit rejection, moderation/admin cancellation
+and registry invalidation retain their immediate refund paths. Approved upfront
+and final researcher payments remain available under their existing approval
+rules. The lock does not add partial withdrawals or mutual early release.
+
+An open funding owner's unallocated pool custody is locked until the posting
+expires or is withdrawn. Pending grant reservations remain protected after that
+expiry until each researcher's full seven-day acceptance window ends. Accepted
+grant escrow custody and independent crowdfunding keep their separate workflows.
+Application funding gates use confirmed escrow custody; evaluator feedback is
+optional and advisory.
+
 ## Atomic proposal creation
 
 The application standard is **50% upfront and 50% on completion**, with either

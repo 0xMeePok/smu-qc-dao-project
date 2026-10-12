@@ -234,6 +234,34 @@ describe("FundingEscrow: selection and dual approval", function () {
 });
 
 describe("FundingEscrow: cancellation, expiry and pull refunds", function () {
+  it("locks partially funded custody against direct wallet claims until the exact posting expiry", async function () {
+    const c = await fixture();
+    await c.escrow.connect(c.alice).deposit(250n);
+    await c.escrow.connect(c.bob).deposit(75n);
+    const aliceBalance = await c.token.balanceOf(c.alice.address);
+    await at(c, c.expiresAt - 1n);
+    await expect(c.escrow.connect(c.alice).claimRefund()).to.be.revertedWithCustomError(c.escrow, "WindowStillOpen");
+    expect(await c.escrow.state()).to.equal(State.Open);
+    expect(await c.escrow.totalRefunded()).to.equal(0n);
+    expect(await c.token.balanceOf(c.alice.address)).to.equal(aliceBalance);
+    expect(await c.token.balanceOf(c.escrowAddress)).to.equal(325n);
+    const locked = await c.escrow.depositorSummary(c.alice.address);
+    expect(locked.status).to.equal(Status.Locked);
+    expect(locked.claimable).to.equal(0n);
+
+    // A direct funder claim applies expiry atomically, without a platform or keeper.
+    await at(c, c.expiresAt);
+    const receipt = await (await c.escrow.connect(c.alice).claimRefund()).wait();
+    expect(BigInt((await c.ethers.provider.getBlock(receipt.blockNumber)).timestamp)).to.equal(c.expiresAt);
+    expect(await c.token.balanceOf(c.alice.address)).to.equal(aliceBalance + 250n);
+    expect(await c.escrow.state()).to.equal(State.Expired);
+    expect((await c.escrow.depositorSummary(c.bob.address)).claimable).to.equal(75n);
+    await c.escrow.connect(c.bob).claimRefund();
+    expect(await c.escrow.state()).to.equal(State.Refunded);
+    expect(await c.escrow.totalRefunded()).to.equal(325n);
+    await assertAccounting(c);
+  });
+
   for (const phase of ["open", "locked", "cancelled"]) {
     it(`prevents early refunds while ${phase}`, async function () {
       const c = await fixture();
@@ -249,11 +277,17 @@ describe("FundingEscrow: cancellation, expiry and pull refunds", function () {
     await expect(c.escrow.connect(c.owner).cancel(c.reason)).to.be.revertedWithCustomError(c.escrow, "AccessDenied");
     await expect(c.escrow.cancel(c.ethers.ZeroHash)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
     await expect(c.escrow.cancel(c.reason)).to.emit(c.escrow, "Cancelled").withArgs(c.reason);
+    expect(await c.escrow.refundAvailableAt()).to.equal(c.expiresAt);
     expect((await c.escrow.depositorSummary(c.alice.address)).status).to.equal(Status.RefundPending);
+    expect((await c.escrow.depositorSummary(c.alice.address)).claimable).to.equal(0n);
     await expect(c.escrow.release(c.selectionId)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     await expect(c.escrow.cancel(c.reason)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
+    await at(c, c.expiresAt - 1n);
+    await expect(c.escrow.connect(c.alice).claimRefund()).to.be.revertedWithCustomError(c.escrow, "WindowStillOpen");
+    expect(await c.escrow.totalRefunded()).to.equal(0n);
     await at(c, c.expiresAt);
-    await c.escrow.connect(c.alice).claimRefund();
+    const receipt = await (await c.escrow.connect(c.alice).claimRefund()).wait();
+    expect(BigInt((await c.ethers.provider.getBlock(receipt.blockNumber)).timestamp)).to.equal(c.expiresAt);
     expect(await c.escrow.state()).to.equal(State.Refunded);
   });
 

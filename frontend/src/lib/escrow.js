@@ -16,6 +16,7 @@ import { isIndependentProposal } from "../../../firebase/functions/independentPr
 import { prepareIndependentEscrowCommit, prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { assertActiveAuditDeployment, isActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 import { prepareRemovedProposalClaim } from "./escrowFunding.js";
+import { escrowCustodyLock, escrowSelectionGate } from "../../../firebase/functions/escrowCustody.js";
 
 export const ESCROW_STATE = Object.freeze({ Open: 0, Locked: 1, Released: 2, Refunded: 3, Cancelled: 4, Expired: 5, Active: 6, Voided: 7 });
 const ZERO_HASH = `0x${"0".repeat(64)}`;
@@ -195,7 +196,7 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
   const supportsPendingSelection = config.abi.some(item => item.type === "function" && item.name === "pendingProposalForPosting");
   const supportsSelectionRejection = config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "rejectSelection");
   const tokenRead = (functionName, args) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
-  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused, pendingProposalId, walletValues] = await Promise.all([
+  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused, pendingProposalId, walletValues, custodyBalance] = await Promise.all([
     Promise.all(names.map(name => read(name))),
     readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
@@ -208,6 +209,7 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
       tokenRead("balanceOf", [walletAddress]), tokenRead("allowance", [walletAddress, canonical.address]),
       read("depositorSummary", [walletAddress]),
     ]) : null,
+    tokenRead("balanceOf", [canonical.address]),
   ]);
   assertProposalContent(registered, expected);
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
@@ -247,9 +249,12 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
   const evidenceReady = Boolean(currentMilestone && !same(currentMilestone.evidenceHash, ZERO_HASH));
   const bothApproved = snapshot.ownerApproved && snapshot.solutionApproved;
   const majorityApproved = !snapshot.funderVoting || snapshot.yesWeight > snapshot.totalDeposited / 2n;
+  const selectionGate = escrowSelectionGate({ ...snapshot, active, timestamp: block.timestamp, custodyBalance });
+  const custodyLock = escrowCustodyLock({ ...snapshot, timestamp: block.timestamp,
+    upfrontRefundUsesApprovalDeadline: grantEscrow || supportsSelectionRejection });
   const can = {
     deposit: Boolean(walletAddress && open && active && tokenListed && tokenPrecisionValid && block.timestamp < snapshot.expiresAt && remaining > 0n && wallet.balance > 0n),
-    lockSelection: roles.platform && open && active && block.timestamp < snapshot.expiresAt && remaining === 0n,
+    lockSelection: roles.platform && selectionGate.canSelect,
     ...reviewEligibility({ snapshot, account: walletAddress, active, timestamp: block.timestamp, currentMilestone,
       contribution: wallet.contribution, hasVoted: wallet.hasVoted }),
     rejectSelection: supportsSelectionRejection && proposal.opportunityType !== "open-funding" && upfront && reviewOpen && (roles.problemOwner || roles.proposalOwner),
@@ -267,6 +272,7 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
     symbol: config.escrow.tokens.find(token => same(token.address, expected.fundingTerms.token))?.symbol ?? proposal.currency,
     entityId: expected.entityId, blockNumber: block.number, timestamp: block.timestamp, workflowActive: active, workflowPaused: paused, workflowInvalidated: supportsInvalidation ? invalidated : !active, tokenListed, tokenPrecisionValid,
     remaining, milestones, currentMilestone, wallet, roles, can, isHistorical, supportsSelectionRejection, pendingProposalId,
+    custodyBalance: BigInt(custodyBalance), custodyLock, selectionGate, fundingRequirementMet: selectionGate.fundingMet,
     blockedBySelection: !same(pendingProposalId, ZERO_HASH) && !same(pendingProposalId, expected.entityId) };
 }
 
