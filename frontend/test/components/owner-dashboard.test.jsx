@@ -96,14 +96,13 @@ describe("QCDAO-92 problem owner dashboard", () => {
       postings: [posting({
         readiness: { fundingMet: false, feedbackPresent: false, canSelect: false, blockers: [
           { kind: "funding_short", owner: false, detail: "No solution has reached its funding target. Selection opens once one is fully funded." },
-          { kind: "feedback_missing", owner: false, detail: "No evaluator recommendation has been filed. A decision needs at least one." },
         ] },
       })],
     }));
     render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
     await screen.findByText("Cold-chain routing");
     expect(within(card()).getByText(/reached its funding target/)).toBeTruthy();
-    expect(within(card()).getByText(/No evaluator recommendation has been filed/)).toBeTruthy();
+    expect(within(card()).queryByText(/A decision needs at least one/)).toBeNull();
     expect(within(card()).queryByText(/Selection can begin/)).toBeNull();
   });
 
@@ -140,8 +139,8 @@ describe("QCDAO-92 problem owner dashboard", () => {
         posting: { id: "p1", title: "Cold-chain routing" }, submittedAt: "2026-10-01T00:00:00.000Z" }], awaitingReview: [] },
     });
     mocks.listOwnerDashboard.mockResolvedValue(dashboard({
-      blockers: [{ postingId: "p2", postingTitle: "Scheduling", kind: "feedback_missing", owner: false,
-        detail: "No evaluator recommendation has been filed. A decision needs at least one." }],
+      blockers: [{ postingId: "p2", postingTitle: "Scheduling", kind: "funding_short", owner: false,
+        detail: "No solution has reached its funding target." }],
     }));
     render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
     await screen.findByText("Waiting on someone else");
@@ -150,7 +149,7 @@ describe("QCDAO-92 problem owner dashboard", () => {
     // Named as not the owner's to fix: a blocker in the to-do list would read as
     // a reproach for work they cannot do.
     expect(screen.getByText(/Nothing here is yours to fix/)).toBeTruthy();
-    expect(screen.getByText(/Evaluator feedback outstanding/)).toBeTruthy();
+    expect(screen.getByText(/Funding target not reached/)).toBeTruthy();
   });
 
   it("gives a new owner something to do instead of an empty grid", async () => {
@@ -216,5 +215,70 @@ describe("QCDAO-92 problem owner dashboard", () => {
     mocks.listOwnerDashboard.mockRejectedValue(Object.assign(new Error("nope"), { code: "unauthenticated" }));
     render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
     expect((await screen.findByRole("alert")).textContent).toMatch(/Sign in again/);
+  });
+
+  it("allows funding readiness without a recommendation and calls feedback optional", async () => {
+    mocks.listOwnerDashboard.mockResolvedValue(dashboard({ postings: [posting({
+      qualifyingRecommendations: 0, recommendations: [],
+      readiness: { fundingMet: true, feedbackPresent: false, feedbackRequired: false, canSelect: true, blockers: [] },
+    })] }));
+    render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
+    await screen.findByText("Cold-chain routing");
+    expect(within(card()).getByText(/Selection can begin.*Evaluator feedback is optional/)).toBeTruthy();
+    expect(screen.queryByText(/Fully funded with evaluator feedback on file/)).toBeNull();
+  });
+
+  it("shows exact token escrow amounts independently from legacy currency totals", async () => {
+    mocks.listOwnerDashboard.mockResolvedValue(dashboard({ postings: [posting({
+      fundingCommitted: 0, fundingTarget: 0, fundingPercent: 0,
+      escrowFunding: { unavailableItems: 0, items: [{ proposalId: "s1", title: "Precise token study", available: true,
+        tokenSymbol: "ETH", tokenDecimals: 18, tokenAddress: `0x${"b".repeat(40)}`,
+        fundingTarget: "90071992547409930001", totalDeposited: "90071992547409930001",
+        outstandingBalance: "90071992547409930001", fundingPercent: 100, blockNumber: 250,
+        fundingMet: true, canSelect: true,
+        custodyLock: { status: "locked", reason: "posting_window", unlockAt: "4070908800" },
+      }] },
+    })] }));
+    render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
+    await screen.findByText("Cold-chain routing");
+    const row = within(card());
+    expect(row.getByText(/90\.071992547409930001 ETH deposited of 90\.071992547409930001 ETH required/)).toBeTruthy();
+    expect(row.getByText(/90\.071992547409930001 ETH held in escrow · Confirmed block 250/)).toBeTruthy();
+    expect(row.queryByText(/SGD .*committed/)).toBeNull();
+    expect(row.getByText("Funds locked.")).toBeTruthy();
+    expect(row.getByRole("progressbar", { name: "Confirmed escrow funding for Precise token study" }).value).toBe(100);
+  });
+
+  it("marks unavailable escrow funding without inventing a zero amount or readiness", async () => {
+    mocks.listOwnerDashboard.mockResolvedValue(dashboard({ postings: [posting({
+      fundedSolutions: 0, fundingCommitted: 0, fundingTarget: 0,
+      readiness: { fundingMet: false, feedbackPresent: false, canSelect: false, blockers: [] },
+      escrowFunding: { unavailableItems: 1, items: [{ proposalId: "s1", title: "Unverified study", available: false }] },
+    })] }));
+    render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
+    await screen.findByText("Cold-chain routing");
+    expect(within(card()).getByText(/Funding unavailable\. Open Selection/)).toBeTruthy();
+    expect(within(card()).queryByText(/0 .*deposited of/)).toBeNull();
+    expect(within(card()).queryByText(/Selection can begin/)).toBeNull();
+  });
+
+  it("distinguishes a fully funded locked escrow from a selectable open solution", async () => {
+    mocks.listOwnerDashboard.mockResolvedValue(dashboard({ postings: [posting({
+      fundedSolutions: 1, selectableSolutions: 0, fundingCommitted: 0, fundingTarget: 0,
+      readiness: { fundingMet: true, feedbackPresent: false, canSelect: false, blockers: [{
+        kind: "selection_unavailable", owner: false, detail: "No open solution is currently eligible for selection.",
+      }] },
+      escrowFunding: { unavailableItems: 0, items: [{ proposalId: "s1", title: "Selected study", available: true,
+        tokenSymbol: "USDC", tokenDecimals: 6, fundingTarget: "100000000", totalDeposited: "100000000",
+        outstandingBalance: "100000000", fundingPercent: 100, blockNumber: 250,
+        fundingMet: true, canSelect: false, state: "Locked",
+        custodyLock: { status: "locked", reason: "upfront_approval", unlockAt: "4070908800" },
+      }] },
+    })] }));
+    render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
+    await screen.findByText("Cold-chain routing");
+    expect(within(card()).getByText(/Funding requirement met; selection is unavailable/)).toBeTruthy();
+    expect(within(card()).getByText(/No open solution is currently eligible/)).toBeTruthy();
+    expect(within(card()).queryByText(/Selection can begin/)).toBeNull();
   });
 });

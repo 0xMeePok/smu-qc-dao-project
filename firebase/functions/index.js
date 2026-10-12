@@ -55,6 +55,7 @@ import { listIndependentListings as independentListings } from "./independentPro
 import { listOwnerReviews as readOwnerReviews, recordOwnerReview as writeOwnerReview } from "./ownerReviews.js";
 import { createFundingApproach as writeFundingApproach, decideFundingApproach as writeFundingApproachDecision, getFundingApproach as readFundingApproach, listFundingApproaches as readFundingApproaches, saveFundingApproachAnchor, saveFundingApproachDecisionAnchors } from "./fundingApproach.js";
 import { readAuditTrail } from "./auditTrail.js";
+import { getEscrowFundingSummary as readEscrowFundingSummary } from "./escrowFunding.js";
 import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedUpload, resourceKey,
   uploadObjectPath, uploadReservationKey, validateResource } from "./resourceQuotas.js";
 
@@ -270,7 +271,8 @@ export const listActionItems = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 
  */
 export const listOwnerDashboard = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
-  return collectOwnerDashboard({ db, uid, readFeedback: feedbackByProposal });
+  return collectOwnerDashboard({ db, uid, config: auditRegistryConfig, readFeedback: feedbackByProposal,
+    readFundingSummary: () => readEscrowFundingSummary({ db, client: publicClient, config: auditRegistryConfig, uid }) });
 });
 
 export const createFundingApproach = onCall(MEMBER_CALL_OPTIONS, async (request) => {

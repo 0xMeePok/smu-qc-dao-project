@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { network } from "hardhat";
-import { scopedId, terms, mineAt, Behavior } from "./helpers.js";
+import { scopedId, terms, at, mineAt, Behavior } from "./helpers.js";
 
 const S = { Open: 0n, Accepted: 1n, Released: 2n, Declined: 3n, Expired: 4n, Cancelled: 5n, Refunded: 6n };
 async function fixture({ decimals = 0, target = 100n, feeBps = 0, reviewDays = 30, duration = 2 * 86400, tokenName = "EscrowTestToken" } = {}) {
@@ -195,12 +195,22 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     for (const amount of [40n, 100n]) {
       const c = await fixture({ feeBps: 1000 }); await c.escrow.connect(c.alice).deposit(amount);
       await expect(c.escrow.expire()).to.be.revertedWithCustomError(c.escrow, "WindowStillOpen");
+      const balance = await c.token.balanceOf(c.alice.address);
+      await at(c, c.expiresAt - 1n);
+      await expect(c.escrow.connect(c.alice).claimRefund()).to.be.revertedWithCustomError(c.escrow, "WindowStillOpen");
+      const locked = await c.escrow.getState(c.alice.address);
+      expect(locked.state).to.equal(S.Open);
+      expect(locked.claimable).to.equal(0n);
+      expect(locked.refundsEnabled).to.equal(false);
+      expect(await c.token.balanceOf(c.alice.address)).to.equal(balance);
+      expect(await c.token.balanceOf(c.escrowAddress)).to.equal(amount);
       await mineAt(c, c.expiresAt);
       const snapshot = await c.escrow.getState(c.alice.address);
       expect(snapshot.state).to.equal(S.Expired);
       expect(snapshot.refundsEnabled).to.equal(true);
       expect(snapshot.claimable).to.equal(amount);
       await c.escrow.connect(c.alice).claimRefund();
+      expect(await c.token.balanceOf(c.alice.address)).to.equal(balance + amount);
       expect(await c.escrow.totalRefunded()).to.equal(amount);
       expect(await c.escrow.feePaid()).to.equal(0n);
       await accounting(c);

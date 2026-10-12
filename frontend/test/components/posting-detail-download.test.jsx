@@ -79,6 +79,7 @@ vi.mock("../../src/context/AuthContext.jsx", () => ({
 vi.mock("../../src/components/MatchingPanel.jsx", () => ({
   MatchingPanel: ({ onNavigate }) => <section id="proposal-funding"><button onClick={() => onNavigate("proposal/proposal1")}>View funded proposal</button></section>,
 }));
+vi.mock("../../src/components/PostingEscrowFunding.jsx", () => ({ PostingEscrowFunding: () => null }));
 vi.mock("../../src/components/ProposalComparison.jsx", () => ({
   ProposalComparison: () => { mocks.comparisonMounts(); return <section id="proposal-comparison" />; },
 }));

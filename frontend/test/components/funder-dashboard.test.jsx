@@ -10,6 +10,7 @@ vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({ RELATED_AUDIT_KIND: { LISTING: "listing", PROPOSAL: "proposal" },
   RelatedAuditReceiptPane: ({ record, loading, error }) => <div role="dialog">{loading ? "Loading audit" : error || `Receipt for ${record?.title}`}</div> }));
 import { FunderDashboard } from "../../src/components/FunderDashboard.jsx";
+import { formatInstant } from "../../src/lib/datetime.js";
 vi.mock("../../src/components/IndependentFundingPanel.jsx", () => ({ IndependentFundingPanel: ({ proposal }) => <p>Independent refund panel {proposal.id}</p> }));
 const token = { chainId: 421614, tokenAddress: `0x${"a".repeat(40)}`, tokenDecimals: 6, tokenSymbol: "USDC" };
 const fixture = { opportunities: [{ id: "grant", title: "Quantum grants", status: "open", amount: 100000, currency: "USDC", pool: { ...token, poolAddress: "pool", totalDeposited: "100000000000", available: "50000000000", totalReserved: "50000000000" } }],
@@ -19,10 +20,32 @@ let queryClient;
 const wrapper = ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 beforeEach(() => { queryClient = new QueryClient(); mocks.approaches.mockReset().mockResolvedValue({ sent: [] }); vi.clearAllMocks(); mocks.user = { id: "owner", org: "Research Fund" }; mocks.fetch.mockReset().mockResolvedValue(fixture); });
 afterEach(() => { cleanup(); queryClient.clear(); });
+it("shows verified lock dates for proposal and independent commitments without extra reads", async () => {
+  mocks.fetch.mockResolvedValue({ ...fixture,
+    commitments: [{ ...fixture.commitments[0], state: "Open", outstandingBalance: "50000000000", timestamp: "1900000000", expiresAt: "2000000000" }],
+    independentCommitments: [{ proposalId: "independent", title: "Independent library", state: "Accepted", tokenDecimals: 6, tokenSymbol: "USDT",
+      totalDeposited: "2000000", fundingTarget: "2000000", outstandingBalance: "1000000", timestamp: "1900000000", completionDeadline: "2002592000",
+      wallet: { deposited: "1000000", claimable: "0" } }] });
+  render(<FunderDashboard onNavigate={vi.fn()} />, { wrapper });
+  await screen.findByText("Independent library");
+  expect(screen.getAllByText("Funds locked.")).toHaveLength(2);
+  expect(screen.getByText(formatInstant(new Date(2000000000 * 1000)))).toBeTruthy();
+  expect(screen.getByText(formatInstant(new Date(2002592000 * 1000)))).toBeTruthy();
+  expect(mocks.fetch).toHaveBeenCalledTimes(1);
+});
+it("does not claim cached independent custody is currently refundable", async () => {
+  mocks.fetch.mockResolvedValue({ ...fixture, commitments: [], independentCommitments: [{ proposalId: "cached", title: "Cached independent listing",
+    state: "Cancelled", outstandingBalance: "1000000", totalDeposited: "1000000", fundingTarget: "2000000", tokenDecimals: 6, tokenSymbol: "USDT",
+    timestamp: "1900000000", custodyLock: { status: "refundable", verifiedAt: "1900000000" }, wallet: { deposited: "1000000", claimable: null, stale: true } }] });
+  render(<FunderDashboard onNavigate={vi.fn()} />, { wrapper });
+  await screen.findByText("Cached independent listing");
+  expect(screen.getByText("Custody lock status needs verification.")).toBeTruthy();
+  expect(screen.queryByText("Funds refundable.")).toBeNull();
+});
 it("shows exact confirmed totals, separately reserved grants and pooled progress", async () => {
   render(<FunderDashboard onNavigate={() => {}} />, { wrapper });
   expect(await screen.findByText("Quantum grants")).toBeTruthy();
-  for (const label of ["Total committed", "Total locked", "Total released", "Total refunded"]) expect(screen.getByText(label)).toBeTruthy();
+  for (const label of ["Total committed", "Total held in escrow", "Total released", "Total refunded"]) expect(screen.getByText(label)).toBeTruthy();
   expect(screen.getByText(/Deposited 100000 USDC · Available 50000 USDC · Reserved 50000 USDC/)).toBeTruthy();
   expect(screen.getByText("Pooled progress: 50000 USDC / 50000 USDC")).toBeTruthy();
 });

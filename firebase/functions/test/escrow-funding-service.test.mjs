@@ -9,6 +9,7 @@ import { fundingDigest } from "../escrowFundingEvents.js";
 import { deploymentKey, enqueueEscrowFunding, fundingBlockReason, getEscrowFundingHistory, getEscrowFundingSummary,
   prepareEscrowDeposit, readVerifiedFunding, reconcilePostingFundingPause, resumePlatformTransaction, settlementAction,
   startEscrowSettlement, submitPlatformAction, syncEscrowFunding, queuePostingFundingPause } from "../escrowFunding.js";
+import { getPostingEscrowFundingSummary } from "../escrowFunding.js";
 import { sweepEscrowFunding } from "../escrowFunding.js";
 import { getFunderDashboard } from "../funderDashboard.js";
 
@@ -29,7 +30,8 @@ function fixture({ release = false } = {}) {
     totalReleased: release ? BigInt(record.fundingTerms.target) / 2n : 0n, totalRefunded: 0n,
     currentTranche: release ? 1n : 0n, selectionId: hash("5"), ownerApproved: false, solutionApproved: false,
     yesWeight: 0n, approvalDeadline: nextDay, expiresAt: 2000000000n, platformSigner: platform,
-    active: true, invalidated: false, pendingProposalEntityId: zero };
+    active: true, invalidated: false, pendingProposalEntityId: zero,
+    refundsEnabled: false, refundAvailableAt: 0n };
   function eventLog(eventName, args, logIndex, transactionHash, blockNumber) {
     const registry = ["FundingEventAnchored", "ProposalEscrowLinked"].includes(eventName);
     const abi = registry ? config.abi : config.escrow.escrowAbi;
@@ -59,6 +61,9 @@ function fixture({ release = false } = {}) {
   client.getLogs = async request => { ranges.push(request); return anchors.filter(log => log.blockNumber >= request.fromBlock && log.blockNumber <= request.toBlock); };
   client.readContract = async request => {
     reads.push(request);
+    if (request.address === record.fundingTerms.token && request.functionName === "balanceOf") {
+      return state.custodyBalance ?? state.totalDeposited - state.totalReleased - state.totalRefunded;
+    }
     if (request.functionName === "depositorSummary") return request.args[0].toLowerCase() === owner.toLowerCase()
       ? { deposited: state.totalDeposited, refunded: state.totalRefunded, released: state.totalReleased, claimable: 0n }
       : { deposited: 0n, refunded: 0n, released: 0n, claimable: 0n };
@@ -83,6 +88,53 @@ const localWorkerWallet = signedBytes => () => ({ account: { address: platform }
   prepareTransactionRequest: async request => request, signTransaction: async () => signedBytes });
 
 describe("escrow funding service", () => {
+  it("uses confirmed custody for the shared selection gate and ignores recorded or donated display funding", async () => {
+    const f = fixture();
+    let verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    assert.equal(verified.summary.fundingRequirementMet, true);
+    assert.equal(verified.summary.selectionGate.canSelect, true);
+    assert.equal(verified.summary.selectionGate.feedbackRequired, false);
+    assert.equal(verified.summary.custodyLock.status, "locked");
+    assert.equal(verified.summary.custodyLock.unlockAt, "2000000000");
+    f.state.custodyBalance = f.state.totalDeposited - 1n;
+    await assert.rejects(startEscrowSettlement({ ...f, uid: owner, proposalId: f.record.id }), { code: "failed-precondition" });
+    assert.equal([...f.db.records.values()].some(row => row.selectionRequested), false);
+    f.state.totalDeposited /= 2n; f.state.custodyBalance = BigInt(f.record.fundingTerms.target) * 2n;
+    f.record.matching = { fundedMinor: 999999999 };
+    verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    assert.equal(verified.summary.fundingRequirementMet, false, "an unsolicited token transfer cannot satisfy recorded funding");
+    assert.equal(settlementAction({ ...f, verified, job: { selectionRequested: true, selectionId: hash("9") } }).action, undefined);
+  });
+
+  it("shows posting locks from canonical snapshots and reuses a recent snapshot without wallet reads", async () => {
+    const f = fixture();
+    const options = { ...f, uid: researcher, problemId: f.parent.id, getWallet: () => { throw new Error("Must not sign"); } };
+    const result = await getPostingEscrowFundingSummary(options);
+    assert.equal(result.items.length, 1); assert.equal(result.unavailableItems, 0);
+    assert.equal(result.items[0].available, true);
+    assert.equal(result.items[0].custodyLock.status, "locked");
+    assert.equal(result.items[0].custodyLock.unlockAt, "2000000000");
+    assert.equal(result.items[0].fundingRequirementMet, true);
+    assert(f.reads.every(read => read.blockNumber === 100n));
+    assert.equal(f.reads.some(read => read.functionName === "depositorSummary"), false);
+    const count = f.reads.length;
+    f.client.getBlockNumber = async () => { throw new Error("Cached snapshot must not query RPC"); };
+    assert.equal((await getPostingEscrowFundingSummary(options)).items[0].custodyLock.status, "locked");
+    assert.equal(f.reads.length, count);
+  });
+
+  it("keeps unavailable posting custody unknown and refuses unauthorized reads before touching RPC", async () => {
+    const f = fixture();
+    f.client.getBlockNumber = async () => { throw new Error("Offline"); };
+    const result = await getPostingEscrowFundingSummary({ ...f, uid: researcher, problemId: f.parent.id });
+    assert.equal(result.unavailableItems, 1);
+    assert.equal(result.items[0].available, false);
+    assert.equal(result.items[0].custodyLock, undefined);
+    f.db.records.set(`users/${researcher}`, { role: 0, suspended: true });
+    await assert.rejects(getPostingEscrowFundingSummary({ ...f, uid: researcher, problemId: f.parent.id }), { code: "permission-denied" });
+    assert.equal(f.reads.length, 0);
+  });
+
   it("projects confirmed chain deposits, hashes and exact base units with deterministic audit IDs", async () => {
     const f = fixture();
     const result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });

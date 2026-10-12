@@ -17,6 +17,7 @@ vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletMod
 import { EscrowFundingPanel, EscrowFundingView } from "../../src/components/EscrowFundingPanel.jsx";
 import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";
+import { formatInstant } from "../../src/lib/datetime.js";
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`, selectionId = `0x${"3".repeat(64)}`;
 const proposal = { id: "proposal1", researcherId: account, fundingTerms: { trancheBps: [5000, 5000] } };
 const model = (overrides = {}) => ({ address: `0x${"b".repeat(40)}`, state: 0, decimals: 6, symbol: "USDC", selectionId,
@@ -42,6 +43,53 @@ function ActionCount({ read }) {
 }
 
 describe("wallet escrow funding panel", () => {
+  it("shows the confirmed posting lock deadline and blocks an early refund callback", () => {
+    const onAction = vi.fn();
+    render(<EscrowFundingView state={model({ timestamp: 1900000000n, totalDeposited: 1000000n, outstandingBalance: 1000000n,
+      can: { claimRefund: true } })} walletReady amount="" delivery={{ summary: "", url: "" }} onAction={onAction} />);
+    expect(screen.getByText("Funds locked.")).toBeTruthy();
+    expect(screen.getByText(formatInstant(new Date(2000000000 * 1000)))).toBeTruthy();
+    expect(screen.getByText(/As of verified block/).textContent).toContain(formatInstant(new Date(1900000000 * 1000)));
+    expect(screen.getByText(/Ordinary early withdrawals are unavailable/)).toBeTruthy();
+    const refund = screen.getByRole("button", { name: "Claim my refund" });
+    expect(refund.disabled).toBe(true); fireEvent.click(refund);
+    expect(onAction).not.toHaveBeenCalled();
+  });
+  it("retains immediate authorized rejection refunds before posting expiry", () => {
+    const onAction = vi.fn();
+    render(<EscrowFundingView state={model({ state: 4, timestamp: 1900000000n, totalDeposited: 1000000n,
+      outstandingBalance: 1000000n, refundsEnabled: true, refundAvailableAt: 1900000000n,
+      can: { claimRefund: true }, wallet: { contribution: 1000000n, depositor: { claimable: 1000000n } } })}
+      walletReady amount="" delivery={{ summary: "", url: "" }} onAction={onAction} />);
+    expect(screen.getByText("Funds refundable.")).toBeTruthy();
+    const refund = screen.getByRole("button", { name: "Claim my refund" });
+    expect(refund.disabled).toBe(false); fireEvent.click(refund);
+    expect(onAction).toHaveBeenCalledWith("claimRefund", {});
+  });
+  it("shows the completion deadline rather than promising withdrawal at posting expiry", () => {
+    render(<EscrowFundingView state={model({ state: 6, timestamp: 2000000001n, totalDeposited: 1000000n,
+      outstandingBalance: 500000n, approvalDeadline: 2001000000n })} walletReady amount="" delivery={{ summary: "", url: "" }} />);
+    expect(screen.getByText("Funds locked.")).toBeTruthy();
+    expect(screen.getByText(formatInstant(new Date(2001000000 * 1000)))).toBeTruthy();
+    expect(screen.getByText(/Posting expiry does not unlock accepted work/)).toBeTruthy();
+  });
+  it("does not present an unavailable custody snapshot as settled or withdrawable", () => {
+    render(<EscrowFundingView state={model({ totalDeposited: 1000000n, outstandingBalance: 1000000n })}
+      walletReady amount="" delivery={{ summary: "", url: "" }} />);
+    expect(screen.getByText("Custody lock status needs verification.")).toBeTruthy();
+    expect(screen.queryByText("Escrow settled.")).toBeNull();
+    expect(screen.queryByText("Funds refundable.")).toBeNull();
+  });
+  it("blocks selection when recorded target funding is not held in verified custody", () => {
+    const onSettle = vi.fn();
+    render(<EscrowFundingView state={model({ remaining: 0n, fundingRequirementMet: false,
+      selectionGate: { canSelect: false, feedbackRequired: false }, roles: { problemOwner: true } })}
+      walletReady amount="" delivery={{ summary: "", url: "" }} onSettle={onSettle} />);
+    const select = screen.getByRole("button", { name: "Select proposal for upfront approval" });
+    expect(select.disabled).toBe(true); fireEvent.click(select);
+    expect(onSettle).not.toHaveBeenCalled();
+    expect(screen.getByText(/Evaluator feedback remains optional/)).toBeTruthy();
+  });
   it("refreshes an active action count after the owner confirms upfront approval", async () => {
     const confirmed = vi.fn();
     let total = 1;
