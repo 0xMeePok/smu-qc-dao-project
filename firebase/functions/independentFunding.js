@@ -13,6 +13,7 @@ import { opportunityEntityId, toUnixSeconds } from "./auditCanonical.js";
 import { submitPlatformAction, resumePlatformTransaction } from "./escrowFunding.js";
 import { enqueueIndependentFundingCancellation, INDEPENDENT_FUNDING_CANCELLATIONS } from "./independentFundingModeration.js";
 import { memberCall } from "./memberCall.js";
+import { escrowCustodyLock } from "./escrowCustody.js";
 
 export { enqueueIndependentFundingCancellation, INDEPENDENT_FUNDING_CANCELLATIONS };
 export const INDEPENDENT_FUNDING_SUMMARIES = "independentFundingSummaries";
@@ -236,6 +237,7 @@ async function readState({ db, client, config, uid, proposalId, readAttachment }
     refunded: amounts.refunded.toString(), claimable: amounts.claimable.toString(),
     hasVoted: snapshot.hasVoted === true, votedApprove: snapshot.votedApprove === true,
     voteWeight: amounts.contribution.toString(), isResearcher: same(uid, record.researcherId), blockNumber: summary.blockNumber, stale: false };
+  summary.custodyLock = escrowCustodyLock(summary);
   const actions = noActions(), author = same(uid, record.researcherId), visible = !hidden;
   actions.deposit = visible && !author && [0, 3].includes(context.profile?.role) && snapshot.depositsOpen === true;
   actions.accept = visible && author && snapshot.canAccept === true;

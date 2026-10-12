@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   profile: null,
   idleExpired: false,
   wallet: null,
+  profileListener: null,
+  snapshotError: null,
+  subscribeProfile: null,
   go: vi.fn(),
   revoke: vi.fn(async () => ({ success: true })),
   signOut: vi.fn(),
@@ -28,7 +31,9 @@ vi.mock("firebase/auth", () => ({
 vi.mock("firebase/firestore", () => ({
   doc: (_db, collection, id) => ({ collection, id }),
   onSnapshot: (_ref, callback, onError) => {
+    mocks.profileListener = callback;
     mocks.snapshotError = onError;
+    if (mocks.subscribeProfile) return mocks.subscribeProfile(callback, onError);
     callback({ exists: () => Boolean(mocks.profile), data: () => mocks.profile });
     return () => {};
   },
@@ -110,6 +115,7 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     });
     mocks.revoke.mockReset().mockResolvedValue({ success: true });
     mocks.exchangePrivy.mockReset().mockResolvedValue(ADDRESS);
+    mocks.subscribeProfile = null;
   });
 
   afterEach(() => cleanup());
@@ -297,6 +303,47 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     await act(async () => { revoked({ success: true }); await finished; });
     expect(currentSession.isSignedIn).toBe(false);
     expect(currentSession.error).toBeNull();
+  });
+
+  it("recovers a failed profile listener when the same wallet signs in again without an auth-state event", async () => {
+    const unsubscribe = vi.fn();
+    mocks.subscribeProfile = vi.fn((_next, error) => {
+      error({ code: "permission-denied" });
+      return unsubscribe;
+    });
+    mountProvider();
+    await waitFor(() => expect(currentSession?.error).toBeTruthy());
+    expect(currentSession.isSignedIn).toBe(false);
+
+    // The Firebase uid is unchanged, so auth emits nothing. Access still waits
+    // for the fresh profile read.
+    mocks.subscribeProfile.mockImplementation(() => () => {});
+    await act(async () => { expect((await currentSession.signIn()).ok).toBe(true); });
+    expect(currentSession.isChecking).toBe(true);
+    expect(currentSession.isSignedIn).toBe(false);
+    expect(mocks.exchangePrivy).not.toHaveBeenCalled();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    await act(async () => {
+      mocks.profileListener({ exists: () => true, data: () => ({ fullName: "Ada", role: 0 }) });
+    });
+    expect(currentSession.isSignedIn).toBe(true);
+    expect(currentSession.isBusy).toBe(false);
+    expect(currentSession.error).toBeNull();
+  });
+
+  it("continues to deny access if the refreshed same-wallet profile read is rejected", async () => {
+    mocks.subscribeProfile = vi.fn((_next, error) => {
+      error({ code: "permission-denied" });
+      return () => {};
+    });
+    mountProvider();
+    await waitFor(() => expect(currentSession?.error).toBeTruthy());
+
+    await act(async () => { await currentSession.signIn(); });
+    expect(currentSession.isSignedIn).toBe(false);
+    expect(currentSession.isBusy).toBe(false);
+    expect(currentSession.error).toBeTruthy();
+    expect(mocks.exchangePrivy).not.toHaveBeenCalled();
   });
 
   // Revocation already succeeded here, so the token is dead server-side. Staying

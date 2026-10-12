@@ -1,5 +1,6 @@
 import { HttpsError } from "firebase-functions/v2/https";
 import { problemIsMemberBrowsable } from "./moderation.js";
+import { escrowSelectionGate } from "./escrowCustody.js";
 import {
   WORKFLOW_STATUS, opportunityWorkflowStatus, proposalWorkflowStatus, recommendationCounts,
 } from "./workflowStatus.js";
@@ -14,11 +15,9 @@ import {
  * firestore.rules), so it exists precisely to answer this question without one
  * query per posting.
  *
- * Nothing here touches the chain. Escrow and grant state needs a confirmed
- * block per proposal, which listActionItems already pays for; this module
- * answers the questions that are pure Firestore arithmetic - how many solutions
- * arrived, whether the funding condition is met, and whether the evaluator
- * feedback a decision depends on exists yet.
+ * Escrow readiness consumes the same confirmed summaries as the funding
+ * dashboard. This module never performs its own contract reads. Evaluator
+ * recommendations remain advisory and do not block selection.
  */
 
 const LIVE_PROBLEM = new Set(["submitted", "open"]);
@@ -40,13 +39,43 @@ export const LINKED_RECOMMENDATION_CAP = 6;
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const iso = (value) => value?.toDate?.().toISOString?.() ?? (typeof value === "string" ? value : null);
 const minor = (amount) => Math.round((Number(amount) || 0) * 100);
+const same = (a, b) => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
+const address = value => typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value);
+const units = value => typeof value === "string" && /^\d{1,78}$/.test(value) && BigInt(value) < 2n ** 256n;
+
+/** A confirmed snapshot is display evidence only if it describes this exact
+ * stored proposal and the currently configured deployment and token. */
+function matchingFundingSummary(row, posting, summary, config) {
+  if (!summary || !config || row.audit?.status !== "confirmed"
+      || !(summary.snapshotVerified === true || (summary.reconciliation?.complete === true && summary.reconciliation?.matched === true))
+      || !Number.isSafeInteger(summary.blockNumber) || summary.blockNumber < 0
+      || summary.chainId !== config.chainId || row.audit?.chainId !== config.chainId
+      || !address(summary.registryAddress) || !same(summary.registryAddress, config.address)
+      || !address(summary.escrowAddress) || !address(summary.tokenAddress)
+      || summary.proposalId !== row.id || summary.problemId !== posting.id
+      || !same(summary.postingOwnerId, posting.ownerId) || !same(summary.researcherId, row.researcherId)
+      || !same(row.postingOwnerId, posting.ownerId)
+      || !same(summary.tokenAddress, row.fundingTerms?.token)
+      || !units(summary.fundingTarget) || !units(row.fundingTerms?.target)
+      || BigInt(summary.fundingTarget) === 0n
+      || BigInt(summary.fundingTarget) !== BigInt(row.fundingTerms.target)
+      || !units(summary.expiresAt) || BigInt(summary.expiresAt) === 0n
+      || !Number.isSafeInteger(summary.timestamp) || summary.timestamp <= 0
+      || ![summary.totalDeposited, summary.totalReleased, summary.totalRefunded,
+        summary.outstandingBalance, summary.custodyBalance].every(units)) return null;
+  const token = config.escrow?.tokens?.find(item => same(item.address, summary.tokenAddress));
+  if (!token || token.symbol !== row.currency || token.symbol !== summary.tokenSymbol
+      || !Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 77
+      || token.decimals !== summary.tokenDecimals) return null;
+  return summary;
+}
 
 /**
  * Why selection cannot begin on a posting yet, worst first.
  *
  * `owner` blockers are the member's own next move. `external` blockers are
- * someone else's - funders who have not reached the target, evaluators who have
- * not filed - and are labelled that way so the panel never reads as a reproach
+ * someone else's - funders who have not reached the target - and are labelled
+ * that way so the panel never reads as a reproach
  * for work the owner cannot do.
  */
 function selectionBlockers({ posting, solutions, workflowStatus }) {
@@ -58,13 +87,15 @@ function selectionBlockers({ posting, solutions, workflowStatus }) {
       detail: "No solution has been submitted yet." });
     return blockers;
   }
-  if (!solutions.funded.length) {
+  if (!solutions.selectable.length && solutions.unavailable.length) {
+    blockers.push({ kind: "funding_unavailable", owner: false,
+      detail: "Confirmed escrow funding is unavailable for one or more solutions. Open Selection & funding to verify readiness." });
+  } else if (!solutions.selectable.length && solutions.closedFunding.length) {
+    blockers.push({ kind: "selection_unavailable", owner: false,
+      detail: "No open solution is currently eligible for selection. Open Selection & funding to review the escrow state." });
+  } else if (!solutions.selectable.length) {
     blockers.push({ kind: "funding_short", owner: false,
       detail: "No solution has reached its funding target. Selection opens once one is fully funded." });
-  }
-  if (!solutions.withFeedback.length) {
-    blockers.push({ kind: "feedback_missing", owner: false,
-      detail: "No evaluator recommendation has been filed. A decision needs at least one." });
   }
   return blockers;
 }
@@ -75,7 +106,8 @@ function selectionBlockers({ posting, solutions, workflowStatus }) {
  * emulator run.
  */
 export function summariseOwnerDashboard({
-  problems = [], proposals = [], feedback = new Map(), now = Date.now(), truncated = {},
+  problems = [], proposals = [], feedback = new Map(), fundingSummaries = new Map(), config,
+  now = Date.now(), truncated = {},
 } = {}) {
   const byProblem = new Map();
   for (const proposal of proposals) {
@@ -94,7 +126,8 @@ export function summariseOwnerDashboard({
     const isDraft = posting.status === "draft";
     const workflowStatus = opportunityWorkflowStatus(posting, new Date(now));
     const rows = (byProblem.get(posting.id) ?? []).filter((row) => !BLOCKED.has(row.moderationStatus) && !row.moderated);
-    const solutions = { open: [], funded: [], withFeedback: [], accepted: [] };
+    const solutions = { open: [], funded: [], selectable: [], unavailable: [], closedFunding: [], withFeedback: [], accepted: [] };
+    const escrowItems = [], escrowTotals = new Map();
     const recommendations = [];
     let recommendationsTotal = 0;
     let fundedMinor = 0;
@@ -117,11 +150,59 @@ export function summariseOwnerDashboard({
       // gate mockSelectionState applies is "this solution reached its own
       // target". A posting's requested amount is what it asked for, not what
       // unlocks a decision.
-      const rowTarget = minor(row.amount);
-      const rowFunded = row.fundingTerms ? 0 : (Number(row.matching?.fundedMinor) || 0);
-      targetMinor += rowTarget;
-      fundedMinor += rowFunded;
-      if (rowTarget > 0 && rowFunded >= rowTarget) solutions.funded.push(row);
+      if (posting.opportunityType === OPEN_FUNDING_TYPE) {
+        // Grant offers use the opportunity's pool; proposal escrow deposits do
+        // not decide whether that owner can select another grant recipient.
+      } else if (row.fundingTerms) {
+        // Token units never enter the legacy currency totals below.
+        const summary = matchingFundingSummary(row, posting, fundingSummaries.get(row.id), config);
+        if (!summary) {
+          solutions.unavailable.push(row);
+          escrowItems.push({ proposalId: row.id, title: row.title ?? "", available: false });
+        } else {
+          const gate = escrowSelectionGate(summary);
+          const otherPending = typeof summary.pendingProposalEntityId === "string"
+            && !/^0x0{64}$/i.test(summary.pendingProposalEntityId)
+            && !same(summary.pendingProposalEntityId, summary.proposalEntityId);
+          const canSelect = gate.canSelect && Number(summary.expiresAt) * 1000 > now
+            && summary.invalidated !== true
+            && !otherPending && !same(row.researcherId, posting.ownerId)
+            && (!posting.escrowSelection?.proposalId || posting.escrowSelection.proposalId === row.id)
+            && (!posting.acceptedProposalId || posting.acceptedProposalId === row.id);
+          if (gate.fundingMet) solutions.funded.push(row);
+          if (canSelect) solutions.selectable.push(row);
+          // Insufficient deposits alone remain an ordinary funding shortfall.
+          else if (summary.state !== "Open" || summary.active !== true || summary.invalidated === true
+              || otherPending || same(row.researcherId, posting.ownerId)
+              || posting.escrowSelection?.proposalId || posting.acceptedProposalId
+              || Number(summary.expiresAt) * 1000 <= now) solutions.closedFunding.push(row);
+          const target = BigInt(summary.fundingTarget), deposited = BigInt(summary.totalDeposited);
+          const percent = target > 0n ? deposited * 100n / target : 0n;
+          escrowItems.push({ proposalId: row.id, title: row.title ?? "", available: true,
+            chainId: summary.chainId, escrowAddress: summary.escrowAddress, state: summary.state,
+            tokenAddress: summary.tokenAddress, tokenSymbol: summary.tokenSymbol, tokenDecimals: summary.tokenDecimals,
+            fundingTarget: summary.fundingTarget, totalDeposited: summary.totalDeposited,
+            totalReleased: summary.totalReleased, totalRefunded: summary.totalRefunded,
+            outstandingBalance: summary.outstandingBalance, custodyBalance: summary.custodyBalance,
+            blockNumber: summary.blockNumber, confirmedAt: summary.confirmedAt ?? null,
+            timestamp: summary.timestamp, expiresAt: summary.expiresAt,
+            approvalDeadline: summary.approvalDeadline ?? null,
+            refundsEnabled: summary.refundsEnabled ?? null, refundAvailableAt: summary.refundAvailableAt ?? null,
+            custodyLock: summary.custodyLock ?? null, fundingPercent: Number(percent > 100n ? 100n : percent),
+            fundingMet: gate.fundingMet, canSelect });
+          const key = `${summary.chainId}:${summary.tokenAddress.toLowerCase()}:${summary.tokenDecimals}`;
+          const total = escrowTotals.get(key) ?? { chainId: summary.chainId, tokenAddress: summary.tokenAddress,
+            tokenSymbol: summary.tokenSymbol, tokenDecimals: summary.tokenDecimals,
+            fundingTarget: 0n, totalDeposited: 0n, outstandingBalance: 0n };
+          total.fundingTarget += target; total.totalDeposited += deposited;
+          total.outstandingBalance += BigInt(summary.outstandingBalance);
+          escrowTotals.set(key, total);
+        }
+      } else {
+        const rowTarget = minor(row.amount), rowFunded = Number(row.matching?.fundedMinor) || 0;
+        targetMinor += rowTarget; fundedMinor += rowFunded;
+        if (rowTarget > 0 && rowFunded >= rowTarget) { solutions.funded.push(row); solutions.selectable.push(row); }
+      }
       if (qualifying > 0) solutions.withFeedback.push(row);
       else awaitingFeedback += 1;
       recommendationsTotal += qualifying;
@@ -157,6 +238,7 @@ export function summariseOwnerDashboard({
       proposalsReceived: rows.length,
       openSolutions: solutions.open.length,
       fundedSolutions: solutions.funded.length,
+      selectableSolutions: solutions.selectable.length,
       awaitingFeedback: solutions.open.length - solutions.withFeedback.length,
       qualifyingRecommendations: recommendationsTotal,
       recommendationOutcomes: recommendationCounts(outcomes),
@@ -166,13 +248,19 @@ export function summariseOwnerDashboard({
       fundingCommitted: fundedMinor / 100,
       fundingTarget: targetMinor / 100,
       fundingPercent: targetMinor > 0 ? Math.min(100, Math.round((fundedMinor / targetMinor) * 100)) : 0,
+      escrowFunding: { items: escrowItems, unavailableItems: solutions.unavailable.length,
+        totals: [...escrowTotals.values()].map(total => ({ ...total,
+          fundingTarget: total.fundingTarget.toString(), totalDeposited: total.totalDeposited.toString(),
+          outstandingBalance: total.outstandingBalance.toString() })) },
       readiness: {
         fundingMet: solutions.funded.length > 0,
         feedbackPresent: solutions.withFeedback.length > 0,
+        feedbackRequired: false,
+        fundingAvailable: solutions.unavailable.length === 0,
         // What mockSelectionState checks, minus the per-solution moderation and
         // self-authorship tests it applies at the moment of selection.
         canSelect: live && posting.opportunityType !== OPEN_FUNDING_TYPE
-          && solutions.funded.length > 0 && solutions.withFeedback.length > 0,
+          && solutions.selectable.length > 0,
         blockers: postingBlockers,
       },
       acceptedProposalId: posting.acceptedProposalId ?? solutions.accepted[0]?.id ?? null,
@@ -209,7 +297,7 @@ const rows = (snapshot, cap) => snapshot.docs.slice(0, cap).map((doc) => ({ id: 
 
 /** `readFeedback` is proposalQueues.feedbackByProposal, injected so the counts
  * have one reader and the summariser above stays testable without a database. */
-export async function collectOwnerDashboard({ db, uid, readFeedback, now = Date.now() }) {
+export async function collectOwnerDashboard({ db, uid, readFeedback, readFundingSummary, config, now = Date.now() }) {
   if (!uid) fail("unauthenticated", "Sign in to continue.");
   const profile = await db.collection("users").doc(uid).get();
   if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
@@ -222,12 +310,23 @@ export async function collectOwnerDashboard({ db, uid, readFeedback, now = Date.
   // A proposal whose parent fell outside the posting page would otherwise be
   // counted against a posting this response never describes.
   const proposals = rows(received, PROPOSAL_CAP).filter((row) => ownedIds.has(row.problemId));
-  const feedback = await readFeedback(db, proposals.filter((row) => row.status !== "draft").map((row) => row.id));
+  const postingById = new Map(problems.map(problem => [problem.id, problem]));
+  const businessEscrows = proposals.filter(row => row.fundingTerms && row.status !== "draft"
+    && postingById.get(row.problemId)?.opportunityType !== OPEN_FUNDING_TYPE);
+  const [feedback, funding] = await Promise.all([
+    readFeedback(db, proposals.filter((row) => row.status !== "draft").map((row) => row.id)),
+    businessEscrows.length && readFundingSummary
+      ? Promise.resolve().then(() => readFundingSummary({ db, uid })).catch(() => ({ items: [], unavailableItems: businessEscrows.length }))
+      : { items: [] },
+  ]);
   return summariseOwnerDashboard({
     problems,
     proposals,
     feedback,
+    fundingSummaries: new Map((funding.items ?? []).map(item => [item.proposalId, item])),
+    config,
     now,
-    truncated: { postings: owned.size > POSTING_CAP, proposals: received.size > PROPOSAL_CAP },
+    truncated: { postings: owned.size > POSTING_CAP, proposals: received.size > PROPOSAL_CAP,
+      funding: funding.truncated === true },
   });
 }

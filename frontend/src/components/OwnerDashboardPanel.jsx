@@ -10,6 +10,8 @@ import { OWNER_DASHBOARD_KEY, listOwnerDashboard, queueError } from "../lib/prop
 import { useAuth } from "../context/AuthContext.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { workflowStatusLabel } from "../config/workflowStatus.js";
+import { formatUnits } from "viem";
+import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
 
 /**
  * QCDAO-92 - one screen answering "where does my work stand".
@@ -51,10 +53,11 @@ function Readiness({ posting }) {
     );
   }
   if (posting.readiness.canSelect) {
+    const selectable = posting.selectableSolutions ?? posting.fundedSolutions;
     return (
       <p className="queue-note queue-note-ready">
-        Selection can begin: {posting.fundedSolutions} fully funded{" "}
-        {posting.fundedSolutions === 1 ? "solution" : "solutions"} with evaluator feedback on file.
+        Selection can begin: {selectable} fully funded{" "}
+        {selectable === 1 ? "solution" : "solutions"}. Evaluator feedback is optional.
       </p>
     );
   }
@@ -67,6 +70,46 @@ function Readiness({ posting }) {
         <li key={blocker.kind} className="queue-note queue-note-gate">{blocker.detail}</li>
       ))}
     </ul>
+  );
+}
+
+const tokenAmount = (value, token) => {
+  try { return `${formatUnits(BigInt(value), token.tokenDecimals)} ${token.tokenSymbol}`; }
+  catch { return "Amount unavailable"; }
+};
+
+/** Exact token units stay beside their own proposal and token. No RPC request
+ * is added here; confirmed block evidence arrives with the overview payload. */
+function EscrowReadiness({ posting }) {
+  if (posting.opportunityType === "open-funding" || !posting.escrowFunding?.items?.length) return null;
+  return (
+    <div className="rollup-recommendations">
+      <h4>Confirmed escrow funding</h4>
+      {posting.escrowFunding.items.map(item => (
+        <div className="rollup-meter" key={item.proposalId}>
+          <strong>{item.title || "Untitled solution"}</strong>
+          {!item.available ? (
+            <p className="queue-note queue-note-gate">Funding unavailable. Open Selection &amp; funding to verify this solution.</p>
+          ) : (
+            <>
+              <progress aria-label={`Confirmed escrow funding for ${item.title || "this solution"}`}
+                value={item.fundingPercent} max={100} />
+              <small>
+                {tokenAmount(item.totalDeposited, item)} deposited of {tokenAmount(item.fundingTarget, item)} required
+                {" · "}{item.fundingPercent}%
+              </small>
+              <small>{tokenAmount(item.outstandingBalance, item)} held in escrow · Confirmed block {item.blockNumber}</small>
+              <small>
+                {item.canSelect ? "Funding requirement met; selection can begin." : item.fundingMet
+                  ? "Funding requirement met; selection is unavailable in the current escrow state."
+                  : "Funding requirement not yet met."}
+              </small>
+              <EscrowCustodyNotice summary={item} compact />
+            </>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -115,6 +158,8 @@ function PostingRollup({ posting, onNavigate }) {
           </small>
         </div>
       )}
+
+      <EscrowReadiness posting={posting} />
 
       <Readiness posting={posting} />
 
@@ -180,8 +225,8 @@ export function OwnerDashboardPanel({ onNavigate }) {
         <h2>Posting overview</h2>
         <p>
           Every posting you own with the solutions, funding and evaluator feedback on it, counted from live
-          records. Readiness is the funding condition a selection depends on, not an opinion about which
-          solution to pick.
+          records. Escrow funding uses confirmed contract balances. Evaluator feedback is optional;
+          selection depends on the funding requirement and the posting&apos;s current state.
         </p>
       </div>
 
@@ -198,7 +243,7 @@ export function OwnerDashboardPanel({ onNavigate }) {
           {dashboard.isFetching ? "Refreshing…" : "Refresh overview"}
         </button>
       )}
-      {!dashboard.isPending && !error && (data?.truncated?.postings || data?.truncated?.proposals) && (
+      {!dashboard.isPending && !error && (data?.truncated?.postings || data?.truncated?.proposals || data?.truncated?.funding) && (
         <p className="field-hint" role="status">
           Counted from the most recent records only. The real totals are higher.
         </p>
@@ -221,13 +266,13 @@ export function OwnerDashboardPanel({ onNavigate }) {
             <Stat
               label="Postings ready to select"
               value={totals.readyToSelect}
-              hint={totals.readyToSelect > 0 ? "Fully funded with evaluator feedback on file." : "No posting has a selectable solution yet."}
+              hint={totals.readyToSelect > 0 ? "Funding requirement met. Evaluator feedback is optional." : "No posting has a selectable solution yet."}
             />
             <Stat
               label="Solutions awaiting feedback"
               value={totals.awaitingFeedback}
               tone={totals.awaitingFeedback > 0 ? "warn" : undefined}
-              hint={totals.awaitingFeedback > 0 ? "No evaluator has recommended these yet." : "Every open solution has a recommendation."}
+              hint={totals.awaitingFeedback > 0 ? "Optional evaluator feedback has not been filed yet." : "Every open solution has a recommendation."}
             />
             <Stat label="Accepted solutions" value={totals.acceptedSolutions} />
           </div>

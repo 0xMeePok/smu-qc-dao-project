@@ -5,6 +5,7 @@ import { isIndependentProposal } from "./independentProposal.js";
 import { boundedMap } from "./boundedMap.js";
 import { createRequestReadClient } from "./requestReadClient.js";
 import { memberCallFromReceipt } from "./memberCall.js";
+import { escrowSelectionGate } from "./escrowCustody.js";
 
 const at = (row, name, index) => row?.[name] ?? row?.[index];
 const blocked = row => row?.moderated || ["hidden", "removed"].includes(row?.moderationStatus);
@@ -103,7 +104,7 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
       let action = null;
       if (!grant && owner && summary.state === "Open" && summary.active && validContent
           && ["submitted", "under_review"].includes(context.record.status) && ["submitted", "open"].includes(context.parent.status)
-          && timestamp < BigInt(summary.expiresAt) && BigInt(summary.totalDeposited) === BigInt(summary.fundingTarget)
+          && escrowSelectionGate(summary).canSelect
           && !context.parent.escrowSelection
           && !fundingBlockReason(context.record, context.parent, summary, summary.timestamp * 1000)) action = "select";
       else if (summary.state === "Locked" && summary.currentTranche === 0 && reviewOpen && needsApproval) action = "approve_upfront";

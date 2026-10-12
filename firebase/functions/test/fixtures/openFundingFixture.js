@@ -52,7 +52,10 @@ export function openFundingFixture() {
     simulateContract: async request => { simulations.push(request); return { request }; },
     readContract: async request => {
       calls.push(request); const { functionName, args, address } = request;
-      if (functionName === "balanceOf") return state.walletBalance;
+      if (functionName === "balanceOf") {
+        const escrowIndex = addresses.findIndex(row => sameAddress(row, args[0]));
+        return escrowIndex >= 0 ? state.escrowDeposits[escrowIndex] - state.released[escrowIndex] - state.refunded[escrowIndex] : state.walletBalance;
+      }
       if (functionName === "allowance") return state.tokenAllowance;
       if (functionName === "decimals") return state.actualTokenDecimals;
       if (functionName === "allowedTokens") return state.tokenAllowed;
@@ -79,6 +82,7 @@ export function openFundingFixture() {
           totalReleased: state.released[index], totalRefunded: state.refunded[index], currentTranche: 0n, selectionId: expected[index].entityId,
           ownerApproved: true, solutionApproved: true, yesWeight: 0n, approvalDeadline: 1950000000n, platformSigner: owner,
           outstandingBalance: state.escrowDeposits[index] - state.released[index] - state.refunded[index],
+          refundsEnabled: false, refundAvailableAt: 0n,
           depositorSummary: { deposited: state.escrowDeposits[index], refunded: state.refunded[index], released: state.released[index] } };
         if (functionName in values) return values[functionName];
       }

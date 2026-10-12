@@ -154,6 +154,8 @@ export function fundingApproachAttention(approaches = [], now = new Date()) {
 export const BLOCKER_LABELS = Object.freeze({
   no_solutions: "No solutions yet",
   funding_short: "Funding target not reached",
+  funding_unavailable: "Funding verification unavailable",
+  selection_unavailable: "Selection unavailable",
   feedback_missing: "Evaluator feedback outstanding",
 });
 

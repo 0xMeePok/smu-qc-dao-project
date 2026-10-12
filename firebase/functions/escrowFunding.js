@@ -4,7 +4,7 @@ import { fundingAmountError } from "./fundingAmountPolicy.js";
 import { randomUUID } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
-import { decodeFunctionData, encodeFunctionData, keccak256, stringToHex } from "viem";
+import { decodeFunctionData, encodeFunctionData, erc20Abi, keccak256, stringToHex } from "viem";
 import { prepareIndependentEscrowCommit, prepareStoredProposal } from "./proposalAuditPayload.js";
 import { opportunityEntityId } from "./auditCanonical.js";
 import { verifyProposalEscrow } from "./escrowAudit.js";
@@ -18,6 +18,7 @@ import { createRequestReadClient } from "./requestReadClient.js";
 import { boundedMap } from "./boundedMap.js";
 import { createRequestDocumentReader } from "./requestDocuments.js";
 import { isEntryPoint, memberCall, memberCallFromReceipt } from "./memberCall.js";
+import { escrowCustodyLock, escrowSelectionGate } from "./escrowCustody.js";
 export { FUNDING_POSITIONS } from "./fundingSnapshots.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
@@ -174,8 +175,9 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     throw new Error("Escrow reconciliation mismatch: proposal content differs from its registry hashes.");
   }
   const names = ["state", "totalDeposited", "totalReleased", "totalRefunded", "outstandingBalance", "currentTranche",
-    "selectionId", "ownerApproved", "solutionApproved", "yesWeight", "approvalDeadline", "expiresAt", "platformSigner"];
-  const [values, [active, invalidated, count, pendingProposalEntityId, block], milestones] = await Promise.all([
+    "selectionId", "ownerApproved", "solutionApproved", "yesWeight", "approvalDeadline", "expiresAt", "platformSigner",
+    "refundsEnabled", "refundAvailableAt"];
+  const [values, [active, invalidated, count, pendingProposalEntityId, block], milestones, custodyBalance] = await Promise.all([
     Promise.all(names.map(functionName => read({ address: escrow.address, abi: config.escrow.escrowAbi, functionName }))),
     Promise.all([
       read({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, escrow.address] }),
@@ -187,6 +189,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     ]),
     Promise.all(expected.fundingTerms.trancheBps.map((_, index) => read({ address: escrow.address,
       abi: config.escrow.escrowAbi, functionName: "milestoneAt", args: [BigInt(index)] }))),
+    read({ address: expected.fundingTerms.token, abi: erc20Abi, functionName: "balanceOf", args: [escrow.address] }),
   ]);
   const data = Object.fromEntries(names.map((name, i) => [name, values[i]]));
   if (typeof block?.timestamp !== "bigint" || block.timestamp < 0n || block.timestamp > BigInt(Math.floor(Number.MAX_SAFE_INTEGER / 1000))) {
@@ -199,12 +202,20 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     chainId: config.chainId, state: ESCROW_STATES[Number(data.state)], totalDeposited: String(data.totalDeposited),
     totalReleased: String(data.totalReleased), totalRefunded: String(data.totalRefunded), outstandingBalance: String(data.outstandingBalance),
     fundingTarget: expected.fundingTerms.target.toString(), expiresAt: String(data.expiresAt),
+    custodyBalance: String(custodyBalance), approvalDeadline: String(data.approvalDeadline),
+    refundsEnabled: data.refundsEnabled === true, refundAvailableAt: String(data.refundAvailableAt),
+    upfrontRefundUsesApprovalDeadline: isOpenFunding(record, parent) || hasRegistryFunction(config, "pendingProposalForPosting"),
     upfrontReleased: milestoneValue(milestones[0], "paid", 6) === true,
     finalReleased: milestoneValue(milestones.at(-1), "paid", 6) === true, active, invalidated,
     proposalEntityId: expected.entityId, pendingProposalEntityId,
     fundingActivityVersion: Number(count),
     timestamp: Number(block.timestamp), blockNumber: Number(blockNumber), currentTranche: Number(data.currentTranche) };
   summary.fundingBlockReason = fundingBlockReason(record, parent, summary, summary.timestamp * 1000, { deposit: true });
+  summary.selectionGate = escrowSelectionGate(summary);
+  summary.selectionBlockReason = fundingBlockReason(record, parent, summary, summary.timestamp * 1000);
+  if (summary.selectionBlockReason) summary.selectionGate.canSelect = false;
+  summary.fundingRequirementMet = summary.selectionGate.fundingMet;
+  summary.custodyLock = escrowCustodyLock(summary);
   return { expected, escrow, data, summary, milestones, anchorCount: Number(count) };
 }
 
@@ -484,7 +495,7 @@ export function settlementAction({ verified, config, record, parent, job, now })
   const reason = fundingBlockReason(record, parent, summary, chainMillis);
   if (reason) return { settlement: { status: "blocked", message: reason } };
   if (!isOpenFunding(record, parent) && summary.state === "Open" && job.selectionRequested && !fundingBlockReason(record, parent, summary, chainMillis, { deposit: false })
-      && BigInt(summary.totalDeposited) === BigInt(summary.fundingTarget) && BigInt(data.expiresAt) * 1000n > BigInt(chainMillis)) {
+      && escrowSelectionGate(summary).canSelect) {
     return { action: { ...base, key: `select:${record.id}:${job.selectionId}`, functionName: "lockSelection",
       args: [job.selectionId, expected.expectedResearcher] } };
   }
@@ -644,8 +655,7 @@ export async function startEscrowSettlement(options) {
   const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: await client.getBlockNumber({ cacheTime: 0 }) - 1n });
   const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000);
   if (reason) fail("failed-precondition", reason);
-  if (verified.summary.state !== "Open" || BigInt(verified.summary.totalDeposited) !== BigInt(verified.summary.fundingTarget)
-      || BigInt(verified.summary.expiresAt) * 1000n <= BigInt(verified.summary.timestamp * 1000)) fail("failed-precondition", "Selection requires a fully funded, open escrow.");
+  if (!escrowSelectionGate(verified.summary).canSelect) fail("failed-precondition", "Selection requires a fully funded, open escrow with the full target held in verified custody.");
   await enqueueEscrowFunding({ db, config, record: context.record, now });
   const ref = db.collection(FUNDING_JOBS).doc(jobKey(config, proposalId));
   await db.runTransaction(async tx => {
@@ -666,7 +676,68 @@ export async function startEscrowSettlement(options) {
   return syncEscrowFunding({ ...options, now });
 }
 
-export async function getEscrowFundingSummary({ db, client, config, uid }) {
+/** Posting-level custody is public only to members who may read the posting.
+ * Cached display snapshots never authorize selection; missing/stale ones are
+ * verified at one confirmed block without log scans, wallet reads or signing. */
+export async function getPostingEscrowFundingSummary({ db, client, config, uid, problemId, now = Timestamp.now() }) {
+  validId(problemId);
+  const [profile, posting] = await Promise.all([
+    db.collection("users").doc(uid).get(), db.collection("problems").doc(problemId).get(),
+  ]);
+  if (!profile.exists || profile.data().suspended) fail("permission-denied", "An active member profile is required.");
+  if (!posting.exists) fail("not-found", "This posting is no longer available.");
+  if (!await canReadContent({ get: ref => ref.get() }, db, "problem", posting.data(), uid, profile.data())) {
+    fail("permission-denied", "This posting is not available to your account.");
+  }
+  if (posting.data().opportunityType === "open-funding") fail("failed-precondition", "Use the grant pool to view this posting's funding.");
+  const page = await db.collection("proposals").where("problemId", "==", problemId).limit(51).get();
+  const visible = [];
+  for (const doc of page.docs.slice(0, 50)) {
+    const record = { ...doc.data(), id: doc.id };
+    if (record.status === "draft" || !record.fundingTerms || isIndependentProposal(record)) continue;
+    if (await canReadContent({ get: ref => ref.get() }, db, "proposal", record, uid, profile.data())) visible.push(record);
+  }
+  if (!visible.length) return { problemId, items: [], unavailableItems: 0, truncated: page.size > 50, blockNumber: null };
+  const prefix = deploymentKey(config), parent = { ...posting.data(), id: problemId };
+  const saved = await db.getAll(...visible.map(record => db.collection(FUNDING_SUMMARIES).doc(`${prefix}_${record.id}`)));
+  const readClient = client ? createRequestReadClient(client, { chainId: config.chainId }) : null;
+  let confirmedBlock;
+  const block = () => confirmedBlock ??= assertFundingChain(readClient, config)
+    .then(() => readClient.getBlockNumber({ cacheTime: 0 })).then(head => {
+      if (head < 1n) fail("unavailable", "No confirmed escrow block is available yet.");
+      return head - 1n;
+    });
+  let unavailableItems = 0;
+  const items = await boundedMap(visible, async (record, index) => {
+    try {
+      if (record.audit?.status !== "confirmed") throw new Error("Unconfirmed publication");
+      let summary = saved[index].data();
+      const age = now.toMillis() - Number(summary?.timestamp) * 1000;
+      const unlockNeedsConfirmation = summary?.custodyLock?.status === "locked" && summary.custodyLock.unlockAt
+        && BigInt(summary.custodyLock.unlockAt) * 1000n <= BigInt(now.toMillis());
+      if (!isConfirmedSnapshot(summary) || summary.chainId !== config.chainId || !same(summary.registryAddress, config.address)
+          || !same(summary.researcherId, record.researcherId) || !same(summary.postingOwnerId, parent.ownerId)
+          || summary.fundingTarget !== record.fundingTerms.target || !same(summary.tokenAddress, record.fundingTerms.token)
+          || !Number.isFinite(age) || age < 0 || age >= 120_000 || unlockNeedsConfirmation) {
+        const verified = await readVerifiedFunding({ client: readClient, config, record, parent, blockNumber: await block() });
+        summary = { ...verified.summary, snapshotVerified: true, confirmedAt: now.toDate().toISOString() };
+        await saveFundingSnapshot({ db, collection: FUNDING_SUMMARIES, id: `${prefix}_${record.id}`, snapshot: summary });
+      }
+      summary = { ...summary, selectionGate: escrowSelectionGate(summary),
+        selectionBlockReason: fundingBlockReason(record, parent, summary, summary.timestamp * 1000) };
+      if (summary.selectionBlockReason || now.toMillis() >= Number(summary.expiresAt) * 1000) summary.selectionGate.canSelect = false;
+      return { ...summary, title: record.title || "Proposal", available: true };
+    } catch {
+      unavailableItems++;
+      return { proposalId: record.id, title: record.title || "Proposal", available: false };
+    }
+  }, 2);
+  return { problemId, items, unavailableItems, truncated: page.size > 50,
+    blockNumber: items.some(item => item.available) ? Math.min(...items.filter(item => item.available).map(item => item.blockNumber)) : null };
+}
+
+export async function getEscrowFundingSummary({ db, client, config, uid, problemId }) {
+  if (problemId !== undefined) return getPostingEscrowFundingSummary({ db, client, config, uid, problemId });
   if (client) client = createRequestReadClient(client, { chainId: config.chainId });
   const readDocument = createRequestDocumentReader();
   const [sets, records] = await Promise.all([
@@ -705,7 +776,10 @@ export async function getEscrowFundingSummary({ db, client, config, uid }) {
 
 const isConfirmedSnapshot = item => Boolean(item && (item.snapshotVerified === true
   || (item.reconciliation?.complete === true && item.reconciliation?.matched === true))
-  && Number.isSafeInteger(item.blockNumber) && item.blockNumber >= 0);
+  && Number.isSafeInteger(item.blockNumber) && item.blockNumber >= 0
+  && /^[0-9]{1,78}$/.test(item.custodyBalance ?? "")
+  && typeof item.refundsEnabled === "boolean" && /^[0-9]{1,20}$/.test(item.refundAvailableAt ?? "")
+  && /^[0-9]{1,20}$/.test(item.approvalDeadline ?? "") && item.custodyLock);
 
 /** A missing dashboard record is verified once and then reused. No settlement,
  * event scan or platform signer is involved in filling this display cache. */

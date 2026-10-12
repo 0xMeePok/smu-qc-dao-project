@@ -11,6 +11,7 @@ import { FUNDING_POSITIONS, OPEN_FUNDING_SELECTIONS, fundingAllocationBasis } fr
 import { createRequestReadClient } from "./requestReadClient.js";
 import { createRequestDocumentReader } from "./requestDocuments.js";
 import { boundedMap } from "./boundedMap.js";
+import { escrowCustodyLock } from "./escrowCustody.js";
 
 const CAP = 50, APPROACH_CAP = 200;
 const iso = value => value?.toDate?.().toISOString?.() ?? null;
@@ -241,7 +242,12 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
     try {
       let snapshot = positions.get(proposalId);
       const aggregate = await readSaved(FUNDING_SUMMARIES, proposalId);
-      if (!snapshot || (aggregate && aggregate.blockNumber > snapshot.blockNumber
+      const lock = snapshot ? escrowCustodyLock(snapshot) : null;
+      const lockMetadataMissing = !snapshot?.custodyLock || !units(snapshot?.custodyBalance)
+        || typeof snapshot?.refundsEnabled !== "boolean";
+      const unlockNeedsConfirmation = lock?.status === "locked" && lock.unlockAt
+        && BigInt(lock.unlockAt) * 1000n <= BigInt(now.toMillis());
+      if (!snapshot || lockMetadataMissing || unlockNeedsConfirmation || (aggregate && aggregate.blockNumber > snapshot.blockNumber
           && fundingAllocationBasis(aggregate) !== fundingAllocationBasis(snapshot))) {
         const refreshed = await fillEscrow(proposalId);
         snapshot = refreshed ? positions.get(proposalId) : null;
@@ -261,6 +267,11 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
         escrowAddress: snapshot.escrowAddress, chainId: snapshot.chainId, tokenAddress: snapshot.tokenAddress.toLowerCase(),
         tokenSymbol: snapshot.tokenSymbol, tokenDecimals: snapshot.tokenDecimals, blockNumber: snapshot.blockNumber,
         fundingTarget: snapshot.fundingTarget, totalDeposited: snapshot.totalDeposited,
+        outstandingBalance: snapshot.outstandingBalance, custodyBalance: snapshot.custodyBalance,
+        timestamp: snapshot.timestamp, expiresAt: snapshot.expiresAt, approvalDeadline: snapshot.approvalDeadline,
+        refundsEnabled: snapshot.refundsEnabled, refundAvailableAt: snapshot.refundAvailableAt,
+        custodyLock: escrowCustodyLock(snapshot), fundingRequirementMet: snapshot.fundingRequirementMet,
+        claimable: snapshot.claimable,
         committed: committed.toString(), locked: locked.toString(), released: released.toString(), refunded: refunded.toString() };
       commitments.push(row);
       const key = `${row.chainId}_${row.tokenAddress}`, old = totals.get(key) || { chainId: row.chainId, tokenAddress: row.tokenAddress,

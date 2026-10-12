@@ -12,6 +12,7 @@ vi.mock("../../src/lib/independentEscrow.js", async importOriginal => ({ ...awai
   syncIndependentFunding: (...args) => mocks.sync(...args) }));
 vi.mock("../../src/lib/escrow.js", async importOriginal => ({ ...await importOriginal(), confirmEscrowTransaction: (...args) => mocks.confirm(...args) }));
 import { IndependentFundingPanel, IndependentFundingView } from "../../src/components/IndependentFundingPanel.jsx";
+import { formatInstant } from "../../src/lib/datetime.js";
 afterEach(cleanup);
 const summary = { state: "Open", escrowAddress: `0x${"b".repeat(40)}`, tokenSymbol: "USDT", tokenDecimals: 6,
   fundingTarget: "2000000", totalDeposited: "1000000", totalReleased: "0", feePaid: "0", outstandingBalance: "1000000",
@@ -21,6 +22,39 @@ const props = extra => ({ snapshot: { exists: true, configured: true, summary, w
 beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); mocks.user = { id: `0x${"a".repeat(40)}` };
   mocks.account = { address: mocks.user.id, isConnected: true, chainId: 421614 }; mocks.read.mockReset().mockResolvedValue(props().snapshot);
   mocks.sync.mockResolvedValue({}); mocks.confirm.mockResolvedValue({ transactionHash: `0x${"1".repeat(64)}` }); });
+
+it("keeps independent contributions locked before the listing closes", () => {
+  const p = props({ snapshot: { ...props().snapshot, summary: { ...summary, timestamp: "1900000000" }, actions: { claimRefund: true } } });
+  render(<IndependentFundingView {...p} />);
+  expect(screen.getByText("Funds locked.")).toBeTruthy();
+  expect(screen.getByText(formatInstant(new Date(2000000000 * 1000)))).toBeTruthy();
+  const refund = screen.getByRole("button", { name: "Claim my refund" });
+  expect(refund.disabled).toBe(true); fireEvent.click(refund);
+  expect(p.onAction).not.toHaveBeenCalled();
+});
+it("keeps accepted work locked to its completion deadline after the listing expires", () => {
+  const p = props({ snapshot: { ...props().snapshot, summary: { ...summary, state: "Accepted", timestamp: "2000000001",
+    completionDeadline: "2002592000" }, actions: {} } });
+  render(<IndependentFundingView {...p} />);
+  expect(screen.getByText("Funds locked.")).toBeTruthy();
+  expect(screen.getByText(formatInstant(new Date(2002592000 * 1000)))).toBeTruthy();
+  expect(screen.getByText(/Posting expiry does not unlock accepted work/)).toBeTruthy();
+});
+it("allows confirmed cancellation refunds immediately instead of waiting for listing expiry", () => {
+  const p = props({ snapshot: { ...props().snapshot, summary: { ...summary, state: "Cancelled", timestamp: "1900000000" },
+    wallet: { deposited: "1000000", claimable: "1000000" }, actions: { claimRefund: true } } });
+  render(<IndependentFundingView {...p} />);
+  expect(screen.getByText("Funds refundable.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Claim my refund" }).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Claim my refund" }));
+  expect(p.onAction).toHaveBeenCalledWith("claimRefund", {});
+});
+it("explains that a fully settled independent escrow has no unpaid balance left", () => {
+  render(<IndependentFundingView {...props({ snapshot: { ...props().snapshot,
+    summary: { ...summary, state: "Released", outstandingBalance: "0", totalDeposited: "2000000", timestamp: "2000000001" }, actions: {} } })} />);
+  expect(screen.getByText("Escrow settled.")).toBeTruthy();
+  expect(screen.queryByText("Funds refundable.")).toBeNull();
+});
 
 it("lets funders contribute without any problem-owner selection or dual-approval controls", () => {
   const p = props(); render(<IndependentFundingView {...p} />);

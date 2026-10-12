@@ -13,6 +13,8 @@ export function fundingAllocationBasis(summary = {}) {
     summary.tokenAddress?.toLowerCase(), summary.fundingTarget,
     summary.totalDeposited, summary.totalReleased, summary.totalRefunded,
     summary.state, summary.active, summary.invalidated, summary.currentTranche, summary.expiresAt,
+    summary.approvalDeadline, summary.refundsEnabled, summary.refundAvailableAt,
+    summary.custodyBalance, summary.custodyLock?.status, summary.custodyLock?.unlockAt,
     Number(summary.timestamp) >= Number(summary.expiresAt),
   ]);
 }

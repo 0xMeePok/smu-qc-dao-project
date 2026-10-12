@@ -24,8 +24,8 @@ const IDLE_MESSAGE = "You were signed out after 15 minutes of inactivity. Sign i
  * Session states:
  *   signed-out       no verified account
  *   verifying        a new sign-in: Privy's login modal is open, or the
- *                    member's embedded wallet is loading, signing the server's
- *                    message and exchanging it for a token
+ *                    member's embedded wallet is loading and its access token
+ *                    is being exchanged for a Firebase session
  *   checking         verified, looking the address up in Firestore
  *   needs-onboarding verified but no profile, so the onboarding modal opens
  *   signed-in        verified and a profile exists
@@ -49,6 +49,7 @@ export function SessionProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState(null);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
+  const [profileLookupVersion, setProfileLookupVersion] = useState(0);
 
   // Starts TRUE when Firebase was never configured: there is no persisted session
   // that could arrive late, so the app should render immediately rather than hang on
@@ -104,9 +105,9 @@ export function SessionProvider({ children }) {
   const signInInFlight = useRef(null);
 
   /**
-   * Opens Privy's login modal - email and a one-time code; Privy creates the
-   * embedded wallet on a first sign-in - then has that wallet sign the server's
-   * challenge and exchanges the signature for the Firebase session.
+ * Opens Privy's login modal - email and a one-time code; Privy creates the
+ * embedded wallet on a first sign-in - then exchanges Privy's access token
+ * for the Firebase session.
    *
    * Returns { ok, message } instead of throwing, so a caller can show a failure
    * where the member is looking without an unhandled rejection. Closing Privy's
@@ -135,7 +136,16 @@ export function SessionProvider({ children }) {
         // A returning member's wallet loads; a first sign-in's was just created.
         // The server, not this address, decides who the Firebase session is.
         const local = (await walletRef.current.ensureWallet()).toLowerCase();
-        if (local === before.verifiedAddress) return { ok: true };
+        // The Firebase session is already this wallet. Signing in again must
+        // still replace a failed profile listener: Firebase may not emit an
+        // auth-state event when the uid is unchanged.
+        if (local === before.verifiedAddress) {
+          markActivity({ force: true });
+          setError(null);
+          setStatus("checking");
+          setProfileLookupVersion(version => version + 1);
+          return { ok: true };
+        }
 
         const accessToken = await walletRef.current.accessToken();
         const address = (await exchangePrivySession(accessToken)).toLowerCase();
@@ -145,6 +155,7 @@ export function SessionProvider({ children }) {
         }
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
+        setStatus("checking");
         setVerifiedAddress(address);
         return { ok: true };
       } catch (caught) {
@@ -183,10 +194,8 @@ export function SessionProvider({ children }) {
         setProfile(found);
         setStatus(found ? "signed-in" : "needs-onboarding");
 
-        // Fires once per session establishment (this effect only re-runs when
-        // verifiedAddress changes - a fresh sign-in or a restored session on page
-        // load), not on every render, so navigating elsewhere afterward doesn't
-        // keep yanking an admin back here.
+        // Route once when establishing or reauthenticating a session, rather
+        // than on every profile update or render while an admin navigates.
         if (found && isAdmin(found.role) && !found.suspended && !hasRoutedToAdmin) {
           hasRoutedToAdmin = true;
           go("admin");
@@ -202,7 +211,7 @@ export function SessionProvider({ children }) {
     );
 
     return () => unsubscribe();
-  }, [verifiedAddress, clearSession]);
+  }, [verifiedAddress, profileLookupVersion, clearSession]);
 
   const completeOnboarding = useCallback(
     async (form) => {

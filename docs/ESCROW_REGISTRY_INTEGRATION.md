@@ -58,11 +58,15 @@ The default variant is both owners. Replacing evidence resets owner approvals an
 funder votes. Each payment is subject to the configured platform fee, with any token
 rounding remainder in the final payment. Review windows accept one whole-day value
 for both payments or two values (upfront, final), each 1–365 days; the default is seven
-days. The first window is capped by the contract at seven days and the posting
-deadline. The final window starts with the upfront payout, so it must allow time
-for delivery and acceptance. Missing that final deadline opens refunds of the
-unpaid balance. If the upfront approval window lapses, the original posting expiry
-still governs when ordinary refunds become available.
+days. Main business selection starts a full seven-day dual approval window, even
+when the posting's submission deadline arrives sooner. An accepted open funding
+grant starts its first payment review window, capped at seven days; its separate
+grant acceptance window also remains open for the full seven days after selection.
+The final payment review starts with the upfront payout, so it must allow time
+for delivery and acceptance. Missing a handshake or payment review deadline opens
+refunds of the unpaid balance. Ordinary cancellation before payment retains the
+original posting expiry for refunds; explicit rejection, moderation cancellation
+or on-chain invalidation retains its existing immediate refund behavior.
 
 Drafts retain unfinished inputs in `fundingPlan`. Submission resolves the configured
 token address and decimals, produces exact integer base units, and stores the six
@@ -241,9 +245,15 @@ an existing currency symbol to a different address. The current form's currency
 choices remain the existing USDC/USDT/XSGD choices. On-chain token delisting still
 blocks new funding while preserving exits from existing escrows.
 
-The current scope is QCDAO-110, QCDAO-113 and QCDAO-117. A global deposit/refund
-portfolio and the separate QCDAO-111/112/114/115/116 stories are not part of this
-rollout. Existing contract refund functions remain available.
+The integration covers QCDAO-110, QCDAO-111, QCDAO-113 and QCDAO-117. QCDAO-111
+surfaces the contract's custody lock and applicable unlock date on posting,
+dashboard and escrow views. Funding availability uses confirmed escrow custody;
+evaluator feedback remains optional and advisory. The custody lock does not
+replace approved researcher payments, immediate rejection/cancellation refunds,
+or open funding's separate seven-day grant reservations. Ordinary main escrow
+cancellation still waits for its configured posting expiry. No partial withdrawal
+or early release by mutual agreement is added. The separate QCDAO-112/114/115/116
+stories remain outside this scope. Existing contract refund functions remain available.
 No Jira records were changed during implementation or deployment.
 
 ## Automatic settlement and funding audit

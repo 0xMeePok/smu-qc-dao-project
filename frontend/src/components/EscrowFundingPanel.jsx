@@ -18,6 +18,8 @@ import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { ACTION_ITEMS_KEY } from "../lib/proposalQueues.js";
 import { canApproachIndependentListing } from "../lib/independentFunding.js";
 import { isIndependentProposal } from "../config/proposal.js";
+import { escrowCustodyLock } from "../../../firebase/functions/escrowCustody.js";
+import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
 
 const STATE_LABELS = ["Open for funding", "Awaiting upfront approval", "Fully paid", "Refunded", "Cancelled", "Expired", "Delivery in progress", "Voided"];
 const explorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`;
@@ -47,8 +49,11 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   const grantWaiting = state?.isGrant && state.state === 0;
   const grantMessage = "Grant funding moves into this escrow when the researcher accepts the selected offer.";
   const settlementMessage = grantWaiting && ["waiting", "not_ready", "waiting_approval"].includes(settlement?.status) ? grantMessage : settlement?.message;
+  const custodyLock = state?.custodyLock ?? escrowCustodyLock(state ?? {});
+  const refundLocked = custodyLock.status === "locked";
+  const selectionAllowed = state?.selectionGate?.canSelect !== false && state?.fundingRequirementMet !== false;
   const action = (name, label, extra = {}, allowed = state?.can[name]) => <button type="button" className="primary small"
-    disabled={disabled || !allowed || (name === "deposit" && (Boolean(fundingBlockReason) || !String(amount ?? "").trim() || Boolean(amountError))) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => onAction(name, extra)}>{label}</button>;
+    disabled={disabled || !allowed || (name === "claimRefund" && refundLocked) || (name === "deposit" && (Boolean(fundingBlockReason) || !String(amount ?? "").trim() || Boolean(amountError))) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => { if (name !== "claimRefund" || !refundLocked) onAction(name, extra); }}>{label}</button>;
   return <section className="card escrow-funding" aria-labelledby="escrow-funding-title">
     <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
       <button type="button" className="secondary small" disabled={busy || loading} onClick={onRefresh}>Refresh escrow</button></div>
@@ -83,6 +88,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
         <div className="settings-row"><dt>Your available refund</dt><dd>{money(state.wallet.depositor?.claimable)}</dd></div>
         <div className="settings-row"><dt>{state.state === 0 ? state.isGrant ? "Posting closes" : "Funding closes" : "Current approval deadline"}</dt><dd>{instant(state.state === 0 ? state.expiresAt : state.approvalDeadline)}</dd></div>
       </dl>
+      <EscrowCustodyNotice summary={state} />
       {grantWaiting && !settlementMessage && <p className="field-hint">{grantMessage} Manage the offer in the grant funding panel.</p>}
       {state.state === 0 && state.remaining > 0n && !state.isGrant && canDeposit && <div className="field-group">
         <p><strong>Funding token: {state.symbol}</strong> · This proposal accepts the token fixed in its payment plan.</p>
@@ -94,8 +100,9 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       </div>}
       {state.state === 0 && state.remaining === 0n && !state.isGrant && <div className="field-group">
         <p>The target is fully funded. The problem owner selects this proposal, then both owners approve the upfront payment.</p>
-        {state.roles.problemOwner ? <button type="button" className="primary small" disabled={disabled || moderated || integrityBlocked || state.isHistorical || state.workflowActive === false} onClick={onSettle}>Select proposal for upfront approval</button>
+        {state.roles.problemOwner ? <button type="button" className="primary small" disabled={disabled || moderated || integrityBlocked || state.isHistorical || state.workflowActive === false || !selectionAllowed} onClick={onSettle}>Select proposal for upfront approval</button>
           : <p className="field-hint">Waiting for the problem owner to select this proposal.</p>}
+        {!selectionAllowed && <p className="field-hint">Selection requires the exact funding target to be held in verified escrow while the posting remains open. Evaluator feedback remains optional.</p>}
       </div>}
       {state.state === 1 && <div className="field-group">
         <h4>Upfront 50%</h4><p>Problem owner: {state.ownerApproved ? "approved" : "pending"}. Proposal owner: {state.solutionApproved ? "approved" : "pending"}.</p>
