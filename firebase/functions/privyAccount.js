@@ -129,19 +129,32 @@ export async function bindPrivyAccount({ db, Timestamp, address, email, privyUse
  * writes the same fields again. Role 1 is granted only while the role is still
  * the default 0, only for an email in ADMIN_BOOTSTRAP_EMAILS, and only when no
  * other account already holds that email.
+ *
+ * One transaction reads the profile, checks the other holders of the email and
+ * writes the patch, as bindPrivyAccount does. Firestore serialises it against
+ * any concurrent stamp or sign-in for the same email, so two wallets onboarding
+ * at once cannot both pass the first-holder check and both be promoted.
  */
-export async function stampUserFromIdentity({ db, Timestamp, address, userData, adminEmails }) {
-  const identity = (await db.collection(PRIVY_IDENTITIES).doc(address).get()).data();
-  if (!identity?.email || !identity?.privyUserId) return { stamped: false };
-  if (userData?.email && userData.email !== identity.email) return { stamped: false };
-  if (userData?.privyUserId && userData.privyUserId !== identity.privyUserId) return { stamped: false };
-  const patch = {};
-  if (userData?.email !== identity.email) patch.email = identity.email;
-  if (userData?.privyUserId !== identity.privyUserId) patch.privyUserId = identity.privyUserId;
-  if (promoteRole(userData, identity.email, adminEmails)
-      && await firstHolderOfEmail((query) => query.get(), db, identity.email, address)) patch.role = 1;
-  if (Object.keys(patch).length === 0) return { stamped: false };
-  patch.updatedAt = Timestamp.now();
-  await db.collection("users").doc(address).set(patch, { merge: true });
-  return { stamped: true, ...patch };
+export async function stampUserFromIdentity({ db, Timestamp, address, adminEmails }) {
+  const identityRef = db.collection(PRIVY_IDENTITIES).doc(address);
+  const userRef = db.collection("users").doc(address);
+  return db.runTransaction(async (tx) => {
+    const [identitySnap, userSnap] = await Promise.all([tx.get(identityRef), tx.get(userRef)]);
+    const identity = identitySnap.data();
+    if (!identity?.email || !identity?.privyUserId || !userSnap.exists) return { stamped: false };
+    // Read inside the transaction rather than taken from the trigger event,
+    // which may be older than the document now is.
+    const profile = userSnap.data();
+    if (profile?.email && profile.email !== identity.email) return { stamped: false };
+    if (profile?.privyUserId && profile.privyUserId !== identity.privyUserId) return { stamped: false };
+    const patch = {};
+    if (profile?.email !== identity.email) patch.email = identity.email;
+    if (profile?.privyUserId !== identity.privyUserId) patch.privyUserId = identity.privyUserId;
+    if (promoteRole(profile, identity.email, adminEmails)
+        && await firstHolderOfEmail((query) => tx.get(query), db, identity.email, address)) patch.role = 1;
+    if (Object.keys(patch).length === 0) return { stamped: false };
+    patch.updatedAt = Timestamp.now();
+    tx.set(userRef, patch, { merge: true });
+    return { stamped: true, ...patch };
+  });
 }

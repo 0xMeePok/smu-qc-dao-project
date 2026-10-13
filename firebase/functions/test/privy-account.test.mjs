@@ -96,12 +96,37 @@ describe("one email per account", () => {
       [`users/${OTHER}`]: { address: OTHER, role: 0, fullName: "Second" },
     });
     const stamped = await stampUserFromIdentity({
-      db: fresh, Timestamp, address: OTHER, userData: fresh.records.get(`users/${OTHER}`), adminEmails,
+      db: fresh, Timestamp, address: OTHER, adminEmails,
     });
     assert.equal(stamped.stamped, true);
     assert.equal(stamped.role, undefined);
     assert.equal(fresh.records.get(`users/${OTHER}`).role, 0);
     assert.equal(fresh.records.get(`users/${OTHER}`).email, EMAIL);
+  });
+
+  it("promotes only one of two wallets onboarding at once with a bootstrap email", async () => {
+    const db = memoryDb({
+      [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
+      [`${PRIVY_IDENTITIES}/${OTHER}`]: { address: OTHER, email: EMAIL, privyUserId: "did:privy:second" },
+      [`users/${ADDRESS}`]: { address: ADDRESS, role: 0, fullName: "First" },
+      [`users/${OTHER}`]: { address: OTHER, role: 0, fullName: "Second" },
+    });
+    const adminEmails = new Set([EMAIL]);
+    // Started together, as two onboarding triggers firing at the same moment.
+    const results = await Promise.all([ADDRESS, OTHER].map((address) =>
+      stampUserFromIdentity({ db, Timestamp, address, adminEmails })));
+    assert.deepEqual(results.map((result) => result.stamped), [true, true]);
+    const roles = [ADDRESS, OTHER].map((address) => db.records.get(`users/${address}`).role);
+    assert.equal(roles.filter((role) => role === 1).length, 1);
+    assert.equal(db.records.get(`users/${OTHER}`).email, EMAIL);
+  });
+
+  it("does nothing once the profile it was asked to stamp is gone", async () => {
+    const db = memoryDb({
+      [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
+    });
+    assert.deepEqual(await stampUserFromIdentity({ db, Timestamp, address: ADDRESS, adminEmails: new Set([EMAIL]) }), { stamped: false });
+    assert.equal(db.records.has(`users/${ADDRESS}`), false);
   });
 
   it("stamps an existing profile and grants admin once for a bootstrap email", async () => {
@@ -149,13 +174,13 @@ describe("one email per account", () => {
       [`users/${ADDRESS}`]: { address: ADDRESS, role: 0, fullName: "Ada" },
     });
     const stamped = await stampUserFromIdentity({
-      db, Timestamp, address: ADDRESS, userData: db.records.get(`users/${ADDRESS}`), adminEmails: new Set([EMAIL]),
+      db, Timestamp, address: ADDRESS, adminEmails: new Set([EMAIL]),
     });
     assert.equal(stamped.stamped, true);
     assert.equal(stamped.role, 1);
     assert.equal(db.records.get(`users/${ADDRESS}`).email, EMAIL);
     const again = await stampUserFromIdentity({
-      db, Timestamp, address: ADDRESS, userData: db.records.get(`users/${ADDRESS}`), adminEmails: new Set([EMAIL]),
+      db, Timestamp, address: ADDRESS, adminEmails: new Set([EMAIL]),
     });
     assert.equal(again.stamped, false);
   });
