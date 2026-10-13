@@ -305,7 +305,7 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     expect(currentSession.error).toBeNull();
   });
 
-  it("recovers a failed profile listener when the same wallet signs in again without an auth-state event", async () => {
+  it("reauthenticates a failed same-wallet profile listener even without an auth-state event", async () => {
     const unsubscribe = vi.fn();
     mocks.subscribeProfile = vi.fn((_next, error) => {
       error({ code: "permission-denied" });
@@ -315,13 +315,13 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     await waitFor(() => expect(currentSession?.error).toBeTruthy());
     expect(currentSession.isSignedIn).toBe(false);
 
-    // The Firebase uid is unchanged, so auth emits nothing. Access still waits
-    // for the fresh profile read.
+    // The Firebase uid is unchanged, but the rejected session may be revoked.
+    // Exchange a fresh verified Privy token before restarting the profile read.
     mocks.subscribeProfile.mockImplementation(() => () => {});
     await act(async () => { expect((await currentSession.signIn()).ok).toBe(true); });
     expect(currentSession.isChecking).toBe(true);
     expect(currentSession.isSignedIn).toBe(false);
-    expect(mocks.exchangePrivy).not.toHaveBeenCalled();
+    expect(mocks.exchangePrivy).toHaveBeenCalledWith("header.payload.signature");
     expect(unsubscribe).toHaveBeenCalledOnce();
     await act(async () => {
       mocks.profileListener({ exists: () => true, data: () => ({ fullName: "Ada", role: 0 }) });
@@ -343,7 +343,7 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     expect(currentSession.isSignedIn).toBe(false);
     expect(currentSession.isBusy).toBe(false);
     expect(currentSession.error).toBeTruthy();
-    expect(mocks.exchangePrivy).not.toHaveBeenCalled();
+    expect(mocks.exchangePrivy).toHaveBeenCalledWith("header.payload.signature");
   });
 
   // Revocation already succeeded here, so the token is dead server-side. Staying

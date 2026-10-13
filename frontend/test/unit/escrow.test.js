@@ -479,6 +479,48 @@ describe("Canonical escrow wallet integration", () => {
     assert.ok(f.waits.every(request => request.confirmations === 2));
   });
 
+  for (const [step, allowance] of [["resetAllowance", 1n], ["approve", 0n], ["deposit", 2_000_000n]]) {
+    it(`preserves a sponsored ${step} hash rejected before writeContract resolves`, async () => {
+      const f = fixture({ allowance });
+      const pendingSponsoredTransaction = { id: step, transactionHash: txHash, phase: "unresolved" };
+      const provider = Object.assign(new Error("Sponsored transaction is pending"), {
+        walletOutcome: "pending", transactionHash: txHash, pendingSponsoredTransaction,
+      });
+      f.adapters.writeContract = async request => {
+        f.writes.push(request);
+        throw new Error("viem wrapped send", { cause: new Error("provider wrapper", { cause: provider }) });
+      };
+      await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "2" }), error => {
+        assert.equal(error.transactionHash, txHash);
+        assert.equal(error.walletOutcome, "pending");
+        assert.equal(error.pendingSponsoredTransaction, pendingSponsoredTransaction);
+        assert.equal(error.action, step);
+        assert.notEqual(error.transactionSettled, true);
+        return true;
+      });
+      assert.equal(f.writes.length, 1);
+      assert.equal(f.waits.length, 0);
+    });
+  }
+
+  it("marks a reverted sponsored approval as settled instead of retaining it as pending", async () => {
+    const f = fixture();
+    f.adapters.writeContract = async request => {
+      f.writes.push(request);
+      throw new Error("viem wrapped revert", { cause: Object.assign(new Error("Sponsored call reverted"), {
+        walletOutcome: "reverted", transactionHash: txHash,
+      }) });
+    };
+    await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" }), error => {
+      assert.equal(error.transactionHash, txHash);
+      assert.equal(error.transactionSettled, true);
+      assert.equal(error.terminal, true);
+      assert.equal(error.action, "approve");
+      return true;
+    });
+    assert.equal(f.writes.length, 1);
+  });
+
   for (const outcome of ["cancelled", "replaced", "reverted"]) it(`does not deposit after a ${outcome} token approval`, async () => {
     const f = fixture({ wait: async request => {
       if (outcome !== "reverted") request.onReplaced({ reason: outcome });

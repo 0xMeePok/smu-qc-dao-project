@@ -86,6 +86,21 @@ describe("confirmed escrow funding event reconciliation", () => {
     assert.equal(event.counterparty, researcher);
   });
 
+  it("reports Released and Refunded only when that exact receipt records the state transition", async () => {
+    const release = [log("StateChanged", { previousState: 6, newState: 2 }, 0),
+      anchor(8, digest("uint256,bytes32,uint256,uint256", [1n, evidenceHash, 50000001n, 50000n]), 1),
+      log("TrancheReleased", { index: 1n, evidenceHash, grossAmount: 50000001n, fee: 50000n, netAmount: 49950001n }, 2)];
+    const [paid] = await reconcileFundingReceipt(fixture(release));
+    assert.equal(paid.stateBefore, "Active"); assert.equal(paid.stateAfter, "Released");
+    const claimed = [log("StateChanged", { previousState: 5, newState: 3 }, 0),
+      anchor(10, digest("address,uint256", [actor, 7000000n]), 1),
+      log("RefundClaimed", { depositor: actor, amount: 7000000n, cumulativeRefunded: 7000000n }, 2)];
+    const [refund] = await reconcileFundingReceipt(fixture(claimed));
+    assert.equal(refund.stateAfter, "Refunded");
+    const partial = await reconcileFundingReceipt(fixture(claimed.slice(1)));
+    assert.equal(partial[0].stateAfter, null, "a partial claim must not imply every contributor was refunded");
+  });
+
   it("pairs delivery evidence and the funding-weighted vote for that evidence", async () => {
     const rows = [anchor(7, digest("uint256,bytes32", [1n, evidenceHash]), 0, { actor: researcher }),
       log("MilestoneSubmitted", { index: 1n, evidenceHash }, 1),
@@ -102,7 +117,23 @@ describe("confirmed escrow funding event reconciliation", () => {
     const events = await reconcileFundingReceipt(fixture(rows));
     assert.deepEqual(events.map(event => event.type), ["Cancelled", "SelectionInvalidated", "Voided", "RefundClaimed"]);
     assert.equal(events.at(-1).amountBaseUnits, "7000000"); assert.equal(events.at(-1).counterparty, actor);
+    assert.equal(events[0].reasonHash, reasonHash); assert.equal(events[1].refundReason, "selection_declined");
+    assert.equal(events[2].refundReason, "escrow_voided");
   });
+
+  for (const [deposited, refundReason] of [[70n, "funding_target_not_met"], [100n, "no_proposal_selected"]]) {
+    it(`records the confirmed ${refundReason} expiry trigger and exact fee-free pool`, async () => {
+      const rows = [log("StateChanged", { previousState: 0, newState: 5 }, 0),
+        log("RefundsOpened", { pool: deposited, availableAt: timestamp }, 1),
+        anchor(6, digest("uint256,uint256,uint256", [1n, timestamp, deposited]), 2)];
+      const f = fixture(rows, { state: { totalDeposited: deposited } });
+      f.expected = { ...f.expected, fundingTerms: { ...f.expected.fundingTerms, target: 100n } };
+      const [event] = await reconcileFundingReceipt(f);
+      assert.equal(event.refundReason, refundReason); assert.equal(event.refundPoolBaseUnits, deposited.toString());
+      assert.equal(event.refundAvailableAt, timestamp.toString()); assert.equal(event.deadlineAt, timestamp.toString());
+      assert(f.reads.every(read => read.blockNumber === 100n));
+    });
+  }
 
   for (const previousState of [0, 1, 6]) it(`reconstructs expiry from the correct deadline for prior state ${previousState}`, async () => {
     const deadline = previousState === 6 ? timestamp - 1n : timestamp;
@@ -112,7 +143,9 @@ describe("confirmed escrow funding event reconciliation", () => {
     const f = fixture(rows);
     if (previousState === 1) f.config = { ...f.config, abi: f.config.abi.filter(item => item.name !== "pendingProposalForPosting"),
       escrow: { ...f.config.escrow, escrowAbi: f.config.escrow.escrowAbi.filter(item => item.name !== "rejectSelection") } };
-    assert.equal((await reconcileFundingReceipt(f))[0].type, "Expired");
+    const [event] = await reconcileFundingReceipt(f);
+    assert.equal(event.type, "Expired");
+    assert.equal(event.refundReason, previousState === 6 ? "completion_approval_timeout" : previousState === 1 ? "selection_approval_timeout" : "posting_expired");
   });
 
   for (const kind of ["main", "grant"]) it(`reconstructs a current ${kind} locked selection expiry from its seven-day approval deadline`, async () => {

@@ -11,7 +11,7 @@ import {
   verifyOpportunityAudit,
   waitForAuditReceipt,
 } from "./auditRegistry.js";
-import { auditErrorMessage } from "./errors.js";
+import { auditErrorMessage, walletOutcomeError } from "./errors.js";
 import { assertActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
 const AUDIT_STATUSES = new Set(["queued", "submitted", "pending", "confirmed", "failed"]);
@@ -217,7 +217,7 @@ export function createOpportunityAuditFlow({
           adapters,
           maxRetries: maxReceiptRetries,
         });
-        if (chainReceipt?.status !== "success") throw new Error("AuditRegistry transaction reverted.");
+        if (chainReceipt?.status !== "success") throw Object.assign(new Error("AuditRegistry transaction reverted."), { transactionSettled: true });
         const verification = await verifyAudit(setup.prepared, {
           address: setup.address,
           registryConfig,
@@ -230,8 +230,8 @@ export function createOpportunityAuditFlow({
         return current;
       } catch (error) {
         await persist({
-          status: "failed",
-          ...(error.code === "AUDIT_TRANSACTION_CANCELLED" ? { transactionHash: "", blockNumber: 0 } : {}),
+          status: walletOutcomeError(error)?.walletOutcome === "pending" ? "pending" : "failed",
+          ...(error.code === "AUDIT_TRANSACTION_CANCELLED" || error.transactionSettled ? { transactionHash: "", blockNumber: 0 } : {}),
           lastError: auditErrorMessage(error),
         });
         throw error;
@@ -268,8 +268,8 @@ export function createOpportunityAuditFlow({
       return current;
     } catch (error) {
       await persist({
-        status: "failed",
-        transactionHash: error.code === "AUDIT_TRANSACTION_CANCELLED"
+        status: walletOutcomeError(error)?.walletOutcome === "pending" ? "pending" : "failed",
+        transactionHash: error.code === "AUDIT_TRANSACTION_CANCELLED" || error.transactionSettled
           ? "" : error.transactionHash ?? current.transactionHash,
         lastError: auditErrorMessage(error),
       });

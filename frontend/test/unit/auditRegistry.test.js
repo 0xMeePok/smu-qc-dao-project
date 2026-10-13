@@ -48,6 +48,32 @@ function unused() {
   throw new Error("Unexpected adapter call");
 }
 
+for (const knownHash of [true, false]) it(`retains a sponsored pending publication ${knownHash ? "hash" : "operation without a hash"} through a nested wallet failure`, async () => {
+  const prepared = prepareOpportunityCommit({ recordId: "posting-pending", payload: OPPORTUNITY_PAYLOAD,
+    kind: 0, expiresAt: 1_796_083_200 });
+  const pendingSponsoredTransaction = { id: "pending-publication", phase: "unresolved" };
+  const provider = Object.assign(new Error("Transaction sent; confirmation unavailable"), {
+    walletOutcome: "pending", pendingSponsoredTransaction,
+    ...(knownHash ? { transactionHash: TX_HASH } : {}),
+  });
+  const statuses = [];
+  let writes = 0;
+  await assert.rejects(commitOpportunityAudit(prepared, { account: ACCOUNT,
+    adapters: { writeContract: async () => { writes++; throw new Error("viem wrapped", { cause: provider }); },
+      readContract: unused, waitForTransactionReceipt: unused },
+    onStatus: entry => statuses.push(entry),
+  }), error => {
+    assert.equal(error.walletOutcome, "pending");
+    assert.equal(error.transactionHash, knownHash ? TX_HASH : undefined);
+    assert.equal(error.pendingSponsoredTransaction, pendingSponsoredTransaction);
+    return true;
+  });
+  assert.equal(writes, 1);
+  assert.deepEqual(statuses.map(entry => entry.status), ["queued", "pending"]);
+  assert.equal(statuses.at(-1).transactionHash, knownHash ? TX_HASH : undefined);
+  assert.equal(statuses.at(-1).classification.category, "pending");
+});
+
 describe("AuditRegistry canonical hash scheme", () => {
   it("uses the existing fixed-hash AuditRegistry write signatures", () => {
     const writes = AUDIT_REGISTRY_ABI.filter((entry) =>

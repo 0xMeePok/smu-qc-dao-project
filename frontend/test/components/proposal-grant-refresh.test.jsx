@@ -56,7 +56,9 @@ beforeEach(() => {
   mocks.sync.mockReset().mockResolvedValue({});
   mocks.escrow.mockReset().mockImplementation(async () => escrow());
   mocks.history.mockReset().mockImplementation(async () => ({ events: accepted ? [{
-    id: "grant-deposit", type: "escrow_Deposited", amountBaseUnits: "50000000000", tokenDecimals: 6, tokenSymbol: "USDC", transactionHash: hash,
+    id: "grant-deposit", type: "Deposit", eventType: "Deposit", verified: true,
+    blockNumber: 100, timestamp: 1900000000, logIndex: 1,
+    amountBaseUnits: "50000000000", tokenDecimals: 6, tokenSymbol: "USDC", transactionHash: hash,
   }] : [] }));
 });
 afterEach(cleanup);
@@ -78,7 +80,7 @@ it.each([false, true])("refreshes the adjacent canonical escrow and funding audi
   await screen.findByText("50000 USDC / 50000 USDC");
   expect(screen.queryByText("Waiting for grant funding")).toBeNull();
   expect(screen.getByText("Upfront payment pending")).toBeTruthy();
-  await screen.findByRole("row", { name: /Deposited.*50000 USDC/ });
+  await screen.findByRole("row", { name: /Deposit.*50000 USDC/ });
   expect(mocks.escrow).toHaveBeenCalledTimes(2);
   expect(mocks.history).toHaveBeenCalledTimes(2);
   expect(mocks.history).toHaveBeenLastCalledWith({ proposalId: proposal.id });

@@ -139,7 +139,7 @@ export function SessionProvider({ children }) {
         // The Firebase session is already this wallet. Signing in again must
         // still replace a failed profile listener: Firebase may not emit an
         // auth-state event when the uid is unchanged.
-        if (local === before.verifiedAddress) {
+        if (local === before.verifiedAddress && before.status === "signed-in") {
           markActivity({ force: true });
           setError(null);
           setStatus("checking");
@@ -157,6 +157,10 @@ export function SessionProvider({ children }) {
         markActivity({ force: true });
         setStatus("checking");
         setVerifiedAddress(address);
+        // A rejected profile read can mean this Firebase session was revoked.
+        // Re-exchange Privy's verified token even when the wallet is unchanged,
+        // and restart the listener if Firebase emits no same-uid auth event.
+        if (address === before.verifiedAddress) setProfileLookupVersion(version => version + 1);
         return { ok: true };
       } catch (caught) {
         // Lockstep: a sign-in that did not finish must not leave behind a Privy

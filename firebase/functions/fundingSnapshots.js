@@ -1,4 +1,5 @@
 import { signalFundingChange } from "./activitySignals.js";
+import { confirmedRefundMetadata } from "./escrowRefundMetadata.js";
 
 /** Server-only dashboard projections. A slow older request must never replace
  * a newer confirmed snapshot. These records never authorize a transaction. */
@@ -25,6 +26,11 @@ export async function saveFundingSnapshot({ db, collection, id, snapshot }) {
   return db.runTransaction(async tx => {
     const old = await tx.get(ref);
     if (old.exists && Number(old.data().blockNumber) > snapshot.blockNumber) return false;
+    if (collection === "escrowFundingSummaries") {
+      // Fresh balance reads may intentionally leave the reason absent/null;
+      // preserve the prior anchor when the canonical identity still matches.
+      snapshot = { ...snapshot, ...confirmedRefundMetadata(snapshot, old.data()), ...confirmedRefundMetadata(snapshot, snapshot) };
+    }
     tx.set(ref, snapshot);
     if (["escrowFundingSummaries", "openFundingSummaries", OPEN_FUNDING_SELECTIONS].includes(collection)) {
       signalFundingChange(tx, db, old.data(), snapshot);

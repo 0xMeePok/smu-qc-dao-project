@@ -7,6 +7,8 @@ import { formatInstant } from "../lib/datetime.js";
 import { PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
 import { isModerated } from "../lib/moderation.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { FundingProgress } from "./FundingProgress.jsx";
+import { EscrowLifecycleBadge } from "./EscrowLifecycle.jsx";
 import { recommendationCounts, workflowStatusLabel, INDEPENDENT_FUNDING_STATE as I } from "../config/workflowStatus.js";
 import { independentFundingLocked, independentFundingStatus } from "../lib/independentEscrow.js";
 import {
@@ -100,6 +102,7 @@ export function ProposalTracker({ onNavigate }) {
           </small>
           {item.grantUnavailable && <small className="table-row-meta">Grant offer status is temporarily unavailable.</small>}
           {item.escrowUnavailable && <small className="table-row-meta">Escrow status is temporarily unavailable.</small>}
+          {item.escrow && <><FundingProgress summary={item.escrow} compact /><EscrowLifecycleBadge summary={item.escrow} compact /></>}
         </div>
         <div className="table-row-actions">
           {isModerated(item) || item.status === "moderated_removed" || item.status === "moderated_hidden" ? (

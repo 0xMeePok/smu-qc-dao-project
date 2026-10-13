@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { escrowEventLabel, escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
 import { shortenAddress } from "../lib/chain.js";
+import { FundingContributors } from "./FundingProgress.jsx";
+import { EscrowLifecycleTimeline } from "./EscrowLifecycle.jsx";
+import { confirmedFundingEvents } from "../lib/fundingDisplay.js";
 
 function ParticipantAddress({ address }) {
   if (!/^0x[0-9a-f]{40}$/i.test(address || "")) return address || "—";
@@ -9,7 +12,7 @@ function ParticipantAddress({ address }) {
 
 export function EscrowFundingHistory({ data, error, busy, onSync }) {
   const [filter, setFilter] = useState("all");
-  const events = data?.events ?? [];
+  const events = confirmedFundingEvents(data?.events ?? []);
   const types = [...new Set(events.map(event => event.type))];
   const visible = events.filter(event => filter === "all" || event.type === filter);
   const summary = data?.summary;
@@ -20,6 +23,8 @@ export function EscrowFundingHistory({ data, error, busy, onSync }) {
       <p className="field-hint">Confirmed escrow activity checked against the audit registry.</p></div>
       <button type="button" className="secondary small" disabled={busy} onClick={onSync}>{busy ? "Checking…" : "Reconcile funding records"}</button></div>
     {error && <p className="error-banner" role="alert">{error}</p>}
+    {summary && <FundingContributors summary={summary} stale={Boolean(error)} />}
+    {data && <EscrowLifecycleTimeline summary={summary} events={data.lifecycle?.events ?? events} stale={Boolean(error)} />}
     {reconciliation && <p role="status">{reconciled ? "Escrow events match the audit registry." : reconciliation.message || "Funding records are still being checked against the audit registry."}</p>}
     {events.length > 0 && <label className="field-hint">Event type <select aria-label="Filter funding events" value={filter} onChange={event => setFilter(event.target.value)}>
       <option value="all">All funding events</option>{types.map(type => <option key={type} value={type}>{escrowEventLabel(type)}</option>)}

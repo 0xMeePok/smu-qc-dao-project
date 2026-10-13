@@ -55,6 +55,29 @@ beforeEach(() => {
 });
 
 describe("QCDAO-79 posting audit recovery", () => {
+  it.each([false, true])("keeps an unresolved sponsored publication pending (known hash=%s)", async (knownHash) => {
+    const pending = Object.assign(new Error("This transaction may already have been sent."), {
+      walletOutcome: "pending", ...(knownHash ? { transactionHash: TX } : {}),
+    });
+    const changes = [];
+    const writeContract = vi.fn(async () => { throw pending; });
+    await expect(anchorPostingAudit(posting(), {
+      account: ACCOUNT, persistReceipt: false, onChange: audit => changes.push(audit),
+      adapters: { writeContract, readContract: configuredReads(), waitForTransactionReceipt: vi.fn() },
+    })).rejects.toMatchObject({ walletOutcome: "pending", ...(knownHash ? { transactionHash: TX } : {}) });
+    expect(changes.at(-1).status).toBe("pending");
+    expect(changes.at(-1).transactionHash || "").toBe(knownHash ? TX : "");
+    expect(writeContract).toHaveBeenCalledOnce();
+  });
+  it("clears a confirmed reverted publication so a retry is not tied to its failed receipt", async () => {
+    const changes = [];
+    await expect(anchorPostingAudit(posting({ ...queuedAudit(), status: "pending", transactionHash: TX }), {
+      account: ACCOUNT, persistReceipt: false, onChange: audit => changes.push(audit),
+      adapters: { getTransaction, writeContract: vi.fn(), readContract: configuredReads(),
+        waitForTransactionReceipt: async () => ({ status: "reverted", blockNumber: 101n }) },
+    })).rejects.toThrow("reverted");
+    expect(changes.at(-1)).toMatchObject({ status: "failed", transactionHash: "", blockNumber: 0 });
+  });
   it.each([false, true])("clears a cancelled transaction so a fresh submission can be signed (resume=%s)", async (resume) => {
     const writeContract = vi.fn(async () => TX);
     const cancelled = Object.assign(new Error("Cancelled"), { code: "AUDIT_TRANSACTION_CANCELLED", transactionHash: TX });

@@ -64,6 +64,7 @@ export function normaliseOpportunityMetrics(value = {}) {
   const fundingProgressPercent = Number(value.fundingProgressPercent);
   return {
     proposalCount: Number.isInteger(proposalCount) && proposalCount >= 0 ? proposalCount : 0,
+    ...(value.escrowFunding?.source === "confirmed-escrow-snapshots" ? { escrowFunding: value.escrowFunding } : {}),
     fundedAmount: Number.isFinite(fundedAmount) && fundedAmount >= 0 ? fundedAmount : 0,
     fundingProgressPercent: Number.isFinite(fundingProgressPercent)
       ? Math.max(0, Math.min(100, fundingProgressPercent))
@@ -81,7 +82,7 @@ function opportunityMetricsFromSnapshot(snapshot, fallback = {}) {
   // Historical totals can contain client-authored funding. Do not display that
   // amount while the bounded server migration replaces the projection.
   return normaliseOpportunityMetrics(data.version === 2 ? data
-    : { proposalCount: data.proposalCount, fundedAmount: 0, fundingProgressPercent: 0 });
+    : { proposalCount: data.proposalCount, fundedAmount: 0, fundingProgressPercent: 0, escrowFunding: data.escrowFunding });
 }
 
 function postingFromSnapshot(snapshot, metrics) {

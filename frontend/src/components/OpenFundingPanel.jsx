@@ -1,13 +1,14 @@
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
+import { erc20Abi } from "viem";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useSignIn } from "../context/SessionContext.jsx";
 import { useWallet } from "../context/WalletContext.jsx";
 import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { getOpenFundingSummary, openFundingSupported, syncOpenFunding, writeOpenFundingAction } from "../lib/openFunding.js";
-import { confirmEscrowTransaction, escrowErrorMessage } from "../lib/escrow.js";
+import { confirmEscrowTransaction, createWalletEscrowAdapters, escrowErrorMessage } from "../lib/escrow.js";
 import { escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
 import { Field } from "./Field.jsx";
@@ -140,11 +141,15 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
   const act = async (action, selectedProposalId) => {
     if (actionBusy.current || pending || !walletReady || (integrityBlocked && !["withdraw", "void"].includes(action))) return;
     actionBusy.current = true; setBusy(true); setError(""); setNotice("");
+    let walletStep;
+    const pendingRecord = (transactionHash, step) => ({ transactionHash, action: step, proposalId: selectedProposalId,
+      ...(["approve", "resetAllowance"].includes(step) ? { tokenAddress: data.tokenAddress, poolAddress: data.poolAddress } : {}) });
     try {
       const result = await writeOpenFundingAction({ problemId, proposalId: selectedProposalId, account: address,
         action, amount: action === "withdraw" ? withdrawalAmount : amount, decimals: data.tokenDecimals, tokenAddress: data.tokenAddress,
         onProgress: progress => {
-          if (progress.status === "pending") remember({ transactionHash: progress.transactionHash, action: progress.action, proposalId: selectedProposalId });
+          if (progress.action) walletStep = progress.action;
+          if (progress.status === "pending") remember(pendingRecord(progress.transactionHash, walletStep || action));
           if (progress.status === "confirmed") remember(null);
         } });
       remember({ transactionHash: result.transactionHash, action, proposalId: selectedProposalId });
@@ -155,6 +160,7 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
       if (currentPanel()) { setAmount(""); setWithdrawalAmount(""); setNotice(action === "select" ? "Offer recorded. The researcher has seven days to accept." : action === "accept" ? "Grant accepted. The requested funds are now in proposal escrow." : action === "withdraw" ? "Withdrawal confirmed. Unreserved funds have returned to your wallet." : "Grant pool updated."); }
     } catch (err) {
       if (err.terminal || err.transactionSettled) remember(null);
+      else if (/^0x[0-9a-f]{64}$/i.test(err.transactionHash ?? "")) remember(pendingRecord(err.transactionHash, walletStep || err.action || action));
       if (currentPanel()) setError(escrowErrorMessage(err));
     } finally { actionBusy.current = false; if (alive.current) setBusy(false); }
   };
@@ -163,6 +169,24 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
     actionBusy.current = true; setBusy(true); setError("");
     try {
       const result = await confirmEscrowTransaction(pending.transactionHash, { confirmations: 2 });
+      if (["approve", "resetAllowance"].includes(pending.action)) {
+        const next = await getOpenFundingSummary({ problemId, proposalId: pending.proposalId });
+        if (!next?.supported || next.chainId !== AUDIT_REGISTRY_CONFIG.chainId
+            || !/^0x[0-9a-f]{40}$/i.test(next.poolAddress ?? "") || !/^0x[0-9a-f]{40}$/i.test(next.tokenAddress ?? "")
+            || (pending.poolAddress && !same(pending.poolAddress, next.poolAddress))
+            || (pending.tokenAddress && !same(pending.tokenAddress, next.tokenAddress))) {
+          throw new Error("The approved token or grant pool changed. Refresh before continuing.");
+        }
+        const allowance = BigInt(await createWalletEscrowAdapters().readContract({ address: next.tokenAddress, abi: erc20Abi,
+          functionName: "allowance", args: [user.id, next.poolAddress], chainId: AUDIT_REGISTRY_CONFIG.chainId }));
+        if (allowance < 0n) throw new Error("The token allowance could not be verified. Check this transaction again.");
+        await applySynced(next);
+        remember(null);
+        if (currentPanel()) setNotice(allowance === 0n
+          ? "Token allowance reset confirmed. No funds were deposited. Review the amount and deposit funds when ready."
+          : "Token approval confirmed. No funds were deposited. Review the amount and deposit funds when ready.");
+        return;
+      }
       void queryClient?.invalidateQueries({ queryKey: ACTION_ITEMS_KEY });
       try { const next = await syncOpenFunding({ problemId, proposalId: pending.proposalId, transactionHash: result.transactionHash }); invalidateFundingDashboardSummaries(queryClient); await applySynced(next); }
       finally { if (currentPanel()) onChange?.({ proposalId: pending.proposalId, action: pending.action, transactionHash: result.transactionHash }); }

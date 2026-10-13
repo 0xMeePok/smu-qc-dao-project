@@ -5,7 +5,7 @@ import { listActionItems, listMyProposals } from "../proposalQueues.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { seedDashboardSnapshots } from "./fixtures/dashboardSnapshots.js";
 import { getFunderDashboard } from "../funderDashboard.js";
-import { FUNDING_EVENTS } from "../escrowFunding.js";
+import { FUNDING_EVENTS, FUNDING_SUMMARIES, deploymentKey, readVerifiedFunding, loadFundingContext } from "../escrowFunding.js";
 import { openFundingFixture, owner, researcher, otherResearcher } from "./fixtures/openFundingFixture.js";
 
 const nowFor = f => Timestamp.fromMillis(Number(f.state.timestamp) * 1000);
@@ -94,6 +94,24 @@ function mainFixture() {
 }
 
 describe("canonical main escrow action counts", () => {
+  it("joins a prior confirmed admin cancellation explanation without replacing fresh queue accounting", async () => {
+    const f = mainFixture(); f.queueState.escrowState = 7;
+    const proposalId = f.proposals[0].id, context = await loadFundingContext({ ...f, uid: researcher, proposalId });
+    const verified = await readVerifiedFunding({ ...f, ...context, blockNumber: 100n });
+    const saved = { ...verified.summary, snapshotVerified: true, blockNumber: 99, refundsEnabled: true,
+      refundReason: "admin_cancelled", refundTransactionHash: `0x${"a".repeat(64)}`, refundReasonHash: `0x${"b".repeat(64)}`,
+      totalRefunded: "999" };
+    f.db.records.set(`${FUNDING_SUMMARIES}/${deploymentKey(f.config)}_${proposalId}`, saved);
+    f.calls.length = 0;
+    const queue = await listMyProposals({ ...f, uid: researcher });
+    assert.equal(queue.items[0].escrow.refundReason, "admin_cancelled");
+    assert.equal(queue.items[0].escrow.totalRefunded, verified.summary.totalRefunded);
+    assert.equal(queue.items[0].escrow.blockNumber, 100);
+    assert.equal(f.calls.filter(call => call.functionName === "expiresAt" && call.address === f.addresses[0]).length, 1);
+    f.db.records.set(`${FUNDING_SUMMARIES}/${deploymentKey(f.config)}_${proposalId}`, { ...saved, escrowAddress: `0x${"9".repeat(40)}` });
+    assert.equal((await listMyProposals({ ...f, uid: researcher })).items[0].escrow.refundReason, undefined);
+  });
+
   it("projects the complete main escrow lifecycle without rewriting a submitted proposal", async () => {
     const f = mainFixture();
     const states = [[0, "Open", "submitted"], [1, "Locked", "pending_approval"], [6, "Active", "accepted"],

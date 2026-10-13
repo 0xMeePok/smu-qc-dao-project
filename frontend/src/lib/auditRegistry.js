@@ -95,6 +95,21 @@ function onAuditChain({ chainId, ...request } = {}) {
   return request;
 }
 
+/** viem wraps provider failures; keep a submitted sponsored operation recoverable. */
+export function normalizeWalletWriteError(error) {
+  const outcome = walletOutcomeError(error);
+  if (!outcome) return error;
+  const normalized = new Error(outcome.message, { cause: error });
+  for (const field of ["walletOutcome", "transactionHash", "pendingSponsoredTransaction", "outcome", "terminal", "transactionSettled"]) {
+    if (outcome[field] !== undefined) normalized[field] = outcome[field];
+  }
+  if (outcome.walletOutcome === "reverted") {
+    normalized.terminal = true;
+    normalized.transactionSettled = true;
+  }
+  return normalized;
+}
+
 /**
  * Reads go through the browser's failover RPC client; writes are signed by the
  * member's Privy embedded wallet. Both are injectable so tests drive the real
@@ -151,7 +166,11 @@ export function createWalletAuditAdapters({ publicClient = browserPublicClient, 
       // Keep UI callbacks outside the contract request so they never reach the
       // wallet RPC. Preparation is complete only at this boundary.
       onWalletRequest?.();
-      return wallet.writeContract({ ...call, ...feeCaps, chain: arbitrumSepolia });
+      try {
+        return await wallet.writeContract({ ...call, ...feeCaps, chain: arbitrumSepolia });
+      } catch (error) {
+        throw normalizeWalletWriteError(error);
+      }
     },
     waitForTransactionReceipt: async (request) => publicClient.waitForTransactionReceipt(onAuditChain(request)),
     readContract: async (request) => publicClient.readContract(onAuditChain(request)),
@@ -324,8 +343,12 @@ export async function executePreparedAudit(preparedAudit, {
       chainId: AUDIT_REGISTRY_CHAIN_ID,
     });
   } catch (error) {
-    await status(onStatus, "failed", { error, classification: classifyAuditError(error) });
-    throw error;
+    const normalized = normalizeWalletWriteError(error);
+    await status(onStatus, normalized.walletOutcome === "pending" ? "pending" : "failed", {
+      error: normalized, classification: classifyAuditError(normalized),
+      ...(normalized.transactionHash ? { transactionHash: normalized.transactionHash } : {}),
+    });
+    throw normalized;
   }
 
   await status(onStatus, "submitted", { transactionHash });

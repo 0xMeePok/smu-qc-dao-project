@@ -20,6 +20,8 @@ import { canApproachIndependentListing } from "../lib/independentFunding.js";
 import { isIndependentProposal } from "../config/proposal.js";
 import { escrowCustodyLock } from "../../../firebase/functions/escrowCustody.js";
 import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
+import { FundingProgress } from "./FundingProgress.jsx";
+import { EscrowLifecycleBadge } from "./EscrowLifecycle.jsx";
 
 const STATE_LABELS = ["Open for funding", "Awaiting upfront approval", "Fully paid", "Refunded", "Cancelled", "Expired", "Delivery in progress", "Voided"];
 const explorer = (type, value) => `https://sepolia.arbiscan.io/${type}/${value}`;
@@ -80,9 +82,12 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       {state.blockedBySelection && !state.isGrant && <p className="field-hint">Funding and selection are paused while another proposal awaits both owners’ approval. If that selection is rejected or expires, eligible proposals reopen. Once the selected proposal’s upfront payment is processed, other proposals close and their contributions become refundable.</p>}
       <p><strong>{grantWaiting ? "Waiting for grant funding" : state.isGrant && state.state === 1 && state.ownerApproved && state.solutionApproved
         ? "Upfront payment pending" : STATE_LABELS[state.state] ?? "Unknown state"}</strong> · <a href={explorer("address", state.address)} target="_blank" rel="noreferrer">View escrow contract</a></p>
+      <EscrowLifecycleBadge summary={state} stale={Boolean(error)} />
+      <FundingProgress summary={state} stale={Boolean(error)} />
       <dl className="settings-group">
         <div className="settings-row"><dt>Funded / target</dt><dd>{money(state.totalDeposited)} / {money(state.fundingTarget)}</dd></div>
         <div className="settings-row"><dt>Released before fees</dt><dd>{money(state.totalReleased)}</dd></div>
+        <div className="settings-row"><dt>Refunded to contributors</dt><dd>{money(state.totalRefunded)}</dd></div>
         <div className="settings-row"><dt>Held for unpaid work</dt><dd>{money(state.outstandingBalance)}</dd></div>
         <div className="settings-row"><dt>Your contribution</dt><dd>{money(state.wallet.contribution)}</dd></div>
         <div className="settings-row"><dt>Your available refund</dt><dd>{money(state.wallet.depositor?.claimable)}</dd></div>

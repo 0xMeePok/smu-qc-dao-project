@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import { DashboardAttention, DashboardCount } from "./DashboardAttention.jsx";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { FundingApproachList } from "./FundingApproachList.jsx";
+import { FundingProgress } from "./FundingProgress.jsx";
+import { EscrowLifecycleBadge, EscrowMoneySummary } from "./EscrowLifecycle.jsx";
+import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
 import { FundingApproachReceiptPane } from "./FundingApproachReceiptPane.jsx";
 import { useActionItems } from "../lib/actionItems.js";
 import { fundingApproachError, listFundingApproaches } from "../lib/fundingApproach.js";
@@ -73,6 +76,8 @@ function RowShell({ row, onNavigate, children, meta }) {
           Submitted {formatInstant(row.createdAt)} · {discussionCountLabel(row)}
         </small>
         {meta}
+        {row.escrow && <><FundingProgress summary={row.escrow} compact /><EscrowLifecycleBadge summary={row.escrow} compact /><EscrowMoneySummary summary={row.escrow} compact /><EscrowCustodyNotice summary={row.escrow} compact /></>}
+        {row.escrowUnavailable && <p className="field-hint">Escrow progress and status need verification. Open funding to check current custody.</p>}
       </div>
       <div className="table-row-actions">
         {children}

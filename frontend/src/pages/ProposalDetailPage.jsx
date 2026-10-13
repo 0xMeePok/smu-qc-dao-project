@@ -2,6 +2,7 @@ import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
 import { EscrowFundingPanel } from "../components/EscrowFundingPanel.jsx";
+import { AdminEscrowCancellation } from "../components/AdminEscrowCancellation.jsx";
 import { IndependentFundingPanel } from "../components/IndependentFundingPanel.jsx";
 import { IndependentFundingTerms } from "../components/IndependentFundingTerms.jsx";
 import { getIndependentFundingState, independentFundingLocked } from "../lib/independentEscrow.js";
@@ -339,6 +340,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
+        {!independent && proposal.fundingTerms && openedTabs.has("funding") && <AdminEscrowCancellation key={`${proposal.id}:${user?.id}`} proposalId={proposal.id} onConfirmed={() => { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); }} />}
         {isOpenFunding && <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate}
           onChange={(change) => { if (activeProposalId.current === change.proposalId) { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); } }} />}
         {independent ? <IndependentFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal}

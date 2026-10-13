@@ -14,6 +14,8 @@ import { IndependentFundingPanel } from "./IndependentFundingPanel.jsx";
 import { independentFundingAmount, independentFundingStatus } from "../lib/independentEscrow.js";
 import { Modal } from "./Modal.jsx";
 import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
+import { FundingProgress } from "./FundingProgress.jsx";
+import { EscrowLifecycleBadge } from "./EscrowLifecycle.jsx";
 
 const money = (item, key) => escrowFundingAmount(item[key], item.tokenDecimals, item.tokenSymbol);
 
@@ -109,6 +111,8 @@ export function FunderDashboard({ onNavigate }) {
         <div><strong>{item.title}</strong><small className="table-row-meta">{item.postingTitle} · {stateLabel(item.state)}</small>
           <small className="table-row-meta">Committed {money(item, "committed")} · Held {money(item, "locked")} · Released {money(item, "released")} · Refunded {money(item, "refunded")}</small>
           {item.fundingTarget != null && <small className="table-row-meta">Pooled progress: {money(item, "totalDeposited")} / {money(item, "fundingTarget")}</small>}
+          <FundingProgress summary={item.summary ?? item} compact stale={Boolean(error) || item.stale} label={`Confirmed funding progress for ${item.title}`} />
+          <EscrowLifecycleBadge summary={item.summary ?? item} stale={Boolean(error) || item.stale} />
           <EscrowCustodyNotice summary={item.summary ?? item} compact stale={dashboard.isFetching || Boolean(error) || item.stale} />
           {item.escrowAddress && <a href={escrowExplorer("address", item.escrowAddress)} target="_blank" rel="noreferrer">Escrow contract</a>}
         </div>{links(item)}

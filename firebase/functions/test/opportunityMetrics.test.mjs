@@ -6,8 +6,19 @@ import {
   opportunityMetricsFrom,
   affectsMetrics,
   syncMetricContribution,
+  refreshOpportunityMetrics,
 } from "../opportunityMetrics.js";
 import { memoryDb } from "./memoryDb.mjs";
+
+it("preserves confirmed escrow card progress while legacy metric triggers update counts", async () => {
+  const escrowFunding = { source: "confirmed-escrow-snapshots", available: true, groups: [{ totalDeposited: "50", fundingTarget: "100" }] };
+  const db = memoryDb({ "problems/p": { amount: 1000 }, "proposals/live": { status: "submitted", problemId: "p" },
+    "opportunityMetrics/p": { escrowFunding } });
+  await syncMetricContribution({ db, collectionName: "proposals", recordId: "live", updatedAt: 1 });
+  await refreshOpportunityMetrics({ db, problemId: "p", updatedAt: 2 });
+  assert.deepEqual(db.records.get("opportunityMetrics/p").escrowFunding, escrowFunding);
+  assert.equal(db.records.get("opportunityMetrics/p").proposalCount, 1);
+});
 
 describe("opportunity marketplace metrics", () => {
   it("counts submitted proposal records but not drafts or withdrawals", () => {

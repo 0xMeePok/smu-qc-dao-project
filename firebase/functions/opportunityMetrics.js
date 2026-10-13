@@ -96,7 +96,7 @@ export async function syncMetricContribution({ db, collectionName, recordId, upd
       tx.set(metricsRef, projection(id, {
         proposalCount: (counts.proposalCount || 0) - (previous.proposalCount || 0) + (next.proposalCount || 0),
         fundedAmount: (counts.fundedAmount || 0) - (previous.fundedAmount || 0) + (next.fundedAmount || 0),
-      }, problem.data().amount, updatedAt));
+      }, problem.data().amount, updatedAt), { merge: true });
     }
     if (after) tx.set(contributionRef, after); else tx.delete(contributionRef);
   });
@@ -111,7 +111,7 @@ export async function refreshOpportunityMetrics({ db, problemId, updatedAt }) {
     ]);
     if (!problem.exists) { tx.delete(ref); return null; }
     const result = projection(problemId, metrics.data()?.version === 2 ? metrics.data() : {}, problem.data().amount, updatedAt);
-    tx.set(ref, result);
+    tx.set(ref, result, { merge: true });
     return result;
   });
 }

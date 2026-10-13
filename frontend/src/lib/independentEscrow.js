@@ -4,6 +4,7 @@ import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { auditErrorMessage, isRpcQuotaExceeded, isRpcUnreachable } from "./errors.js";
+import { normalizeWalletWriteError } from "./auditRegistry.js";
 import independentConfig from "../config/independentFunding.contract.json" with { type: "json" };
 import { INDEPENDENT_FUNDING_LABELS, INDEPENDENT_FUNDING_STATE as S } from "../config/workflowStatus.js";
 
@@ -96,15 +97,21 @@ export async function writeIndependentFundingAction({ proposalId, action, accoun
   if (!spec || !Array.isArray(prepared.args) || spec.inputs.length !== prepared.args.length) throw new Error("The funding transaction could not be prepared. Refresh and retry.");
   const send = async (request, step) => {
     onChange?.({ status: "preparing", action: step });
-    const transactionHash = await adapters.writeContract({ ...request, account, chainId: prepared.chainId }, {
-      onWalletRequest: () => onChange?.({ status: "awaiting_signature", action: step }),
-    });
-    onChange?.({ status: "pending", action: step, transactionHash });
+    let transactionHash;
     try {
+      transactionHash = await adapters.writeContract({ ...request, account, chainId: prepared.chainId }, {
+        onWalletRequest: () => onChange?.({ status: "awaiting_signature", action: step }),
+      });
+      onChange?.({ status: "pending", action: step, transactionHash });
       const confirmed = await confirmEscrowTransaction(transactionHash, { adapters });
       onChange?.({ status: "confirmed", action: step, transactionHash });
       return confirmed;
-    } catch (error) { error.action = step; throw error; }
+    } catch (cause) {
+      const error = normalizeWalletWriteError(cause);
+      if (!error.transactionHash && transactionHash) error.transactionHash = transactionHash;
+      error.action = step;
+      throw error;
+    }
   };
   if (action === "deposit") {
     const amountBaseUnits = BigInt(prepared.amountBaseUnits);

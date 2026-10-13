@@ -242,7 +242,7 @@ describe("QCDAO-92 problem owner dashboard", () => {
     render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
     await screen.findByText("Cold-chain routing");
     const row = within(card());
-    expect(row.getByText(/90\.071992547409930001 ETH deposited of 90\.071992547409930001 ETH required/)).toBeTruthy();
+    expect(row.getByText(/90\.071992547409930001 ETH raised of 90\.071992547409930001 ETH required/)).toBeTruthy();
     expect(row.getByText(/90\.071992547409930001 ETH held in escrow · Confirmed block 250/)).toBeTruthy();
     expect(row.queryByText(/SGD .*committed/)).toBeNull();
     expect(row.getByText("Funds locked.")).toBeTruthy();
