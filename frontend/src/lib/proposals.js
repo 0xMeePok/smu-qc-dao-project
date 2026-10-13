@@ -227,7 +227,7 @@ export async function submitProposal({ proposalId, researcherId, posting, form, 
   await runTransaction(db, async (transaction) => {
     const parent = await transaction.get(doc(db, "problems", posting.id));
     const current = parent.exists() ? { id: parent.id, ...parent.data() } : null;
-    const reason = proposalBlockReason(current);
+    const reason = proposalBlockReason(current, undefined, { researcherId: uid });
     if (reason) throw new Error(reason);
     if (current.currency !== posting.currency) throw new Error("The funding currency changed. Reload the opportunity before submitting.");
     if (Object.keys(validateProposal(form, current)).length) throw new Error("Complete all required proposal fields.");

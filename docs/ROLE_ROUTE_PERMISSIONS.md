@@ -88,8 +88,8 @@ When creating a brief on `#/create`:
 ## 6. Authentication & Role Capability Resolution
 
 ### 6.1 Authentication Architecture
-Authentication is strictly enforced via Web3 Sign-In with Ethereum (SIWE) through Firebase Cloud Functions and custom auth tokens:
-1. **Wallet Verification**: Users sign a server-issued cryptographic nonce to verify wallet ownership.
+Authentication is Privy email sign-in. The server verifies Privy's access token, reads the embedded wallet Privy created for that email, and mints a Firebase custom token whose uid is that address:
+1. **Account**: The Firebase uid and `users/{address}` id are the wallet address. `email` and `privyUserId` are written by the server. One email maps to one wallet.
 2. **Session & Profile Resolution**: On successful authentication, the user's registered Firestore profile (`/users/{address}`) is loaded into `SessionContext` and mapped into `AuthContext`.
 3. **Capability Set Assignment**:
    - **Platform Participant**: User profiles (`role == 0` in Firestore) receive the full participant capability set: `[owner, researcher, evaluator, funder]`.

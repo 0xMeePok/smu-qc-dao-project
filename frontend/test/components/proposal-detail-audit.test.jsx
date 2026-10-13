@@ -3,14 +3,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const live = vi.hoisted(() => ({ channels: {} }));
 vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.channels[options.channel] = options; } }));
-const mocks = vi.hoisted(() => ({ connected: false, anchor: vi.fn(), find: vi.fn(), verify: vi.fn(), revisions: vi.fn(async () => []) }));
+const mocks = vi.hoisted(() => ({ connected: false, signIn: vi.fn(), anchor: vi.fn(), find: vi.fn(), verify: vi.fn(), revisions: vi.fn(async () => []) }));
 const account = `0x${"a".repeat(40)}`;
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => ({ isConnected: mocks.connected, address: `0x${"a".repeat(40)}` }) }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
   RelatedAuditReceiptPane: () => null,
 }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: `0x${"a".repeat(40)}` } }) }));
+vi.mock("../../src/context/SessionContext.jsx", () => ({ useSignIn: () => mocks.signIn }));
 vi.mock("../../src/lib/proposals.js", () => ({ findProposal: (...args) => mocks.find(...args), withdrawProposal: vi.fn(), listProposalRevisions: (...args) => mocks.revisions(...args) }));
 vi.mock("../../src/lib/ownerReviews.js", () => ({
   listOwnerReviews: async () => ({ items: [] }),
@@ -29,22 +30,21 @@ vi.mock("../../src/lib/proposalAudit.js", () => ({
   anchorProposalAudit: (...args) => mocks.anchor(...args), proposalAuditReceipt: (record) => record.audit,
   readProposalAudit: (...args) => mocks.verify(...args),
 }));
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet picker</p> }));
 import ProposalDetailPage from "../../src/pages/ProposalDetailPage.jsx";
 const record = { id: "proposal1", researcherId: account, title: "Saved routing study", summary: "Baseline and validation", amount: 1200.25,
   currency: "USDC", category: "quantum-annealing", status: "submitted", createdAt: new Date(),
   audit: { schemaVersion: 1, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, attemptCount: 0, status: "queued", transactionHash: "" } };
-beforeEach(() => { mocks.revisions.mockClear(); mocks.connected = false; mocks.anchor.mockReset(); mocks.find.mockReset().mockResolvedValue(record);
+beforeEach(() => { mocks.signIn.mockClear(); mocks.revisions.mockClear(); mocks.connected = false; mocks.anchor.mockReset(); mocks.find.mockReset().mockResolvedValue(record);
   mocks.verify.mockReset().mockRejectedValue(new Error("execution reverted: InvalidInput")); });
 afterEach(() => { vi.useRealTimers(); cleanup(); });
 it("shows a concise rejection banner and clears it on retry without losing the proposal", async () => {
   mocks.connected = true;
-  mocks.anchor.mockRejectedValueOnce(new Error(`User rejected the request. Request Arguments: data: 0x${"a".repeat(2000)} Details: MetaMask Tx Signature: User denied transaction signature.`))
+  mocks.anchor.mockRejectedValueOnce(new Error(`User rejected the request. Request Arguments: data: 0x${"a".repeat(2000)} Details: Tx Signature: User denied transaction signature.`))
     .mockResolvedValueOnce(undefined);
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} autoAnchor />);
   fireEvent.click(await screen.findByRole("button", { name: "Start verification" }));
   expect((await screen.findByRole("alert")).textContent).toBe("Your proposal is saved. The wallet transaction was declined. You can retry when ready.");
-  expect(screen.queryByText(/Request Arguments|MetaMask Tx Signature/)).toBeNull();
+  expect(screen.queryByText(/Request Arguments|Tx Signature/)).toBeNull();
   expect(screen.getByRole("heading", { name: record.title })).toBeTruthy();
   fireEvent.click(await screen.findByRole("button", { name: "Start verification" }));
   await waitFor(() => expect(mocks.anchor).toHaveBeenCalledTimes(2));
@@ -62,7 +62,7 @@ it("keeps a successfully saved proposal visible when its wallet is disconnected"
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} autoAnchor />);
   expect(await screen.findByRole("heading", { name: record.title })).toBeTruthy();
   fireEvent.click(await screen.findByRole("button", { name: "Start verification" }));
-  expect(await screen.findByText(/Connect the wallet that submitted it/)).toBeTruthy();
+  expect(await screen.findByText(/Sign in with the email account that submitted it/)).toBeTruthy();
   expect(mocks.anchor).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Withdraw proposal" })).toBeTruthy();
 });
@@ -115,7 +115,7 @@ it("reads the chain for a missing receipt and never auto-signs already verified 
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} autoAnchor />);
   expect(await screen.findByText("Verified on Arbitrum Sepolia")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /start verification|resume verification/i })).toBeNull();
-  expect(screen.queryByText("Wallet picker")).toBeNull();
+  expect(mocks.signIn).not.toHaveBeenCalled();
   expect(mocks.anchor).not.toHaveBeenCalled();
 });
 it("groups the proposal into tabs instead of one long page", async () => {

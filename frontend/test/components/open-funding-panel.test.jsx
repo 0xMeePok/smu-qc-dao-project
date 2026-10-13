@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const live = vi.hoisted(() => ({ options: null }));
 vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
-const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), supported: true, account: null, user: null }));
-vi.mock("wagmi", () => ({ useAccount: () => mocks.account }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), supported: true, account: null, user: null, signIn: vi.fn() }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => mocks.account }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
+vi.mock("../../src/context/SessionContext.jsx", () => ({ useSignIn: () => mocks.signIn }));
 vi.mock("../../src/lib/openFunding.js", () => ({ getOpenFundingSummary: (...args) => mocks.read(...args),
   writeOpenFundingAction: (...args) => mocks.write(...args), syncOpenFunding: (...args) => mocks.sync(...args), openFundingSupported: () => mocks.supported }));
 vi.mock("../../src/lib/escrow.js", () => ({ confirmEscrowTransaction: (...args) => mocks.confirm(...args), escrowErrorMessage: error => error.message }));
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet connection dialog</p> }));
 import { OpenFundingPanel, OpenFundingView } from "../../src/components/OpenFundingPanel.jsx";
 import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`;
@@ -147,7 +147,7 @@ describe("open funding grant workflow UI", () => {
   it("requires the signed-in wallet and configured network before signing", async () => {
     mocks.account.chainId = 1; render(<OpenFundingPanel problemId="grant" />);
     const button = await screen.findByRole("button", { name: "Select for funding" }); expect(button.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Connect your signed-in wallet" })); expect(screen.getByText("Wallet connection dialog")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in to use your wallet" })); expect(mocks.signIn).toHaveBeenCalledOnce();
     expect(mocks.write).not.toHaveBeenCalled();
   });
 });

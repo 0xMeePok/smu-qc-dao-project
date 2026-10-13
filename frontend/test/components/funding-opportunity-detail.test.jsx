@@ -7,8 +7,7 @@ const mocks = vi.hoisted(() => ({
   verifyProblem: vi.fn(async () => ({ verified: false })),
 }));
 
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(),
-  useAccount: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true }),
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => ({ address: `0x${"a".repeat(40)}`, isConnected: true }),
 }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
@@ -63,10 +62,6 @@ vi.mock("../../src/components/AuditReceipt.jsx", () => ({
       <button type="button" onClick={onVerify}>Verify test receipt</button>
     </div>
   ),
-}));
-
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({
-  ConnectWalletModal: () => <div role="dialog">Reconnect wallet</div>,
 }));
 
 const { default: PostingDetailPage } = await import("../../src/pages/PostingDetailPage.jsx");

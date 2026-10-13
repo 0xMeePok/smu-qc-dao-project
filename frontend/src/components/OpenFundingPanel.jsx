@@ -1,15 +1,15 @@
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
-import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useSignIn } from "../context/SessionContext.jsx";
+import { useWallet } from "../context/WalletContext.jsx";
 import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { getOpenFundingSummary, openFundingSupported, syncOpenFunding, writeOpenFundingAction } from "../lib/openFunding.js";
 import { confirmEscrowTransaction, escrowErrorMessage } from "../lib/escrow.js";
 import { escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
-import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
 import { ACTION_ITEMS_KEY } from "../lib/proposalQueues.js";
 
@@ -51,7 +51,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, walletRead
       </dl>
       {data.poolAddress ? <a href={escrowExplorer("address", data.poolAddress)} target="_blank" rel="noreferrer">View grant pool contract</a>
         : <p className="field-hint">The owner must create this pool, then deposit funds. The advertised budget is not a deposit.</p>}
-      {!walletReady && <button type="button" className="secondary small" onClick={onConnect}>Connect your signed-in wallet</button>}
+      {!walletReady && <button type="button" className="secondary small" onClick={onConnect}>Sign in to use your wallet</button>}
       {data.canCreate && !data.poolAddress && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("create")}>Create grant pool</button>}
       {data.canDeposit && data.poolAddress && <div className="field-group">
         <Field label="Add funding" htmlFor="grant-deposit" hint={`Enter an additional amount in ${data.tokenSymbol}. You can increase the pool after awarding grants.`}>
@@ -93,12 +93,13 @@ export function OpenFundingView({ data, loading, error, notice, busy, walletRead
 export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId } = useWallet();
   const [data, setData] = useState(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [amount, setAmount] = useState(""), [notice, setNotice] = useState("");
   const [withdrawalAmount, setWithdrawalAmount] = useState("");
-  const [pending, setPending] = useState(null), [walletPrompt, setWalletPrompt] = useState(false);
+  const [pending, setPending] = useState(null);
+  const signIn = useSignIn(setError);
   const actionBusy = useRef(false);
   const key = storageKey(problemId, user?.id);
   const viewKey = `${key}:${proposalId || ""}`;
@@ -170,6 +171,5 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
     finally { actionBusy.current = false; setBusy(false); }
   };
   return <><OpenFundingView {...{ data, loading, error, notice, busy, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, proposalId, onNavigate, integrityBlocked }}
-    onAction={act} onRefresh={() => { setError(""); void refresh(); }} onConfirm={confirm} onConnect={() => setWalletPrompt(true)} />
-    {walletPrompt && <ConnectWalletModal onClose={() => setWalletPrompt(false)} />}</>;
+    onAction={act} onRefresh={() => { setError(""); void refresh(); }} onConfirm={confirm} onConnect={() => { void signIn(); }} /></>;
 }

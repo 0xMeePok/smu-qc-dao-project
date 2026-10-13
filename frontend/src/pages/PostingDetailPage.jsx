@@ -2,8 +2,9 @@ import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { proposalBlockReason } from "../lib/proposalValidation.js";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useSignIn } from "../context/SessionContext.jsx";
+import { useWallet } from "../context/WalletContext.jsx";
 import { findPosting, withdrawPosting } from "../lib/postings.js";
 import {
   downloadAttachment,
@@ -15,7 +16,6 @@ import { auditErrorMessage, messageForFirebaseError } from "../lib/errors.js";
 import { categoryLabel } from "../config/postingCategories.js";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
-import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { PostingProposals } from "../components/PostingProposals.jsx";
 import { MatchingPanel } from "../components/MatchingPanel.jsx";
 import { OpenFundingPanel } from "../components/OpenFundingPanel.jsx";
@@ -149,7 +149,7 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
 
 export default function PostingDetailPage({ postingId, onNavigate, initialTab = "overview" }) {
   const { isAuthenticated, user } = useAuth();
-  const { address: connectedAddress, isConnected } = useAccount();
+  const { address: connectedAddress, isConnected } = useWallet();
   const [posting, setPosting] = useState(null);
   const liveScope = `${postingId}:${user?.id || ""}`;
   const activeLiveScope = useRef(liveScope); activeLiveScope.current = liveScope;
@@ -165,7 +165,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
   const [error, setError] = useState(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [auditVerification, setAuditVerification] = useState(null);
-  const [walletPromptOpen, setWalletPromptOpen] = useState(false);
+  const signIn = useSignIn(setError);
   const [poster, setPoster] = useState(null);
   const [withdrawing, setWithdrawing] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -254,7 +254,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
     const sameWallet = isConnected
       && connectedAddress?.toLowerCase() === user?.id?.toLowerCase();
     if (!sameWallet) {
-      setWalletPromptOpen(true);
+      void signIn();
       return;
     }
     setAuditBusy(true);
@@ -300,7 +300,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
         return;
       }
       if (!isConnected || connectedAddress?.toLowerCase() !== posting.ownerId?.toLowerCase()) {
-        setReasonError("Connect the wallet that published this opportunity to sign the withdrawal.");
+        setReasonError("Sign in with the email account that published this opportunity to sign the withdrawal.");
         return;
       }
       if (isResponseWindowClosed(posting)) {
@@ -371,7 +371,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
             type="button"
             onClick={() => onNavigate(`login?redirect=${encodeURIComponent(`posting/${postingId}`)}`)}
           >
-            Sign in with wallet
+            Sign in with email
           </button>
         </section>
       );
@@ -430,10 +430,6 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
       <button className="back" type="button" onClick={() => onNavigate(ownsPosting ? "my-problems" : "discover")}>
         {ownsPosting ? "Back to my problems" : "Back to opportunities"}
       </button>
-
-      {walletPromptOpen && (
-        <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} />
-      )}
 
       <div className="detail-layout">
         <article className="detail-main">

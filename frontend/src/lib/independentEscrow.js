@@ -79,10 +79,10 @@ function abiValue(value, input) {
 /** All calldata comes from the server's verified listing/escrow preparation. */
 export async function writeIndependentFundingAction({ proposalId, action, account, amount, evidence, evidenceHash, approve, reason,
   adapters, prepare = prepareIndependentFundingAction, onChange }) {
-  if (!account) throw new Error("Connect the wallet you are signed in with.");
+  if (!account) throw new Error("Sign in with your email to use your QC DAO wallet.");
   onChange?.({ status: "preparing", action });
-  const { createWagmiEscrowAdapters, confirmEscrowTransaction, hashEscrowEvidence } = await import("./escrow.js");
-  adapters ??= createWagmiEscrowAdapters();
+  const { createWalletEscrowAdapters, confirmEscrowTransaction, hashEscrowEvidence } = await import("./escrow.js");
+  adapters ??= createWalletEscrowAdapters();
   const hash = action === "submitEvidence" ? hashEscrowEvidence(evidence) : evidenceHash;
   const declineReason = action === "decline" ? String(reason ?? "").trim().normalize("NFC") : null;
   if (declineReason !== null && (declineReason.length < 10 || declineReason.length > 2000)) {
@@ -91,7 +91,7 @@ export async function writeIndependentFundingAction({ proposalId, action, accoun
   const prepared = await prepare({ proposalId, action, ...(amount !== undefined ? { amount } : {}),
     ...(hash ? { evidenceHash: hash } : {}), ...(evidence ? { evidence } : {}), ...(approve !== undefined ? { approve } : {}),
     ...(declineReason !== null ? { reason: declineReason } : {}) });
-  if (prepared.chainId !== AUDIT_REGISTRY_CHAIN_ID) throw new Error("Switch your wallet to Arbitrum Sepolia.");
+  if (prepared.chainId !== AUDIT_REGISTRY_CHAIN_ID) throw new Error("This funding transaction was prepared for the wrong network. Refresh the app and try again.");
   const spec = prepared.abi?.find(item => item.type === "function" && item.name === prepared.functionName);
   if (!spec || !Array.isArray(prepared.args) || spec.inputs.length !== prepared.args.length) throw new Error("The funding transaction could not be prepared. Refresh and retry.");
   const send = async (request, step) => {

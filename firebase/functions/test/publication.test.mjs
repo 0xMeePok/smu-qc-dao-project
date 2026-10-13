@@ -7,6 +7,7 @@ import { verifyPublication } from "../publication.js";
 import { prepareOpportunityCommit, prepareProposalCommit, opportunityEntityId } from "../auditCanonical.js";
 import { postingAuditPayload, fundingOpportunityAuditPayload } from "../opportunityAuditPayload.js";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
+import { sponsoredTransaction } from "./sponsoredTx.mjs";
 const owner = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`, blockHash = `0x${"2".repeat(64)}`;
 function fixture(openFunding = false) {
   return { id: "trusted-publication", ownerId: owner, title: "Routing", summary: "Research", amount: 1000, currency: "USDC",
@@ -47,6 +48,14 @@ describe("QCDAO-131 trusted publication boundary", () => {
     }
     await assert.rejects(verifyPublication({ scope: "problems", record,
       client: { ...client, getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(), status: "reverted" }) } }));
+  });
+  it("QCDAO-144 verifies a gas-sponsored publication by the member's own call, not the bundler", async () => {
+    const record = fixture(), direct = clientFor(record);
+    const plain = await direct.getTransaction();
+    const sponsored = (sender) => sponsoredTransaction({ hash, blockHash, calls: [{ sender, to: registry.address, input: plain.input }] });
+    const asClient = ({ transaction, receipt }) => ({ ...direct, getTransaction: async () => transaction, getTransactionReceipt: async () => receipt });
+    assert.equal((await verifyPublication({ scope: "problems", record, client: asClient(sponsored(owner)) })).status, "confirmed");
+    await assert.rejects(verifyPublication({ scope: "problems", record, client: asClient(sponsored(`0x${"b".repeat(40)}`)) }), /does not belong/);
   });
   it("rejects reorgs, withdrawn registry records and replaced attachment bytes", async () => {
     const record = fixture(), client = clientFor(record);

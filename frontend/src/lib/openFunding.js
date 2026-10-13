@@ -3,7 +3,7 @@ import { erc20Abi } from "viem";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
-import { confirmEscrowTransaction, createWagmiEscrowAdapters, escrowErrorMessage } from "./escrow.js";
+import { confirmEscrowTransaction, createWalletEscrowAdapters, escrowErrorMessage } from "./escrow.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
 
 async function call(name, payload = {}) {
@@ -24,7 +24,7 @@ const same = (a, b) => Boolean(a && b && a.toLowerCase() === b.toLowerCase());
 
 /** Only a user action submits a transaction. Failed confirmation retains its hash. */
 export async function writeOpenFundingAction({ problemId, proposalId, account, action, amount, tokenAddress,
-  decimals, onProgress, adapters = createWagmiEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG,
+  decimals, onProgress, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG,
   prepare = prepareOpenFundingAction }) {
   if (!openFundingSupported(config)) throw new Error("Open funding pools are awaiting a contract deployment.");
   if (!Object.hasOwn(ACTIONS, action)) throw new Error("Unknown open funding action.");

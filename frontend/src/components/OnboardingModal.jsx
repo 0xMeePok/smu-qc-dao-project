@@ -11,9 +11,9 @@ const initialForm = { fullName: "", organisation: "", acceptedTerms: false };
 
 
 /**
- * Shown only when a verified wallet has no profile in Firestore. There is no public
+ * Shown only when a verified account has no profile in Firestore. There is no public
  * registration URL: this is the entire sign-up surface, and it cannot be reached
- * without first connecting and signing.
+ * without first signing in with an email code.
  */
 export function OnboardingModal() {
   const { needsOnboarding, completeOnboarding, cancelOnboarding, address } = useSession();
@@ -86,10 +86,10 @@ export function OnboardingModal() {
         <header className="modal-head">
           <span className="modal-badge" aria-hidden="true">✓</span>
           <div>
-            <h2 id="onboarding-title">Wallet verified — finish setting up</h2>
+            <h2 id="onboarding-title">Email verified — finish setting up</h2>
             <p id="onboarding-description">
-              <code>{shortenAddress(address)}</code> is verified and new to us. Tell us
-              who you are and this wallet becomes your account.
+              Your QC DAO wallet <code>{shortenAddress(address)}</code> is ready. Tell us
+              who you are to finish creating your account.
             </p>
           </div>
         </header>

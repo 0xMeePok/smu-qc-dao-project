@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
-import { ConnectWalletModal } from "../components/ConnectWalletModal.jsx";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import { BriefPreview, ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
@@ -20,7 +19,7 @@ import {
 } from "../config/postingCategories.js";
 import { fundingTagsFromCategories } from "../config/fundingOpportunity.js";
 import { opportunityStatusLabel } from "../config/workflowStatus.js";
-import { useSession } from "../context/SessionContext.jsx";
+import { useSession, useSignIn } from "../context/SessionContext.jsx";
 import { formatInstant, toDate } from "../lib/datetime.js";
 import {
   FUNDING_STATUS_DRAFT,
@@ -145,7 +144,7 @@ function expiryWindowFor(expiresAt, createdAt) {
 
 export default function CreateFundingOpportunityPage({ resumeId = null, editOpportunityId = null, onNavigate }) {
   const { address, profile } = useSession();
-  const { address: connectedAddress, isConnected } = useAccount();
+  const { address: connectedAddress, isConnected } = useWallet();
   const [opportunityId, setOpportunityId] = useState(() => editOpportunityId ?? resumeId ?? newFundingOpportunityId());
   const [existing, setExisting] = useState(null);
   const [editBlocked, setEditBlocked] = useState("");
@@ -167,7 +166,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
   const [auditProgress, setAuditProgress] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmedAudit, setConfirmedAudit] = useState(null);
-  const [walletPromptOpen, setWalletPromptOpen] = useState(false);
+  const signIn = useSignIn(setSubmitError);
   const pendingRecordRef = useRef(null);
   const formTop = useRef(null);
   const wizard = useWizard(FUNDING_STEPS);
@@ -352,8 +351,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
     const sameWallet = isConnected
       && connectedAddress?.toLowerCase() === address?.toLowerCase();
     if (!sameWallet) {
-      setSubmitError("Reconnect the wallet used to sign in before submitting the on-chain audit.");
-      setWalletPromptOpen(true);
+      setSubmitError("Your QC DAO wallet is not ready. Sign in again with your email before submitting the on-chain audit.");
+      void signIn();
       return;
     }
 
@@ -770,8 +769,6 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             <p className="field-hint" role="status">{Object.values(errors).filter(Boolean).length} field(s) need attention. Steps marked ! have the details.</p>
           ) : null}
         </form>
-
-        {walletPromptOpen ? <ConnectWalletModal onClose={() => setWalletPromptOpen(false)} /> : null}
 
         <BriefPreview
           kind="Open funding"

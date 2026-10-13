@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   callable: vi.fn(),
   invoke: vi.fn(),
+  signIn: vi.fn(),
 }));
 
 vi.mock("firebase/functions", () => ({
   httpsCallable: mocks.callable,
 }));
 vi.mock("firebase/auth", () => ({
-  signInWithCustomToken: vi.fn(),
+  signInWithCustomToken: (...args) => mocks.signIn(...args),
 }));
 vi.mock("../../src/lib/firebase.js", () => ({
   auth: {},
@@ -18,29 +19,27 @@ vi.mock("../../src/lib/firebase.js", () => ({
   missingFirebaseConfig: [],
 }));
 
-const { exchangeSignatureForSession, requestSignInMessage } = await import("../../src/lib/authFlow.js");
+const { exchangePrivySession } = await import("../../src/lib/authFlow.js");
 
-describe("wallet authentication flow", () => {
+describe("Privy session exchange", () => {
   beforeEach(() => {
     mocks.callable.mockReset();
     mocks.invoke.mockReset();
-    mocks.invoke.mockResolvedValue({ data: { message: "Sign this message", challengeId: "a".repeat(32) } });
+    mocks.signIn.mockReset();
     mocks.callable.mockReturnValue(mocks.invoke);
   });
 
-  it("uses the cached App Check token for nonce requests", async () => {
-    await expect(requestSignInMessage(`0x${"a".repeat(40)}`)).resolves.toEqual({
-      message: "Sign this message", challengeId: "a".repeat(32),
-    });
-    expect(mocks.callable).toHaveBeenCalledWith({}, "getSiweNonce");
+  it("sends only the Privy access token and signs in with the token the server returns", async () => {
+    const address = `0x${"a".repeat(40)}`;
+    mocks.invoke.mockResolvedValue({ data: { token: "custom-token", address } });
+    await expect(exchangePrivySession("header.payload.signature")).resolves.toBe(address);
+    expect(mocks.callable).toHaveBeenCalledWith({}, "exchangePrivySession");
+    expect(mocks.invoke).toHaveBeenCalledWith({ accessToken: "header.payload.signature" });
+    expect(mocks.signIn).toHaveBeenCalledWith({}, "custom-token");
   });
 
-  it("sends the challenge id back so verification uses this attempt's own record", async () => {
-    mocks.invoke.mockResolvedValue({ data: { token: "custom-token", address: `0x${"a".repeat(40)}` } });
-    await exchangeSignatureForSession({
-      address: `0x${"a".repeat(40)}`, signature: `0x${"11".repeat(65)}`, challengeId: "b".repeat(32),
-    });
-    expect(mocks.callable).toHaveBeenCalledWith({}, "verifySiweSignature");
-    expect(mocks.invoke).toHaveBeenCalledWith(expect.objectContaining({ challengeId: "b".repeat(32) }));
+  it("does not call the server with an address the browser named", async () => {
+    await expect(exchangePrivySession("not-a-jwt")).rejects.toThrow(/did not return a session/);
+    expect(mocks.callable).not.toHaveBeenCalled();
   });
 });

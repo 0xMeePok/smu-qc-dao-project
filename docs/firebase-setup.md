@@ -7,12 +7,12 @@ people skip, and skipping it produces a misleading CORS error.
 
 ## Before you start
 
-You need the **Blaze (pay-as-you-go)** plan. Sign-in verifies wallet signatures on the
-server, that runs in Cloud Functions, and Cloud Functions is not available on Spark.
+You need the **Blaze (pay-as-you-go)** plan. Sign-in verifies the Privy access
+token in Cloud Functions, and Cloud Functions is not available on Spark.
 
 The free allowance (2M invocations/month) means a demo costs effectively nothing, but
-a card is required. There is no fool-proof alternative: verifying a signature in the
-browser proves nothing, because an attacker just skips the browser.
+a card is required. The browser never chooses the account: the server reads the
+embedded wallet from Privy and mints the Firebase session.
 
 If you only want to develop locally, skip to [Local development](#local-development-no-cloud-project)
 — the emulators run fine on Spark.
@@ -62,7 +62,9 @@ reference, the schema is:
 
 | Field | Type | Notes |
 |---|---|---|
-| `address` | string | lowercase `0x…`, equals the document id |
+| `address` | string | lowercase `0x…`, equals the document id and the Firebase uid |
+| `email` | string | server-written on sign-in. One email per account. Clients cannot write it |
+| `privyUserId` | string | server-written `did:privy:…`. Clients cannot write it |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
 | `role` | number | `0` (user) or `1` (administrator) access level |
@@ -77,8 +79,11 @@ The whole `stats` map is **frozen against client writes** — the rules require 
 byte-identical on update, so nobody can award themselves karma. Only Admin SDK code can
 move those numbers.
 
-**`siweNonces/{challengeId}`** — one pending sign-in challenge per attempt, written and
-consumed by the Cloud Functions, denied to all clients. Manages itself; ignore it.
+**`emailAccounts/{email}`** — the uniqueness lock, one document per normalised
+email, holding the wallet address. Admin SDK only.
+
+**`privyIdentities/{address}`** — the sign-in binding, copied onto `users/{address}`
+when onboarding creates the profile. Admin SDK only.
 
 ## Step 5 — Register the web app **[YOU]**
 
@@ -123,7 +128,7 @@ firebase deploy --only firestore:rules,firestore:indexes,functions --project YOU
 ```
 
 **Both halves are mandatory.** Without the rules, production mode denies every write.
-Without the functions, nothing can verify a signature and nobody can sign in.
+Without the functions, nothing can verify a Privy session and nobody can sign in.
 
 The first deploy asks to enable the `cloudfunctions`, `cloudbuild`, `artifactregistry`,
 `eventarc`, and `cloudscheduler` APIs — accept. It takes several minutes.
@@ -134,13 +139,13 @@ The first deploy asks to enable the `cloudfunctions`, `cloudbuild`, `artifactreg
 firebase functions:list --project YOUR_PROJECT_ID
 ```
 
-You want `getSiweNonce` and `verifySiweSignature` in `asia-southeast1`. Then check the
+You want `exchangePrivySession` and `revokeOwnSessions` in `asia-southeast1`. Then check the
 endpoint is really reachable:
 
 ```bash
 curl -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" \
-  --data '{"data":{"address":"0x0000000000000000000000000000000000000000"}}' \
-  https://asia-southeast1-YOUR_PROJECT_ID.cloudfunctions.net/getSiweNonce
+  --data '{"data":{}}' \
+  https://asia-southeast1-YOUR_PROJECT_ID.cloudfunctions.net/exchangePrivySession
 ```
 
 `200` means deployed and working. **`404` means not deployed** — see
@@ -153,32 +158,66 @@ npm install --prefix frontend
 npm run dev --prefix frontend
 ```
 
-## Step 10 — Get a wallet **[YOU]**
+## Step 10 — Privy email sign-in **[YOU]**
 
-Install [MetaMask](https://metamask.io/download/). You do **not** need to add Arbitrum
-Sepolia in advance, and signing in costs no gas — it is a signature, not a transaction.
+<a id="privy-email-sign-in"></a>
+Members sign in through Privy's login modal with an email address and a one-time code.
+Nobody installs a wallet: Privy's modal creates an embedded wallet on the first sign-in
+(`createOnLogin: "users-without-wallets"` in `src/lib/privy.js`), and that address is
+the account.
+
+1. In the [Privy dashboard](https://dashboard.privy.io), create an app (or open the
+   existing one) and copy **App settings → Basics → App ID** into `frontend/.env` as
+   `VITE_PRIVY_APP_ID`. The app id is public; the app **secret** is never needed by the
+   frontend and must never go in a `VITE_` variable.
+2. **User management → Authentication**: enable **Email** only. Turn off wallet, SMS,
+   social and passkey login. The app limits Privy's modal to email in code
+   (`src/lib/privy.js`), but **passkeys are the exception**: whenever the dashboard
+   allows passkey login, Privy's modal shows "I have a passkey" whatever the app's
+   config says, so that toggle must be off here.
+3. **Wallets → Embedded wallets**: enable **Ethereum (EVM)** wallets. Leave smart wallets
+   off: gas sponsorship upgrades the embedded wallet in place (EIP-7702, same address),
+   so the account never moves to a separate smart-wallet address.
+4. **App settings → Domains → Allowed origins**: add every origin that serves the app —
+   `https://YOUR_PROJECT_ID.web.app`, `https://YOUR_PROJECT_ID.firebaseapp.com`, each
+   Hosting preview channel URL you test on (Privy does not accept a `*.web.app`
+   wildcard), and `http://localhost:5173` / `http://127.0.0.1:5173` while developing.
+5. **Fee sponsorship** (QCDAO-144): turn on **Sponsor gas fees**, add **Arbitrum
+   Sepolia** under **Supported chains**, and turn on **Allow transactions from the
+   client** (the app requests sponsorship from the browser with `sponsor: true`).
+   Sponsorship needs Privy's TEE execution: the app's config reports
+   `embedded_wallet_config.mode: "user-controlled-server-wallets-only"` when it is on
+   (see Privy's [TEE migration guide](https://docs.privy.io/recipes/tee-wallet-migration-guide)
+   for an app still on on-device execution). Testnet gas costs nothing; mainnet
+   sponsorship needs prepaid credits.
+6. Optional, for repeatable testing: **User management → Authentication → Advanced →
+   Enable test accounts** gives a fixed `test-XXXX@privy.io` address and code.
+
+Signing in costs no gas: it sends no transaction at all. Every member transaction
+(publishing audits, proposals, funding approvals and deposits) is gas-sponsored, so a
+new embedded wallet holding no ETH can take part. A sponsored transaction is sent by a
+bundler to the ERC-4337 EntryPoint, so the Cloud Functions verify the member's own call
+inside it (`firebase/functions/memberCall.js`) instead of the transaction's sender.
+Funding still needs the test token itself in the funder's wallet.
 
 ---
 
 ## How sign-in works
 
 ```
-Sign in with Wallet
+Sign in with email
       |
       v
-wagmi connector picker   (wallets discovered via EIP-6963)
+Privy's login modal: email address, then the one-time code Privy sends to it
       |
       v
-getSiweNonce()   ------>  server opens a challenge for THIS attempt and returns
-      |                   the exact message to sign, plus its challengeId
-      v
-wallet signs that message
+embedded wallet created by the modal on first sign-in, loaded on every later one
       |
       v
-verifySiweSignature() -->  server looks up that challengeId, rebuilds the message
-      |   (+ challengeId)   from its OWN stored nonce, verifies the signature, burns
-      |                    the nonce, and mints a Firebase custom token whose uid IS
-      |                    the wallet address
+exchangePrivySession() -->  server verifies the Privy access token, reads that
+      |                      user's embedded wallet from Privy, and mints a Firebase
+      |                      custom token whose uid IS that address. The browser
+      |                      does not name the account.
       v
 signInWithCustomToken()
       |
@@ -191,9 +230,57 @@ signInWithCustomToken()
                                         #/role-selection
 ```
 
-`request.auth.uid` **is** the wallet address, and a uid can only exist because the
-server verified a signature. That is what makes the rule `request.auth.uid == address`
+`request.auth.uid` **is** the wallet address. Email is stored on the same
+`users/{address}` document by the server (`email`, `privyUserId`), and
+`emailAccounts/{email}` refuses a second wallet for that email. The rules
+reject a client write of either field. That is what makes the rule `request.auth.uid == address`
 a real proof of ownership rather than a claim the browser made about itself.
+
+## Administrator bootstrap (QCDAO-152)
+
+The wallet address does not exist until the administrator signs in, so the grant
+is keyed by email. Put their address in `ADMIN_BOOTSTRAP_EMAILS` on the functions
+environment before they finish onboarding:
+
+```bash
+# firebase/functions/.env.qcdao-a0c7a  (gitignored)
+ADMIN_BOOTSTRAP_EMAILS=you@smu.edu.sg
+```
+
+Redeploy functions, then sign in with that email and complete onboarding. The
+server sets `role` to `1` on the new `users/{wallet}` document. A later sign-in
+grants it again if the role is still `0`, which covers setting the variable
+after the first signup. Remove the email from the list before demoting that
+account to a normal user, or the next sign-in promotes it again.
+
+The emulator reads the same variable from the process environment or
+`firebase/functions/.env`.
+
+## Reset development data (QCDAO-152)
+
+`firebase/functions/scripts/reset-dev-data.mjs` deletes every Firestore root
+collection (including subcollections), every Storage object, and every Auth
+user. Dry run is the default. `--confirm` must be the project id or nothing is
+deleted.
+
+This repository's tests run it only against the emulator. The live site is
+`qcdao-a0c7a`; run that yourself, after a dry run:
+
+```bash
+cd firebase/functions
+
+# Emulator. Start it first, then:
+node scripts/reset-dev-data.mjs --project qcdao-a0c7a
+node scripts/reset-dev-data.mjs --project qcdao-a0c7a --confirm qcdao-a0c7a
+
+# Live project. Application Default Credentials. Emulator host variables must be unset.
+node scripts/reset-dev-data.mjs --target production --project qcdao-a0c7a
+node scripts/reset-dev-data.mjs --target production --project qcdao-a0c7a --confirm qcdao-a0c7a
+```
+
+The script refuses a production reset of any project other than `qcdao-a0c7a`,
+and refuses production while `FIRESTORE_EMULATOR_HOST`,
+`FIREBASE_AUTH_EMULATOR_HOST` or `FIREBASE_STORAGE_EMULATOR_HOST` is set.
 
 ---
 
@@ -216,9 +303,7 @@ If that fails with a billing error, you are still on Spark — do step 2.
 If `curl` returns `403`, the functions deployed but are not publicly invokable. Grant it:
 
 ```bash
-gcloud run services add-iam-policy-binding getsiwenonce \
-  --region=asia-southeast1 --member=allUsers --role=roles/run.invoker
-gcloud run services add-iam-policy-binding verifysiwesignature \
+gcloud run services add-iam-policy-binding exchangeprivysession \
   --region=asia-southeast1 --member=allUsers --role=roles/run.invoker
 ```
 
@@ -231,11 +316,12 @@ that region or change `REGION` and `FUNCTIONS_REGION` (step 4) to match what you
 
 The rules are not deployed: `firebase deploy --only firestore:rules`.
 
-### The wallet connects but no onboarding popup appears
+### Email sign-in succeeds but no onboarding popup appears
 
-Sign-in never completed. The popup only opens once the server has verified your
-signature. Check the browser console for the specific error — an undeployed function
-now reports itself in plain language rather than failing silently.
+The Firebase session never completed. The popup opens only after
+`exchangePrivySession` has minted a custom token. Check the browser console for
+the specific error — an undeployed function reports itself in plain language
+rather than failing silently.
 
 ---
 
@@ -278,17 +364,18 @@ npm test --prefix firebase/functions
 
 ## FAQ
 
-### Do I still need a WalletConnect project id?
+### Do I still need a WalletConnect project id, or MetaMask?
 
-**No.** It has been removed. wagmi discovers browser wallets over EIP-6963 with no
-project id and no extra dependency, so MetaMask, Rabby, Coinbase's extension and others
-appear automatically.
+**No.** Browser wallets are gone: email through Privy is the only sign-in method, and
+external wallets (MetaMask, WalletConnect, Coinbase and the rest) are switched off in
+the Privy config. Delete `VITE_WALLETCONNECT_PROJECT_ID` from your env file; nothing
+reads it.
 
-You would only need one if you deliberately add the `walletConnect()` connector back for
-phone-QR sign-in. That currently pulls in `@reown/appkit → @base-org/account → axios`,
-which carries a high-severity advisory and adds noticeably to the bundle — the trade-off
-is documented in [`src/lib/wagmi.js`](../frontend/src/lib/wagmi.js). Delete
-`VITE_WALLETCONNECT_PROJECT_ID` from your env file; nothing reads it.
+### What ends a session?
+
+Signing out, 15 minutes of inactivity, or an administrator suspending the account. Each
+ends **both** the Privy session and the Firebase session. A Privy session found without a
+Firebase session beside it (after a reload, or a sign-out in another tab) is ended too.
 
 ### Do I still need `authDomain`?
 
@@ -304,5 +391,5 @@ only `apiKey`, `projectId` and `appId` are required.
 
 No. They ship in the JS bundle and are visible to anyone who opens devtools. They are
 identifiers, not credentials. Your data is protected by Firestore rules and by
-server-side signature verification. Keep the env file out of git anyway so each person
+the server checking the Privy access token. Keep the env file out of git anyway so each person
 uses their own project.

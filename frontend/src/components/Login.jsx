@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { landingRouteFor } from "../config/roles.js";
-import { SignInWithWallet } from "./SignInWithWallet.jsx";
+import { SignInWithEmail } from "./SignInWithEmail.jsx";
 import { getRouteConfig } from "../config/routes.js";
 
 export function Login({ redirectTarget, onNavigate }) {
@@ -54,13 +54,13 @@ export function Login({ redirectTarget, onNavigate }) {
             </div>
           ) : (
             <p className="login-subhead">
-              Sign in with your verified Web3 wallet to access your SMU QC DAO workspaces.
+              Sign in with your email address to access your SMU QC DAO workspaces. No browser wallet is needed.
             </p>
           )}
         </div>
 
-        <div className="wallet-signin-section">
-          <SignInWithWallet />
+        <div className="email-signin-section">
+          <SignInWithEmail />
         </div>
       </div>
     </section>

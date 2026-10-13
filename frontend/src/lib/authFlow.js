@@ -4,17 +4,16 @@ import { auth, functions, isFirebaseConfigured, missingFirebaseConfig } from "./
 import { OnboardingError } from "./errors.js";
 
 /**
- * Sign-in with Ethereum, verified server side.
+ * Privy has already authenticated the email. This exchanges that session for
+ * the Firebase session the rest of the app trusts.
  *
- *   1. Ask the server for a single-use nonce. It returns the exact message to sign.
- *   2. The wallet signs that message (wagmi does this part).
- *   3. The server re-derives the message from its own stored nonce, verifies the
- *      signature, burns the nonce, and mints a Firebase custom token whose uid is
- *      the wallet address.
- *   4. We sign in with that token.
+ *   1. The browser sends Privy's access token. It does not name the account.
+ *   2. The server verifies the token, reads the embedded wallet from Privy, and
+ *      mints a Firebase custom token whose uid is that address.
+ *   3. We sign in with that token.
  *
- * The browser never decides who it is. `request.auth.uid` can only ever be an address
- * whose signature this server checked, which is what makes the Firestore rules sound.
+ * `request.auth.uid` can only be an address Privy linked to this email. A
+ * browser cannot choose a different one.
  */
 export function requireFirebase() {
   if (!isFirebaseConfigured) {
@@ -22,17 +21,6 @@ export function requireFirebase() {
       `Firebase is not configured yet. Add ${missingFirebaseConfig.join(", ")} to frontend/.env.local (or frontend/.env) and restart the dev server.`,
     );
   }
-}
-
-export async function requestSignInMessage(address) {
-  requireFirebase();
-  const getSiweNonce = httpsCallable(functions, "getSiweNonce");
-  const { data } = await getSiweNonce({ address });
-  if (!data?.message) {
-    throw new OnboardingError("The server did not return a message to sign. Try again.");
-  }
-  // The challenge id ties the signature back to this attempt's own record.
-  return { message: data.message, challengeId: data.challengeId ?? null };
 }
 
 export async function revokeOwnSessions() {
@@ -45,11 +33,14 @@ export async function revokeOwnSessions() {
   return data;
 }
 
-export async function exchangeSignatureForSession({ address, signature, challengeId }) {
+export async function exchangePrivySession(accessToken) {
   requireFirebase();
-  const verifySiweSignature = httpsCallable(functions, "verifySiweSignature");
-  const { data } = await verifySiweSignature({ address, signature, ...(challengeId ? { challengeId } : {}) });
-  if (!data?.token) {
+  if (typeof accessToken !== "string" || accessToken.split(".").length !== 3) {
+    throw new OnboardingError("Sign-in did not return a session. Try again.");
+  }
+  const exchange = httpsCallable(functions, "exchangePrivySession");
+  const { data } = await exchange({ accessToken });
+  if (!data?.token || !/^0x[0-9a-f]{40}$/.test(data.address ?? "")) {
     throw new OnboardingError("The server did not return a session token. Try again.");
   }
   await signInWithCustomToken(auth, data.token);

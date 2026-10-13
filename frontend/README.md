@@ -1,7 +1,8 @@
 # QC DAO Frontend
 
-Vite + React app. Sign-in is wallet-only (wagmi + a server-verified signature) — see
-the root [README](../README.md) for how that works.
+Vite + React app. Sign-in is email-only, through Privy's login modal: the one-time code
+it sends unlocks the member's embedded wallet, which signs a server-verified challenge — see the root
+[README](../README.md) for how that works.
 
 ## Run locally
 
@@ -171,13 +172,14 @@ npm run preview
 
 ```
 src/
-├── lib/            # Firebase/wagmi setup, validation, SIWE client calls, roles, stats,
+├── lib/            # Firebase/Privy setup, validation, email sign-in, roles, stats,
 │                  #   profile.js (writes users/ + publicProfiles/ in one batch)
-├── context/         # SessionContext — the wallet -> verified -> onboarding/signed-in state machine
-├── components/      # Modal shell, connector picker, onboarding form, sign-in button
+├── context/         # WalletContext (Privy + embedded wallet), SessionContext — the
+│                    #   Privy login -> verified -> onboarding/signed-in state machine
+├── components/      # Modal shell, onboarding form, sign-in button (opens Privy's login modal)
 ├── pages/            # AdminPage (only reachable when the signed-in profile has role == 1)
 ├── App.jsx            # Hash router, marketplace pages, top bar
-└── main.jsx             # WagmiProvider -> QueryClientProvider -> SessionProvider -> App
+└── main.jsx             # PrivyProvider -> QueryClientProvider -> WalletProvider -> SessionProvider -> App
 ```
 
 ## Proposal submission (QCDAO-59 / QCDAO-60)

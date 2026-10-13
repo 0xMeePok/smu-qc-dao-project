@@ -24,7 +24,7 @@ import { useDraftGuard } from "../lib/draftGuard.js";
 import { auditErrorMessage, messageForPublicationSaveError } from "../lib/errors.js";
 import { SubmissionError } from "../components/SubmissionError.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
-import { useAccount } from "wagmi";
+import { useWallet } from "../context/WalletContext.jsx";
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../lib/proposalValidation.js";
 import { getMockMatching, proposalMatchingLocked } from "../lib/matching.js";
 import { PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, isIndependentProposal } from "../config/proposal.js";
@@ -99,7 +99,7 @@ function DraftStatus({ savedAt, saving }) {
 
 export default function CreateProposalPage({ postingId, proposalId: editProposalId, onNavigate }) {
   const { user } = useAuth();
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useWallet();
   const [auditProgress, setAuditProgress] = useState(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmedAudit, setConfirmedAudit] = useState(null);
@@ -271,7 +271,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       return;
     }
     if (!isConnected || address?.toLowerCase() !== user.id.toLowerCase()) {
-      setError("Connect the wallet that owns this account to sign and submit.");
+      setError("Your QC DAO wallet is not ready. Sign in again with your email to sign and submit.");
       return;
     }
     // Progress, the receipt and any retry are shown on the Review step.
@@ -352,7 +352,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     return <section className="page empty"><h1>This proposal can no longer be edited</h1><p role="alert">{proposalMatchingLocked(record) ? "Funding or matching has started. The proposal is locked to preserve the funders’ commitment." : `Its status is ${workflowStatusLabel(proposalWorkflowStatus(record))}. A proposal is locked once evaluation begins.`}</p><button className="secondary" onClick={() => onNavigate(`proposal/${record.id}`)}>View proposal</button></section>;
   }
   const isOpenFunding = openFunding;
-  const blocked = proposalBlockReason(posting, now);
+  const blocked = proposalBlockReason(posting, now, { researcherId: user?.id });
   const disabled = busy || savingDraft || Boolean(blocked);
   const showForm = !(active && !editing && !draftExists);
   const textField = ([key, label, max]) => <Field key={key} htmlFor={`proposal-${key}`} label={label} error={errors[key]}>

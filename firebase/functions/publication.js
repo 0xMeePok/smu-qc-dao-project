@@ -5,6 +5,7 @@ import { registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { getStorage } from "firebase-admin/storage";
 import { createHash } from "node:crypto";
+import { memberCall } from "./memberCall.js";
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
@@ -23,8 +24,9 @@ export async function verifyPublication({ scope, record, client, readAttachment 
   const [receipt, transaction] = await Promise.all([
     client.getTransactionReceipt({ hash }), client.getTransaction({ hash }),
   ]);
-  if (receipt.status !== "success" || !same(transaction.to, address)
-      || !same(transaction.from, record.ownerId) || Number(transaction.chainId) !== registry.chainId
+  const call = memberCall(transaction, receipt, { sender: record.ownerId });
+  if (receipt.status !== "success" || !same(call?.to, address)
+      || !same(call.from, record.ownerId) || Number(call.chainId) !== registry.chainId
       || !same(receipt.transactionHash, hash) || !same(transaction.hash, hash)
       || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber !== transaction.blockNumber
       || !receipt.blockHash || !same(receipt.blockHash, transaction.blockHash)) {
@@ -37,7 +39,7 @@ export async function verifyPublication({ scope, record, client, readAttachment 
   if (!same(block.hash, receipt.blockHash) || !same(nextBlock.parentHash, block.hash)) {
     throw new Error("The audit transaction needs another confirmation. Retry shortly.");
   }
-  const decoded = decodeFunctionData({ abi: registry.abi, data: transaction.input });
+  const decoded = decodeFunctionData({ abi: registry.abi, data: call.input });
   const args = decoded.functionName === "commitOpportunity" ? expected.args
     : decoded.functionName === "updateOpportunity" ? [expected.entityId, expected.contentHash, expected.args[3]] : null;
   if (!args || args.length !== decoded.args.length || args.some((v, i) => !same(v, decoded.args[i]))) {

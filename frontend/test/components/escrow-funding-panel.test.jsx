@@ -7,13 +7,12 @@ const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(
 vi.mock("../../src/lib/escrowFunding.js", async importOriginal => ({ ...await importOriginal(),
   prepareEscrowDeposit: (...args) => mocks.prepare(...args), syncEscrowFunding: (...args) => mocks.sync(...args),
   getEscrowFundingHistory: (...args) => mocks.history(...args), startEscrowSettlement: (...args) => mocks.start(...args) }));
-vi.mock("wagmi", () => ({ useAccount: () => mocks.account }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => mocks.account }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/lib/escrow.js", () => ({ readEscrow: (...args) => mocks.read(...args), writeEscrowAction: (...args) => mocks.write(...args),
   confirmEscrowTransaction: (...args) => mocks.confirm(...args), escrowErrorMessage: error => error.message,
   hashEscrowEvidence: evidence => `0x${(evidence.summary === "Delivery complete" ? "1" : "2").repeat(64)}` }));
 vi.mock("../../src/lib/escrowEvidence.js", () => ({ loadEscrowEvidence: (...args) => mocks.load(...args), saveEscrowEvidence: (...args) => mocks.save(...args) }));
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet connection dialog</p> }));
 import { EscrowFundingPanel, EscrowFundingView } from "../../src/components/EscrowFundingPanel.jsx";
 import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";

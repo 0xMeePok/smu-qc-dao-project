@@ -24,7 +24,7 @@ vi.mock("../../src/components/EscrowFundingPanel.jsx", () => ({ EscrowFundingPan
   React.useEffect(() => { onStateChange(mocks.escrowState); }, [onStateChange]);
   return <p>Wallet escrow controls</p>;
 } }));
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: account }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => ({ isConnected: mocks.connected, address: account }) }));
 vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
   RELATED_AUDIT_KIND: { PROPOSAL: "proposal", LISTING: "listing", COMMENT: "comment" },
   RelatedAuditReceiptPane: () => null,
@@ -64,7 +64,6 @@ vi.mock("../../src/lib/proposalAudit.js", () => ({
 vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
   AttachmentUploader: ({ disabled }) => <p>{disabled ? "Attachments locked" : "Attachments"}</p>,
 }));
-vi.mock("../../src/components/ConnectWalletModal.jsx", () => ({ ConnectWalletModal: () => <p>Wallet picker</p> }));
 import CreateProposalPage from "../../src/pages/CreateProposalPage.jsx";
 import ProposalDetailPage from "../../src/pages/ProposalDetailPage.jsx";
 
@@ -415,7 +414,7 @@ describe("nothing is written before the transaction confirms", () => {
     await screen.findByRole("heading", { name: "Withdraw this proposal?" });
     fireEvent.change(screen.getByLabelText("Why are you withdrawing?"), { target: { value: "The costing was wrong." } });
     fireEvent.click(screen.getByRole("button", { name: "Sign and withdraw" }));
-    expect(await screen.findByText(/Connect the wallet that submitted this proposal/)).toBeTruthy();
+    expect(await screen.findByText(/Sign in with the email account that submitted this proposal/)).toBeTruthy();
     expect(mocks.anchorWithdrawal).not.toHaveBeenCalled();
     expect(mocks.withdraw).not.toHaveBeenCalled();
   });

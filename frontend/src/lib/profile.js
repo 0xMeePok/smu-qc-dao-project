@@ -10,7 +10,9 @@ import { ROLE_USER } from "./roles.js";
 export const TERMS_VERSION = "2026-08-24";
 
 // Profiles are keyed by lowercase wallet address, which is also the Firebase uid
-// minted by verifySiweSignature. Rules only have to check that the two match.
+// minted by exchangePrivySession. Email and privyUserId are not written here:
+// the server stamps them after this create, and the rules reject a client that
+// tries to set them. One email maps to one wallet.
 function profileRef(address) {
   return doc(db, "users", address.toLowerCase());
 }
@@ -79,13 +81,13 @@ export async function createProfile({ form, address }) {
     expertise,
     // Every account starts as a normal user. Nothing in the client can write 1
     // here or later: firebase/firestore.rules fixes this to 0 on create and makes
-    // it immutable on every update, so becoming an administrator is only ever done
-    // by hand, directly in Firestore, by someone with console access.
+    // it immutable on every update. Role 1 is granted by the server for an email
+    // in ADMIN_BOOTSTRAP_EMAILS, or by an administrator afterwards.
     role: ROLE_USER,
     chainId: EXPECTED_CHAIN_ID,
     stats: initialStats,
     // Safe to assert: this write is only possible with a uid the server minted
-    // after verifying a signature from this exact address.
+    // after verifying this email's Privy session.
     walletVerified: true,
     termsAcceptedAt: serverTimestamp(),
     termsVersion: TERMS_VERSION,

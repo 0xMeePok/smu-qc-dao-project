@@ -4,6 +4,7 @@ import { same } from "./escrowFundingEvents.js";
 import { isIndependentProposal } from "./independentProposal.js";
 import { boundedMap } from "./boundedMap.js";
 import { createRequestReadClient } from "./requestReadClient.js";
+import { memberCallFromReceipt } from "./memberCall.js";
 import { escrowSelectionGate } from "./escrowCustody.js";
 
 const at = (row, name, index) => row?.[name] ?? row?.[index];
@@ -88,7 +89,7 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
       const receipt = await client.getTransactionReceipt({ hash: context.record.audit.transactionHash });
       // Historical deployments retain their own read/refund screens and must
       // never yield new active-deployment actions in this queue.
-      if (!same(receipt.to, config.address)) return;
+      if (!same((await memberCallFromReceipt(client, receipt, { sender: context.record.researcherId }))?.to, config.address)) return;
       if (receipt.status !== "success" || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > blockNumber
           || !same(receipt.transactionHash, context.record.audit.transactionHash)) throw new Error("Unconfirmed publication");
       const { summary, data, milestones } = await readVerifiedFunding({ client, config, ...context, blockNumber });

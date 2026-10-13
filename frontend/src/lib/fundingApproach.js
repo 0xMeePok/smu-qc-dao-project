@@ -5,7 +5,7 @@ import { CURRENCIES } from "../config/postingCategories.js";
 import { WORKFLOW_STATUS, workflowStatusLabel } from "../config/workflowStatus.js";
 import { requireFirebase } from "./authFlow.js";
 import { toDate } from "./datetime.js";
-import { confirmEscrowTransaction, createWagmiEscrowAdapters, escrowErrorMessage } from "./escrow.js";
+import { confirmEscrowTransaction, createWalletEscrowAdapters, escrowErrorMessage } from "./escrow.js";
 import { functions } from "./firebase.js";
 
 export const APPROACH_TEXT_MAX = 2000;
@@ -141,7 +141,7 @@ export async function getFundingApproach(approachId) {
 }
 
 /** The funder's wallet anchors the saved digest. The message is not sent to the chain. */
-export async function submitFundingApproachAnchor(created, { account, adapters = createWagmiEscrowAdapters() } = {}) {
+export async function submitFundingApproachAnchor(created, { account, adapters = createWalletEscrowAdapters() } = {}) {
   if (!/^0x[0-9a-f]{64}$/i.test(created?.approachAnchorId || "") || !/^0x[0-9a-f]{64}$/i.test(created?.recordHash || "")) {
     throw new Error("This approach has no anchor digest.");
   }
@@ -170,7 +170,7 @@ export async function recordFundingApproachAnchor(approachId, transactionHash) {
 }
 
 /** The researcher's wallet anchors the decision digest. The message and reason stay off-chain. */
-export async function submitFundingApproachDecisions(decisions, { account, adapters = createWagmiEscrowAdapters() } = {}) {
+export async function submitFundingApproachDecisions(decisions, { account, adapters = createWalletEscrowAdapters() } = {}) {
   const hex = (value) => /^0x[0-9a-f]{64}$/i.test(value || "");
   const decisionIds = (decisions ?? []).map((item) => item.decisionAnchorId);
   const recordHashes = (decisions ?? []).map((item) => item.recordHash);

@@ -152,6 +152,7 @@ jobs:
         env:
           ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
           ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
+          PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
         run: |
           if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
             echo "::error::ARBITRUM_SEPOLIA_RPC_URL is required for on-chain publication verification."
@@ -159,6 +160,11 @@ jobs:
           fi
           printf 'ARBITRUM_SEPOLIA_RPC_URL=%s\n' "$ARBITRUM_SEPOLIA_RPC_URL" > firebase/functions/.env
           printf 'ARBITRUM_SEPOLIA_RPC_BACKUP_URLS=%s\n' "$ARBITRUM_SEPOLIA_RPC_BACKUP_URLS" >> firebase/functions/.env
+          if [ -z "$PRIVY_APP_ID" ]; then
+            echo "::error::VITE_PRIVY_APP_ID is required so exchangePrivySession can verify Privy access tokens."
+            exit 1
+          fi
+          printf 'PRIVY_APP_ID=%s\n' "$PRIVY_APP_ID" >> firebase/functions/.env
 
       - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase
@@ -226,6 +232,16 @@ jobs:
             echo "::error::VITE_FIREBASE_APP_CHECK_SITE_KEY is required because production nonce calls enforce App Check."
             exit 1
           fi
+      # QCDAO-141. Email through Privy is the only sign-in method, so a bundle
+      # without the app id would deploy a site nobody can sign in to.
+      - name: Verify Privy is configured
+        env:
+          PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
+        run: |
+          if [ -z "$PRIVY_APP_ID" ]; then
+            echo "::error::VITE_PRIVY_APP_ID is required: Privy email login is the only way to sign in."
+            exit 1
+          fi
       - name: Build
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
@@ -235,6 +251,9 @@ jobs:
           # QCDAO-58. Absent, the bundle builds fine and the attachment UI reports
           # "Storage is not configured" at runtime instead of uploading.
           VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          # Public by design (it ships in every bundle); the Privy app secret is
+          # never needed by the frontend and must not be added here.
+          VITE_PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
           VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
           VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
           VITE_FIREBASE_USE_EMULATORS: "false"

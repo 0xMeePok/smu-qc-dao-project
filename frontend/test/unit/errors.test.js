@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { auditErrorMessage, isModuleLoadError, isRpcQuotaExceeded, isRpcUnreachable, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, messageForPublicationSaveError, fieldForFirebaseError, OnboardingError, redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE } from "../../src/lib/errors.js";
+import { ACCOUNT_SUSPENDED_MESSAGE, auditErrorMessage, isModuleLoadError, isRpcQuotaExceeded, isRpcUnreachable, MODULE_LOAD_ERROR_MESSAGE, messageForFirebaseError, messageForPublicationSaveError, messageForSignInError, fieldForFirebaseError, OnboardingError, redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE } from "../../src/lib/errors.js";
 import { messageForProposalError } from "../../src/lib/proposalValidation.js";
 import { escrowErrorMessage } from "../../src/lib/escrow.js";
 
 describe("publication errors stay separate from sign-in errors", () => {
-  it("does not interpret a publication precondition as a missing sign-in nonce", () => {
+  it("does not treat a publication precondition as a failed sign-in", () => {
     const error = { code: "functions/failed-precondition", message: "The content could not be verified against its mined transaction. Wait for confirmation and retry." };
     assert.match(messageForPublicationSaveError(error), /server could not verify this submission/);
     assert.doesNotMatch(messageForPublicationSaveError(error), /sign.in/);
-    assert.match(messageForFirebaseError(error), /No sign-in request/);
+    assert.doesNotMatch(messageForFirebaseError(error), /nonce|pending for this wallet/);
   });
   for (const [message, expected] of [
     ["Registry maintenance or retirement prevents publication.", /maintenance/],
@@ -20,7 +20,19 @@ describe("publication errors stay separate from sign-in errors", () => {
   });
   it("maps only actual authentication failures to sign-in guidance", () => {
     assert.match(messageForPublicationSaveError({ code: "functions/unauthenticated" }), /session has expired/);
-    assert.doesNotMatch(messageForPublicationSaveError({ code: "functions/internal" }), /sign.in|nonce/);
+    assert.doesNotMatch(messageForPublicationSaveError({ code: "functions/internal" }), /sign.in/);
+  });
+});
+
+describe("sign-in copy from the Privy exchange", () => {
+  it("shows the server's wallet message instead of a publication error", () => {
+    const error = { code: "functions/failed-precondition", message: "Your QC DAO wallet is not ready yet. Sign in again in a moment." };
+    assert.equal(messageForSignInError(error), error.message);
+  });
+
+  it("still reports a suspended account as suspended", () => {
+    const error = { code: "functions/permission-denied", message: "This account has been suspended by an administrator." };
+    assert.equal(messageForSignInError(error), ACCOUNT_SUSPENDED_MESSAGE);
   });
 });
 

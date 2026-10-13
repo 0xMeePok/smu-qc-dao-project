@@ -3,14 +3,14 @@ import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { formatUnits, keccak256, stringToHex } from "viem";
-import { useAccount } from "wagmi";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useSignIn } from "../context/SessionContext.jsx";
+import { useWallet } from "../context/WalletContext.jsx";
 import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isModerated } from "../lib/moderation.js";
 import { confirmEscrowTransaction, escrowErrorMessage, hashEscrowEvidence, readEscrow, writeEscrowAction } from "../lib/escrow.js";
 import { loadEscrowEvidence, saveEscrowEvidence } from "../lib/escrowEvidence.js";
-import { ConnectWalletModal } from "./ConnectWalletModal.jsx";
 import { Field } from "./Field.jsx";
 import { fundingActivityCovered, getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
 import { EscrowFundingHistory } from "./EscrowFundingHistory.jsx";
@@ -67,7 +67,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       {progress.transactionHash && <> <a href={explorer("tx", progress.transactionHash)} target="_blank" rel="noreferrer">View transaction</a></>}</p>}
     {unresolvedTransaction && <p role="alert">This transaction is awaiting confirmation. Check it before starting another payment. <a href={explorer("tx", unresolvedTransaction)} target="_blank" rel="noreferrer">View pending transaction</a>{" "}
       <button type="button" className="secondary small" disabled={busy} onClick={onConfirm}>Retry confirmation</button></p>}
-    {!walletReady && <p className="field-hint">{walletMessage} <button type="button" className="text-button" onClick={onConnect}>Connect wallet</button></p>}
+    {!walletReady && <p className="field-hint">{walletMessage} <button type="button" className="text-button" onClick={onConnect}>Sign in</button></p>}
     {moderated && <p className="field-hint">This proposal is moderated. Funding and approval actions are paused here; available refunds can still be claimed.</p>}
     {fundingBlockReason && !state?.isGrant && <p className="field-hint">{fundingBlockReason}</p>}
     {settlement && <p role="status">{settlementMessage || "Checking confirmed approvals and payment status."}
@@ -162,7 +162,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
 export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refreshVersion = 0, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId } = useWallet();
   const storageKey = pendingKey(proposal.id, address);
   const moderated = isModerated(proposal);
   const [state, setState] = useState(null), [evidence, setEvidence] = useState(null);
@@ -170,7 +170,7 @@ export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refre
   const [progress, setProgress] = useState(null), [unresolvedTransaction, setUnresolvedTransaction] = useState(() => savedTransaction(storageKey));
   const [amount, setAmount] = useState(""), [delivery, setDelivery] = useState({ summary: "", url: "" });
   const [rejectionReason, setRejectionReason] = useState("");
-  const [connect, setConnect] = useState(false);
+  const signIn = useSignIn(setError);
   const [history, setHistory] = useState(null), [historyError, setHistoryError] = useState("");
   const [syncError, setSyncError] = useState(""), [settlement, setSettlement] = useState(null);
   const [notice, setNotice] = useState("");
@@ -190,9 +190,9 @@ export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refre
       ? (authorViewing ? history?.summary?.fundingBlockReason : "Only a client or funder can approach this listing with funding.")
       : !roles.some(role => ["funder", "owner"].includes(role)) ? "Sign in with a funder or problem owner account to deposit."
         : history?.summary?.fundingBlockReason;
-  const walletMessage = !isConnected ? "Connect your signed-in wallet to fund, approve or claim refunds."
-    : address?.toLowerCase() !== user?.id?.toLowerCase() ? "Connect the wallet belonging to your signed-in account."
-      : "Switch your wallet to Arbitrum Sepolia to continue.";
+  const walletMessage = !isConnected ? "Sign in with your email to fund, approve or claim refunds."
+    : address?.toLowerCase() !== user?.id?.toLowerCase() ? "This wallet belongs to a different account. Sign in again with your email."
+      : "Your wallet is moving to Arbitrum Sepolia. Try again in a moment.";
   const refresh = useCallback(async ({ includeHistory = true, activityOnly = false, activitySnapshots = [] } = {}) => {
     const request = ++generation.current;
     const requestedProposal = current.current.proposal;
@@ -369,7 +369,6 @@ export function EscrowFundingPanel({ proposal, onStateChange, onConfirmed, refre
     enabled: Boolean(proposal.id), blocked: busy || loading });
   return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit, integrityBlocked }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize(true)} onSync={() => synchronize()}
-    onAction={act} onRefresh={refresh} onConnect={() => setConnect(true)} onConfirm={confirmPending} />
-    {user?.id && !state?.isHistorical && <EscrowFundingHistory data={history} error={syncError || historyError} busy={busy || loading} onSync={() => synchronize()} />}
-    {connect && <ConnectWalletModal onClose={() => setConnect(false)} />}</>;
+    onAction={act} onRefresh={refresh} onConnect={() => { void signIn(); }} onConfirm={confirmPending} />
+    {user?.id && !state?.isHistorical && <EscrowFundingHistory data={history} error={syncError || historyError} busy={busy || loading} onSync={() => synchronize()} />}</>;
 }

@@ -17,7 +17,7 @@ vi.mock("../../src/lib/proposals.js", () => ({
   saveProposalDraft: (...args) => mocks.saveDraft(...args),
   updateProposal: (...args) => mocks.update(...args),
 }));
-vi.mock("wagmi", async (importOriginal) => ({ ...await importOriginal(), useAccount: () => ({ isConnected: mocks.connected, address: "0xabc" }) }));
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => ({ isConnected: mocks.connected, address: "0xabc" }) }));
 vi.mock("../../src/lib/proposalAudit.js", () => ({
   proposalAuditReceipt: () => ({ status: "queued" }),
   anchorProposalBeforeWrite: (...args) => mocks.anchor(...args),
@@ -138,7 +138,7 @@ describe("proposal submission form", () => {
   it("refuses to start without the signing wallet connected", async () => {
     mocks.connected = false;
     await renderForm(); fill(); fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/Connect the wallet/);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Sign in again with your email/);
     expect(mocks.anchor).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
   });

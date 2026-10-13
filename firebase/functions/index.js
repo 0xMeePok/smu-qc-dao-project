@@ -4,12 +4,12 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
-import { createPublicClient, fallback, http, verifyMessage } from "viem";
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { createPublicClient, fallback, http } from "viem";
 import { arbitrumSepolia } from "viem/chains";
-import { createSiweMessage, parseSiweMessage, validateSiweMessage } from "viem/siwe";
-import { createHash, randomBytes } from "node:crypto";
-import { resolveDomain } from "./siweOrigin.js";
+import { defineSecret } from "firebase-functions/params";
+import { exchangePrivySession as mintPrivySession, PrivySessionError } from "./privySession.js";
+import { bootstrapAdminEmails, stampUserFromIdentity } from "./privyAccount.js";
 import { registerModerationCallables } from "./moderationFunctions.js";
 import { registerMatchingNotificationFunctions } from "./matchingNotifications.js";
 import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
@@ -66,12 +66,7 @@ initializeApp();
 const auditRegistryConfig = { ...auditRegistryBaseConfig, independentFunding: independentFundingConfig };
 
 const db = getFirestore();
-const NONCE_COLLECTION = "siweNonces";
-const NONCE_TTL_MS = 5 * 60 * 1000;
-const RATE_LIMIT_COLLECTION = "siweRateLimits";
-const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_PER_SOURCE = 100;
-const RATE_LIMIT_GLOBAL = 1000;
+const privySecret = defineSecret("PRIVY_SECRET");
 
 function isoTimestamp(value) {
   if (value == null || value === "") return null;
@@ -122,19 +117,13 @@ function serializeOpportunityForAdmin(id, data) {
   };
 }
 
-// There is deliberately no per-address cooldown any more. It was an attempt to limit
-// how often a pending nonce could be overwritten; getSiweNonce now never overwrites
-// one at all, so repeat calls for an address are harmless AND cheaper than before -
-// they resolve inside the read half of a transaction and write nothing. Reinstating a
-// cooldown would only add a way to refuse legitimate users.
-
 // Hard ceiling on concurrent instances. Bounds the worst-case cost and blast radius
 // of a volumetric flood (many distinct addresses, one call each, so per-address
 // idempotency does not help) to a fixed number regardless of how much traffic
 // arrives - once instances are saturated, Cloud Run queues or fails fast rather than
 // autoscaling without limit. This adds no latency to normal traffic; a handful of
 // concurrent sign-ins never gets close to it.
-const NONCE_MAX_INSTANCES = 10;
+const SIGN_IN_MAX_INSTANCES = 10;
 
 // Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js and the Firestore
 // database location. Otherwise every sign-in crosses regions.
@@ -526,303 +515,46 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
   return { verified: true };
 });
 
-function normaliseAddress(value) {
-  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
-    throw new HttpsError("invalid-argument", "A valid wallet address is required.");
-  }
-  return value.toLowerCase();
-}
-
 /**
- * Builds the exact string the user signs.
- *
- * This lives ONLY on the server. The client never supplies a message: it asks for a
- * nonce, receives the finished message, and signs it verbatim. If the client could
- * choose the text, it could get a user to sign something harmless here and replay
- * that signature somewhere it means much more.
+ * Sign-in. Verifies the Privy access token, resolves that user's embedded
+ * wallet, and mints a Firebase custom token whose uid is the wallet address.
+ * The browser does not name the account. PRIVY_SECRET is the functions secret
+ * the operator set. PRIVY_APP_ID is public: the functions env when deployed,
+ * frontend/.env.local's VITE_PRIVY_APP_ID in the emulator (see privyAppId).
  */
-function buildMessage({ address, nonce, issuedAt, domain }) {
-  const scheme = domain.startsWith("localhost:") || domain.startsWith("127.0.0.1:")
-    ? "http"
-    : "https";
-  return createSiweMessage({
-    address,
-    chainId: arbitrumSepolia.id,
-    domain,
-    issuedAt: new Date(issuedAt),
-    nonce,
-    scheme,
-    statement: "Sign in to SMU QC DAO. This proves wallet control and authorises no transaction.",
-    uri: `${scheme}://${domain}`,
-    version: "1",
-  });
-}
-
-function quotaCounter(snapshot, nowMs) {
-  if (!snapshot.exists) return { count: 0, windowStartedAtMs: nowMs };
-  const data = snapshot.data() ?? {};
-  const started = typeof data.windowStartedAt?.toMillis === "function"
-    ? data.windowStartedAt.toMillis()
-    : 0;
-  if (started <= 0 || nowMs - started >= RATE_LIMIT_WINDOW_MS) {
-    return { count: 0, windowStartedAtMs: nowMs };
-  }
-  return {
-    count: Number.isInteger(data.count) && data.count >= 0 ? data.count : 0,
-    windowStartedAtMs: started,
-  };
-}
-
-async function issueNonce({ request, address, ref, domain }) {
-  const emulatorTestSource = process.env.FUNCTIONS_EMULATOR === "true"
-    ? request.rawRequest?.headers?.["x-emulator-test-source"]
-    : null;
-  const source = emulatorTestSource
-    || request.rawRequest?.ip
-    || request.rawRequest?.socket?.remoteAddress
-    || "unknown";
-  const sourceHash = createHash("sha256").update(source).digest("hex");
-  const globalRef = db.collection(RATE_LIMIT_COLLECTION).doc("global");
-  const sourceRef = db.collection(RATE_LIMIT_COLLECTION).doc(`source_${sourceHash}`);
-  const nowMs = Date.now();
-
-  return db.runTransaction(async (tx) => {
-    const [globalSnapshot, sourceSnapshot] = await Promise.all([
-      tx.get(globalRef),
-      tx.get(sourceRef),
-    ]);
-    const global = quotaCounter(globalSnapshot, nowMs);
-    const perSource = quotaCounter(sourceSnapshot, nowMs);
-
-    if (global.count >= RATE_LIMIT_GLOBAL || perSource.count >= RATE_LIMIT_PER_SOURCE) {
-      throw new HttpsError(
-        "resource-exhausted",
-        "Too many sign-in requests. Wait one minute and try again.",
-      );
-    }
-
-    const expiresAt = Timestamp.fromMillis(nowMs + RATE_LIMIT_WINDOW_MS * 2);
-    tx.set(globalRef, {
-      count: global.count + 1,
-      windowStartedAt: Timestamp.fromMillis(global.windowStartedAtMs),
-      expiresAt,
-    });
-    tx.set(sourceRef, {
-      count: perSource.count + 1,
-      windowStartedAt: Timestamp.fromMillis(perSource.windowStartedAtMs),
-      expiresAt,
-    });
-
-    const fresh = {
-      nonce: randomBytes(16).toString("hex"),
-      issuedAt: new Date(nowMs).toISOString(),
-      domain,
-    };
-
-    tx.set(ref, {
-      ...fresh,
-      address,
-      callerHash: sourceHash,
-      consumed: false,
-      expiresAt: Timestamp.fromMillis(nowMs + NONCE_TTL_MS),
-      createdAt: Timestamp.fromMillis(nowMs),
-    });
-
-    return fresh;
-  });
-}
-
-/**
- * Step 1 of sign-in. Issues a single-use nonce and returns the message to sign.
- * The nonce document is written with the Admin SDK, so it is unreachable from any
- * browser: firestore.rules denies the whole collection.
- */
-export const getSiweNonce = onCall(
-  {
-    region: REGION,
-    maxInstances: NONCE_MAX_INSTANCES,
-    enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
-    // Diagnostic: isolate whether limited-use consumption is the 401. App Check
-    // is still required; tokens are no longer treated as single-use.
-    consumeAppCheckToken: false,
-  },
-  async (request) => {
-    const address = normaliseAddress(request.data?.address);
-    // One opaque challenge per attempt, not one per wallet: another caller can
-    // then neither replace this sign-in nor spend its verification attempts.
-    const challengeId = randomBytes(16).toString("hex");
-    const ref = db.collection(NONCE_COLLECTION).doc(challengeId);
-    const domain = resolveDomain(request);
-    const issued = await issueNonce({ request, address, ref, domain });
-
-    return {
-      message: buildMessage({ address, ...issued }),
-      nonce: issued.nonce,
-      issuedAt: issued.issuedAt,
-      challengeId,
-    };
-  },
-);
-
-/**
- * Step 2 of sign-in. Verifies the signature against the message this server issued,
- * burns the nonce, and mints a Firebase custom token whose uid IS the wallet address.
- *
- * That uid is the whole security model: firestore.rules only ever has to check
- * `request.auth.uid == address`, and a uid can exist only if this function verified a
- * signature first. Nothing the browser does can forge one.
- */
-export const verifySiweSignature = onCall({
-  region: REGION, maxInstances: NONCE_MAX_INSTANCES,
+export const exchangePrivySession = onCall({
+  region: REGION,
+  maxInstances: SIGN_IN_MAX_INSTANCES,
+  secrets: [privySecret],
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
 }, async (request) => {
-  const address = normaliseAddress(request.data?.address);
-  const signature = request.data?.signature;
-
-  // Contract wallets may use variable-length signatures; bound and validate the
-  // bytes before spending a database read or making an EIP-1271 RPC request.
-  if (typeof signature !== "string" || !/^0x(?:[0-9a-fA-F]{2}){1,2048}$/.test(signature)) {
-    throw new HttpsError("invalid-argument", "A valid wallet signature is required.");
-  }
-
-  const challengeId = request.data?.challengeId;
-  if (challengeId !== undefined && challengeId !== null
-      && (typeof challengeId !== "string" || !/^[0-9a-f]{32}$/.test(challengeId))) {
-    throw new HttpsError("invalid-argument", "A valid sign-in challenge is required.");
-  }
-  // Attempts are counted on this document, so a challenge belongs to the caller
-  // that opened it. Address-keyed records predate this and drain with their TTL.
-  const ref = db.collection(NONCE_COLLECTION).doc(challengeId || address);
-
-  // Bound verification work atomically before cryptography. Failed signatures
-  // spend an attempt but never consume the wallet nonce.
-  const source = (process.env.FUNCTIONS_EMULATOR === "true" && request.rawRequest?.headers?.["x-emulator-test-source"])
-    || request.rawRequest?.ip || request.rawRequest?.socket?.remoteAddress || "unknown";
-  const sourceHash = createHash("sha256").update(source).digest("hex");
-  const snapshot = await db.runTransaction(async (tx) => {
-    const now = Date.now();
-    const sourceRef = db.collection(RATE_LIMIT_COLLECTION).doc(`verify_source_${sourceHash}`);
-    const globalRef = db.collection(RATE_LIMIT_COLLECTION).doc("verify_global");
-    const [nonce, sourceSnapshot, globalSnapshot] = await Promise.all([
-      tx.get(ref), tx.get(sourceRef), tx.get(globalRef),
-    ]);
-    const perSource = quotaCounter(sourceSnapshot, now);
-    const global = quotaCounter(globalSnapshot, now);
-    const attempts = nonce.data()?.verificationAttempts ?? 0;
-    if (perSource.count >= 30 || global.count >= 300 || attempts >= 10) {
-      throw new HttpsError("resource-exhausted", "Too many verification attempts. Wait a few minutes and start sign-in again.");
-    }
-    const expiresAt = Timestamp.fromMillis(now + RATE_LIMIT_WINDOW_MS * 2);
-    tx.set(sourceRef, { count: perSource.count + 1, windowStartedAt: Timestamp.fromMillis(perSource.windowStartedAtMs), expiresAt });
-    tx.set(globalRef, { count: global.count + 1, windowStartedAt: Timestamp.fromMillis(global.windowStartedAtMs), expiresAt });
-    // Reserve attempts atomically BEFORE verification so concurrent failures
-    // cannot all pass a read-only counter. Do not consume the wallet's nonce.
-    if (nonce.exists) tx.update(ref, { verificationAttempts: attempts + 1 });
-    return nonce;
-  });
-  if (!snapshot.exists) {
-    throw new HttpsError("failed-precondition", "No sign-in request is pending for this wallet. Start again.");
-  }
-
-  const record = snapshot.data() ?? {};
-  if (record.address && record.address !== address) {
-    throw new HttpsError("failed-precondition", "That sign-in request belongs to another wallet. Start again.");
-  }
-  const expiresAtMs = typeof record.expiresAt?.toMillis === "function"
-    ? record.expiresAt.toMillis()
-    : null;
-
-  if (record.consumed) {
-    throw new HttpsError("failed-precondition", "That sign-in request was already used. Start again.");
-  }
-  if (expiresAtMs === null || typeof record.nonce !== "string" || typeof record.issuedAt !== "string") {
-    throw new HttpsError("failed-precondition", "That sign-in request is no longer valid. Start again.");
-  }
-  if (expiresAtMs < Date.now()) {
-    throw new HttpsError("deadline-exceeded", "That sign-in request expired. Start again.");
-  }
-
-  // Rebuilt from what the server stored, never from anything the client sent.
-  const message = buildMessage({
-    address,
-    nonce: record.nonce,
-    issuedAt: record.issuedAt,
-    domain: record.domain,
-  });
-
-  const parsedMessage = parseSiweMessage(message);
-  const expectedScheme = record.domain.startsWith("localhost:")
-    || record.domain.startsWith("127.0.0.1:")
-    ? "http"
-    : "https";
-  const conformsToSiwe = validateSiweMessage({
-    address,
-    domain: record.domain,
-    message: parsedMessage,
-    nonce: record.nonce,
-    scheme: expectedScheme,
-  })
-    && parsedMessage.chainId === arbitrumSepolia.id
-    && parsedMessage.version === "1"
-    && parsedMessage.uri === `${expectedScheme}://${record.domain}`
-    && parsedMessage.issuedAt?.toISOString() === record.issuedAt;
-
-  if (!conformsToSiwe) {
-    throw new HttpsError("failed-precondition", "That sign-in request is malformed. Start again.");
-  }
-
-  let valid = false;
   try {
-    valid = await verifyMessage({ address, message, signature, client: publicClient });
-  } catch {
-    valid = false;
+    return await mintPrivySession(request, { db, getAuth, Timestamp });
+  } catch (error) {
+    if (error instanceof PrivySessionError) throw new HttpsError(error.code, error.message);
+    throw new HttpsError("unavailable", "Sign-in could not be confirmed. Try again in a moment.");
   }
-
-  if (!valid) {
-    // No write happened, so a forged signature costs the legitimate holder nothing:
-    // their already-signed message still matches this same nonce.
-    throw new HttpsError("permission-denied", "That signature does not match this wallet.");
-  }
-
-  // Only now is the nonce spent, atomically and only if it is still the SAME record
-  // the signature was checked against.
-  //
-  // Re-reading `consumed` alone is not enough. The nonce read above could expire
-  // between that read and this write, letting getSiweNonce mint a replacement - and
-  // this transaction would then consume the NEW nonce on the strength of a signature
-  // over the OLD one. Comparing the nonce value closes that, and re-checking expiry
-  // stops a nonce that lapsed mid-verification from being spent at all.
-  await db.runTransaction(async (tx) => {
-    const current = await tx.get(ref);
-    const data = current.exists ? current.data() ?? {} : null;
-
-    if (!data || data.consumed || data.nonce !== record.nonce) {
-      throw new HttpsError("failed-precondition", "That sign-in request was already used. Start again.");
-    }
-
-    const currentExpiry = typeof data.expiresAt?.toMillis === "function"
-      ? data.expiresAt.toMillis()
-      : null;
-    if (currentExpiry === null || currentExpiry < Date.now()) {
-      throw new HttpsError("deadline-exceeded", "That sign-in request expired. Start again.");
-    }
-
-    tx.update(ref, { consumed: true, consumedAt: Timestamp.now() });
-  });
-
-  // Check if account has been administratively suspended
-  const userProfileSnap = await db.collection("users").doc(address).get();
-  if (userProfileSnap.exists && userProfileSnap.data()?.suspended) {
-    throw new HttpsError("permission-denied", "This account has been suspended by an administrator.");
-  }
-
-  const token = await getAuth().createCustomToken(address, {
-    wallet: address,
-    chainId: arbitrumSepolia.id,
-  });
-
-  return { token, address };
 });
+
+/**
+ * Onboarding creates users/{address} without email: rules forbid the client
+ * from writing it. This copies the binding exchangePrivySession stored, and
+ * grants role 1 when the email is on ADMIN_BOOTSTRAP_EMAILS.
+ */
+export const stampPrivyIdentity = onDocumentCreated(
+  { document: "users/{address}", region: REGION, retry: true, maxInstances: 5 },
+  async (event) => {
+    const address = String(event.params.address || "").toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(address)) return;
+    await stampUserFromIdentity({
+      db,
+      Timestamp,
+      address,
+      userData: event.data?.data() ?? {},
+      adminEmails: bootstrapAdminEmails(),
+    });
+  },
+);
 
 /**
  * Invalidates every refresh token for the current wallet before the browser clears
@@ -1179,6 +911,7 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
     return {
       address: docSnap.id,
       fullName: data.fullName || "",
+      email: data.email || "",
       organisation: data.organisation || "",
       role: typeof data.role === "number" ? data.role : 0,
       suspended: Boolean(data.suspended),
@@ -1194,6 +927,7 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
     const searchLower = search.trim().toLowerCase();
     users = users.filter((u) =>
       u.fullName.toLowerCase().includes(searchLower) ||
+      u.email.toLowerCase().includes(searchLower) ||
       u.address.toLowerCase().includes(searchLower) ||
       u.organisation.toLowerCase().includes(searchLower),
     );
@@ -1215,6 +949,14 @@ export const adminListUsers = onCall({ region: REGION }, async (request) => {
     totalPages: Math.ceil(total / safePageSize) || 1,
   };
 });
+
+/** The admin callables take a member's wallet address as the Firestore user id. */
+function normaliseAddress(value) {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
+    throw new HttpsError("invalid-argument", "A valid wallet address is required.");
+  }
+  return value.toLowerCase();
+}
 
 /**
  * Admin: Change a user's role assignment with written reason and audit recording.

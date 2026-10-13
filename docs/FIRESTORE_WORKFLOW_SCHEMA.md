@@ -1,5 +1,29 @@
 # Firestore workflow schema
 
+## Accounts (QCDAO-152)
+
+The Firebase uid and the `users/{address}` document id stay the lowercase
+embedded-wallet address. Email is the human identifier: one email maps to one
+account, and the address is what proposals, postings and the contracts already
+store. Email is not the document id, so a public posting never shows it.
+
+| Field | Who writes it | Notes |
+| --- | --- | --- |
+| `email` | server, on sign-in | normalised lowercase; clients cannot create or change it |
+| `privyUserId` | server, on sign-in | `did:privy:…`; clients cannot create or change it |
+
+`emailAccounts/{email}` and `privyIdentities/{address}` are Admin SDK only.
+`emailAccounts` is the uniqueness lock: its id is the email and its `address`
+is the wallet. A second wallet that presents the same email is refused.
+`privyIdentities` holds the binding until onboarding creates `users/{address}`,
+when `stampPrivyIdentity` copies `email` and `privyUserId` onto that document.
+Sign-in of an account that already has a profile writes the same fields directly.
+
+`ADMIN_BOOTSTRAP_EMAILS` (comma-separated, on the functions environment) grants
+role `1` to an account whose email is on that list while its role is still `0`.
+Remove the email from the list before demoting that account to a normal user.
+`publicProfiles` does not carry email.
+
 Firestore rules enforce these client-writable workflow contracts. Every create uses
 server timestamps for `createdAt` and `updatedAt`; every update preserves `createdAt`,
 sets `updatedAt` to the server timestamp, and keeps ownership/reference fields

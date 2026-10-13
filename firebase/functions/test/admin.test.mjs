@@ -4,6 +4,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
+import { idTokenForAddress } from "./id-token.mjs";
 
 process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
 process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:9099";
@@ -34,24 +35,7 @@ async function call(fn, data, { token = null } = {}) {
 }
 
 async function getIdTokenForAccount(account) {
-  const address = account.address.toLowerCase();
-  const { result: nonceRes } = await call("getSiweNonce", { address });
-  const signature = await account.signMessage({ message: nonceRes.message });
-  const { result: verifyRes } = await call("verifySiweSignature", {
-    address, signature, challengeId: nonceRes.challengeId,
-  });
-  const customToken = verifyRes.token;
-
-  const authRes = await fetch(
-    "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake-api-key",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: customToken, returnSecureToken: true }),
-    },
-  );
-  const authData = await authRes.json();
-  return authData.idToken;
+  return idTokenForAddress(account.address);
 }
 
 // Test accounts
@@ -310,21 +294,30 @@ describe("adminSetSuspended", () => {
     assert.equal(res.error?.status, "PERMISSION_DENIED");
   });
 
-  it("[BIT-AAR-015] rejects login / signature verification if user account is suspended", async () => {
-    // 1. Suspend user2
+  it("[BIT-AAR-015] rejects sign-in if the account is suspended", async () => {
     await db.collection("users").doc(user2Address).update({ suspended: true });
-
-    // 2. Attempt SIWE login for user2
-    const { result: nonceRes } = await call("getSiweNonce", { address: user2Address });
-    const signature = await user2Account.signMessage({ message: nonceRes.message });
-    const verifyRes = await call("verifySiweSignature", {
-      address: user2Address, signature, challengeId: nonceRes.challengeId,
+    const fixture = {
+      linked_accounts: [
+        { type: "email", address: "suspended@example.com" },
+        {
+          type: "wallet", address: user2Address, chain_type: "ethereum",
+          connector_type: "embedded", wallet_client_type: "privy",
+        },
+      ],
+    };
+    const res = await fetch(`${BASE}/exchangePrivySession`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+        "X-Emulator-Privy-User": JSON.stringify(fixture),
+        "X-Emulator-Test-Source": user2Address,
+      },
+      body: JSON.stringify({ data: {} }),
     });
-
+    const verifyRes = await res.json();
     assert.equal(verifyRes.error?.status, "PERMISSION_DENIED");
-    assert.ok(verifyRes.error?.message?.includes("suspended"));
-
-    // Cleanup: reinstate user2
+    assert.match(verifyRes.error?.message ?? "", /suspended/);
     await db.collection("users").doc(user2Address).update({ suspended: false });
   });
 

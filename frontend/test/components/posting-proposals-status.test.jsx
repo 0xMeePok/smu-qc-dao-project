@@ -7,9 +7,7 @@ vi.mock("../../src/lib/proposals.js", () => ({
   PROPOSAL_STATUS_DRAFT: "draft",
   listProposalsForPosting: async () => rows.items,
 }));
-vi.mock("wagmi", async (importOriginal) => ({
-  ...await importOriginal(),
-  useAccount: () => ({ isConnected: false, address: null, chainId: null }),
+vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => ({ isConnected: false, address: null, chainId: null }),
 }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { id: "0xabc" } }) }));
 import { PostingProposals } from "../../src/components/PostingProposals.jsx";

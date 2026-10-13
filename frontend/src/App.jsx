@@ -14,9 +14,8 @@ import { NotificationCentre } from "./components/ModerationNotifications.jsx";
 import { RouteGuard } from "./components/RouteGuard.jsx";
 import { Login } from "./components/Login.jsx";
 import { AccessDenied } from "./components/AccessDenied.jsx";
-import { SignInWithWallet } from "./components/SignInWithWallet.jsx";
+import { SignInWithEmail } from "./components/SignInWithEmail.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
-import { NetworkBanner } from "./components/NetworkBanner.jsx";
 import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import { useActionItems } from "./lib/actionItems.js";
 import HomePage from "./pages/HomePage.jsx";
@@ -170,7 +169,7 @@ function ThemeToggle({ theme, onToggle }) {
   );
 }
 
-function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut }) {
+function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut, signingOut = false }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
   const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
@@ -194,13 +193,14 @@ function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut }) {
       <button
         type="button"
         className="avatar-button"
-        aria-label={`Account menu for ${name}`}
+        aria-label={signingOut ? "Signing out" : `Account menu for ${name}`}
         aria-expanded={open}
         aria-haspopup="true"
+        disabled={signingOut}
         onClick={() => setOpen((current) => !current)}
       >
         <span className="avatar" aria-hidden="true">{initial}</span>
-        <span className="account-menu-inline-name">{name}</span>
+        <span className="account-menu-inline-name">{signingOut ? "Signing out…" : name}</span>
       </button>
       {open && (
         <div className="account-menu-panel" role="menu">
@@ -225,7 +225,7 @@ function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut }) {
 }
 
 function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
-  const { isSignedIn, profile, address, signOut } = useSession();
+  const { isSignedIn, isSigningOut, profile, address, signOut } = useSession();
   const { hasRole } = useAuth();
 
   const newBrief = canCreate && (
@@ -248,6 +248,7 @@ function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
           roleLabel={profile?.organisation ? `${roleLabel} · ${profile.organisation}` : roleLabel}
           workspaceRoutes={workspaceRoutes}
           onSignOut={() => signOut()}
+          signingOut={isSigningOut}
         />
       </div>
     );
@@ -256,7 +257,7 @@ function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
   return (
     <div className="account-controls">
       <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-      <SignInWithWallet />
+      <SignInWithEmail />
     </div>
   );
 }
@@ -862,7 +863,6 @@ function AppContent() {
 
   return (
     <>
-      <NetworkBanner />
       <SuspensionBanner />
       <Shell route={section}><Suspense fallback={<PageLoading />}>{pageComponent}</Suspense></Shell>
       <OnboardingModal />

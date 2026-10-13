@@ -29,9 +29,26 @@ describe("security deployment configuration", () => {
     assert.equal(policy.includes("wss://*.googleapis.com"), false);
   });
 
-  it("[QCDAO-123] enforces App Check for production nonce calls", () => {
-    assert.match(functionsSource, /enforceAppCheck:\s*process\.env\.FUNCTIONS_EMULATOR !== "true"/);
-    assert.match(functionsSource, /consumeAppCheckToken:\s*false/);
+  it("[QCDAO-123] enforces App Check for production Privy sign-in", () => {
+    assert.match(
+      functionsSource,
+      /export const exchangePrivySession = onCall\(\{[^}]*enforceAppCheck:\s*process\.env\.FUNCTIONS_EMULATOR !== "true"/,
+    );
+  });
+
+  it("[QCDAO-141] allows Privy email sign-in and no wallet-connection services", () => {
+    const directives = Object.fromEntries(contentSecurityPolicy().split(";")
+      .map((part) => part.trim().split(/\s+/))
+      .filter(([name]) => name)
+      .map(([name, ...sources]) => [name, sources]));
+    // Privy's API, and the iframe that holds the embedded wallet's keys.
+    assert.ok(directives["connect-src"].includes("https://auth.privy.io"));
+    assert.ok(directives["frame-src"].includes("https://auth.privy.io"));
+    // The RPC Privy's embedded wallet uses on Arbitrum Sepolia, named exactly.
+    assert.ok(directives["connect-src"].includes("https://arbitrum-sepolia.rpc.privy.systems"));
+    assert.equal(contentSecurityPolicy().includes("*.rpc.privy.systems"), false);
+    // External wallets are switched off, so none of their relays are trusted.
+    assert.equal(/walletconnect|walletlink|metamask/i.test(contentSecurityPolicy()), false);
   });
 
   it("[BUT-OPD-020] ships Storage rules and allows the Storage endpoint", () => {
@@ -174,11 +191,11 @@ describe("security deployment configuration", () => {
     assert.match(writer, /\.doc\(eventId\)/);
   });
 
-  it("enables TTL cleanup for nonce and rate-limit documents", () => {
+  it("enables TTL cleanup for publication attempt documents", () => {
     const ttlGroups = indexes.fieldOverrides
       .filter((entry) => entry.fieldPath === "expiresAt" && entry.ttl === true)
       .map((entry) => entry.collectionGroup)
       .sort();
-    assert.deepEqual(ttlGroups, ["publicationAttempts", "siweNonces", "siweRateLimits"]);
+    assert.deepEqual(ttlGroups, ["publicationAttempts"]);
   });
 });

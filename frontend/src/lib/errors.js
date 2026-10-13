@@ -37,11 +37,11 @@ const FUNCTIONS_MESSAGES = {
   "functions/unauthenticated":
     "The sign-in server rejected the request as unauthenticated. Confirm the functions allow unauthenticated invocation.",
   "functions/failed-precondition":
-    "No sign-in request is pending for this wallet. Start the sign-in again.",
+    "Sign-in could not be completed. Start again.",
   "functions/deadline-exceeded":
     "The sign-in server took too long to respond. Please try again.",
   "functions/resource-exhausted":
-    "A sign-in request was just issued for this wallet. Wait a few seconds and try again.",
+    "Too many sign-in attempts. Wait a minute, then try again.",
 };
 
 const FIRESTORE_MESSAGES = {
@@ -154,14 +154,29 @@ export function isWalletRejection(error) {
     seen.add(current);
     if (["4001", "ACTION_REJECTED"].includes(String(current.code ?? ""))) return true;
     const text = [current.name, current.shortMessage, current.message].filter(Boolean).join(" ");
-    if (/UserRejectedRequestError|user (?:rejected|denied|cancelled|canceled)|denied transaction signature/i.test(text)) return true;
+    // "User exited the modal" is Privy's wording when a member closes its
+    // confirmation screen instead of approving the transaction.
+    if (/UserRejectedRequestError|user (?:rejected|denied|cancelled|canceled|exited)|denied transaction signature/i.test(text)) return true;
     pending.push(current.cause, current.data?.originalError);
   }
   return false;
 }
 
+/**
+ * The sponsored-transaction outcome (embeddedWallet.js) behind an error, or
+ * null. viem nests the provider's error a few causes deep.
+ */
+export function walletOutcomeError(error) {
+  for (let current = error, depth = 0; current && typeof current === "object" && depth < 10; current = current.cause, depth++) {
+    if (current.walletOutcome) return current;
+  }
+  return null;
+}
+
 export function auditErrorMessage(error) {
   if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
+  const outcome = walletOutcomeError(error);
+  if (outcome) return outcome.message;
   if (error?.code === "AUDIT_TRANSACTION_CANCELLED") {
     return "The pending verification transaction was cancelled in your wallet. This submission was not completed. Your entries are still here; submit again when ready.";
   }
@@ -173,7 +188,7 @@ export function auditErrorMessage(error) {
   const text = String(error?.message ?? "");
   // These phrases are OUR OWN copy, written by auditRevertMessage and the
   // pre-flight checks, so echoing them is showing a reviewed message back.
-  if (/already anchored|updateOpportunity, not a second commit|updateHashes, not a second commit|already been withdrawn|cannot be edited|cannot be amended|cannot be withdrawn|cannot be filed|not on the configured AuditRegistry|Connect the wallet that owns/i.test(text)) {
+  if (/already anchored|updateOpportunity, not a second commit|registry refused this proposal|already been withdrawn|cannot be edited|cannot be amended|cannot be withdrawn|cannot be filed|not on the configured AuditRegistry|Sign in with the account that owns|could not cover the network fee|has not confirmed yet/i.test(text)) {
     return text;
   }
   // Before the revert check: a transport failure wraps the contract call, so its
@@ -211,13 +226,15 @@ export function messageForPublicationSaveError(error) {
   return error?.message || "The submission could not be saved. Keep this page open and try again.";
 }
 
+export const ACCOUNT_SUSPENDED_MESSAGE = "Your account has been suspended, contact an administrator.";
+
 export function messageForFirebaseError(error) {
   if (isModuleLoadError(error)) return MODULE_LOAD_ERROR_MESSAGE;
   if (isTransactionFeeTooLow(error)) return TRANSACTION_FEE_TOO_LOW_MESSAGE;
   // Firebase's own SDKs always use string codes ("auth/xyz", "permission-denied").
-  // This function is also the catch-all for the chain-switch step in signIn() and
-  // for whatever a wallet extension throws, though - and EIP-1193 wallet errors
-  // (Backpack, MetaMask, etc.) commonly carry a NUMERIC code (4001, 4902, -32603).
+  // This function is also the catch-all for whatever the wallet provider throws
+  // during sign-in, though - and EIP-1193 wallet errors commonly carry a NUMERIC
+  // code (4001, 4902, -32603).
   // `error?.code ?? ""` only guards against undefined/null, so a numeric code sailed
   // through as a number and crashed the very first `.includes()` call below with
   // "code.includes is not a function" - hiding whatever the wallet's real error was
@@ -226,7 +243,7 @@ export function messageForFirebaseError(error) {
   const code = String(error?.code ?? "");
 
   if (error?.message && typeof error.message === "string" && error.message.toLowerCase().includes("suspended")) {
-    return "Your account has been suspended, contact an administrator.";
+    return ACCOUNT_SUSPENDED_MESSAGE;
   }
   if (error?.message && typeof error.message === "string"
     && /revocation|invalidate this session|retry sign out/i.test(error.message)) {
@@ -244,8 +261,8 @@ export function messageForFirebaseError(error) {
   if (error instanceof OnboardingError) return error.message;
 
   // Surface whatever the wallet/SDK actually said instead of a pure guess - this is
-  // what lets a genuinely wallet-specific failure (e.g. a chain switch Backpack
-  // itself refuses) be diagnosed from what the user sees, rather than staying invisible.
+  // what lets a genuinely provider-specific failure be diagnosed from what the user
+  // sees, rather than staying invisible.
   if (isRpcQuotaExceeded(error)) return RPC_QUOTA_MESSAGE;
   if (isRpcUnreachable(error)) return RPC_UNREACHABLE_MESSAGE;
   const detail = error?.shortMessage || error?.reason || error?.message;
@@ -254,11 +271,40 @@ export function messageForFirebaseError(error) {
     : "Something went wrong. Please try again, and contact the platform team if it keeps happening.";
 }
 
-// Wallet-level failures (connect rejected, wrong network, extension errors) are
-// handled inline where they occur - see ConnectWalletModal.jsx and
-// SessionContext.jsx, both of which check `error.name === "UserRejectedRequestError"`
-// on the error objects wagmi throws. There is no separate raw-EIP-1193 error path
-// left to map here now that wagmi owns the wallet connection.
+/** Privy's code for a login modal closed before sign-in finished. */
+export const SIGN_IN_CANCELLED = "exited_auth_flow";
+
+/** The member closed Privy's login modal: a change of mind, not a failure. */
+export function isSignInCancelled(error) {
+  return error?.privyErrorCode === SIGN_IN_CANCELLED;
+}
+
+// Privy's login modal explains its own email and code errors in place. These
+// are the Privy failures that can still reach the app: setting up or using the
+// embedded wallet after the modal has closed.
+const SIGN_IN_MESSAGES = {
+  too_many_requests: "Too many sign-in attempts. Wait a minute, then try again.",
+  client_request_timeout: "The sign-in service took too long to respond. Check your connection and try again.",
+  embedded_wallet_create_error: "Your QC DAO wallet could not be set up. Sign in again to retry.",
+  unknown_embedded_wallet_error: "Your QC DAO wallet could not be loaded. Sign in again to retry.",
+};
+
+/** Sign-in failures: the embedded wallet first, then the Firebase exchange. */
+export function messageForSignInError(error) {
+  const privyMessage = SIGN_IN_MESSAGES[error?.privyErrorCode];
+  if (privyMessage) return privyMessage;
+  // Our own wallet-readiness copy, written to be shown as-is.
+  if (error?.name === "WalletUnavailableError") return error.message;
+  const detail = String(error?.message ?? "");
+  if (/QC DAO wallet|email address for this account|does not match this account|Sign-in is not configured|could not be confirmed/i.test(detail)) {
+    return detail;
+  }
+  return messageForFirebaseError(error);
+}
+
+// Transaction-level wallet failures (rejections, fee and RPC errors) are mapped
+// by auditErrorMessage and escrowErrorMessage. Sign-in failures go through
+// messageForSignInError above.
 
 export function fieldForFirebaseError(error) {
   if (error instanceof OnboardingError) return error.field;
