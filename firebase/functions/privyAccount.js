@@ -4,7 +4,11 @@
  * already key ownership by that address and show it in public. Email and the
  * Privy user id are written here, never by a client.
  *
- * emailAccounts/{email} is the uniqueness lock: one email, one wallet.
+ * One email, one wallet is Privy's guarantee: Privy keeps one user per email
+ * and sign-in accepts only that user's single embedded wallet. This module
+ * does not repeat it with a lock of its own, so a Privy user recreated for the
+ * same email simply arrives as a new wallet instead of being locked out.
+ *
  * privyIdentities/{address} holds the binding until onboarding creates the
  * profile, which clients must create without these fields. stampPrivyIdentity
  * copies them on afterwards. A later sign-in writes them directly when the
@@ -14,7 +18,6 @@
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PRIVY_ID = /^did:privy:[A-Za-z0-9_-]{1,100}$/;
 
-export const EMAIL_ACCOUNTS = "emailAccounts";
 export const PRIVY_IDENTITIES = "privyIdentities";
 
 export class PrivySessionError extends Error {
@@ -75,21 +78,17 @@ function promoteRole(profile, email, adminEmails) {
 }
 
 /**
- * Binds this email to this wallet, or refuses when either side is already
- * bound to someone else. Does not create the profile: onboarding still does
- * that, and the rules forbid the client from writing these fields.
+ * Records this wallet's email and Privy id, or refuses when the wallet's
+ * profile already carries a different one. Does not create the profile:
+ * onboarding still does that, and the rules forbid the client from writing
+ * these fields.
  */
 export async function bindPrivyAccount({ db, Timestamp, address, email, privyUserId, adminEmails }) {
-  const emailRef = db.collection(EMAIL_ACCOUNTS).doc(email);
   const identityRef = db.collection(PRIVY_IDENTITIES).doc(address);
   const userRef = db.collection("users").doc(address);
   const now = Timestamp.now();
   return db.runTransaction(async (tx) => {
-    const [emailSnap, userSnap] = await Promise.all([tx.get(emailRef), tx.get(userRef)]);
-    const taken = emailSnap.data();
-    if (emailSnap.exists && taken?.address !== address) {
-      throw new PrivySessionError("already-exists", "This email is already registered to another account.");
-    }
+    const userSnap = await tx.get(userRef);
     const profile = userSnap.exists ? userSnap.data() : null;
     if (profile?.suspended) {
       throw new PrivySessionError("permission-denied", "This account has been suspended by an administrator.");
@@ -101,7 +100,6 @@ export async function bindPrivyAccount({ db, Timestamp, address, email, privyUse
       throw new PrivySessionError("failed-precondition", "This wallet is already linked to a different sign-in.");
     }
     const grantAdmin = promoteRole(profile, email, adminEmails);
-    tx.set(emailRef, { address, privyUserId, updatedAt: now });
     tx.set(identityRef, { address, email, privyUserId, updatedAt: now });
     if (!profile) return { address, email, privyUserId, profileReady: false, roleGranted: grantAdmin };
     const patch = { email, privyUserId, updatedAt: now };

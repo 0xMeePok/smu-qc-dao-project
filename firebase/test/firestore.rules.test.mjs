@@ -1425,10 +1425,8 @@ describe("collections outside the schema", () => {
     await assertFails(getDoc(doc(db, "secrets", "x")));
   });
 
-  it("[QCDAO-152] hides the email lock and the Privy binding from every client", async () => {
+  it("[QCDAO-152] hides the Privy binding from every client", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertFails(getDoc(doc(db, "emailAccounts", "member@example.com")));
-    await assertFails(setDoc(doc(db, "emailAccounts", "member@example.com"), { address: ADDRESS }));
     await assertFails(getDoc(doc(db, "privyIdentities", ADDRESS)));
     await assertFails(setDoc(doc(db, "privyIdentities", ADDRESS), { email: "member@example.com" }));
   });

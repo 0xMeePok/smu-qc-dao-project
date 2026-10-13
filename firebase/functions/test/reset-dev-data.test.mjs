@@ -98,7 +98,7 @@ describe("emulator wipe", { skip: !emulatorReady }, () => {
     await db.collection("users").doc(uid).set({ email: "wipe@example.com", address: uid });
     await db.collection("problems").doc("posting").set({ title: "wipe me" });
     await db.collection("problems").doc("posting").collection("revisions").doc("rev").set({ n: 1 });
-    await db.collection("emailAccounts").doc("wipe@example.com").set({ address: uid });
+    await db.collection("privyIdentities").doc(uid).set({ address: uid, email: "wipe@example.com" });
     await bucket.file(`problems/${uid}/posting/file.pdf`).save(Buffer.from("%PDF"), {
       resumable: false,
       contentType: "application/pdf",

@@ -11,7 +11,7 @@ for anyone editing `firestore.rules` or `functions/index.js` and redeploying.
 ```
 firebase/
 ├── deploy.sh                    # One-shot production setup - see "Deploy" below
-├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, emailAccounts/
+├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, privyIdentities/
 ├── storage.rules                # Authorisation for posting attachments (QCDAO-58)
 ├── storage.cors.json            # Bucket CORS allow-list - see "Posting attachments"
 ├── firestore.indexes.json       # Discover query indexes (QCDAO-52/53)
@@ -176,7 +176,7 @@ FUNCTIONS_BASE_URL=https://asia-southeast1-<project-id>.cloudfunctions.net npm -
 The rules suite checks things like: a wallet can only create its own
 profile and can only read its own, `stats` can never be written non-zero at signup,
 the user base cannot be enumerated, `role` never leaks through `publicProfiles`, and
-`emailAccounts` and `privyIdentities` are unreachable from any client.
+`privyIdentities` is unreachable from any client.
 
 The functions suite checks that sign-in uses the embedded wallet Privy reports
 for the email, and refuses an external wallet, a missing wallet, or an address
@@ -368,7 +368,6 @@ You should see `exchangePrivySession` and `revokeOwnSessions` in `asia-southeast
 |---|---|---|
 | `users/{address}` | the owning wallet only (`get`, never `list`) | the full profile, including `role`, plus server-written `email` and `privyUserId` |
 | `publicProfiles/{address}` | anyone (`get`, never `list`) | `address`, `fullName`, `organisation`, `biography`, `expertise` — nothing else. No email |
-| `emailAccounts/{email}` | nobody; Admin SDK only | one email → one wallet. The document id is the normalised email |
 | `privyIdentities/{address}` | nobody; Admin SDK only | sign-in binding copied onto `users/{address}` at onboarding |
 
 Postings live in `problems/{problemId}`. A submitted or open posting is readable by
@@ -392,7 +391,7 @@ batch, so an account can never end up half-created.
 | Field | Type | Notes |
 |---|---|---|
 | `address` | string | lowercase `0x…`, must equal the document id and the Firebase uid |
-| `email` | string | server-written, normalised lowercase. Clients cannot set or change it. One email per account, enforced by `emailAccounts/{email}` |
+| `email` | string | server-written, normalised lowercase. Clients cannot set or change it. One email per account, guaranteed by Privy (one Privy user per email, one embedded wallet per user) |
 | `privyUserId` | string | server-written `did:privy:…`. Clients cannot set or change it |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
