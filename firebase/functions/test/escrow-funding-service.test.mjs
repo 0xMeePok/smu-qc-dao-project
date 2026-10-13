@@ -8,7 +8,7 @@ import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { fundingDigest } from "../escrowFundingEvents.js";
 import { deploymentKey, enqueueEscrowFunding, fundingBlockReason, getEscrowFundingHistory, getEscrowFundingSummary,
   prepareEscrowDeposit, readVerifiedFunding, reconcilePostingFundingPause, resumePlatformTransaction, settlementAction,
-  startEscrowSettlement, submitPlatformAction, syncEscrowFunding, queuePostingFundingPause } from "../escrowFunding.js";
+  startEscrowSettlement, submitPlatformAction, syncEscrowFunding, queuePostingFundingPause, refreshEscrowDashboardSnapshot } from "../escrowFunding.js";
 import { getPostingEscrowFundingSummary } from "../escrowFunding.js";
 import { sweepEscrowFunding } from "../escrowFunding.js";
 import { getFunderDashboard } from "../funderDashboard.js";
@@ -143,10 +143,66 @@ describe("escrow funding service", () => {
     assert.equal(result.summary.totalDeposited, f.record.fundingTerms.target);
     assert.equal(result.summary.registryAddress, config.address);
     assert.equal(result.events[0].amountBaseUnits, f.record.fundingTerms.target);
+    assert.equal(result.contributors.available, true); assert.equal(result.contributors.complete, true);
+    assert.equal(result.contributors.items[0].walletAddress, owner);
+    assert.equal(result.contributors.items[0].shareBps, "10000");
+    assert.equal(result.contributors.items[0].committed, f.record.fundingTerms.target);
     assert.equal([...f.db.records.keys()].filter(path => path.startsWith("audits/")).length, 2);
     assert(f.reads.filter(item => ["getProposal", "fundingTarget"].includes(item.functionName)).every(item => item.blockNumber === 100n));
     await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
     assert.equal([...f.db.records.keys()].filter(path => path.startsWith("audits/")).length, 2);
+  });
+
+  it("serves public contributor names and unchanged allocations on posting refresh without wallet reads or history scans", async () => {
+    const f = fixture();
+    f.db.records.set(`users/${owner}`, { role: 0, fullName: "Public Funder", email: "private@example.test" });
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    const walletReads = f.reads.filter(read => read.functionName === "depositorSummary").length, scans = f.ranges.length;
+    f.client.getBlockNumber = async () => 102n;
+    f.client.getBlock = async () => ({ hash: hash("4"), timestamp: 1900000130n });
+    const result = await getPostingEscrowFundingSummary({ ...f, uid: researcher, problemId: f.parent.id, now: Timestamp.fromMillis(1900000130000) });
+    assert.equal(result.items[0].contributors.items[0].displayName, "Public Funder");
+    assert.equal(result.items[0].contributors.available, true); assert.equal(result.items[0].contributors.complete, true);
+    assert.equal(result.items[0].positionsComplete, true);
+    assert(!JSON.stringify(result).includes("private@example.test"));
+    assert.equal(f.reads.filter(read => read.functionName === "depositorSummary").length, walletReads);
+    assert.equal(f.ranges.length, scans);
+  });
+
+  it("preserves anchored cancellation reasons through display refreshes and a capped history containing only later claims", async () => {
+    const f = fixture(), transactionHash = hash("c"), reasonHash = hash("b");
+    f.add(9, reasonHash, "EscrowVoided", { admin: platform, reasonHash, refundPool: f.state.totalDeposited }, transactionHash, 95n, platform);
+    const receipt = f.receipts.get(transactionHash), anchor = { ...receipt.logs[0], logIndex: 2 }, voided = { ...receipt.logs[1], logIndex: 3 };
+    f.anchors[f.anchors.length - 1] = anchor;
+    receipt.logs = [f.eventLog("StateChanged", { previousState: 0, newState: 7 }, 0, transactionHash, 95n),
+      f.eventLog("RefundsOpened", { pool: f.state.totalDeposited, availableAt: 1900000000n }, 1, transactionHash, 95n), anchor, voided];
+    f.state.state = 7; f.state.refundsEnabled = true; f.state.refundAvailableAt = 1900000000n;
+    f.db.records.set(`escrowAdminCancellationJobs/${key(f.record.id)}`, { id: key(f.record.id), transactionHash,
+      reasonHash, escrowAddress, reason: "Authorized unpaid cancellation", actorId: platform });
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    const summaryPath = `escrowFundingSummaries/${key(f.record.id)}`;
+    assert.equal(f.db.records.get(summaryPath).refundReason, "admin_cancelled");
+    f.state.totalRefunded = 1n; f.client.getBlockNumber = async () => 500n;
+    const refreshed = await refreshEscrowDashboardSnapshot({ ...f, uid: owner, proposalId: f.record.id });
+    assert.equal(refreshed.summary.refundReason, "admin_cancelled");
+    assert.equal(refreshed.summary.refundTransactionHash, transactionHash);
+    assert.equal(refreshed.summary.refundReasonHash, reasonHash);
+    assert.equal(refreshed.summary.totalRefunded, "1", "the older explanation must not restore the older balance");
+    for (let index = 0; index < 110; index++) f.db.records.set(`escrowFundingEvents/later_claim_${index}`, {
+      proposalId: f.record.id, problemId: f.parent.id, registryAddress: config.address, escrowAddress, chainId: config.chainId,
+      eventType: "RefundClaimed", verified: true, blockNumber: 200 + index, logIndex: 0, timestamp: 1900000000,
+      transactionHash: hash("d"), actor: owner, amountBaseUnits: "1",
+    });
+    const history = await getEscrowFundingHistory({ ...f, uid: owner, proposalId: f.record.id });
+    assert.equal(history.events.length, 100); assert.equal(history.hasMore, true);
+    assert.equal(history.lifecycle.refundEvent, null, "the earlier opening event is outside this history page");
+    assert.equal(history.lifecycle.refundReason, "admin_cancelled"); assert.equal(history.summary.refundReason, "admin_cancelled");
+    const cached = f.db.records.get(summaryPath); delete cached.custodyLock;
+    const ownerSummary = await getEscrowFundingSummary({ ...f, uid: owner });
+    assert.equal(ownerSummary.items[0].refundReason, "admin_cancelled");
+    assert.equal(f.db.records.get(summaryPath).refundReasonHash, reasonHash);
+    const posting = await getPostingEscrowFundingSummary({ ...f, uid: owner, problemId: f.parent.id });
+    assert.equal(posting.items[0].refundReason, "admin_cancelled");
   });
 
   it("starts a new scan at the verified creation receipt instead of the deployment block", async () => {
@@ -465,7 +521,48 @@ describe("escrow funding service", () => {
     assert.equal(f.db.records.get(parentPath).escrowSelection, null);
     assert.equal(f.db.records.get(jobPath).selectionRequested, false);
     assert.equal(f.db.records.get(`escrowFundingSummaries/${key(f.record.id)}`).state, "Expired");
+    assert.equal(f.db.records.get(`escrowFundingSummaries/${key(f.record.id)}`).refundReason, "selection_approval_timeout");
+    const notice = [...f.db.records.values()].find(row => row.recipientId === owner && row.refundReason === "selection_approval_timeout");
+    assert(notice); assert.equal(notice.transactionHash, pendingHash);
     assert.deepEqual(actions, ["expire"]);
+  });
+
+  it("keeps a declined escrow refundable, notifies each depositor once, and reopens only the original unexpired posting", async () => {
+    const f = fixture(), selectionId = f.state.selectionId, reason = hash("b"), transactionHash = hash("c");
+    f.add(4, fundingDigest(["bytes32", "bytes32"], [selectionId, reason]), "SelectionInvalidated",
+      { selectionId, reasonHash: reason }, transactionHash, 95n, researcher);
+    const receipt = f.receipts.get(transactionHash), anchor = { ...receipt.logs[0], logIndex: 2 }, invalidation = { ...receipt.logs[1], logIndex: 3 };
+    f.anchors[f.anchors.length - 1] = anchor;
+    receipt.logs = [f.eventLog("StateChanged", { previousState: 1, newState: 4 }, 0, transactionHash, 95n),
+      f.eventLog("RefundsOpened", { pool: f.state.totalDeposited, availableAt: 1900000000n }, 1, transactionHash, 95n), anchor, invalidation];
+    f.state.state = 4; f.state.selectionId = zero; f.state.refundsEnabled = true; f.state.refundAvailableAt = 1900000000n;
+    await enqueueEscrowFunding(f);
+    const jobPath = `escrowFundingJobs/${key(f.record.id)}`, parentPath = `problems/${f.parent.id}`;
+    f.db.records.set(jobPath, { ...f.db.records.get(jobPath), selectionRequested: true, selectionId });
+    f.db.records.set(parentPath, { ...f.parent, status: "pending_approval", escrowSelection: { proposalId: f.record.id, selectionId, registryAddress: config.address } });
+    let result = await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    assert.equal(result.summary.state, "Cancelled"); assert.equal(result.lifecycle.refundReason, "selection_declined");
+    assert.equal(f.db.records.get(parentPath).status, "submitted"); assert.equal(f.db.records.get(parentPath).escrowSelection, null);
+    assert.equal(f.db.records.get(`proposals/${f.record.id}`).status, "rejected");
+    assert.equal(f.db.records.get(jobPath).selectionRequested, false);
+    assert.equal([...f.db.records.keys()].filter(path => path.startsWith("moderationNotifications/")).length, 1);
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    assert.equal([...f.db.records.keys()].filter(path => path.startsWith("moderationNotifications/")).length, 1);
+    await assert.rejects(startEscrowSettlement({ ...f, uid: owner, proposalId: f.record.id }), /no longer eligible/);
+  });
+
+  it("blocks queued administrator cancellations before automatic settlement or payment signing", async () => {
+    const f = fixture(); f.state.state = 1; f.state.ownerApproved = true; f.state.solutionApproved = true;
+    const verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+    const job = { adminCancellationId: "cancellation", adminCancellationStatus: "queued" };
+    assert.equal(settlementAction({ ...f, verified, job }).settlement.status, "blocked");
+    f.db.records.set(`escrowFundingJobs/${key(f.record.id)}`, job);
+    const result = await submitPlatformAction({ ...f, getWallet: () => { throw new Error("Must not sign"); },
+      action: { proposalId: f.record.id, address: escrowAddress, abi: config.escrow.escrowAbi, functionName: "release", args: [f.state.selectionId], key: "release" } });
+    assert.equal(result.status, "blocked");
+    f.record.escrowAdminCancellation = { id: "cancellation", status: "pending" };
+    assert.match(fundingBlockReason(f.record, f.parent, verified.summary), /administrator cancellation/);
+    assert.equal(f.ranges.length, 0);
   });
 
   it("automatically opens refunds for an invalidated losing sibling but never refunds one that is only temporarily paused", async () => {
@@ -610,6 +707,50 @@ describe("serialized platform signing outbox", () => {
     };
     return { path, transactionHash };
   }
+
+  it("retains a manual cancellation's signed hash when the caller crashes before saving it", async () => {
+    const f = signingFixture(), cancellationId = key(f.record.id);
+    const requestPath = `escrowAdminCancellationJobs/${cancellationId}`;
+    f.db.records.set(requestPath, { id: cancellationId, status: "queued", proposalId: f.record.id });
+    f.action = { ...f.action, functionName: "voidEscrow", args: [hash("b")], key: "admin-cancel", adminCancellationId: cancellationId };
+    const submitted = await submitPlatformAction(f);
+    const outbox = f.db.records.get(`escrowPlatformOutbox/${deploymentKey(config)}`);
+    assert.equal(outbox.adminCancellationId, cancellationId); assert.equal(outbox.functionName, "voidEscrow");
+    assert.equal(f.db.records.get(requestPath).transactionHash, undefined);
+    f.setReceipt({ status: "success", transactionHash: submitted.transactionHash, blockNumber: 100n, blockHash: hash("4") });
+    await resumePlatformTransaction(f);
+    assert.equal(f.db.records.get(requestPath).transactionHash, submitted.transactionHash);
+    assert.equal(f.db.records.get(requestPath).status, "pending", "receipt status alone does not mark the audited cancellation complete");
+  });
+
+  it("aborts an unsigned payment if cancellation wins while the signer is preparing it", async () => {
+    const f = signingFixture(), getWallet = f.getWallet;
+    f.getWallet = async () => {
+      const wallet = getWallet();
+      const prepare = wallet.prepareTransactionRequest;
+      wallet.prepareTransactionRequest = async request => {
+        assert.equal(f.db.records.get(`escrowPlatformOutbox/${deploymentKey(config)}`).functionName, "release");
+        f.db.records.set(`escrowFundingJobs/${key(f.record.id)}`, { adminCancellationId: "cancel", adminCancellationStatus: "queued" });
+        return prepare(request);
+      };
+      return wallet;
+    };
+    await assert.rejects(submitPlatformAction(f), /cancellation replaced/);
+    assert.equal(f.broadcasts.length, 0);
+    assert.equal(f.db.records.get(`escrowPlatformOutbox/${deploymentKey(config)}`).transactionHash, undefined);
+  });
+
+  it("retains a cancelled outbox action's replacement outcome before another proposal can use the signer", async () => {
+    const f = signingFixture(), cancellationId = key(f.record.id), requestPath = `escrowAdminCancellationJobs/${cancellationId}`;
+    f.db.records.set(requestPath, { id: cancellationId, status: "queued" });
+    f.action = { ...f.action, functionName: "voidEscrow", args: [hash("b")], key: "admin-cancel", adminCancellationId: cancellationId };
+    const submitted = await submitPlatformAction(f);
+    f.setConfirmedNonce(8);
+    const result = await resumePlatformTransaction(f);
+    assert.equal(result.status, "replaced");
+    assert.equal(f.db.records.get(requestPath).transactionHash, submitted.transactionHash);
+    assert.equal(f.db.records.get(requestPath).transactionOutcome, "replaced");
+  });
 
   it("reports an already-confirmed requested action without signing or rebroadcasting it", async () => {
     const f = signingFixture(), previous = previousTransaction(f, f.action.key);

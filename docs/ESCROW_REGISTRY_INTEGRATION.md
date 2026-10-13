@@ -252,9 +252,59 @@ evaluator feedback remains optional and advisory. The custody lock does not
 replace approved researcher payments, immediate rejection/cancellation refunds,
 or open funding's separate seven-day grant reservations. Ordinary main escrow
 cancellation still waits for its configured posting expiry. No partial withdrawal
-or early release by mutual agreement is added. The separate QCDAO-112/114/115/116
-stories remain outside this scope. Existing contract refund functions remain available.
+or early release by mutual agreement is added. QCDAO-112/114/115/116 extend this
+integration with confirmed funding progress, public contributor names, lifecycle
+receipts, refund notifications and administrator cancellation. Existing contract
+refund functions remain available.
 No Jira records were changed during implementation or deployment.
+
+### Funding visibility and refunds with Privy
+
+Privy email login retains the verified embedded wallet address as the member
+identity. Contributions and manual refund claims use that wallet's existing
+sponsored transaction path; this integration does not introduce an extension
+wallet or a separate identity binding.
+
+Contributor amounts and proportional shares use confirmed escrow deposits and
+allocation snapshots. Public profile names are display labels, with a public
+wallet-address fallback. Emails and Privy account identifiers are never included.
+An incomplete or stale allocation is explicitly unavailable, rather than reported
+as zero. Listing progress uses server-only confirmed snapshots, keeps each token
+separate, and labels its denominator as proposal escrow targets. A posting's
+currency budget is not treated as a token balance. Each proposal remains a
+separate escrow; combined listing progress does not select or fund a solution.
+
+Funding state history uses reconciled registry anchors and canonical escrow logs,
+with timestamps and transaction/receipt links. Queued requests and wallet
+signatures cannot become confirmed state changes. Refund openings distinguish
+an unmet target, no selected proposal, the upfront approval timeout, selection
+decline, invalidation, and cancellation. Missing evaluator feedback never triggers
+a refund, because the feedback remains optional. Decline removes the pending
+selection only while preserving the original posting deadline; other eligible
+proposals or a newly published proposal can begin the next round. The declined
+escrow retains its original refund accounting and is not reused.
+
+`startEscrowAdminCancellation` requires an active administrator and a mandatory
+reason, commits that administrator and reason in the on-chain digest, and uses
+the existing allowlisted platform signer and durable transaction outbox.
+`getEscrowAdminCancellation` distinguishes queued, pending, blocked and confirmed
+requests. A manual cancellation is refused after any payment or with an in-flight
+payment; pending cancellation also blocks new deposits, selection and platform
+payments. It supports unpaid main and funded grant escrows. Unaccepted grant
+reservations and independent crowdfunding retain their dedicated workflows.
+The underlying contract's `voidEscrow` state remains `Voided`; a verified
+administrator-cancellation receipt is displayed as cancelled, and completion of
+all refund claims is displayed as refunded. This preserves the existing
+moderation path, which can still resolve unpaid balances after earlier payments.
+
+Cancellation and other eligible pre-payment refund openings enable exact,
+fee-free `claimRefund` calls by depositors. They do not automatically transfer
+tokens, charge refund fees, or pay the administrator. Confirmed reasons are
+recorded in audit events; depositor notices are paged and idempotent, and manual
+cancellation also notifies the posting owner. Duplicate triggers cannot double
+refund or recreate a read notification. Deploy the Functions, indexes and
+frontend together through the existing backend-before-Hosting workflow. No new
+contract address, ABI or redeployment is required.
 
 ## Automatic settlement and funding audit
 

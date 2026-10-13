@@ -12,6 +12,8 @@ import { formatInstant } from "../lib/datetime.js";
 import { workflowStatusLabel } from "../config/workflowStatus.js";
 import { formatUnits } from "viem";
 import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
+import { FundingProgress } from "./FundingProgress.jsx";
+import { EscrowLifecycleBadge } from "./EscrowLifecycle.jsx";
 
 /**
  * QCDAO-92 - one screen answering "where does my work stand".
@@ -80,7 +82,7 @@ const tokenAmount = (value, token) => {
 
 /** Exact token units stay beside their own proposal and token. No RPC request
  * is added here; confirmed block evidence arrives with the overview payload. */
-function EscrowReadiness({ posting }) {
+function EscrowReadiness({ posting, stale = false }) {
   if (posting.opportunityType === "open-funding" || !posting.escrowFunding?.items?.length) return null;
   return (
     <div className="rollup-recommendations">
@@ -92,19 +94,15 @@ function EscrowReadiness({ posting }) {
             <p className="queue-note queue-note-gate">Funding unavailable. Open Selection &amp; funding to verify this solution.</p>
           ) : (
             <>
-              <progress aria-label={`Confirmed escrow funding for ${item.title || "this solution"}`}
-                value={item.fundingPercent} max={100} />
-              <small>
-                {tokenAmount(item.totalDeposited, item)} deposited of {tokenAmount(item.fundingTarget, item)} required
-                {" · "}{item.fundingPercent}%
-              </small>
+              <FundingProgress summary={item} compact stale={stale} label={`Confirmed escrow funding for ${item.title || "this solution"}`} />
+              <EscrowLifecycleBadge summary={item} compact stale={stale} />
               <small>{tokenAmount(item.outstandingBalance, item)} held in escrow · Confirmed block {item.blockNumber}</small>
               <small>
                 {item.canSelect ? "Funding requirement met; selection can begin." : item.fundingMet
                   ? "Funding requirement met; selection is unavailable in the current escrow state."
                   : "Funding requirement not yet met."}
               </small>
-              <EscrowCustodyNotice summary={item} compact />
+              <EscrowCustodyNotice summary={item} compact stale={stale} />
             </>
           )}
         </div>
@@ -113,7 +111,7 @@ function EscrowReadiness({ posting }) {
   );
 }
 
-function PostingRollup({ posting, onNavigate }) {
+function PostingRollup({ posting, onNavigate, stale = false }) {
   const open = posting.live && !posting.isDraft;
   const link = (tab, label) => (
     <button type="button" className="text-button" onClick={() => onNavigate?.(`posting/${posting.id}?tab=${tab}`)}>{label}</button>
@@ -159,7 +157,7 @@ function PostingRollup({ posting, onNavigate }) {
         </div>
       )}
 
-      <EscrowReadiness posting={posting} />
+      <EscrowReadiness posting={posting} stale={stale} />
 
       <Readiness posting={posting} />
 
@@ -312,7 +310,7 @@ export function OwnerDashboardPanel({ onNavigate }) {
             </div>
           ) : (
             <div className="rollup-list">
-              {published.map((posting) => <PostingRollup key={posting.id} posting={posting} onNavigate={onNavigate} />)}
+              {published.map((posting) => <PostingRollup key={posting.id} posting={posting} onNavigate={onNavigate} stale={Boolean(error)} />)}
             </div>
           )}
 

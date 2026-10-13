@@ -270,6 +270,7 @@ export async function getFunderDashboard({ db, client, config, uid, now = Timest
         outstandingBalance: snapshot.outstandingBalance, custodyBalance: snapshot.custodyBalance,
         timestamp: snapshot.timestamp, expiresAt: snapshot.expiresAt, approvalDeadline: snapshot.approvalDeadline,
         refundsEnabled: snapshot.refundsEnabled, refundAvailableAt: snapshot.refundAvailableAt,
+        refundReason: aggregate?.refundReason ?? snapshot.refundReason ?? null,
         custodyLock: escrowCustodyLock(snapshot), fundingRequirementMet: snapshot.fundingRequirementMet,
         claimable: snapshot.claimable,
         committed: committed.toString(), locked: locked.toString(), released: released.toString(), refunded: refunded.toString() };

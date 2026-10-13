@@ -188,6 +188,7 @@ export function summariseOwnerDashboard({
             timestamp: summary.timestamp, expiresAt: summary.expiresAt,
             approvalDeadline: summary.approvalDeadline ?? null,
             refundsEnabled: summary.refundsEnabled ?? null, refundAvailableAt: summary.refundAvailableAt ?? null,
+            refundReason: summary.refundReason ?? null,
             custodyLock: summary.custodyLock ?? null, fundingPercent: Number(percent > 100n ? 100n : percent),
             fundingMet: gate.fundingMet, canSelect });
           const key = `${summary.chainId}:${summary.tokenAddress.toLowerCase()}:${summary.tokenDecimals}`;

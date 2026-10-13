@@ -1,4 +1,4 @@
-import { decodeEventLog, encodeAbiParameters, keccak256 } from "viem";
+import { decodeEventLog, encodeAbiParameters, keccak256, stringToHex } from "viem";
 
 export const FUNDING_EVENT_NAMES = ["EscrowCreated", "Deposit", "SelectionLocked", "Approval", "SelectionInvalidated",
   "Cancelled", "Expired", "MilestoneSubmitted", "TrancheReleased", "Voided", "RefundClaimed", "FunderVote"];
@@ -6,6 +6,7 @@ export const ESCROW_STATES = ["Open", "Locked", "Released", "Refunded", "Cancell
 export const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const value = (item, name, index) => item?.[name] ?? item?.[index];
 const mismatch = message => { throw new Error(`Escrow reconciliation mismatch: ${message}`); };
+const registryWithdrawal = keccak256(stringToHex("REGISTRY_WITHDRAWAL"));
 export const fundingDigest = (types, values) => keccak256(encodeAbiParameters(types.map(type => ({ type })), values));
 export const escrowEventId = (chainId, registry, transactionHash, logIndex) =>
   `${chainId}_${registry.toLowerCase()}_${transactionHash.toLowerCase()}_${logIndex}`;
@@ -71,13 +72,13 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
       case 3:
         for (const log of named("SelectionApproved")) {
           const a = log.args;
-          if (same(a.approver, actor)) add(log, ["bytes32", "uint256", "address"], [a.selectionId, 0n, actor]);
+          if (same(a.approver, actor)) add(log, ["bytes32", "uint256", "address"], [a.selectionId, 0n, actor], { tranche: 0 });
         }
         if (named("MilestoneApproved").length) {
           const [selectionId] = await state();
           for (const log of named("MilestoneApproved")) {
             const a = log.args;
-            if (same(a.approver, actor)) add(log, ["bytes32", "uint256", "bytes32", "address"], [selectionId, a.index, a.evidenceHash, actor]);
+            if (same(a.approver, actor)) add(log, ["bytes32", "uint256", "bytes32", "address"], [selectionId, a.index, a.evidenceHash, actor], { tranche: Number(a.index) });
           }
         }
         break;
@@ -104,8 +105,16 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
             const pool = await read("openFundingPool");
             approvalExpiry = /^0x[0-9a-f]{40}$/i.test(pool ?? "") && !/^0x0{40}$/i.test(pool);
           }
+          const expiredDeadline = approvalExpiry ? deadline : expiresAt;
+          let refundReason = previousState === 6 ? "completion_approval_timeout" : previousState === 1 ? "selection_approval_timeout" : "posting_expired";
+          if (previousState === 0 && expected.fundingTerms.target !== undefined) {
+            const deposited = await read("totalDeposited");
+            if (typeof deposited !== "bigint" || deposited < 0n || deposited > BigInt(expected.fundingTerms.target)) mismatch("expiry funding total cannot be verified");
+            refundReason = deposited < BigInt(expected.fundingTerms.target) ? "funding_target_not_met" : "no_proposal_selected";
+          }
           add(refund, ["uint256", "uint256", "uint256"],
-            [BigInt(tranche) - BigInt(laterReleases), approvalExpiry ? deadline : expiresAt, refund.args.pool]);
+            [BigInt(tranche) - BigInt(laterReleases), expiredDeadline, refund.args.pool],
+            { refundReason, deadlineAt: String(expiredDeadline), tranche: Number(tranche) - laterReleases });
         }
         break;
       }
@@ -142,12 +151,25 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
     used.add(selected.log.logIndex);
     amount = selected.amount?.toString() ?? null;
     counterparty = selected.counterparty?.toLowerCase() ?? null;
+    const name = FUNDING_EVENT_NAMES[Number(eventType)];
+    const refund = ["SelectionInvalidated", "Cancelled", "Expired", "Voided"].includes(name)
+      ? escrowLogs.filter(log => log.eventName === "RefundsOpened" && log.logIndex < anchor.logIndex).at(-1) : null;
+    const reasonHash = selected.log.args.reasonHash?.toLowerCase() ?? null;
+    const refundReason = selected.refundReason ?? (name === "SelectionInvalidated" ? "selection_declined"
+      : name === "Cancelled" ? "cancelled" : name === "Voided" ? same(reasonHash, registryWithdrawal) ? "registry_invalidated" : "escrow_voided" : null);
+    const precedingAnchor = anchors.filter(item => item.logIndex < anchor.logIndex).at(-1)?.logIndex ?? -1;
+    const change = escrowLogs.filter(log => log.eventName === "StateChanged" && log.logIndex > precedingAnchor && log.logIndex < anchor.logIndex).at(-1);
     output.push({ id: escrowEventId(config.chainId, config.address, transactionHash, anchor.logIndex),
       eventType: FUNDING_EVENT_NAMES[Number(eventType)], type: FUNDING_EVENT_NAMES[Number(eventType)],
       eventTypeCode: Number(eventType), digest: digest.toLowerCase(), actor: actor.toLowerCase(), counterparty,
       amountBaseUnits: amount, amount, netAmountBaseUnits: selected.netAmount?.toString() ?? null,
       feeBaseUnits: selected.fee?.toString() ?? null, tranche: selected.tranche ?? null,
       selectionId: selected.log.args.selectionId ?? null,
+      reasonHash, refundReason, refundPoolBaseUnits: refund ? String(refund.args.pool) : null,
+      refundAvailableAt: refund ? String(refund.args.availableAt) : null,
+      deadlineAt: selected.deadlineAt ?? (name === "SelectionLocked" ? String(selected.log.args.approvalDeadline) : null),
+      stateBefore: change ? ESCROW_STATES[Number(change.args.previousState)] ?? null : null,
+      stateAfter: change ? ESCROW_STATES[Number(change.args.newState)] ?? null : null,
       tokenAddress: expected.fundingTerms.token.toLowerCase(), escrowAddress, registryAddress: config.address.toLowerCase(),
       chainId: config.chainId, transactionHash: transactionHash.toLowerCase(), blockNumber: Number(receipt.blockNumber),
       blockHash: receipt.blockHash, logIndex: anchor.logIndex, timestamp: Number(timestamp), verified: true });

@@ -26,6 +26,7 @@ import {
 } from "./adminActions.js";
 import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
+import { postingProgressChanged, refreshPostingEscrowProgress } from "./postingEscrowProgress.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
 import { createArbitrumRpcTransport, getRpcUrls } from "./rpcPolicy.js";
@@ -165,6 +166,27 @@ export const syncProblemMarketplaceMetrics = onDocumentWritten(
   syncProblemOpportunityMetrics,
 );
 
+async function projectPostingEscrowProgress(event, kind) {
+  if (!postingProgressChanged(kind, event.data?.before?.data(), event.data?.after?.data())) return;
+  const ids = kind === "proposal" ? [event.data?.before?.data()?.problemId, event.data?.after?.data()?.problemId]
+    : [event.data?.after?.data()?.problemId ?? event.data?.before?.data()?.problemId ?? event.params.problemId];
+  for (const problemId of new Set(ids.filter(Boolean))) {
+    await refreshPostingEscrowProgress({ db, problemId, config: auditRegistryConfig });
+  }
+}
+export const syncEscrowMarketplaceProgress = onDocumentWritten(
+  { document: "escrowFundingSummaries/{summaryId}", region: REGION, maxInstances: 3, retry: true },
+  event => projectPostingEscrowProgress(event, "summary"),
+);
+export const syncEscrowMarketplaceProposal = onDocumentWritten(
+  { document: "proposals/{proposalId}", region: REGION, maxInstances: 3, retry: true },
+  event => projectPostingEscrowProgress(event, "proposal"),
+);
+export const syncEscrowMarketplacePosting = onDocumentWritten(
+  { document: "problems/{problemId}", region: REGION, maxInstances: 3, retry: true },
+  event => projectPostingEscrowProgress(event, "posting"),
+);
+
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,
   cacheTime: 0,
@@ -175,7 +197,7 @@ const publicClient = createPublicClient({
 
 async function requireMember(request) {
   const uid = request.auth?.uid;
-  if (!/^0x[0-9a-f]{40}$/.test(uid ?? "")) throw new HttpsError("unauthenticated", "Sign in with your wallet.");
+  if (!/^0x[0-9a-f]{40}$/.test(uid ?? "")) throw new HttpsError("unauthenticated", "Sign in with your email.");
   const [profile, cutoff, maintenance] = await Promise.all([
     db.collection("users").doc(uid).get(), db.collection(SESSION_REVOCATIONS_COLLECTION).doc(uid).get(),
     db.collection("maintenanceState").doc("registryCutover").get(),
@@ -193,7 +215,8 @@ const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
 
 export const { prepareEscrowDeposit, prepareRemovedProposalClaim, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
-  startEscrowSettlement, queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
+  startEscrowSettlement, getEscrowAdminCancellation, startEscrowAdminCancellation,
+  queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
   db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
 });
 

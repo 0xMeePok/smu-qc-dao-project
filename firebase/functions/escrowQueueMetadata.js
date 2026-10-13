@@ -1,11 +1,12 @@
 import { readOpenFunding, supportsOpenFunding } from "./openFunding.js";
-import { fundingBlockReason, loadFundingContext, readVerifiedFunding } from "./escrowFunding.js";
+import { deploymentKey, FUNDING_SUMMARIES, fundingBlockReason, loadFundingContext, readVerifiedFunding } from "./escrowFunding.js";
 import { same } from "./escrowFundingEvents.js";
 import { isIndependentProposal } from "./independentProposal.js";
 import { boundedMap } from "./boundedMap.js";
 import { createRequestReadClient } from "./requestReadClient.js";
 import { memberCallFromReceipt } from "./memberCall.js";
 import { escrowSelectionGate } from "./escrowCustody.js";
+import { confirmedRefundMetadata } from "./escrowRefundMetadata.js";
 
 const at = (row, name, index) => row?.[name] ?? row?.[index];
 const blocked = row => row?.moderated || ["hidden", "removed"].includes(row?.moderationStatus);
@@ -83,6 +84,11 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
     if (blockNumber < 0n) throw new Error("No confirmed block");
   } catch { return { actions, unavailable: new Set(candidates.map(doc => doc.id)), states }; }
   client = createRequestReadClient(client, { chainId: config.chainId });
+  let savedSummaries = new Map();
+  try {
+    const rows = await db.getAll(...candidates.map(doc => db.collection(FUNDING_SUMMARIES).doc(`${deploymentKey(config)}_${doc.id}`)));
+    savedSummaries = new Map(rows.map((row, index) => [candidates[index].id, row.data()]));
+  } catch { /* Canonical balances/actions remain readable without advisory history. */ }
   await boundedMap(candidates, async (doc, index) => {
     try {
       const context = await loadFundingContext({ db, uid, proposalId: doc.id, readDocument });
@@ -115,7 +121,7 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
       }
       const relevantDeadline = summary.state === "Open" ? BigInt(summary.expiresAt)
         : ["Locked", "Active"].includes(summary.state) ? deadline : null;
-      states.set(doc.id, { state: summary.state, workflowStatus, action, approvalDeadline: deadline.toString(),
+      states.set(doc.id, { ...summary, ...confirmedRefundMetadata(summary, savedSummaries.get(doc.id)), workflowStatus, action, approvalDeadline: deadline.toString(),
         deadlineAt: relevantDeadline !== null && relevantDeadline > 0n ? isoDeadline(relevantDeadline) : null,
         blockNumber: Number(blockNumber) });
       if (action) actions[index] = { id: doc.id, problemId: context.record.problemId, title: context.record.title || "Proposal",

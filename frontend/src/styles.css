@@ -5018,3 +5018,9 @@ h1, h2, h3 { font-weight: 500; }
   .dashboard-page .table-row-actions { width: 100%; padding-top: 12px; border-top: 1px solid var(--line); }
   .dashboard-page .table-empty { padding: 24px 20px; }
 }
+
+/* Confirmed escrow progress remains readable inside listing cells. */
+.escrow-card-progress { min-width: 12rem; max-width: 24rem; text-align: left; }
+.escrow-card-progress small { display: block; white-space: normal; }
+.rollup-meter progress { width: 100%; max-width: 24rem; accent-color: var(--accent, #d23a16); }
+.audit-timeline .table-row-meta, .audit-timeline small { overflow-wrap: anywhere; }

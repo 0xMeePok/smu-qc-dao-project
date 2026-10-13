@@ -5,6 +5,8 @@ import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { escrowFundingAmount, getPostingEscrowFundingSummary } from "../lib/escrowFunding.js";
 import { escrowErrorMessage } from "../lib/escrow.js";
 import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
+import { FundingProgress, FundingContributors } from "./FundingProgress.jsx";
+import { EscrowLifecycleBadge, EscrowMoneySummary, EscrowLifecycleTimeline } from "./EscrowLifecycle.jsx";
 
 /** Financial reads mount only when the posting's funding tab is opened. */
 export function PostingEscrowFunding({ problemId, active = true, onNavigate }) {
@@ -28,7 +30,14 @@ export function PostingEscrowFunding({ problemId, active = true, onNavigate }) {
       <div><strong>{item.title}</strong>
         {item.available === false ? <p className="field-hint">Funding and lock status could not be verified. Open the proposal to check its original escrow.</p> : <>
           <small className="table-row-meta">Confirmed deposits {escrowFundingAmount(item.totalDeposited, item.tokenDecimals, item.tokenSymbol)} / {escrowFundingAmount(item.fundingTarget, item.tokenDecimals, item.tokenSymbol)}</small>
+          <FundingProgress summary={item} compact stale={Boolean(query.error)} label={`Confirmed funding progress for ${item.title}`} />
+          <EscrowLifecycleBadge summary={item} stale={Boolean(query.error)} />
+          <EscrowMoneySummary summary={item} compact stale={Boolean(query.error)} />
           <EscrowCustodyNotice summary={item} stale={Boolean(query.error)} />
+          <details><summary>Contributors and state history</summary>
+            <FundingContributors summary={item} stale={Boolean(query.error)} />
+            <EscrowLifecycleTimeline summary={item} events={item.lifecycle?.events ?? []} stale={Boolean(query.error)} />
+          </details>
           {item.selectionGate?.canSelect && <p className="queue-note queue-note-ready">Funding requirement met. The posting owner may select this proposal. Evaluator feedback is optional.</p>}
           {item.state === "Open" && !item.selectionGate?.canSelect && <p className="field-hint">{item.selectionBlockReason || (item.fundingRequirementMet
             ? "Selection is unavailable until the posting is active and open."

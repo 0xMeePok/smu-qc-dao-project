@@ -9,6 +9,7 @@ import { createArbitrumRpcTransport } from "./rpcPolicy.js";
 import { enqueueEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary, prepareEscrowDeposit,
   prepareRemovedProposalClaim, queuePostingFundingPause, startEscrowSettlement, sweepEscrowFunding, syncEscrowFunding } from "./escrowFunding.js";
 import { sweepIndependentFunding } from "./independentFunding.js";
+import { getEscrowAdminCancellation, startEscrowAdminCancellation, sweepEscrowAdminCancellations } from "./escrowAdminCancellation.js";
 
 export const escrowPlatformKey = defineSecret("ESCROW_PLATFORM_PRIVATE_KEY");
 
@@ -27,7 +28,8 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
     const uid = await requireMember(request);
     try {
       return await service({ ...shared, uid, proposalId: request.data?.proposalId, problemId: request.data?.problemId,
-        amount: request.data?.amount, transactionHash: request.data?.transactionHash });
+        amount: request.data?.amount, transactionHash: request.data?.transactionHash,
+        reason: request.data?.reason, requestId: request.data?.requestId });
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       // Viem errors can contain complete request objects. Never return or log
@@ -42,6 +44,8 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
     getEscrowFundingHistory: callable(getEscrowFundingHistory),
     getEscrowFundingSummary: callable(getEscrowFundingSummary),
     startEscrowSettlement: callable(startEscrowSettlement, true),
+    getEscrowAdminCancellation: callable(getEscrowAdminCancellation),
+    startEscrowAdminCancellation: callable(startEscrowAdminCancellation, true),
     queueEscrowFunding: onDocumentWritten({ document: "proposals/{proposalId}", region, retry: true, maxInstances: 5 },
       event => event.data?.after?.exists ? enqueueEscrowFunding({ db, config,
         record: { ...event.data.after.data(), id: event.params.proposalId } }) : undefined),
@@ -50,11 +54,12 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
         problemId: event.params.problemId, record: event.data.after.data() }) : undefined),
     reconcileEscrowFunding: onSchedule({ schedule: "every 1 minutes", region, maxInstances: 1, concurrency: 1,
       timeoutSeconds: 540, secrets: [escrowPlatformKey] }, async () => {
-      let main, independent, failed = false;
+      let main, independent, cancellation, failed = false;
       try { main = await sweepEscrowFunding(shared); } catch { failed = true; }
       try { independent = await sweepIndependentFunding({ ...shared, outboxAlreadyResumed: true }); } catch { failed = true; }
+      try { cancellation = await sweepEscrowAdminCancellations(shared); } catch { failed = true; }
       if (failed) throw new Error("Escrow background reconciliation is unavailable; the persisted jobs will retry.");
-      return { main, independent };
+      return { main, independent, cancellation };
     }),
   };
 }

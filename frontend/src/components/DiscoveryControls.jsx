@@ -1,5 +1,6 @@
 import { StatusBadge } from "./StatusBadge.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
+import { PostingFundingProgress } from "./PostingFundingProgress.jsx";
 import { opportunityWorkflowStatus } from "../config/workflowStatus.js";
 
 export function DiscoverySearchRow({
@@ -182,7 +183,7 @@ export function OpportunityTable({ items, onOpen }) {
         },
         { key: "organisation", label: "Organisation", render: (item) => (item.removed ? "—" : item.owner) },
         { key: "status", label: "Status", render: (item) => (item.removed ? "—" : <OpportunityTrust item={item} />) },
-        { key: "funding", label: "Funding", numeric: true, render: (item) => (item.removed ? "—" : item.amount) },
+        { key: "funding", label: "Funding", numeric: true, render: (item) => (item.removed ? "—" : <>{item.amount}<PostingFundingProgress projection={item.escrowFunding} /></>) },
         { key: "proposals", label: "Proposals", numeric: true, render: (item) => (item.removed ? "—" : item.proposalCount) },
         { key: "closes", label: "Closes", numeric: true, render: (item) => (item.removed ? "—" : item.deadline) },
       ]}
