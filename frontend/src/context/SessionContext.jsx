@@ -62,6 +62,10 @@ export function SessionProvider({ children }) {
   // The ref is for callbacks; the state drives "Signing out…" in the UI.
   const signingOutRef = useRef(false);
   const [signingOut, setSigningOut] = useState(false);
+  // A new sign-in after Privy's modal closes: "wallet" (loading the embedded
+  // wallet), "session" (exchanging Privy's token for the Firebase session),
+  // then "profile" (reading the member's record). Drives SignInProgress.
+  const [signInStep, setSignInStep] = useState(null);
   const current = useRef({});
   current.current = { status, profile, verifiedAddress };
 
@@ -133,6 +137,8 @@ export function SessionProvider({ children }) {
 
       try {
         await walletRef.current.login();
+        const step = (name) => { if (!before.verifiedAddress) setSignInStep(name); };
+        step("wallet");
         // A returning member's wallet loads; a first sign-in's was just created.
         // The server, not this address, decides who the Firebase session is.
         const local = (await walletRef.current.ensureWallet()).toLowerCase();
@@ -147,6 +153,7 @@ export function SessionProvider({ children }) {
           return { ok: true };
         }
 
+        step("session");
         const accessToken = await walletRef.current.accessToken();
         const address = (await exchangePrivySession(accessToken)).toLowerCase();
         if (address !== local) {
@@ -155,6 +162,7 @@ export function SessionProvider({ children }) {
         }
         // Start the idle clock from a real, deliberate sign-in.
         markActivity({ force: true });
+        step("profile");
         setStatus("checking");
         setVerifiedAddress(address);
         // A rejected profile read can mean this Firebase session was revoked.
@@ -166,6 +174,7 @@ export function SessionProvider({ children }) {
         // Lockstep: a sign-in that did not finish must not leave behind a Privy
         // session it started.
         if (!privyWasSignedIn && walletRef.current.authenticated) await logoutOfPrivy();
+        setSignInStep(null);
         if (!before.verifiedAddress) setStatus("signed-out");
         if (isSignInCancelled(caught)) return { ok: false, cancelled: true };
         const failureMessage = messageForSignInError(caught);
@@ -177,6 +186,11 @@ export function SessionProvider({ children }) {
     signInInFlight.current = run().finally(() => { signInInFlight.current = null; });
     return signInInFlight.current;
   }, [logoutOfPrivy]);
+
+  // The progress screen ends with the sign-in: signed in, onboarding or signed out.
+  useEffect(() => {
+    if (status !== "verifying" && status !== "checking") setSignInStep(null);
+  }, [status]);
 
   // Once an address is verified, decide between onboarding and a normal sign-in.
   useEffect(() => {
@@ -374,13 +388,15 @@ export function SessionProvider({ children }) {
       isChecking: status === "checking",
       isBusy: status === "verifying" || status === "checking",
       isSigningOut: signingOut,
+      // Set only between Privy's modal closing and the sign-in finishing.
+      signInStep: status === "verifying" || status === "checking" ? signInStep : null,
       signIn,
       completeOnboarding,
       saveProfile,
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
     }),
-    [status, profile, error, verifiedAddress, authResolved, signingOut, signIn, completeOnboarding,
+    [status, profile, error, verifiedAddress, authResolved, signingOut, signInStep, signIn, completeOnboarding,
       saveProfile, signOutOfSession],
   );
 

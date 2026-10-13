@@ -5024,3 +5024,68 @@ h1, h2, h3 { font-weight: 500; }
 .escrow-card-progress small { display: block; white-space: normal; }
 .rollup-meter progress { width: 100%; max-width: 24rem; accent-color: var(--accent, #d23a16); }
 .audit-timeline .table-row-meta, .audit-timeline small { overflow-wrap: anywhere; }
+
+/* --- Sign-in progress (shown while a new email sign-in finishes) ---------- */
+.signin-progress-backdrop {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 24px;
+  background: rgba(28, 20, 12, 0.55); backdrop-filter: blur(3px); overflow-y: auto;
+  animation: signin-fade 200ms ease-out;
+}
+.signin-progress {
+  width: min(100%, 460px); padding: 32px 28px 24px; text-align: center;
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface);
+  box-shadow: 0 24px 60px rgba(28, 20, 12, 0.25); color: var(--ink);
+}
+.signin-progress h2 { margin: 18px 0 6px; font-size: 1.35rem; }
+.signin-progress-status { margin: 0 0 18px; color: var(--muted); }
+
+/* Three concentric arcs turning at different speeds. */
+.signin-progress-spinner { position: relative; width: 72px; height: 72px; margin: 0 auto; }
+.signin-progress-spinner span {
+  position: absolute; inset: 0; border: 3px solid transparent; border-radius: 50%;
+  border-top-color: var(--brand); animation: signin-spin 1.1s linear infinite;
+}
+.signin-progress-spinner span:nth-child(2) { inset: 10px; border-top-color: var(--ink-soft); animation-duration: 1.6s; animation-direction: reverse; }
+.signin-progress-spinner span:nth-child(3) { inset: 20px; border-top-color: var(--brand-hover); animation-duration: 0.8s; }
+
+.signin-progress-steps { display: grid; gap: 8px; margin: 0 0 18px; padding: 0; list-style: none; text-align: left; }
+.signin-progress-step { display: flex; align-items: center; gap: 10px; color: var(--muted); transition: color 200ms; }
+.signin-progress-step-mark {
+  display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid var(--line-strong); font-size: 0.8rem; font-weight: 600;
+}
+.signin-progress-step.is-active { color: var(--ink); font-weight: 600; }
+.signin-progress-step.is-active .signin-progress-step-mark { border-color: var(--brand); color: var(--brand); animation: signin-pulse 1.4s ease-in-out infinite; }
+.signin-progress-step.is-done { color: var(--ink-soft); }
+.signin-progress-step.is-done .signin-progress-step-mark { border-color: var(--success); background: var(--success); color: #fff; }
+
+/* Indeterminate bar: honest about not knowing exactly how long is left. */
+.signin-progress-bar { position: relative; height: 4px; overflow: hidden; border-radius: 2px; background: var(--track); }
+.signin-progress-bar span {
+  position: absolute; top: 0; bottom: 0; left: -40%; width: 40%; border-radius: 2px;
+  background: var(--brand); animation: signin-slide 1.6s ease-in-out infinite;
+}
+.signin-progress-elapsed { margin: 8px 0 20px; font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.signin-progress-tip {
+  margin: 0; padding: 16px 16px 12px; text-align: left; border-left: 3px solid var(--brand);
+  background: var(--brand-soft);
+}
+.signin-progress-tip figcaption { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brand-strong); }
+.signin-progress-tip blockquote { display: grid; gap: 4px; min-height: 4.5em; margin: 8px 0; animation: signin-tip 450ms ease-out; }
+.signin-progress-tip blockquote span { color: var(--ink-soft); line-height: 1.45; }
+.signin-progress-next {
+  padding: 0; border: 0; background: none; color: var(--link); font: inherit; font-size: 0.85rem;
+  text-decoration: underline; cursor: pointer;
+}
+
+@keyframes signin-spin { to { transform: rotate(360deg); } }
+@keyframes signin-slide { 0% { left: -40%; } 100% { left: 100%; } }
+@keyframes signin-pulse { 50% { box-shadow: 0 0 0 5px rgba(210, 58, 22, 0.15); } }
+@keyframes signin-tip { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes signin-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .signin-progress-backdrop, .signin-progress-tip blockquote, .signin-progress-step.is-active .signin-progress-step-mark { animation: none; }
+  .signin-progress-spinner span, .signin-progress-bar span { animation-duration: 6s; }
+}
