@@ -79,9 +79,6 @@ The whole `stats` map is **frozen against client writes** — the rules require 
 byte-identical on update, so nobody can award themselves karma. Only Admin SDK code can
 move those numbers.
 
-**`emailAccounts/{email}`** — the uniqueness lock, one document per normalised
-email, holding the wallet address. Admin SDK only.
-
 **`privyIdentities/{address}`** — the sign-in binding, copied onto `users/{address}`
 when onboarding creates the profile. Admin SDK only.
 
@@ -231,8 +228,8 @@ signInWithCustomToken()
 ```
 
 `request.auth.uid` **is** the wallet address. Email is stored on the same
-`users/{address}` document by the server (`email`, `privyUserId`), and
-`emailAccounts/{email}` refuses a second wallet for that email. The rules
+`users/{address}` document by the server (`email`, `privyUserId`); Privy
+keeps one user, and so one wallet, per email. The rules
 reject a client write of either field. That is what makes the rule `request.auth.uid == address`
 a real proof of ownership rather than a claim the browser made about itself.
 
@@ -248,7 +245,9 @@ ADMIN_BOOTSTRAP_EMAILS=you@smu.edu.sg
 ```
 
 Redeploy functions, then sign in with that email and complete onboarding. The
-server sets `role` to `1` on the new `users/{wallet}` document. A later sign-in
+server sets `role` to `1` on the new `users/{wallet}` document, but only for the
+first account to hold that email: a second wallet presenting the same email
+stays a normal user until an administrator promotes it by hand. A later sign-in
 grants it again if the role is still `0`, which covers setting the variable
 after the first signup. Remove the email from the list before demoting that
 account to a normal user, or the next sign-in promotes it again.

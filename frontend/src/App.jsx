@@ -16,6 +16,7 @@ import { Login } from "./components/Login.jsx";
 import { AccessDenied } from "./components/AccessDenied.jsx";
 import { SignInWithEmail } from "./components/SignInWithEmail.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
+import { SignInProgress } from "./components/SignInProgress.jsx";
 import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import { WalletTransactionRecovery } from "./components/WalletTransactionRecovery.jsx";
 import { useActionItems } from "./lib/actionItems.js";
@@ -868,6 +869,7 @@ function AppContent() {
       <SuspensionBanner />
       <Shell route={section}><Suspense fallback={<PageLoading />}>{pageComponent}</Suspense></Shell>
       <OnboardingModal />
+      <SignInProgress />
     </>
   );
 }

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  EMAIL_ACCOUNTS,
   PRIVY_IDENTITIES,
   PrivySessionError,
   accountEmail,
@@ -49,24 +48,85 @@ describe("email identity", () => {
 });
 
 describe("one email per account", () => {
-  it("records the binding before a profile exists and refuses a second wallet", async () => {
+  it("records the binding before a profile exists, with no email lock of its own", async () => {
     const db = memoryDb();
     const adminEmails = new Set();
     const first = await bindPrivyAccount({
       db, Timestamp, address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID, adminEmails,
     });
     assert.equal(first.profileReady, false);
-    assert.equal(db.records.get(`${EMAIL_ACCOUNTS}/${EMAIL}`).address, ADDRESS);
     assert.equal(db.records.get(`${PRIVY_IDENTITIES}/${ADDRESS}`).email, EMAIL);
     assert.equal(db.records.has(`users/${ADDRESS}`), false);
+    assert.equal([...db.records.keys()].some((key) => key.startsWith("emailAccounts/")), false);
+  });
 
-    await assert.rejects(
-      bindPrivyAccount({
-        db, Timestamp, address: OTHER, email: EMAIL, privyUserId: "did:privy:other", adminEmails,
-      }),
-      (error) => error instanceof PrivySessionError && error.code === "already-exists",
-    );
-    assert.equal(db.records.get(`${EMAIL_ACCOUNTS}/${EMAIL}`).address, ADDRESS);
+  it("lets a Privy user recreated for the same email sign in with its new wallet", async () => {
+    const db = memoryDb({
+      [`users/${ADDRESS}`]: { address: ADDRESS, role: 0, email: EMAIL, privyUserId: PRIVY_ID },
+      [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
+    });
+    const recreated = await bindPrivyAccount({
+      db, Timestamp, address: OTHER, email: EMAIL, privyUserId: "did:privy:recreated", adminEmails: new Set(),
+    });
+    assert.equal(recreated.profileReady, false);
+    assert.equal(db.records.get(`${PRIVY_IDENTITIES}/${OTHER}`).privyUserId, "did:privy:recreated");
+    // The old wallet's account is left exactly as it was.
+    assert.equal(db.records.get(`users/${ADDRESS}`).privyUserId, PRIVY_ID);
+  });
+
+  it("never promotes a second wallet that presents an administrator's email", async () => {
+    const adminEmails = new Set([EMAIL]);
+    const admin = { address: ADDRESS, role: 1, email: EMAIL, privyUserId: PRIVY_ID };
+
+    // Sign-in of a second wallet that already has a profile.
+    const db = memoryDb({
+      [`users/${ADDRESS}`]: admin,
+      [`users/${OTHER}`]: { address: OTHER, role: 0, fullName: "Second" },
+    });
+    const bound = await bindPrivyAccount({
+      db, Timestamp, address: OTHER, email: EMAIL, privyUserId: "did:privy:recreated", adminEmails,
+    });
+    assert.equal(bound.role, 0);
+    assert.equal(db.records.get(`users/${OTHER}`).role, 0);
+
+    // Onboarding of a second wallet: the stamp copies the email but not the role.
+    const fresh = memoryDb({
+      [`users/${ADDRESS}`]: admin,
+      [`${PRIVY_IDENTITIES}/${OTHER}`]: { address: OTHER, email: EMAIL, privyUserId: "did:privy:recreated" },
+      [`users/${OTHER}`]: { address: OTHER, role: 0, fullName: "Second" },
+    });
+    const stamped = await stampUserFromIdentity({
+      db: fresh, Timestamp, address: OTHER, adminEmails,
+    });
+    assert.equal(stamped.stamped, true);
+    assert.equal(stamped.role, undefined);
+    assert.equal(fresh.records.get(`users/${OTHER}`).role, 0);
+    assert.equal(fresh.records.get(`users/${OTHER}`).email, EMAIL);
+  });
+
+  it("promotes only one of two wallets onboarding at once with a bootstrap email", async () => {
+    const db = memoryDb({
+      [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
+      [`${PRIVY_IDENTITIES}/${OTHER}`]: { address: OTHER, email: EMAIL, privyUserId: "did:privy:second" },
+      [`users/${ADDRESS}`]: { address: ADDRESS, role: 0, fullName: "First" },
+      [`users/${OTHER}`]: { address: OTHER, role: 0, fullName: "Second" },
+    });
+    const adminEmails = new Set([EMAIL]);
+    // Started together, as two onboarding triggers firing at the same moment.
+    const results = await Promise.all([ADDRESS, OTHER].map((address) =>
+      stampUserFromIdentity({ db, Timestamp, address, adminEmails })));
+    assert.deepEqual(results.map((result) => result.stamped), [true, true]);
+    const roles = [ADDRESS, OTHER].map((address) => db.records.get(`users/${address}`).role);
+    assert.equal(roles.filter((role) => role === 1).length, 1);
+    assert.equal(db.records.get(`users/${OTHER}`).email, EMAIL);
+  });
+
+  it("does nothing once the profile it was asked to stamp is gone", async () => {
+    const db = memoryDb({
+      [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
+    });
+    assert.deepEqual(await stampUserFromIdentity({ db, Timestamp, address: ADDRESS, adminEmails: new Set([EMAIL]) }), { stamped: false });
+    assert.equal(db.records.has(`users/${ADDRESS}`), false);
   });
 
   it("stamps an existing profile and grants admin once for a bootstrap email", async () => {
@@ -92,7 +152,6 @@ describe("one email per account", () => {
   it("refuses to move a wallet onto a different email or Privy id", async () => {
     const db = memoryDb({
       [`users/${ADDRESS}`]: { address: ADDRESS, role: 0, email: EMAIL, privyUserId: PRIVY_ID },
-      [`${EMAIL_ACCOUNTS}/${EMAIL}`]: { address: ADDRESS, privyUserId: PRIVY_ID },
     });
     const adminEmails = new Set();
     await assert.rejects(
@@ -115,13 +174,13 @@ describe("one email per account", () => {
       [`users/${ADDRESS}`]: { address: ADDRESS, role: 0, fullName: "Ada" },
     });
     const stamped = await stampUserFromIdentity({
-      db, Timestamp, address: ADDRESS, userData: db.records.get(`users/${ADDRESS}`), adminEmails: new Set([EMAIL]),
+      db, Timestamp, address: ADDRESS, adminEmails: new Set([EMAIL]),
     });
     assert.equal(stamped.stamped, true);
     assert.equal(stamped.role, 1);
     assert.equal(db.records.get(`users/${ADDRESS}`).email, EMAIL);
     const again = await stampUserFromIdentity({
-      db, Timestamp, address: ADDRESS, userData: db.records.get(`users/${ADDRESS}`), adminEmails: new Set([EMAIL]),
+      db, Timestamp, address: ADDRESS, adminEmails: new Set([EMAIL]),
     });
     assert.equal(again.stamped, false);
   });

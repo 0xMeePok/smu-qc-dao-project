@@ -40,8 +40,7 @@ const OWNER = (process.env.MOCK_OWNER_ADDRESS ?? `0x${"d".repeat(40)}`).toLowerC
 
 /**
  * Privy-style identity for the sample owner. The document id and Auth uid stay
- * the wallet address. Email is the human identifier and is unique via
- * emailAccounts/{email}. Override both when the sample postings should belong
+ * the wallet address. Email is the human identifier. Override both when the sample postings should belong
  * to a wallet you can actually sign in as.
  */
 const OWNER_EMAIL = (process.env.MOCK_OWNER_EMAIL ?? "sample.owner@qcdao.example").trim().toLowerCase();
@@ -225,8 +224,8 @@ export async function resetPostings({ db, bucket, logger = console }) {
 
 /**
  * Upserts the sample owner's account in the shape sign-in now writes:
- * users/{wallet} carries email and privyUserId, and emailAccounts/{email}
- * locks that email to this wallet. The Auth user (uid = wallet) is created
+ * users/{wallet} carries email and privyUserId, and privyIdentities/{wallet}
+ * holds the same binding. The Auth user (uid = wallet) is created
  * only against the emulator; a live Privy sign-in creates the real one.
  */
 export async function seedOwnerAccount({ db, auth = null, logger = console }) {
@@ -259,11 +258,6 @@ export async function seedOwnerAccount({ db, auth = null, logger = console }) {
     biography: "",
     expertise: [],
   }, { merge: true });
-  await db.collection("emailAccounts").doc(OWNER_EMAIL).set({
-    address: OWNER,
-    privyUserId: OWNER_PRIVY_ID,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
   await db.collection("privyIdentities").doc(OWNER).set({
     address: OWNER,
     email: OWNER_EMAIL,

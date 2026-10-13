@@ -573,7 +573,6 @@ export const stampPrivyIdentity = onDocumentCreated(
       db,
       Timestamp,
       address,
-      userData: event.data?.data() ?? {},
       adminEmails: bootstrapAdminEmails(),
     });
   },
