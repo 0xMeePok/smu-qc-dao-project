@@ -20,7 +20,9 @@ when `stampPrivyIdentity` copies `email` and `privyUserId` onto that document.
 Sign-in of an account that already has a profile writes the same fields directly.
 
 `ADMIN_BOOTSTRAP_EMAILS` (comma-separated, on the functions environment) grants
-role `1` to an account whose email is on that list while its role is still `0`.
+role `1` to an account whose email is on that list while its role is still `0`,
+and only when no other `users` document already carries that email. A second
+wallet presenting an administrator's email is never promoted automatically.
 Remove the email from the list before demoting that account to a normal user.
 `publicProfiles` does not carry email.
 

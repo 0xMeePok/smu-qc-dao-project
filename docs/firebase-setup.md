@@ -245,7 +245,9 @@ ADMIN_BOOTSTRAP_EMAILS=you@smu.edu.sg
 ```
 
 Redeploy functions, then sign in with that email and complete onboarding. The
-server sets `role` to `1` on the new `users/{wallet}` document. A later sign-in
+server sets `role` to `1` on the new `users/{wallet}` document, but only for the
+first account to hold that email: a second wallet presenting the same email
+stays a normal user until an administrator promotes it by hand. A later sign-in
 grants it again if the role is still `0`, which covers setting the variable
 after the first signup. Remove the email from the list before demoting that
 account to a normal user, or the next sign-in promotes it again.

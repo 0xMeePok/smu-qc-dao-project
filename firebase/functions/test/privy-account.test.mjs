@@ -74,6 +74,36 @@ describe("one email per account", () => {
     assert.equal(db.records.get(`users/${ADDRESS}`).privyUserId, PRIVY_ID);
   });
 
+  it("never promotes a second wallet that presents an administrator's email", async () => {
+    const adminEmails = new Set([EMAIL]);
+    const admin = { address: ADDRESS, role: 1, email: EMAIL, privyUserId: PRIVY_ID };
+
+    // Sign-in of a second wallet that already has a profile.
+    const db = memoryDb({
+      [`users/${ADDRESS}`]: admin,
+      [`users/${OTHER}`]: { address: OTHER, role: 0, fullName: "Second" },
+    });
+    const bound = await bindPrivyAccount({
+      db, Timestamp, address: OTHER, email: EMAIL, privyUserId: "did:privy:recreated", adminEmails,
+    });
+    assert.equal(bound.role, 0);
+    assert.equal(db.records.get(`users/${OTHER}`).role, 0);
+
+    // Onboarding of a second wallet: the stamp copies the email but not the role.
+    const fresh = memoryDb({
+      [`users/${ADDRESS}`]: admin,
+      [`${PRIVY_IDENTITIES}/${OTHER}`]: { address: OTHER, email: EMAIL, privyUserId: "did:privy:recreated" },
+      [`users/${OTHER}`]: { address: OTHER, role: 0, fullName: "Second" },
+    });
+    const stamped = await stampUserFromIdentity({
+      db: fresh, Timestamp, address: OTHER, userData: fresh.records.get(`users/${OTHER}`), adminEmails,
+    });
+    assert.equal(stamped.stamped, true);
+    assert.equal(stamped.role, undefined);
+    assert.equal(fresh.records.get(`users/${OTHER}`).role, 0);
+    assert.equal(fresh.records.get(`users/${OTHER}`).email, EMAIL);
+  });
+
   it("stamps an existing profile and grants admin once for a bootstrap email", async () => {
     const db = memoryDb({
       [`users/${ADDRESS}`]: { address: ADDRESS, role: 0, fullName: "Ada" },
