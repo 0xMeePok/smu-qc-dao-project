@@ -45,9 +45,9 @@ export function adminCancellationReasonHash({ requestId, actorId, proposalEntity
 export function adminCancellationBlockReason(summary, { grant = false } = {}) {
   if (BigInt(summary.totalReleased) !== 0n) return "Escrow cannot be cancelled after any payment has been released.";
   if (!OPEN.has(summary.state)) return "This escrow is already closed or refundable.";
-  if (BigInt(summary.totalDeposited) <= 0n) return grant
-    ? "This grant has no accepted escrow deposit. Use the grant pool workflow to release its reservation."
-    : "This escrow has no deposit to refund.";
+  if (grant && BigInt(summary.totalDeposited) <= 0n) {
+    return "This grant has no accepted escrow deposit. Use the grant pool workflow to release its reservation.";
+  }
   if (BigInt(summary.totalRefunded) !== 0n
       || BigInt(summary.outstandingBalance) !== BigInt(summary.totalDeposited)
       || BigInt(summary.custodyBalance) < BigInt(summary.outstandingBalance)) {

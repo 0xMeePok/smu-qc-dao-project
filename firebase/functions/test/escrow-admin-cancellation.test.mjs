@@ -114,6 +114,16 @@ describe("administrator escrow cancellation", () => {
     assert.equal((await getEscrowAdminCancellation(f.options)).canCancel, false);
   });
 
+  it("can cancel an empty main escrow created in error without inventing depositor refunds", async () => {
+    const f = fixture(); f.state.totalDeposited = 0n; f.state.custodyBalance = 0n;
+    const initial = await getEscrowAdminCancellation(f.options);
+    assert.equal(initial.canCancel, true);
+    const result = await startEscrowAdminCancellation(f.options);
+    assert.equal(result.status, "pending");
+    assert.equal(result.request.refundAmountBaseUnits, null);
+    assert.equal(f.signedTransactions.length, 1);
+  });
+
   it("requires the allowlisted platform signer and refuses a pending platform payout", async () => {
     const f = fixture(); f.state.isAdmin = false;
     await assert.rejects(startEscrowAdminCancellation(f.options), /allowlisted/);
