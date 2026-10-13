@@ -39,6 +39,7 @@ const { WalletProvider, useWallet } = await import("../../src/context/WalletCont
 const { privyConfig, chainIdOf, connectedEmbeddedWallet, linkedEmbeddedWallet } = await import("../../src/lib/privy.js");
 const {
   embeddedWalletClient, getActiveEmbeddedWallet, sendSponsoredTransaction, setActiveEmbeddedWallet, sponsoredProvider,
+  getPendingSponsoredTransaction, recoverPendingSponsoredTransaction, subscribePendingSponsoredTransactions,
   SPONSORSHIP_UNAVAILABLE_MESSAGE, SPONSORED_PENDING_MESSAGE,
 } = await import("../../src/lib/embeddedWallet.js");
 const { auditErrorMessage } = await import("../../src/lib/errors.js");
@@ -278,6 +279,8 @@ describe("embeddedWalletClient", () => {
 });
 
 describe("[QCDAO-144] sponsored transactions", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
   const HASH = `0x${"1".repeat(64)}`;
   const REGISTRY = `0x${"e5".repeat(20)}`;
   const request = { from: ADDRESS, to: REGISTRY, data: "0x1234", value: "0x0" };
@@ -287,7 +290,7 @@ describe("[QCDAO-144] sponsored transactions", () => {
   const chain = ({ success = true, logs, transactions } = {}) => {
     const ours = built(HASH, undefined, success);
     return {
-      getBlockNumber: vi.fn(async () => 100n),
+      getBlockNumber: vi.fn().mockResolvedValueOnce(100n).mockResolvedValue(110n),
       getLogs: vi.fn(async () => logs ?? [{ transactionHash: HASH, blockNumber: 101n, logIndex: 3 }]),
       getTransaction: vi.fn(async ({ hash }) => (transactions ?? { [HASH]: ours.transaction })[hash]),
       waitForTransactionReceipt: vi.fn(async ({ hash }) => (hash === HASH ? ours.receipt : built(hash).receipt)),
@@ -304,7 +307,8 @@ describe("[QCDAO-144] sponsored transactions", () => {
   it("finds the mined transaction from the EntryPoint log when Privy returns no hash yet", async () => {
     const publicClient = chain();
     await expect(sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: "" })), publicClient })).resolves.toBe(HASH);
-    expect(publicClient.getLogs).toHaveBeenCalledWith(expect.objectContaining({ args: { sender: ADDRESS }, fromBlock: 100n }));
+    expect(publicClient.getBlockNumber).toHaveBeenNthCalledWith(1, { cacheTime: 0 });
+    expect(publicClient.getLogs).toHaveBeenCalledWith(expect.objectContaining({ args: { sender: ADDRESS }, fromBlock: 101n }));
     expect(publicClient.getTransaction).toHaveBeenCalledWith({ hash: HASH });
   });
 
@@ -359,6 +363,217 @@ describe("[QCDAO-144] sponsored transactions", () => {
     const error = await sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: "" })), publicClient: chain({ logs: [] }), timeoutMs: 1 })
       .catch((caught) => caught);
     expect(error.message).toBe(SPONSORED_PENDING_MESSAGE);
+  });
+
+  it("never attributes a new hashless send to an identical operation already mined at the tip", async () => {
+    const oldHash = `0x${"3".repeat(64)}`;
+    const old = built(oldHash);
+    const current = built();
+    const publicClient = chain({ logs: [
+      { transactionHash: oldHash, blockNumber: 100n, logIndex: 0 },
+      { transactionHash: HASH, blockNumber: 101n, logIndex: 1 },
+    ], transactions: { [oldHash]: old.transaction, [HASH]: current.transaction } });
+    await expect(sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: "" })), publicClient })).resolves.toBe(HASH);
+    expect(publicClient.getTransaction).not.toHaveBeenCalledWith({ hash: oldHash });
+  });
+
+  it("preserves the known hash and recovers the same operation after a receipt RPC failure without sending again", async () => {
+    const member = wallet(async () => ({ hash: HASH })), publicClient = chain();
+    publicClient.waitForTransactionReceipt.mockRejectedValueOnce(new Error("HTTP request failed"));
+    const changed = vi.fn(), unsubscribe = subscribePendingSponsoredTransactions(changed);
+    const error = await sendSponsoredTransaction(request, { wallet: member, publicClient }).catch(caught => caught);
+    expect(error).toMatchObject({ walletOutcome: "pending", transactionHash: HASH });
+    expect(auditErrorMessage(error)).toBe(SPONSORED_PENDING_MESSAGE);
+    expect(getPendingSponsoredTransaction(ADDRESS)).toMatchObject({ transactionHash: HASH, to: REGISTRY, fromBlock: "101" });
+    expect(JSON.parse(localStorage.getItem(`qcdao:privy-pending:421614:${ADDRESS.toLowerCase()}`))).toMatchObject({ transactionHash: HASH });
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+    expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+    expect(changed).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("blocks a different action while the hashless operation is unresolved and explicit recovery only reads", async () => {
+    const member = wallet(async () => ({ hash: "" })), publicClient = chain({ logs: [] });
+    const error = await sendSponsoredTransaction(request, { wallet: member, publicClient, timeoutMs: 1 }).catch(caught => caught);
+    expect(error).toMatchObject({ walletOutcome: "pending", pendingSponsoredTransaction: { to: REGISTRY } });
+    await expect(sendSponsoredTransaction({ ...request, data: "0xabcd" }, { wallet: member, publicClient })).rejects.toMatchObject({ walletOutcome: "pending" });
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+    publicClient.getBlockNumber.mockResolvedValue(120n);
+    publicClient.getLogs.mockResolvedValue([{ transactionHash: HASH, blockNumber: 112n, logIndex: 1 }]);
+    await expect(recoverPendingSponsoredTransaction({ wallet: member, publicClient })).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+    expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+  });
+
+  it("keeps an ambiguous wallet request failure pending rather than claiming nothing was sent", async () => {
+    const member = wallet(async () => { throw new Error("Failed to fetch"); });
+    const error = await sendSponsoredTransaction(request, { wallet: member, publicClient: chain() }).catch(caught => caught);
+    expect(error.walletOutcome).toBe("pending");
+    expect(auditErrorMessage(error)).toBe(SPONSORED_PENDING_MESSAGE);
+    expect(getPendingSponsoredTransaction(ADDRESS)).toMatchObject({ phase: "unresolved" });
+    await expect(sendSponsoredTransaction({ ...request, data: "0x99" }, { wallet: member, publicClient: chain() })).rejects.toMatchObject({ walletOutcome: "pending" });
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+  });
+
+  it("clears a confirmed failed operation so a deliberate new send can proceed", async () => {
+    const member = wallet(async () => ({ hash: HASH }));
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient: chain({ success: false }) })).rejects.toMatchObject({
+      walletOutcome: "reverted", transactionHash: HASH, transactionSettled: true,
+    });
+    expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient: chain() })).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores pending recovery from storage when no in-memory operation exists", async () => {
+    localStorage.setItem(`qcdao:privy-pending:421614:${ADDRESS.toLowerCase()}`, JSON.stringify({
+      id: "restored", address: ADDRESS, to: REGISTRY, data: "0x1234", value: "0", chainId: 421614,
+      fromBlock: "101", phase: "submitted", transactionHash: HASH, createdAt: Date.now(),
+    }));
+    const member = wallet(async () => ({ hash: HASH }));
+    await expect(recoverPendingSponsoredTransaction({ wallet: member, publicClient: chain() })).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).not.toHaveBeenCalled();
+    expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+  });
+
+  it("does not broadcast when pending state cannot be saved before the wallet request", async () => {
+    const member = wallet(async () => ({ hash: HASH }));
+    const storage = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
+    try {
+      await expect(sendSponsoredTransaction(request, { wallet: member, publicClient: chain() })).rejects.toThrow(/preserve the pending transaction/);
+      expect(member.sendSponsoredTransaction).not.toHaveBeenCalled();
+      expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+    } finally { storage.mockRestore(); }
+  });
+
+  it("clears the pending guard after an explicit declined confirmation", async () => {
+    const member = wallet(async () => { throw Object.assign(new Error("User rejected request"), { code: 4001 }); });
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient: chain() })).rejects.toMatchObject({ code: 4001 });
+    expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+    member.sendSponsoredTransaction.mockResolvedValue({ hash: HASH });
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient: chain() })).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes the browser's shared wallet lock before starting a sponsored send", async () => {
+    const previous = Object.getOwnPropertyDescriptor(navigator, "locks");
+    const requestLock = vi.fn(async (_key, action) => action());
+    Object.defineProperty(navigator, "locks", { configurable: true, value: { request: requestLock } });
+    try {
+      await expect(sendSponsoredTransaction(request, { wallet: wallet(async () => ({ hash: HASH })), publicClient: chain() })).resolves.toBe(HASH);
+      expect(requestLock).toHaveBeenCalledWith(`qcdao:privy-pending:421614:${ADDRESS.toLowerCase()}`, expect.any(Function));
+    } finally {
+      if (previous) Object.defineProperty(navigator, "locks", previous); else delete navigator.locks;
+    }
+  });
+
+  it("blocks a new send when a restored pending record contains malformed JSON", async () => {
+    localStorage.setItem(`qcdao:privy-pending:421614:${OTHER.toLowerCase()}`, "{malformed");
+    const member = { ...wallet(async () => ({ hash: HASH })), address: OTHER };
+    expect(getPendingSponsoredTransaction(OTHER)).toMatchObject({ id: "unreadable", address: OTHER });
+    await expect(sendSponsoredTransaction({ ...request, from: OTHER }, { wallet: member, publicClient: chain() })).rejects.toMatchObject({ walletOutcome: "pending" });
+    expect(member.sendSponsoredTransaction).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a failed storage read as absence of a pending operation after reload", async () => {
+    const member = { ...wallet(async () => ({ hash: HASH })), address: OTHER };
+    const storage = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Read unavailable"); });
+    try {
+      expect(getPendingSponsoredTransaction(OTHER)).toMatchObject({ id: "unreadable", address: OTHER });
+      await expect(sendSponsoredTransaction({ ...request, from: OTHER }, { wallet: member, publicClient: chain() })).rejects.toMatchObject({ walletOutcome: "pending" });
+      expect(member.sendSponsoredTransaction).not.toHaveBeenCalled();
+    } finally { storage.mockRestore(); }
+  });
+
+  it("retains the known in-memory hash when reading pending storage fails", async () => {
+    const member = wallet(async () => ({ hash: HASH })), publicClient = chain();
+    publicClient.waitForTransactionReceipt.mockRejectedValueOnce(new Error("HTTP request failed"));
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).rejects.toMatchObject({ transactionHash: HASH });
+    const storage = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Read unavailable"); });
+    try {
+      expect(getPendingSponsoredTransaction(ADDRESS)).toMatchObject({ transactionHash: HASH });
+      await expect(recoverPendingSponsoredTransaction({ wallet: member, publicClient })).resolves.toBe(HASH);
+      expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+    } finally { storage.mockRestore(); }
+  });
+
+  it("pages a large block gap using small explicit ranges and finds the original call", async () => {
+    const member = wallet(async () => ({ hash: "" })), publicClient = chain();
+    publicClient.getBlockNumber.mockReset().mockResolvedValueOnce(100n).mockResolvedValue(20_000n);
+    publicClient.getLogs.mockImplementation(async ({ fromBlock, toBlock }) => {
+      expect(toBlock - fromBlock + 1n).toBeLessThanOrEqual(1_000n);
+      return fromBlock <= 4_500n && toBlock >= 4_500n ? [{ transactionHash: HASH, blockNumber: 4_500n, logIndex: 1 }] : [];
+    });
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).resolves.toBe(HASH);
+    expect(publicClient.getLogs).toHaveBeenCalledTimes(5);
+    expect(publicClient.getLogs).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 101n, toBlock: 1_100n }));
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+  });
+
+  it("bounds each recovery scan and resumes its saved cursor across checks", async () => {
+    const member = wallet(async () => ({ hash: "" })), publicClient = chain();
+    publicClient.getBlockNumber.mockReset().mockResolvedValueOnce(100n).mockResolvedValue(100_000n);
+    publicClient.getLogs.mockResolvedValue([]);
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).rejects.toMatchObject({ walletOutcome: "pending" });
+    expect(publicClient.getLogs).toHaveBeenCalledTimes(8);
+    const saved = getPendingSponsoredTransaction(ADDRESS);
+    expect(BigInt(saved.scanFromBlock)).toBeGreaterThan(7_000n);
+    expect(saved.fromBlock).toBe("101");
+    publicClient.getLogs.mockClear().mockImplementation(async ({ fromBlock }) => [{ transactionHash: HASH, blockNumber: fromBlock + 10n, logIndex: 1 }]);
+    await expect(recoverPendingSponsoredTransaction({ wallet: member, publicClient, timeoutMs: 10_000 })).resolves.toBe(HASH);
+    expect(publicClient.getLogs).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: BigInt(saved.scanFromBlock) }));
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+  });
+
+  it("retains the current page after a provider failure and retries that page without resending", async () => {
+    const member = wallet(async () => ({ hash: "" })), publicClient = chain();
+    publicClient.getBlockNumber.mockReset().mockResolvedValueOnce(100n).mockResolvedValue(20_000n);
+    publicClient.getLogs.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("Provider log range unavailable"));
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).rejects.toMatchObject({ walletOutcome: "pending" });
+    const saved = getPendingSponsoredTransaction(ADDRESS);
+    expect(saved.scanFromBlock).toBe("1099");
+    publicClient.getLogs.mockClear().mockResolvedValue([{ transactionHash: HASH, blockNumber: 1_200n, logIndex: 1 }]);
+    await expect(recoverPendingSponsoredTransaction({ wallet: member, publicClient })).resolves.toBe(HASH);
+    expect(publicClient.getLogs).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 1_099n, toBlock: 2_098n }));
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+  });
+
+  it("does not advance a page when a matching log's transaction cannot be read", async () => {
+    const member = wallet(async () => ({ hash: "" })), publicClient = chain();
+    publicClient.getBlockNumber.mockReset().mockResolvedValueOnce(100n).mockResolvedValue(20_000n);
+    publicClient.getLogs.mockResolvedValue([{ transactionHash: HASH, blockNumber: 500n, logIndex: 1 }]);
+    publicClient.getTransaction.mockRejectedValueOnce(new Error("Transaction read unavailable"));
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).rejects.toMatchObject({ walletOutcome: "pending" });
+    expect(getPendingSponsoredTransaction(ADDRESS).scanFromBlock).toBe("101");
+    await expect(recoverPendingSponsoredTransaction({ wallet: member, publicClient })).resolves.toBe(HASH);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+  });
+
+  it("retains a discovered hash after its receipt read fails and avoids scanning or sending again", async () => {
+    const member = wallet(async () => ({ hash: "" })), publicClient = chain();
+    publicClient.waitForTransactionReceipt.mockRejectedValueOnce(new Error("Receipt unavailable"));
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).rejects.toMatchObject({ walletOutcome: "pending", transactionHash: HASH });
+    expect(getPendingSponsoredTransaction(ADDRESS)).toMatchObject({ transactionHash: HASH, scanFromBlock: "101" });
+    publicClient.getLogs.mockClear();
+    await expect(recoverPendingSponsoredTransaction({ wallet: member, publicClient })).resolves.toBe(HASH);
+    expect(publicClient.getLogs).not.toHaveBeenCalled();
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce();
+  });
+
+  it("keeps page progress in memory if updating storage temporarily fails", async () => {
+    const member = wallet(async () => ({ hash: "" })), publicClient = chain();
+    publicClient.getBlockNumber.mockReset().mockResolvedValueOnce(100n).mockResolvedValue(100_000n);
+    publicClient.getLogs.mockResolvedValue([]);
+    const originalSet = Storage.prototype.setItem;
+    const storage = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (key, value) {
+      if (BigInt(JSON.parse(value).scanFromBlock ?? "0") > 101n) throw new Error("Storage write unavailable");
+      return originalSet.call(this, key, value);
+    });
+    try {
+      await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).rejects.toMatchObject({ walletOutcome: "pending" });
+      expect(BigInt(getPendingSponsoredTransaction(ADDRESS).scanFromBlock)).toBeGreaterThan(7_000n);
+    } finally { storage.mockRestore(); }
   });
 
   it("routes only transaction sending through sponsorship; reads stay on Privy's provider", async () => {

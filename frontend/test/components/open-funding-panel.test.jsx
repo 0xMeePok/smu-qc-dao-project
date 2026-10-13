@@ -3,18 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const live = vi.hoisted(() => ({ options: null }));
 vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
-const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), supported: true, account: null, user: null, signIn: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), readContract: vi.fn(), supported: true, account: null, user: null, signIn: vi.fn() }));
 vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => mocks.account }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/context/SessionContext.jsx", () => ({ useSignIn: () => mocks.signIn }));
 vi.mock("../../src/lib/openFunding.js", () => ({ getOpenFundingSummary: (...args) => mocks.read(...args),
   writeOpenFundingAction: (...args) => mocks.write(...args), syncOpenFunding: (...args) => mocks.sync(...args), openFundingSupported: () => mocks.supported }));
-vi.mock("../../src/lib/escrow.js", () => ({ confirmEscrowTransaction: (...args) => mocks.confirm(...args), escrowErrorMessage: error => error.message }));
+vi.mock("../../src/lib/escrow.js", () => ({ confirmEscrowTransaction: (...args) => mocks.confirm(...args),
+  createWalletEscrowAdapters: () => ({ readContract: (...args) => mocks.readContract(...args) }), escrowErrorMessage: error => error.message }));
 import { OpenFundingPanel, OpenFundingView } from "../../src/components/OpenFundingPanel.jsx";
 import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`;
 const proposal = { proposalId: "solution", title: "Quantum solution", amountBaseUnits: "50000000000", status: "none", canSelect: true };
-const model = (extra = {}) => ({ supported: true, poolAddress: `0x${"b".repeat(40)}`, tokenAddress: `0x${"c".repeat(40)}`,
+const model = (extra = {}) => ({ supported: true, chainId: 421614, poolAddress: `0x${"b".repeat(40)}`, tokenAddress: `0x${"c".repeat(40)}`,
   tokenDecimals: 6, tokenSymbol: "USDC", totalDeposited: "100000000000", totalAllocated: "0", totalReserved: "0", available: "100000000000",
   canDeposit: true, canSelect: true, selections: [proposal], ...extra });
 function ActionCount({ read }) {
@@ -26,6 +27,7 @@ beforeEach(() => {
   mocks.account = { isConnected: true, address: account, chainId: 421614 }; mocks.user = { id: account };
   mocks.read.mockReset().mockResolvedValue(model()); mocks.sync.mockReset().mockResolvedValue({});
   mocks.write.mockReset().mockResolvedValue({ transactionHash: hash }); mocks.confirm.mockReset().mockResolvedValue({ transactionHash: hash });
+  mocks.readContract.mockReset().mockResolvedValue(10_000_000n);
 });
 afterEach(cleanup);
 describe("open funding grant workflow UI", () => {
@@ -124,6 +126,115 @@ describe("open funding grant workflow UI", () => {
     render(<OpenFundingPanel problemId="grant" />);
     fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
     await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith(hash, { confirmations: 2 }));
+    expect(mocks.write).toHaveBeenCalledTimes(1);
+  });
+  it.each([["approve", 10_000_000n, "Token approval confirmed"], ["resetAllowance", 0n, "Token allowance reset confirmed"]])(
+    "recovers a late %s receipt without treating approval as a grant deposit", async (action, allowance, message) => {
+      mocks.readContract.mockResolvedValue(allowance);
+      mocks.write.mockImplementation(async input => {
+        input.onProgress({ status: "pending", transactionHash: hash, action });
+        throw new Error("Confirmation unavailable");
+      });
+      // An ERC20 approval has no canonical grant-pool event.
+      mocks.sync.mockRejectedValue(new Error("This transaction has no confirmed action for the canonical grant pool."));
+      const view = render(<OpenFundingPanel problemId="approval-recovery-grant" />);
+      fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "10" } });
+      fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+      await screen.findByRole("button", { name: "Check transaction" });
+      view.unmount();
+      render(<OpenFundingPanel problemId="approval-recovery-grant" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
+      await screen.findByText(`${message}. No funds were deposited. Review the amount and deposit funds when ready.`);
+      expect(mocks.confirm).toHaveBeenCalledWith(hash, { confirmations: 2 });
+      expect(mocks.readContract).toHaveBeenCalledWith(expect.objectContaining({
+        address: model().tokenAddress, functionName: "allowance", args: [account, model().poolAddress], chainId: 421614,
+      }));
+      expect(mocks.sync).not.toHaveBeenCalled();
+      expect(mocks.write).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: "Check transaction" })).toBeNull();
+      const amount = screen.getByLabelText("Add funding");
+      expect(amount.disabled).toBe(false);
+      fireEvent.change(amount, { target: { value: "10" } });
+      expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(false);
+    },
+  );
+  it("retains a confirmed approval until its fresh allowance is readable", async () => {
+    mocks.write.mockImplementation(async input => {
+      input.onProgress({ status: "pending", transactionHash: hash, action: "approve" });
+      throw new Error("Confirmation unavailable");
+    });
+    mocks.readContract.mockRejectedValueOnce(new Error("Allowance RPC unavailable"));
+    render(<OpenFundingPanel problemId="approval-retry-grant" />);
+    fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
+    await screen.findByText("Allowance RPC unavailable");
+    expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(true);
+    expect(mocks.sync).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Check transaction" }));
+    await screen.findByText("Token approval confirmed. No funds were deposited. Review the amount and deposit funds when ready.");
+    expect(mocks.write).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Check transaction" })).toBeNull();
+  });
+  it.each(["approve", "resetAllowance", "deposit"])(
+    "keeps the known %s hash when receipt verification fails before pending progress", async step => {
+      mocks.readContract.mockResolvedValue(step === "resetAllowance" ? 0n : 10_000_000n);
+      mocks.write.mockImplementation(async input => {
+        input.onProgress({ status: "awaiting_signature", action: step });
+        throw Object.assign(new Error("Receipt RPC unavailable"), { transactionHash: hash });
+      });
+      const view = render(<OpenFundingPanel problemId={`known-${step}-grant`} />);
+      fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "10" } });
+      fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+      await screen.findByText("Receipt RPC unavailable");
+      expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(true);
+      const saved = JSON.parse(sessionStorage.getItem(Object.keys(sessionStorage).find(key => key.includes(`known-${step}-grant`))));
+      expect(saved).toMatchObject({ transactionHash: hash, action: step });
+      if (step !== "deposit") expect(saved).toMatchObject({ tokenAddress: model().tokenAddress, poolAddress: model().poolAddress });
+      view.unmount();
+      render(<OpenFundingPanel problemId={`known-${step}-grant`} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Check transaction" })).toBeNull());
+      expect(mocks.confirm).toHaveBeenCalledWith(hash, { confirmations: 2 });
+      if (step === "deposit") {
+        expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ transactionHash: hash }));
+        expect(mocks.readContract).not.toHaveBeenCalled();
+      } else {
+        expect(mocks.sync).not.toHaveBeenCalled();
+        expect(mocks.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "allowance", args: [account, model().poolAddress] }));
+      }
+      expect(mocks.write).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText("Add funding").disabled).toBe(false);
+    },
+  );
+  it.each([{ terminal: true }, { transactionSettled: true }])("does not retain a settled transaction hash (%j)", async outcome => {
+    mocks.write.mockImplementation(async input => {
+      input.onProgress({ status: "awaiting_signature", action: "approve" });
+      throw Object.assign(new Error("Transaction reverted"), { transactionHash: hash, ...outcome });
+    });
+    render(<OpenFundingPanel problemId="settled-approval-grant" />);
+    fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+    await screen.findByText("Transaction reverted");
+    expect(screen.queryByRole("button", { name: "Check transaction" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(false);
+    expect(mocks.sync).not.toHaveBeenCalled();
+  });
+  it("does not unlock an approval recovery for a different canonical pool", async () => {
+    mocks.write.mockImplementation(async input => {
+      input.onProgress({ status: "pending", transactionHash: hash, action: "approve" });
+      throw new Error("Confirmation unavailable");
+    });
+    render(<OpenFundingPanel problemId="changed-approval-pool" />);
+    fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+    const check = await screen.findByRole("button", { name: "Check transaction" });
+    mocks.read.mockResolvedValue(model({ poolAddress: `0x${"d".repeat(40)}` }));
+    fireEvent.click(check);
+    await screen.findByText("The approved token or grant pool changed. Refresh before continuing.");
+    expect(mocks.readContract).not.toHaveBeenCalled();
+    expect(mocks.sync).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(true);
     expect(mocks.write).toHaveBeenCalledTimes(1);
   });
   it("recovers a pending withdrawal without broadcasting it again", async () => {

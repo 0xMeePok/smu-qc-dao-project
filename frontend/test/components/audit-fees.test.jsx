@@ -83,6 +83,23 @@ it("leaves wallet rejection to the user and refreshes fees on an explicit retry"
   });
 });
 
+it.each(["pending", "reverted"])("preserves a nested sponsored %s outcome at the wallet adapter boundary", async walletOutcome => {
+  mocks.estimate.mockResolvedValue(feeEstimate);
+  const transactionHash = `0x${"1".repeat(64)}`;
+  const pendingSponsoredTransaction = { id: "operation", transactionHash, phase: "unresolved" };
+  const providerError = Object.assign(new Error("Sponsored operation outcome"), {
+    walletOutcome, transactionHash, pendingSponsoredTransaction,
+  });
+  mocks.write.mockRejectedValue(new Error("ContractFunctionExecutionError", {
+    cause: new Error("UnknownRpcError", { cause: providerError }),
+  }));
+  const error = await adapters().writeContract(request).catch(error => error);
+  expect(error).toMatchObject({ walletOutcome, transactionHash, pendingSponsoredTransaction });
+  expect(error.transactionSettled).toBe(walletOutcome === "reverted" ? true : undefined);
+  expect(error.terminal).toBe(walletOutcome === "reverted" ? true : undefined);
+  expect(mocks.write).toHaveBeenCalledOnce();
+});
+
 // Arbitrum has no priority auction, so a zero tip is a normal estimate there -
 // and wallets refuse to send one ("Priority fee must be greater than 0").
 // Sending the zero straight through stalled every audit write behind a wallet

@@ -1,7 +1,7 @@
 import { contributionError } from "./contributionValidation.js";
 import { erc20Abi, keccak256, stringToHex } from "viem";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG, getAuditRegistryAddress } from "../config/auditRegistry.js";
-import { createWalletAuditAdapters, waitForAuditReceipt } from "./auditRegistry.js";
+import { createWalletAuditAdapters, normalizeWalletWriteError, waitForAuditReceipt } from "./auditRegistry.js";
 import {
   isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection, walletOutcomeError,
   redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE, TRANSACTION_FEE_TOO_LOW_MESSAGE,
@@ -385,10 +385,13 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
       onProgress?.({ status: "confirmed", action: label, transactionHash });
       return { transactionHash, receipt };
     } catch (cause) {
-      const error = new Error(escrowErrorMessage(cause), { cause });
-      if (transactionHash) error.transactionHash = transactionHash;
-      if (cause.terminal !== undefined) { error.terminal = cause.terminal; error.outcome = cause.outcome; }
-      if (cause.transactionSettled) error.transactionSettled = true;
+      const normalized = normalizeWalletWriteError(cause);
+      const error = new Error(escrowErrorMessage(normalized), { cause: normalized });
+      if (normalized.transactionHash || transactionHash) error.transactionHash = normalized.transactionHash || transactionHash;
+      for (const field of ["walletOutcome", "pendingSponsoredTransaction", "terminal", "transactionSettled", "outcome"]) {
+        if (normalized[field] !== undefined) error[field] = normalized[field];
+      }
+      error.action = label;
       throw error;
     }
   };

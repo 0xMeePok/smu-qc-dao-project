@@ -17,6 +17,7 @@ import { AccessDenied } from "./components/AccessDenied.jsx";
 import { SignInWithEmail } from "./components/SignInWithEmail.jsx";
 import { OnboardingModal } from "./components/OnboardingModal.jsx";
 import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
+import { WalletTransactionRecovery } from "./components/WalletTransactionRecovery.jsx";
 import { useActionItems } from "./lib/actionItems.js";
 import HomePage from "./pages/HomePage.jsx";
 import { usePublishedPostings } from "./lib/usePublishedPostings.js";
@@ -323,6 +324,7 @@ function Shell({ route, children }) {
         onNavigate={go} />
 
       <main className="content">
+        <WalletTransactionRecovery />
         {workspaceKeys.has(route) && <div className="workspace-tabs-wrap"><WorkspaceTabs route={route} workspaceRoutes={workspaceRoutes} /></div>}
         {children}
       </main>

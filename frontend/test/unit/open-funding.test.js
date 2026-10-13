@@ -78,6 +78,36 @@ it("retains a submitted hash if confirmation is unavailable and never retries a 
   await assert.rejects(writeOpenFundingAction(options), err => err.transactionHash === hash);
   assert.equal(writes.length, 1);
 });
+for (const [allowance, action] of [[0n, "approve"], [2_000_000n, "deposit"]]) {
+  it(`preserves the nested sponsored ${action} hash and operation when the wallet write rejects`, async () => {
+    const { options, writes, waits } = fixture({ allowance });
+    const pendingSponsoredTransaction = { id: action, transactionHash: hash, phase: "unresolved" };
+    options.adapters.writeContract = async request => {
+      writes.push(request);
+      throw new Error("viem wrapped", { cause: Object.assign(new Error("Sponsored transaction pending"), {
+        walletOutcome: "pending", transactionHash: hash, pendingSponsoredTransaction,
+      }) });
+    };
+    await assert.rejects(writeOpenFundingAction(options), error => {
+      assert.equal(error.transactionHash, hash);
+      assert.equal(error.walletOutcome, "pending");
+      assert.equal(error.pendingSponsoredTransaction, pendingSponsoredTransaction);
+      assert.equal(error.action, action);
+      assert.notEqual(error.transactionSettled, true);
+      return true;
+    });
+    assert.equal(writes.length, 1);
+    assert.equal(waits.length, 0);
+  });
+}
+it("marks a sponsored grant call that reverted as settled", async () => {
+  const { options } = fixture({ allowance: 2_000_000n });
+  options.adapters.writeContract = async () => { throw new Error("viem wrapped", {
+    cause: Object.assign(new Error("Sponsored call reverted"), { walletOutcome: "reverted", transactionHash: hash }),
+  }); };
+  await assert.rejects(writeOpenFundingAction(options), error => error.transactionHash === hash
+    && error.transactionSettled === true && error.terminal === true);
+});
 it("accepts a prepared researcher offer using its canonical proposal reference", async () => {
   const { options, writes } = fixture({ prepared: { request: { address: pool, functionName: "acceptProposal", args: [hash] } } });
   await writeOpenFundingAction({ ...options, action: "accept", proposalId: "proposal" });

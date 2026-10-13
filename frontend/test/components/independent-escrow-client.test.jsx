@@ -88,6 +88,31 @@ describe("independent crowdfunding wallet actions", () => {
       prepare: async () => prepared("submitEvidence", [evidenceHash]) })).rejects.toMatchObject({ transactionHash: tx, action: "accept" });
     expect(wallet.writeContract).toHaveBeenCalledOnce();
   });
+  it.each([["resetAllowance", 1n], ["approve", 0n], ["deposit", 2000000n]])("keeps a sponsored %s failure attached to its actual step", async (action, allowance) => {
+    const wallet = adapters(allowance);
+    const pendingSponsoredTransaction = { id: action, transactionHash: tx, phase: "unresolved" };
+    wallet.writeContract.mockRejectedValue(new Error("viem wrapped", { cause: Object.assign(new Error("Sponsored call pending"), {
+      walletOutcome: "pending", transactionHash: tx, pendingSponsoredTransaction,
+    }) }));
+    await expect(writeIndependentFundingAction({ proposalId: "listing", action: "deposit", account, amount: "2",
+      adapters: wallet, prepare: async () => prepared() })).rejects.toMatchObject({
+      action, transactionHash: tx, walletOutcome: "pending", pendingSponsoredTransaction,
+    });
+    expect(wallet.writeContract).toHaveBeenCalledOnce();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+  it("marks a sponsored approval revert as settled and does not continue into a deposit", async () => {
+    const wallet = adapters();
+    wallet.writeContract.mockRejectedValue(new Error("viem wrapped", { cause: Object.assign(new Error("Sponsored call reverted"), {
+      walletOutcome: "reverted", transactionHash: tx,
+    }) }));
+    await expect(writeIndependentFundingAction({ proposalId: "listing", action: "deposit", account, amount: "2",
+      adapters: wallet, prepare: async () => prepared() })).rejects.toMatchObject({
+      action: "approve", transactionHash: tx, walletOutcome: "reverted", terminal: true, transactionSettled: true,
+    });
+    expect(wallet.writeContract).toHaveBeenCalledOnce();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
   it("preserves the activation hash if indexing fails after the factory transaction confirms", async () => {
     mocks.call.mockImplementation(async name => {
       if (name === "prepareIndependentFundingAction") return { data: prepared("submitEvidence", [evidenceHash]) };

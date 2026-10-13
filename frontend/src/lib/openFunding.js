@@ -4,6 +4,7 @@ import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { confirmEscrowTransaction, createWalletEscrowAdapters, escrowErrorMessage } from "./escrow.js";
+import { normalizeWalletWriteError } from "./auditRegistry.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
 
 async function call(name, payload = {}) {
@@ -54,8 +55,11 @@ export async function writeOpenFundingAction({ problemId, proposalId, account, a
       onProgress?.({ status: "confirmed", action: functionName, transactionHash: result.transactionHash });
       return result;
     } catch (cause) {
+      const normalized = normalizeWalletWriteError(cause);
       throw Object.assign(new Error(escrowErrorMessage(cause), { cause }), {
-        transactionHash, terminal: cause.terminal, transactionSettled: cause.transactionSettled,
+        transactionHash: normalized.transactionHash || transactionHash,
+        action: functionName, walletOutcome: normalized.walletOutcome, pendingSponsoredTransaction: normalized.pendingSponsoredTransaction,
+        outcome: normalized.outcome, terminal: normalized.terminal, transactionSettled: normalized.transactionSettled,
       });
     }
   };

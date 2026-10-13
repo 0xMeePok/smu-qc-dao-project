@@ -6,6 +6,7 @@ import { WORKFLOW_STATUS, workflowStatusLabel } from "../config/workflowStatus.j
 import { requireFirebase } from "./authFlow.js";
 import { toDate } from "./datetime.js";
 import { confirmEscrowTransaction, createWalletEscrowAdapters, escrowErrorMessage } from "./escrow.js";
+import { normalizeWalletWriteError } from "./auditRegistry.js";
 import { functions } from "./firebase.js";
 
 export const APPROACH_TEXT_MAX = 2000;
@@ -158,8 +159,12 @@ export async function submitFundingApproachAnchor(created, { account, adapters =
     const receipt = await confirmEscrowTransaction(transactionHash, { adapters, confirmations: 2 });
     return { transactionHash: receipt.transactionHash ?? transactionHash };
   } catch (cause) {
-    const error = new Error(escrowErrorMessage(cause));
-    error.transactionHash = cause.transactionHash || transactionHash;
+    const normalized = normalizeWalletWriteError(cause);
+    const error = new Error(escrowErrorMessage(normalized), { cause: normalized });
+    error.transactionHash = normalized.transactionHash || transactionHash;
+    for (const field of ["walletOutcome", "pendingSponsoredTransaction", "terminal", "transactionSettled", "outcome"]) {
+      if (normalized[field] !== undefined) error[field] = normalized[field];
+    }
     throw error;
   }
 }
@@ -190,8 +195,12 @@ export async function submitFundingApproachDecisions(decisions, { account, adapt
     const receipt = await confirmEscrowTransaction(transactionHash, { adapters, confirmations: 2 });
     return { transactionHash: receipt.transactionHash ?? transactionHash };
   } catch (cause) {
-    const error = new Error(escrowErrorMessage(cause));
-    error.transactionHash = cause.transactionHash || transactionHash;
+    const normalized = normalizeWalletWriteError(cause);
+    const error = new Error(escrowErrorMessage(normalized), { cause: normalized });
+    error.transactionHash = normalized.transactionHash || transactionHash;
+    for (const field of ["walletOutcome", "pendingSponsoredTransaction", "terminal", "transactionSettled", "outcome"]) {
+      if (normalized[field] !== undefined) error[field] = normalized[field];
+    }
     throw error;
   }
 }
