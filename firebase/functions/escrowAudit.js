@@ -1,4 +1,5 @@
 import { encodeAbiParameters, keccak256 } from "viem";
+import { cachedEscrowRead, storeVerifiedEscrow } from "./immutableChainCache.js";
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
@@ -65,8 +66,11 @@ export function fundingTermsHash(input) {
   return keccak256(encodeAbiParameters(FUNDING_TERMS_ABI, [normalizeFundingTerms(input)]));
 }
 
-/** Confirm immutable terms through BOTH canonical mappings, never a client escrow address. */
-export async function verifyProposalEscrow({ expected, config, readContract }) {
+/** Confirm immutable terms through BOTH canonical mappings, never a client escrow address.
+ * `allowImmutableCache` replays getters already checked for this deployment.
+ * The comparisons below still run. Writes leave the flag off and read the chain.
+ */
+export async function verifyProposalEscrow({ expected, config, readContract, allowImmutableCache = false }) {
   const registryAddress = requireAddress(config.address, "AuditRegistry address");
   const factoryAddress = requireAddress(config.escrow?.factoryAddress, "Funding factory address");
   const factoryAbi = config.escrow?.factoryAbi, escrowAbi = config.escrow?.escrowAbi;
@@ -74,7 +78,14 @@ export async function verifyProposalEscrow({ expected, config, readContract }) {
     throw new Error("Escrow verification ABI configuration is missing.");
   }
   const terms = normalizeFundingTerms(expected.fundingTerms);
-  const read = (address, abi, functionName, args = []) => readContract({ address, abi, functionName, args, chainId: config.chainId });
+  const read = (address, abi, functionName, args = []) => {
+    if (allowImmutableCache) {
+      const hit = cachedEscrowRead({ chainId: config.chainId, registry: registryAddress, factory: factoryAddress,
+        entityId: expected.entityId, address, functionName, args });
+      if (hit !== undefined) return hit;
+    }
+    return readContract({ address, abi, functionName, args, chainId: config.chainId });
+  };
   const [configuredFactory, reverseRegistry, registryEscrow, factoryEscrow] = await Promise.all([
     read(registryAddress, config.abi, "fundingFactory"),
     read(factoryAddress, factoryAbi, "auditRegistry"),
@@ -122,5 +133,25 @@ export async function verifyProposalEscrow({ expected, config, readContract }) {
     if (matches.some(([left, right]) => !same(left, right))) throw mismatchError("the escrow milestone plan differs from the proposal.");
     allocated = cumulative;
   }
+  if (allowImmutableCache) {
+    storeVerifiedEscrow({ chainId: config.chainId, registry: registryAddress, factory: factoryAddress, entityId: expected.entityId,
+      escrowAddress, identity: actual, milestones, opportunityOwner: field(posting, "owner", 0), opportunityExpiresAt: field(posting, "expiresAt", 5),
+      configuredFactory, reverseRegistry });
+  }
   return Object.freeze({ address: escrowAddress, factoryAddress, fundingTermsHash: fundingTermsHash(terms) });
+}
+
+const inflightVerifications = new Map();
+
+/** One in-flight canonical check per deployment and proposal. Display readers share it. */
+export function loadEscrowVerification(args) {
+  if (!args?.allowImmutableCache) return verifyProposalEscrow(args);
+  const key = `${args.config?.chainId}:${String(args.config?.address ?? "").toLowerCase()}:${String(args.expected?.entityId ?? "").toLowerCase()}`;
+  const existing = inflightVerifications.get(key);
+  if (existing) return existing;
+  const promise = verifyProposalEscrow(args).finally(() => {
+    if (inflightVerifications.get(key) === promise) inflightVerifications.delete(key);
+  });
+  inflightVerifications.set(key, promise);
+  return promise;
 }

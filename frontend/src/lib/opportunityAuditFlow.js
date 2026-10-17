@@ -112,7 +112,7 @@ export function createOpportunityAuditFlow({
     }
   };
 
-  const read = async (opportunity, { adapters } = {}) => {
+  const read = async (opportunity, { adapters, allowImmutableCache = false } = {}) => {
     // Rechecks must hash the current server document, never a page snapshot or
     // the stored receipt's hash. A failed server read must fail verification.
     const current = loadRecord
@@ -122,7 +122,7 @@ export function createOpportunityAuditFlow({
     const registryConfig = await recordAuditDeployment(current, { adapters });
     const setup = prepare(current, { registryConfig });
     if (!setup) throw new Error("AuditRegistry is not configured.");
-    return verifyAudit(setup.prepared, { address: setup.address, registryConfig, adapters });
+    return verifyAudit(setup.prepared, { address: setup.address, registryConfig, adapters, allowImmutableCache });
   };
 
   const anchor = async (opportunity, {

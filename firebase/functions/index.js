@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
@@ -30,7 +31,7 @@ import { postingProgressChanged, refreshPostingEscrowProgress } from "./postingE
 import { notifyEscrowWorkflowEvent } from "./escrowWorkflowNotifications.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
-import { createArbitrumRpcTransport, getRpcUrls } from "./rpcPolicy.js";
+import { bindRpcScopeStore, createArbitrumRpcTransport, enableRpcStats, getRpcUrls, withRpcScope } from "./rpcPolicy.js";
 import { collectAdminActivity } from "./adminActivity.js";
 import auditRegistryBaseConfig from "./auditRegistry.contract.json" with { type: "json" };
 import independentFundingConfig from "./independentFunding.contract.json" with { type: "json" };
@@ -194,12 +195,18 @@ export const notifyEscrowWorkflow = onDocumentCreated(
   event => notifyEscrowWorkflowEvent({ db, eventId: event.params.eventId, event: event.data?.data() }),
 );
 
+const rpcCallableScope = new AsyncLocalStorage();
+bindRpcScopeStore(rpcCallableScope);
+if (process.env.NODE_ENV !== "production") enableRpcStats();
+const readBatch = { multicall: { batchSize: 1024, wait: 16 } };
+const rpcTransport = () => createArbitrumRpcTransport({ http, fallback,
+  primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+  backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS });
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,
   cacheTime: 0,
-  transport: createArbitrumRpcTransport({ http, fallback,
-    primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
-    backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }),
+  batch: readBatch,
+  transport: rpcTransport(),
 });
 
 // prepareEscrowDeposit runs immediately before a member's deposit signature and
@@ -209,10 +216,8 @@ const publicClient = createPublicClient({
 const batchedReadClient = createPublicClient({
   chain: arbitrumSepolia,
   cacheTime: 0,
-  batch: { multicall: true },
-  transport: createArbitrumRpcTransport({ http, fallback,
-    primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
-    backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }),
+  batch: readBatch,
+  transport: rpcTransport(),
 });
 
 async function requireMember(request) {
@@ -293,7 +298,7 @@ export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) =>
 // QCDAO-91 shared "Action Needed" workspace tab.
 export const listActionItems = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180 }, async (request) => {
   const uid = await requireMember(request);
-  return actionItems({ db, uid, client: publicClient, config: auditRegistryConfig });
+  return withRpcScope("listActionItems", () => actionItems({ db, uid, client: publicClient, config: auditRegistryConfig }));
 });
 
 /**

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ACTION_ITEMS_KEY, listActionItems } from "./proposalQueues.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { LIVE_DASHBOARD_OPTIONS } from "./liveDashboard.js";
 
 /**
  * QCDAO-91. The member's open actions, shared by the workspace tab count, the
@@ -13,5 +14,5 @@ import { useAuth } from "../context/AuthContext.jsx";
 export function useActionItems() {
   const { user } = useAuth();
   return useQuery({ queryKey: [...ACTION_ITEMS_KEY, user?.id], queryFn: listActionItems,
-    enabled: Boolean(user?.id), staleTime: 30_000, refetchInterval: 30_000 });
+    enabled: Boolean(user?.id), staleTime: 60_000, ...LIVE_DASHBOARD_OPTIONS });
 }

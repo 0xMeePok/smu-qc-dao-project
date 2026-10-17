@@ -345,7 +345,7 @@ export async function listActionItems({ db, uid, client, config, now = Timestamp
     .map(doc => actionView(doc, doc.data(), doc.data().problemId, grantParents.get(doc.data().problemId),
       { grant: grantState.grants.get(doc.id), deadlineAt: grantState.grants.get(doc.id).deadlineAt })));
   const escrowDocs = [...new Map([...mine.docs, ...receivedEscrows.docs].map(doc => [doc.id, doc])).values()];
-  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs: escrowDocs, blockNumber: grantState.blockNumber, readDocument });
+  const escrowState = await readEscrowQueueActions({ db, uid, client, config, docs: escrowDocs, blockNumber: grantState.blockNumber, readDocument, allowImmutableCache: true });
   const independentState = await readIndependentFundingQueueMetadata({ db, uid, config, docs: mine.docs, now });
   const escrowActionIds = new Set(escrowState.actions.map(item => item.id));
   const displayedAwaitingReview = awaitingReview.filter(item => !escrowActionIds.has(item.id)

@@ -38,7 +38,7 @@ import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/functions/escrowProposalTerms.js";
 import { EscrowPaymentPlanFields } from "../components/EscrowPaymentPlanFields.jsx";
-import { readEscrow } from "../lib/escrow.js";
+import { readEscrowFundingStarted } from "../lib/escrow.js";
 import { ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
 
 const ALL_FIELDS = [...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS];
@@ -296,7 +296,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       if (editing) {
         if (form.immutableFundingTerms) {
           const current = await findProposal(proposalId, { fromServer: true });
-          const escrow = current ? await readEscrow({ proposal: current, account: address }) : null;
+          const escrow = current ? await readEscrowFundingStarted({ proposal: current, account: address }) : null;
           if (!escrow || escrow.totalDeposited > 0n || escrow.grantOfferState) {
             throw new Error("Funding has started. This proposal can no longer be edited.");
           }

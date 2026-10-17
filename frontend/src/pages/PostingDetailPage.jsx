@@ -1,6 +1,8 @@
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { proposalBlockReason } from "../lib/proposalValidation.js";
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { fetchAuditVerification, useAuditVerification } from "../lib/escrowReads.js";
 import { flushSync } from "react-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useSignIn } from "../context/SessionContext.jsx";
@@ -150,7 +152,10 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
 export default function PostingDetailPage({ postingId, onNavigate, initialTab = "overview" }) {
   const { isAuthenticated, user } = useAuth();
   const { address: connectedAddress, isConnected } = useWallet();
+  const queryClient = useQueryClient();
   const [posting, setPosting] = useState(null);
+  const readAudit = record => record?.opportunityType === OPEN_FUNDING_TYPE ? readFundingOpportunityAudit(record) : readPostingAudit(record);
+  useAuditVerification(posting, readAudit);
   const liveScope = `${postingId}:${user?.id || ""}`;
   const activeLiveScope = useRef(liveScope); activeLiveScope.current = liveScope;
   useEffect(() => { activeLiveScope.current = liveScope; return () => { activeLiveScope.current = null; }; }, [liveScope]);
@@ -271,11 +276,7 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
     }).finally(() => setAuditBusy(false));
   };
 
-  const verifyAudit = async () => {
-    return posting.opportunityType === OPEN_FUNDING_TYPE
-      ? readFundingOpportunityAudit(posting)
-      : readPostingAudit(posting);
-  };
+  const verifyAudit = () => fetchAuditVerification(queryClient, posting, readAudit);
 
   const ownsPosting = user?.id?.toLowerCase() === posting?.ownerId?.toLowerCase();
   // Matches the rules: submitted/open lapse after the deadline; in_review is

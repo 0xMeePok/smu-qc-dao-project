@@ -8,7 +8,9 @@ import {
 import { embeddedWalletClient } from "./embeddedWallet.js";
 import { browserPublicClient } from "./rpc.js";
 import { isRpcQuotaExceeded, isRpcUnreachable, isTransactionFeeTooLow, isWalletRejection, walletOutcomeError } from "./errors.js";
-import { isEscrowRegistry, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
+import { isEscrowRegistry, loadEscrowVerification, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
+import { claimDisplayAudit } from "./escrowDisplay.js";
+import { readCachedTransaction, storeTransaction } from "../../../firebase/functions/immutableChainCache.js";
 import { knownAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 
 export * from "../../../firebase/functions/auditCanonical.js";
@@ -183,24 +185,42 @@ export function createWalletAuditAdapters({ publicClient = browserPublicClient, 
       // failures and pending transactions are always read again.
       const cache = minedTransactions(publicClient);
       const key = typeof hash === "string" && !Object.keys(rest).length ? hash.toLowerCase() : null;
+      const chainId = request.chainId ?? arbitrumSepolia.id;
       if (key && cache.has(key)) return cache.get(key);
-      const transaction = await publicClient.getTransaction({ hash, ...rest });
-      if (key && transaction && typeof transaction.blockNumber === "bigint"
-          && String(transaction.hash ?? "").toLowerCase() === key) {
-        if (cache.size >= MINED_TRANSACTION_CACHE_LIMIT) cache.delete(cache.keys().next().value);
-        cache.set(key, transaction);
+      if (key) {
+        const stored = readCachedTransaction(chainId, key);
+        if (stored) return stored;
+        const pending = minedTransactionFlights(publicClient).get(key);
+        if (pending) return pending;
       }
-      return transaction;
+      const promise = publicClient.getTransaction({ hash, ...rest });
+      if (key) minedTransactionFlights(publicClient).set(key, promise);
+      try {
+        const transaction = await promise;
+        if (key && transaction && typeof transaction.blockNumber === "bigint"
+            && String(transaction.hash ?? "").toLowerCase() === key) {
+          if (cache.size >= MINED_TRANSACTION_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+          cache.set(key, transaction);
+          storeTransaction(chainId, key, transaction);
+        }
+        return transaction;
+      } finally { if (key) minedTransactionFlights(publicClient).delete(key); }
     },
   };
 }
 
 const MINED_TRANSACTION_CACHE_LIMIT = 200;
 const minedTransactionCaches = new WeakMap();
+const minedTransactionFlightCaches = new WeakMap();
 function minedTransactions(publicClient) {
   let cache = minedTransactionCaches.get(publicClient);
   if (!cache) { cache = new Map(); minedTransactionCaches.set(publicClient, cache); }
   return cache;
+}
+function minedTransactionFlights(publicClient) {
+  let flights = minedTransactionFlightCaches.get(publicClient);
+  if (!flights) { flights = new Map(); minedTransactionFlightCaches.set(publicClient, flights); }
+  return flights;
 }
 
 function auditAdapters(adapters) {
@@ -227,8 +247,9 @@ function readRegistryConfig(options) {
     canonicalRegistryAddress(options.address);
     return AUDIT_REGISTRY_CONFIG;
   }
-  const config = knownAuditDeployment(options.registryConfig.address, options.registryConfig.chainId,
-    { activeConfig: AUDIT_REGISTRY_CONFIG });
+  const known = { activeConfig: AUDIT_REGISTRY_CONFIG };
+  if (options.registryHistory) known.history = options.registryHistory;
+  const config = knownAuditDeployment(options.registryConfig.address, options.registryConfig.chainId, known);
   if (options.address && String(options.address).toLowerCase() !== config.address.toLowerCase()) {
     throw new Error("AuditRegistry read address differs from its known deployment.");
   }
@@ -496,6 +517,16 @@ function tupleField(value, name, index) {
   return value?.[name] ?? value?.[index];
 }
 
+function matchPreloadedAnchor(preloaded, expectedHash) {
+  const anchors = preloaded?.anchors ?? [];
+  for (let position = 0; position < anchors.length; position += 1) {
+    if (sameHex(tupleField(anchors[position], "contentHash", 2), expectedHash)) {
+      return { index: preloaded.indexes[position], anchor: anchors[position] };
+    }
+  }
+  return { anchor: null };
+}
+
 function sameHex(left, right) {
   return String(left ?? "").toLowerCase() === String(right ?? "").toLowerCase();
 }
@@ -586,15 +617,13 @@ export async function readOpportunityRevisionIndex(opportunityId, options = {}) 
 async function findMatchingAnchor(entityId, expectedHash, options) {
   if (options.verifyAnchor === false) return null;
   const count = BigInt(await readWithRetries("anchorCount", [entityId], options));
-  const scan = BigInt(Math.min(Number(count), MAX_ANCHOR_SCAN));
-  for (let offset = 0n; offset < scan; offset += 1n) {
-    const index = count - 1n - offset;
-    const anchor = await readWithRetries("anchorAt", [entityId, index], options);
-    if (sameHex(tupleField(anchor, "contentHash", 2), expectedHash)) {
-      return {
-        index,
-        anchor,
-      };
+  const scan = Math.min(Number(count), MAX_ANCHOR_SCAN);
+  if (!Number.isSafeInteger(scan) || scan <= 0) return { anchor: null };
+  const indexes = Array.from({ length: scan }, (_, offset) => count - 1n - BigInt(offset));
+  const anchors = await Promise.all(indexes.map(index => readWithRetries("anchorAt", [entityId, index], options)));
+  for (let position = 0; position < anchors.length; position += 1) {
+    if (sameHex(tupleField(anchors[position], "contentHash", 2), expectedHash)) {
+      return { index: indexes[position], anchor: anchors[position] };
     }
   }
   return { anchor: null };
@@ -637,7 +666,10 @@ export async function verifyOpportunityAudit(input, options = {}) {
 export async function verifyProposalAudit(input, options = {}) {
   const registryConfig = readRegistryConfig(options);
   let expected = asPrepared(input, prepareProposalCommit);
-  const actual = await readWithRetries("getProposal", [expected.entityId], options);
+  // Display reads share the escrow snapshot's block. Claimed results were
+  // scheduled with linkage and identity; a miss keeps this check on its own.
+  const joined = options.allowImmutableCache ? await claimDisplayAudit(expected.entityId) : null;
+  const actual = joined?.proposal ?? await readWithRetries("getProposal", [expected.entityId], options);
   if (options.useRecordedOpportunityRevision === true) {
     // Saved proposal documents do not carry the committed parent revision.
     // Use the proposal's own chain binding, never the parent's latest revision.
@@ -659,15 +691,16 @@ export async function verifyProposalAudit(input, options = {}) {
     tupleField(actual, "proposalHash", 4), sameHex);
   mismatch(mismatches, "solutionHash", expected.solutionHash,
     tupleField(actual, "solutionHash", 5), sameHex);
-  const anchor = await findMatchingAnchor(
-    expected.entityId, expected.anchorHash, options,
-  );
+  const anchor = joined
+    ? matchPreloadedAnchor(joined, expected.anchorHash)
+    : await findMatchingAnchor(expected.entityId, expected.anchorHash, options);
   let escrow;
   // A known content mismatch is already conclusive. Extra RPC failures must not
   // turn that result into an inconclusive network error while checking escrow.
   if (isEscrowRegistry(registryConfig) && mismatches.length === 0) {
     try {
-      escrow = await verifyProposalEscrow({ expected, config: registryConfig,
+      const verify = options.allowImmutableCache ? loadEscrowVerification : verifyProposalEscrow;
+      escrow = await verify({ expected, config: registryConfig, allowImmutableCache: options.allowImmutableCache === true,
         readContract: request => retryRead(() => auditAdapters(options.adapters).readContract(request), options.maxReadRetries ?? 2, options.onRetry) });
     } catch (error) {
       if (error.code !== "ESCROW_MISMATCH") throw error;

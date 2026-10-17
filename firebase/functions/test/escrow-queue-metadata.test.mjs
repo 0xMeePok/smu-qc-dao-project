@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
+import { resetImmutableChainCache } from "../immutableChainCache.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { listActionItems, listMyProposals } from "../proposalQueues.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
@@ -10,6 +11,7 @@ import { openFundingFixture, owner, researcher, otherResearcher } from "./fixtur
 
 const nowFor = f => Timestamp.fromMillis(Number(f.state.timestamp) * 1000);
 const actions = (f, uid) => listActionItems({ ...f, uid, now: nowFor(f) });
+beforeEach(() => resetImmutableChainCache());
 
 describe("canonical grant queue metadata", () => {
   it("shares pinned verification across grant and escrow queue passes without caching the next request", async () => {

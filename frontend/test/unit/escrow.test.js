@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { encodeFunctionData, keccak256, stringToHex } from "viem";
-import { confirmEscrowTransaction, ESCROW_STATE, escrowErrorMessage, hashEscrowEvidence, hashEscrowSelectionRejection, readEscrow, readPostingFundingStarted, writeEscrowAction } from "../../src/lib/escrow.js";
+import { QueryClient } from "@tanstack/react-query";
+import { confirmEscrowTransaction, ESCROW_STATE, escrowErrorMessage, hashEscrowEvidence, hashEscrowSelectionRejection, readEscrow, readEscrowFundingStarted, readPostingFundingStarted, writeEscrowAction } from "../../src/lib/escrow.js";
+import { verifyProposalAudit } from "../../src/lib/auditRegistry.js";
+import { resetImmutableChainCache } from "../../../firebase/functions/immutableChainCache.js";
+import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
+import { resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
+import { escrowSnapshotQueryKey } from "../../src/lib/escrowReads.js";
 import { escrowAddress, escrowClient, escrowConfig, escrowRecord, owner, researcher, txHash } from "../../../firebase/functions/test/fixtures/escrowAuditFixture.js";
 import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 import historicalRegistries from "../../../firebase/functions/auditRegistry.history.json" with { type: "json" };
@@ -725,6 +731,114 @@ it("rejects fractional cents, small partial contributions and dusty remainders b
     assert.deepEqual(f.writes.at(-1).args, [remaining]);
   }
 });
+function countWaves(inner) {
+  const http = [];
+  let active = 0, rounds = 0;
+  const track = (method, run) => {
+    if (active === 0) rounds += 1;
+    const wave = rounds;
+    active += 1;
+    http.push({ method, wave });
+    return new Promise(resolve => setTimeout(resolve, 80)).then(() => run(wave)).finally(() => { active -= 1; });
+  };
+  let pending = [], timer = null;
+  const flush = () => {
+    timer = null;
+    const batch = pending.splice(0);
+    if (!batch.length) return;
+    void (async () => {
+      if (active === 0) rounds += 1;
+      const wave = rounds;
+      active += 1;
+      http.push({ method: "eth_call", wave });
+      await new Promise(resolve => setTimeout(resolve, 80));
+      const results = await Promise.all(batch.map(async item => {
+        try { return { ok: true, value: await item.run() }; }
+        catch (error) { return { ok: false, error }; }
+      }));
+      active -= 1;
+      batch.forEach((item, index) => {
+        item.request.wave = wave;
+        if (results[index].ok) item.resolve(results[index].value);
+        else item.reject(results[index].error);
+      });
+    })();
+  };
+  const flights = new Map();
+  return { http, rounds: () => rounds, adapters: {
+    getBlock: request => track("eth_getBlockByNumber", () => inner.getBlock(request)),
+    getTransaction: request => {
+      const key = String(request?.hash ?? "");
+      if (flights.has(key)) return flights.get(key);
+      const pending = track("eth_getTransactionByHash", () => inner.getTransaction(request)).finally(() => flights.delete(key));
+      flights.set(key, pending);
+      return pending;
+    },
+    readContract: request => new Promise((resolve, reject) => {
+      pending.push({ request, run: () => inner.readContract(request), resolve, reject });
+      if (!timer) timer = setTimeout(flush, 16);
+    }),
+    writeContract: inner.writeContract,
+    waitForTransactionReceipt: inner.waitForTransactionReceipt,
+  } };
+}
+
+it("[FUT-SXFPP-277] keeps a cold escrow page within 6 RPC requests and 4 rounds, then serves the query cache", async () => {
+  resetImmutableChainCache();
+  const f = fixture({ read: request => {
+    if (request.functionName === "anchorCount") return 4n;
+    if (request.functionName === "anchorAt") return { contentHash: prepareStoredProposal(f.proposal, { registryConfig: f.config }).anchorHash };
+    return undefined;
+  } });
+  const counted = countWaves({
+    ...f.adapters,
+    getTransaction: async () => ({ hash: f.proposal.audit.transactionHash, to: f.config.address,
+      from: f.proposal.researcherId, chainId: f.config.chainId, blockNumber: 88n }),
+  });
+  const prepared = prepareStoredProposal(f.proposal, { registryConfig: f.config });
+  await Promise.all([
+    readEscrow({ ...f, adapters: counted.adapters, allowImmutableCache: true }),
+    verifyProposalAudit(prepared, { adapters: counted.adapters, registryConfig: f.config, registryHistory: [f.config], allowImmutableCache: true }),
+    resolveAuditDeployment(f.proposal, { getTransaction: counted.adapters.getTransaction, activeConfig: f.config, history: [f.config] }),
+    resolveAuditDeployment(f.proposal, { getTransaction: counted.adapters.getTransaction, activeConfig: f.config, history: [f.config] }),
+  ]);
+  assert.ok(counted.http.length <= 6, `${counted.http.length} requests: ${counted.http.map(item => `${item.wave}:${item.method}`).join(",")}`);
+  assert.ok(counted.rounds() <= 4, `${counted.rounds()} rounds`);
+  assert.equal(counted.http.filter(item => item.method === "eth_getTransactionByHash").length, 1);
+  assert.equal(f.reads.filter(read => read.functionName === "fundingFactory").length, 1);
+  const waveOf = (name) => f.reads.find(read => read.functionName === name)?.wave;
+  assert.equal(waveOf("getProposal"), waveOf("fundingFactory"));
+  assert.equal(waveOf("anchorCount"), waveOf("fundingFactory"));
+  const anchors = f.reads.filter(read => read.functionName === "anchorAt");
+  assert.ok(anchors.length >= 2);
+  assert.equal(new Set(anchors.map(read => read.wave)).size, 1);
+  assert.equal(anchors[0].wave, waveOf("postingId"));
+  const client = new QueryClient();
+  const key = escrowSnapshotQueryKey(f.proposal, funder, f.config);
+  await client.fetchQuery({ queryKey: key, queryFn: () => readEscrow({ ...f, adapters: counted.adapters, allowImmutableCache: true }), staleTime: 60_000 });
+  const after = counted.http.length;
+  await client.fetchQuery({ queryKey: key, queryFn: () => readEscrow({ ...f, adapters: counted.adapters, allowImmutableCache: true }), staleTime: 60_000 });
+  assert.equal(counted.http.length, after);
+});
+
+it("[FUT-SXFPP-278] reads only the fresh deposit total when checking whether funding has started", async () => {
+  resetImmutableChainCache();
+  const f = fixture({ state: { totalDeposited: 5n } });
+  const started = await readEscrowFundingStarted({ ...f });
+  assert.equal(started.totalDeposited, 5n);
+  assert.ok(f.reads.some(read => read.functionName === "totalDeposited"));
+  assert.equal(f.reads.filter(read => read.functionName === "depositorSummary").length, 0);
+});
+
+it("[FUT-SXFPP-279] still reads the chain for a wallet preflight after immutable data was cached", async () => {
+  resetImmutableChainCache();
+  const f = fixture();
+  await readEscrow({ ...f, allowImmutableCache: true });
+  f.reads.length = 0;
+  await writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" });
+  assert.ok(f.reads.some(read => read.functionName === "fundingFactory"));
+});
+
 it("explains decoded contract precision, minimum and dust errors", () => {
   for (const [name, message] of [["AmountPrecisionExceeded", /2 decimal places/], ["ContributionBelowMinimum", /at least 1/], ["ContributionLeavesDust", /leave less than 1/]]) {
     assert.match(escrowErrorMessage({ cause: { data: { errorName: name } } }), message);
