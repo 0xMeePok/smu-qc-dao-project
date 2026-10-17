@@ -161,12 +161,22 @@ describe("Arbitrum Sepolia RPC failover", () => {
       assert.equal(await read(client), "0x42");
       assert.equal(endpoints[0].calls.filter((call) => call.method === "eth_chainId").length, 1);
     });
-    await withFixtures([
-      (body) => (body.method === "eth_chainId" ? { result: "0x1" } : { result: "0x99" }),
-    ], async (endpoints) => {
-      const client = clientFor(endpoints, { overlapChainCheck: true });
-      await assert.rejects(read(client), /not on Arbitrum Sepolia/);
-      assert.equal(endpoints[0].calls.some((call) => call.method === "eth_blockNumber"), true);
+    release = undefined;
+    started.length = 0;
+    await withFixtures([async ({ method }) => {
+      started.push(method);
+      if (started.length === 1) await new Promise((resolve) => { release = resolve; });
+      return method === "eth_chainId" ? { result: "0x1" } : { result: "0x99" };
+    }], async (endpoints) => {
+      const client = clientFor(endpoints, { overlapChainCheck: true, timeoutMs: 500 });
+      const pending = read(client);
+      const deadline = Date.now() + 400;
+      while (!started.includes("eth_blockNumber") && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.ok(started.includes("eth_blockNumber"));
+      release();
+      await assert.rejects(pending, /not on Arbitrum Sepolia/);
     });
   });
 
