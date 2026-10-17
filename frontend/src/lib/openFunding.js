@@ -1,5 +1,5 @@
 import { httpsCallable } from "firebase/functions";
-import { erc20Abi } from "viem";
+import { erc20Abi, keccak256, stringToHex } from "viem";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
@@ -19,18 +19,35 @@ export const getFunderDashboard = () => call("getFunderDashboard");
 export const openFundingSupported = (config = AUDIT_REGISTRY_CONFIG) =>
   Boolean(config.escrow?.openFundingPoolAbi?.length && config.escrow?.factoryAbi?.some(item => item.name === "createOpenFundingPool"));
 
+/** Pools created by a factory without declineProposal can only release an offer by expiry. */
+export const openFundingDeclineSupported = (config = AUDIT_REGISTRY_CONFIG) =>
+  Boolean(config.escrow?.openFundingPoolAbi?.some(item => item.type === "function" && item.name === "declineProposal"));
+
 const ACTIONS = Object.freeze({ create: "createOpenFundingPool", deposit: "deposit", select: "selectProposal",
-  accept: "acceptProposal", void: "expireProposal", withdraw: "withdrawAvailable" });
+  accept: "acceptProposal", decline: "declineProposal", void: "expireProposal", withdraw: "withdrawAvailable" });
 const same = (a, b) => Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+export const DECLINE_REASON_MIN = 10, DECLINE_REASON_MAX = 2000;
+
+/** Matches the server: trimmed, NFC-normalized text of 10–2,000 characters. */
+export function normalizeDeclineReason(reason) {
+  const message = String(reason ?? "").trim().normalize("NFC");
+  if (message.length < DECLINE_REASON_MIN || message.length > DECLINE_REASON_MAX) throw new Error("Provide a decline reason of 10–2,000 characters.");
+  return message;
+}
+/** The reason stays off-chain; the pool records this commitment to it and the proposal. */
+export const openFundingDeclineReasonHash = ({ proposalId, reason }) =>
+  keccak256(stringToHex(JSON.stringify({ scheme: "qcdao.open-funding.decline.v1", proposalId: String(proposalId).toLowerCase(), reason })));
 
 /** Only a user action submits a transaction. Failed confirmation retains its hash. */
 export async function writeOpenFundingAction({ problemId, proposalId, account, action, amount, tokenAddress,
-  decimals, onProgress, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG,
+  decimals, reason, onProgress, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG,
   prepare = prepareOpenFundingAction }) {
   if (!openFundingSupported(config)) throw new Error("Open funding pools are awaiting a contract deployment.");
   if (!Object.hasOwn(ACTIONS, action)) throw new Error("Unknown open funding action.");
   const amountBaseUnits = ["deposit", "withdraw"].includes(action) ? fundingAmountUnits(amount, decimals).toString() : undefined;
-  const prepared = await prepare({ problemId, proposalId, action, amountBaseUnits, tokenAddress });
+  if (action === "decline" && !openFundingDeclineSupported(config)) throw new Error("This grant pool cannot record a decline. Leave the offer unaccepted to let it expire.");
+  const declineReason = action === "decline" ? normalizeDeclineReason(reason) : undefined;
+  const prepared = await prepare({ problemId, proposalId, action, amountBaseUnits, tokenAddress, ...(declineReason ? { reason: declineReason } : {}) });
   const request = prepared.request ?? prepared;
   const abi = action === "create" ? config.escrow.factoryAbi : config.escrow.openFundingPoolAbi;
   const method = abi.find(item => item.type === "function" && item.name === ACTIONS[action]);
@@ -45,11 +62,18 @@ export async function writeOpenFundingAction({ problemId, proposalId, account, a
   if (amountBaseUnits && (prepared.tokenDecimals !== decimals || String(args[0]) !== amountBaseUnits)) {
     throw new Error("The token or amount changed. Refresh before continuing.");
   }
+  // The wallet must sign a commitment to exactly the reason the researcher typed.
+  if (declineReason && (!/^0x[0-9a-f]{64}$/i.test(args[0] ?? "") || !same(args[1], prepared.reasonHash)
+      || !same(args[1], openFundingDeclineReasonHash({ proposalId: args[0], reason: declineReason })))) {
+    throw new Error("The decline reason changed. Refresh before continuing.");
+  }
   const send = async (functionName, args, address = request.address, contractAbi = abi) => {
     let transactionHash;
     try {
-      onProgress?.({ status: "awaiting_signature", action: functionName });
-      transactionHash = await adapters.writeContract({ address, abi: contractAbi, functionName, args, account, chainId: config.chainId });
+      onProgress?.({ status: "preparing", action: functionName });
+      transactionHash = await adapters.writeContract({ address, abi: contractAbi, functionName, args, account, chainId: config.chainId }, {
+        onWalletRequest: () => onProgress?.({ status: "awaiting_signature", action: functionName }),
+      });
       onProgress?.({ status: "pending", action: functionName, transactionHash });
       const result = await confirmEscrowTransaction(transactionHash, { adapters, config, confirmations: 2 });
       onProgress?.({ status: "confirmed", action: functionName, transactionHash: result.transactionHash });

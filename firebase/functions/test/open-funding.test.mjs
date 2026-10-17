@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding, supportsOpenFunding } from "../openFunding.js";
+import { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding, supportsOpenFunding, supportsOpenFundingDecline,
+  normalizeDeclineReason, openFundingDeclineReasonHash, OPEN_FUNDING_DECLINES } from "../openFunding.js";
 import { prepareEscrowDeposit, startEscrowSettlement, fundingBlockReason, settlementAction } from "../escrowFunding.js";
 import { seedDashboardSnapshots } from "./fixtures/dashboardSnapshots.js";
 import { getFunderDashboard } from "../funderDashboard.js";
@@ -353,4 +354,100 @@ it("bounds grant summary RPC concurrency and preserves selection order", async (
   const result = await getOpenFundingSummary(f);
   assert(maximum > 1); assert(maximum <= 8);
   assert.deepEqual(result.selections.map(row => row.proposalId), f.proposals.map(row => row.id));
+});
+
+describe("researcher declines a pending grant offer", () => {
+  const reason = "  Our lab has accepted another grant for this project.  ";
+  const trimmed = reason.trim();
+  const notices = f => [...f.db.records.entries()].filter(([path, row]) => path.startsWith("moderationNotifications/") && row.kind === "open_funding_declined");
+
+  it("lets only the selected researcher prepare a decline with a 10–2,000 character reason", async () => {
+    const f = openFundingFixture(); f.select(0); f.select(1);
+    const own = await getOpenFundingSummary({ ...f, uid: researcher });
+    assert.equal(own.selections[0].canDecline, true); assert.equal(own.selections[0].declined, false);
+    assert.equal((await getOpenFundingSummary(f)).selections.every(row => row.canDecline === false), true);
+    const options = { ...f, uid: researcher, proposalId: f.proposals[0].id, action: "decline" };
+    await assert.rejects(prepareOpenFundingAction({ ...options, uid: owner, reason }), /Only the selected proposal owner can decline/);
+    await assert.rejects(prepareOpenFundingAction({ ...options, uid: otherResearcher, reason }));
+    for (const value of [undefined, "too short", " ".repeat(30), "x".repeat(2001)]) {
+      await assert.rejects(prepareOpenFundingAction({ ...options, reason: value }), error => error.code === "invalid-argument" && /10–2,000/.test(error.message));
+    }
+    assert.equal(f.simulations.length, 0);
+    const prepared = await prepareOpenFundingAction({ ...options, reason });
+    const reasonHash = openFundingDeclineReasonHash({ proposalId: f.expected[0].entityId, reason: trimmed });
+    assert.equal(prepared.functionName, "declineProposal"); assert.equal(prepared.address, poolAddress);
+    assert.deepEqual(prepared.args, [f.expected[0].entityId, reasonHash]); assert.equal(prepared.reasonHash, reasonHash);
+    assert.equal(f.simulations.at(-1).account, researcher); assert.equal(f.simulations.at(-1).functionName, "declineProposal");
+    assert.doesNotThrow(() => JSON.stringify(prepared));
+    const saved = [...f.db.records.entries()].filter(([path]) => path.startsWith(`${OPEN_FUNDING_DECLINES}/`));
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0][0], `${OPEN_FUNDING_DECLINES}/${f.config.chainId}_${f.config.address.toLowerCase()}_${reasonHash}`);
+    assert.equal(saved[0][1].reason, trimmed); assert.equal(saved[0][1].status, "prepared");
+    assert.equal(saved[0][1].proposalId, f.proposals[0].id); assert.equal(saved[0][1].researcherId, researcher.toLowerCase());
+    await assert.rejects(prepareOpenFundingAction({ ...options, reason, reasonHash: `0x${"1".repeat(64)}` }), /differs from its hash/);
+    assert.equal(normalizeDeclineReason(`  ${"y".repeat(10)} `), "y".repeat(10));
+  });
+
+  it("allows declining only while the offer is pending and before its deadline", async () => {
+    const f = openFundingFixture(); f.select(0); f.select(1, 2);
+    const options = { ...f, uid: researcher, proposalId: f.proposals[0].id, action: "decline", reason };
+    f.state.paused = true; // Moderation pauses never block an exit.
+    assert.equal((await prepareOpenFundingAction(options)).functionName, "declineProposal");
+    f.state.paused = false;
+    await assert.rejects(prepareOpenFundingAction({ ...options, uid: otherResearcher, proposalId: f.proposals[1].id }), /Only a pending grant offer/);
+    f.state.timestamp += 604800n;
+    await assert.rejects(prepareOpenFundingAction(options), /Only a pending grant offer can be declined/);
+    assert.equal((await getOpenFundingSummary({ ...f, uid: researcher })).selections[0].canDecline, false);
+    f.state.timestamp -= 604800n; f.decline(0, openFundingDeclineReasonHash({ proposalId: f.expected[0].entityId, reason: trimmed }));
+    await assert.rejects(prepareOpenFundingAction(options), /Only a pending grant offer/);
+  });
+
+  it("stays unavailable until the deployed pool ABI includes declineProposal", async () => {
+    const f = openFundingFixture(); f.select(0);
+    f.config.escrow.openFundingPoolAbi = f.config.escrow.openFundingPoolAbi.filter(item => !["declineProposal", "declineReasonHash"].includes(item.name));
+    assert.equal(supportsOpenFunding(f.config), true); assert.equal(supportsOpenFundingDecline(f.config), false);
+    assert.equal((await getOpenFundingSummary({ ...f, uid: researcher })).selections[0].canDecline, false);
+    await assert.rejects(prepareOpenFundingAction({ ...f, uid: researcher, proposalId: f.proposals[0].id, action: "decline", reason }), /cannot record a decline/);
+    assert.equal(f.simulations.length, 0);
+    assert.equal(f.calls.some(call => call.functionName === "declineReasonHash"), false);
+  });
+
+  it("syncs a confirmed decline, returns the reservation to available funds and notifies the owner once", async () => {
+    const f = openFundingFixture(); f.select(0); f.select(1);
+    const prepared = await prepareOpenFundingAction({ ...f, uid: researcher, proposalId: f.proposals[0].id, action: "decline", reason });
+    f.decline(0, prepared.reasonHash);
+    const hash = `0x${"9".repeat(64)}`; f.declineReceipt(hash, 0, prepared.reasonHash);
+    const summary = await syncOpenFunding({ ...f, uid: researcher, transactionHash: hash });
+    await syncOpenFunding({ ...f, uid: researcher, transactionHash: hash });
+    assert.equal(summary.totalReserved, "50000000000"); assert.equal(summary.available, "50000000000");
+    const row = summary.selections[0];
+    assert.equal(row.status, "voided"); assert.equal(row.declined, true); assert.equal(row.declineReasonHash, prepared.reasonHash);
+    assert.equal(row.declineReason, trimmed); assert.equal(row.canDecline, false); assert.equal(row.canAccept, false);
+    const record = f.db.records.get(`${OPEN_FUNDING_DECLINES}/${f.config.chainId}_${f.config.address.toLowerCase()}_${prepared.reasonHash}`);
+    assert.equal(record.status, "confirmed"); assert.equal(record.blockNumber, summary.blockNumber);
+    const sent = notices(f);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0][1].recipientId, owner.toLowerCase()); assert.equal(sent[0][1].proposalId, f.proposals[0].id);
+    assert.match(sent[0][1].message, /declined your grant offer/); assert.match(sent[0][1].message, /50000 USDC/);
+    assert(sent[0][1].message.includes(trimmed));
+    const ownerView = await getOpenFundingSummary(f);
+    assert.equal(ownerView.selections.find(item => item.proposalId === f.proposals[0].id).declineReason, trimmed);
+    assert.equal(ownerView.selections.find(item => item.proposalId === f.proposals[1].id).declined, false);
+    const snapshot = [...f.db.records.entries()].find(([path]) => path.startsWith("openFundingSelections/") && path.endsWith(f.proposals[0].id))[1];
+    assert.equal(snapshot.declined, true); assert.equal(snapshot.status, "voided"); assert.equal(snapshot.declineReason, undefined);
+    assert.equal(f.db.records.get(`proposals/${f.proposals[0].id}`).status, f.proposals[0].status);
+  });
+
+  it("never attaches an unverified reason and treats an expiry as a plain void", async () => {
+    const f = openFundingFixture(); f.select(0); f.select(1, 3);
+    const reasonHash = openFundingDeclineReasonHash({ proposalId: f.expected[0].entityId, reason: trimmed });
+    f.db.records.set(`${OPEN_FUNDING_DECLINES}/${f.config.chainId}_${f.config.address.toLowerCase()}_${reasonHash}`, {
+      proposalId: f.proposals[0].id, entityId: f.expected[0].entityId, reasonHash, reason: "A different reason that was never hashed." });
+    f.decline(0, reasonHash);
+    const summary = await syncOpenFunding(f);
+    assert.equal(summary.selections[0].declined, true); assert.equal(summary.selections[0].declineReason, undefined);
+    assert.equal(summary.selections[1].status, "voided"); assert.equal(summary.selections[1].declined, false);
+    const sent = notices(f);
+    assert.equal(sent.length, 1); assert.equal(sent[0][1].message.includes("Reason"), false);
+  });
 });

@@ -188,7 +188,7 @@ describe("open funding grant workflow UI", () => {
       fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
       await screen.findByText("Receipt RPC unavailable");
       expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(true);
-      const saved = JSON.parse(sessionStorage.getItem(Object.keys(sessionStorage).find(key => key.includes(`known-${step}-grant`))));
+      const saved = JSON.parse(sessionStorage.getItem(Object.keys(sessionStorage).find(key => key.startsWith("qcdao:grant-pending:") && key.includes(`known-${step}-grant`))));
       expect(saved).toMatchObject({ transactionHash: hash, action: step });
       if (step !== "deposit") expect(saved).toMatchObject({ tokenAddress: model().tokenAddress, poolAddress: model().poolAddress });
       view.unmount();
@@ -337,4 +337,96 @@ it("refreshes grant pool activity without clearing the entered contribution or r
   expect(amount.value).toBe("12");
   expect(live.options).toMatchObject({ problemId: "live-pool", channel: "funding", identity: account });
   expect(mocks.write).not.toHaveBeenCalled();
+});
+
+describe("grant pool input survives refreshes (QA)", () => {
+  it("keeps the Add funding amount typed after Create grant pool through refreshes and a remount", async () => {
+    mocks.read.mockResolvedValueOnce(model({ poolAddress: null, canCreate: true, canDeposit: true, totalDeposited: "0", available: "0" }));
+    mocks.sync.mockResolvedValue(model({ problemId: "new-pool", totalDeposited: "0", available: "0" }));
+    const view = render(<OpenFundingPanel problemId="new-pool" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create grant pool" }));
+    await screen.findByText(/Grant pool created/);
+    const amount = screen.getByLabelText("Add funding");
+    fireEvent.change(amount, { target: { value: "250" } });
+    const slow = deferred(); mocks.read.mockReturnValueOnce(slow.promise);
+    await act(async () => { void live.options.onRefresh(); });
+    expect(screen.getByLabelText("Add funding").value).toBe("250");
+    expect(screen.getByLabelText("Add funding").disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(false);
+    await act(async () => { slow.resolve(model()); });
+    view.unmount();
+    render(<OpenFundingPanel problemId="new-pool" />);
+    expect((await screen.findByLabelText("Add funding")).value).toBe("250");
+    fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+    await waitFor(() => expect(mocks.write).toHaveBeenLastCalledWith(expect.objectContaining({ action: "deposit", amount: "250" })));
+    await screen.findByText(/Deposit confirmed/);
+    expect(screen.getByLabelText("Add funding").value).toBe("");
+  });
+  it("shows grant deadlines in UTC and explains how a researcher can decline", () => {
+    render(<OpenFundingView data={model({ canDeposit: false, selections: [{ ...proposal, status: "pending", canAccept: true, acceptanceDeadline: "2000000000" }] })} amount="" walletReady />);
+    expect(screen.getByText("Accept before 2033-05-18 03:33:20 UTC")).toBeTruthy();
+    expect(screen.getByText(/Not taking this grant\?/)).toBeTruthy();
+  });
+  it("hides the recovery prompt while the in-flight action owns its transaction", () => {
+    render(<OpenFundingView data={model()} amount="1" walletReady busy progress={{ status: "pending", transactionHash: hash }} pending={{ transactionHash: hash }} />);
+    expect(screen.queryByText(/still needs confirmation/)).toBeNull();
+    expect(screen.getByText("Transaction submitted. Waiting for confirmation…")).toBeTruthy();
+  });
+});
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+
+describe("researcher declines a grant offer", () => {
+  const offer = { ...proposal, status: "pending", canAccept: true, canDecline: true, acceptanceDeadline: "2000000000" };
+  it("requires a 10–2,000 character reason and a confirmation before declining", async () => {
+    mocks.read.mockResolvedValue(model({ canDeposit: false, canSelect: false, selections: [offer] }));
+    mocks.sync.mockResolvedValue(model({ canDeposit: false, canSelect: false, available: "100000000000",
+      selections: [{ ...offer, status: "voided", canAccept: false, canDecline: false, declined: true, declineReason: "Funded by another sponsor already." }] }));
+    render(<OpenFundingPanel problemId="grant" />);
+    expect(await screen.findByText(/Decline the offer to return the reserved amount/)).toBeTruthy();
+    expect(screen.queryByText(/Leave it unaccepted/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Decline grant offer" }));
+    const input = screen.getByLabelText("Reason for declining");
+    const confirm = screen.getByRole("button", { name: "Confirm decline" });
+    expect(input.getAttribute("maxLength")).toBe("2000");
+    expect(confirm.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Accept grant" }).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "  too short" } });
+    expect(screen.getByText("Enter at least 10 characters.")).toBeTruthy(); expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Keep offer" }));
+    expect(screen.queryByLabelText("Reason for declining")).toBeNull();
+    expect(mocks.write).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Decline grant offer" }));
+    fireEvent.change(screen.getByLabelText("Reason for declining"), { target: { value: "Funded by another sponsor already." } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm decline" }));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution",
+      action: "decline", reason: "Funded by another sponsor already.", account })));
+    expect(await screen.findByText(/Grant offer declined. The reserved amount has returned/)).toBeTruthy();
+    expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ proposalId: "solution", transactionHash: hash }));
+    expect(screen.queryByLabelText("Reason for declining")).toBeNull();
+    expect(screen.getByText(/Offer declined by the researcher/)).toBeTruthy();
+    expect(screen.getByText("Researcher’s reason: Funded by another sponsor already.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Decline grant offer" })).toBeNull();
+  });
+  it("keeps the decline form and reason after a failed wallet action, and allows it on an integrity mismatch", async () => {
+    mocks.read.mockResolvedValue(model({ canDeposit: false, canSelect: false, selections: [offer] }));
+    mocks.write.mockRejectedValueOnce(new Error("User rejected the request."));
+    render(<OpenFundingPanel problemId="grant" integrityBlocked />);
+    fireEvent.click(await screen.findByRole("button", { name: "Decline grant offer" }));
+    fireEvent.change(screen.getByLabelText("Reason for declining"), { target: { value: "The scope no longer fits our lab." } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm decline" }));
+    expect(await screen.findByText("User rejected the request.")).toBeTruthy();
+    expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "decline", reason: "The scope no longer fits our lab." }));
+    expect(screen.getByLabelText("Reason for declining").value).toBe("The scope no longer fits our lab.");
+    expect(mocks.sync).not.toHaveBeenCalled();
+  });
+  it("shows a busy status while the decline is prepared and falls back to the expiry hint on older pools", () => {
+    const view = render(<OpenFundingView data={model({ canDeposit: false, selections: [offer] })} amount="" walletReady busy
+      progress={{ status: "awaiting_signature", action: "declineProposal" }} decline={{ proposalId: "solution", reason: "Already funded elsewhere." }} />);
+    expect(screen.getByText("Confirm the transaction in your wallet.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm decline" }).disabled).toBe(true);
+    expect(screen.getByLabelText("Reason for declining").disabled).toBe(true);
+    view.rerender(<OpenFundingView data={model({ canDeposit: false, selections: [{ ...offer, canDecline: false }] })} amount="" walletReady />);
+    expect(screen.queryByRole("button", { name: "Decline grant offer" })).toBeNull();
+    expect(screen.getByText(/Leave it unaccepted/)).toBeTruthy();
+  });
 });

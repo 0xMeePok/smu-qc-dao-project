@@ -15,6 +15,23 @@ import { EscrowAuditDetails } from "./EscrowAuditDetails.jsx";
 import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
 
 const EMPTY = { types: [], from: "", to: "", role: "", related: "", verify: "" };
+// Typing in "Related record" waits for a pause instead of calling the server per keystroke.
+const RELATED_DEBOUNCE_MS = 350;
+// After this long the panel says the trail is still loading rather than sitting silent.
+const SLOW_LOAD_MS = 8000;
+
+function TrailSkeleton() {
+  return (
+    <div className="opportunity-list opportunity-list-skeleton" aria-label="Loading audit trail events" aria-busy="true">
+      {[0, 1, 2].map((row) => (
+        <div className="opportunity-skeleton-row" key={row}>
+          <span className="skeleton-lines"><i /><i /></span>
+          <span className="skeleton-block" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function readFilters() {
   const params = new URLSearchParams(window.location.hash.split("?")[1] || "");
@@ -67,11 +84,17 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState(null);
+  const [related, setRelated] = useState(filters.related);
+  const [slow, setSlow] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const requestId = useRef(0);
   const receiptRequest = useRef(0);
   const options = AUDIT_EVENT_OPTIONS.filter(([id]) => scope === "admin" || id !== "governance");
   const active = Boolean(filters.types.length || filters.from || filters.to || filters.role || filters.related || filters.verify);
   const filterKey = JSON.stringify(filters);
+  // Clearing the field applies at once; typing waits for the debounce.
+  const requestFilters = { ...filters, related: filters.related ? related : "" };
+  const requestKey = JSON.stringify(requestFilters);
 
   useEffect(() => {
     const sync = () => setFilters(readFilters());
@@ -86,12 +109,24 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
   useEffect(() => { writeFilters(filters); }, [filterKey]);
 
   useEffect(() => {
+    if (!filters.related || filters.related === related) { setRelated(filters.related); return undefined; }
+    const timer = setTimeout(() => setRelated(filters.related), RELATED_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [filters.related]);
+
+  useEffect(() => {
+    if (!loading) { setSlow(false); return undefined; }
+    const timer = setTimeout(() => setSlow(true), SLOW_LOAD_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
+  useEffect(() => {
     if (scope !== "admin" && !entityId) return undefined;
     const request = ++requestId.current;
     setLoading(true);
     setError("");
     setCursor(null);
-    listAuditTrail(requestBody(filters, scope, entityId))
+    listAuditTrail(requestBody(requestFilters, scope, entityId))
       .then((data) => {
         if (request !== requestId.current) return;
         setItems(data.items || []);
@@ -102,7 +137,7 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
       .catch((err) => { if (request === requestId.current) setError(messageForFirebaseError(err)); })
       .finally(() => { if (request === requestId.current) setLoading(false); });
     return undefined;
-  }, [filterKey, scope, entityId]);
+  }, [requestKey, scope, entityId, attempt]);
 
   const loadMore = async () => {
     if (!cursor || loadingMore) return;
@@ -110,7 +145,7 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
     setLoadingMore(true);
     setError("");
     try {
-      const data = await listAuditTrail(requestBody(filters, scope, entityId, cursor));
+      const data = await listAuditTrail(requestBody(requestFilters, scope, entityId, cursor));
       if (request !== requestId.current) return;
       setItems((current) => [...current, ...(data.items || [])]);
       setCursor(data.nextCursor || null);
@@ -183,8 +218,10 @@ export function ConsolidatedAuditTrail({ scope, entityId = "", onOpenComment, on
       <p className="audit-trail-count" role="status" aria-live="polite">
         {loading ? "Loading audit trail…" : `${count} ${count === 1 ? "event" : "events"}`}
         {!loading && truncated ? " · Latest matching records only." : ""}
+        {loading && slow ? " Still loading. The first request after a quiet period can take longer." : ""}
       </p>
-      {error && <p className="error-banner" role="alert">{error}</p>}
+      {error && <p className="error-banner" role="alert">{error} <button type="button" className="text-button" onClick={() => setAttempt((value) => value + 1)}>Retry</button></p>}
+      {loading && items.length === 0 && !error && <TrailSkeleton />}
       {!loading && !error && items.length === 0 && (
         <div className="audit-trail-empty">
           <h3>{active ? "No events match these filters" : "No workflow events yet"}</h3>

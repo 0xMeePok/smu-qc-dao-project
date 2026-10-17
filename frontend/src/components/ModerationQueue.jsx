@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MODERATION_REASONS, REMOVE_REASONS, RESTORE_REASONS, getModerationContext, listModerationQueue, moderateContent, moderationError } from "../lib/moderation.js";
-import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
+import { INDEPENDENT_PROPOSAL_FIELDS, PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
+import { categoryLabel as postingCategoryLabel } from "../config/postingCategories.js";
 import { findPosting } from "../lib/postings.js";
 import { findProposal } from "../lib/proposals.js";
 import { formatInstant } from "../lib/datetime.js";
@@ -36,10 +37,46 @@ function reportDescriptions(item) {
 const typeLabel = (item) => item.proposalKind === "independent" ? "Independent proposal" : item.contentType === "problem" ? "Problem statement" : item.contentType === "proposal" ? "Proposal" : item.contentType === "comment" ? "Comment" : item.contentType;
 const CONTENT_FIELDS = [...new Set(["title", "summary", "body", "text", "content", "businessContext", "currentApproach", "currentLimitations", "expectedOutcome", "successCriteria", "dataAvailability", "fundingThesis", "eligibilityNotes", "methodology", "approach", "deliverables", "timeline", "team", "problemStatement", "proposedSolution", ...PROPOSAL_FIELDS.map(([key]) => key), ...PROBLEM_FRAMING_FIELDS.map(([key]) => key)])];
 
+// Field headings match the ones members see on the posting and proposal pages.
+const fieldLabels = (fields) => Object.fromEntries(fields.map(([key, label]) => [key, label]));
+const PROBLEM_FIELD_LABELS = {
+  title: "Title",
+  summary: "Problem description",
+  businessContext: "Business context",
+  currentApproach: "Current approach",
+  currentLimitations: "Limitations of that approach",
+  expectedOutcome: "Expected outcome",
+  successCriteria: "Success criteria",
+  dataAvailability: "Relevant data availability",
+  fundingThesis: "Funding thesis and areas of interest",
+  eligibilityNotes: "Eligibility notes",
+};
+const PROPOSAL_FIELD_LABELS = { ...fieldLabels(PROPOSAL_FIELDS), ...fieldLabels(PROBLEM_FRAMING_FIELDS) };
+const INDEPENDENT_FIELD_LABELS = { ...PROPOSAL_FIELD_LABELS, ...fieldLabels(INDEPENDENT_PROPOSAL_FIELDS) };
+const OTHER_FIELD_LABELS = {
+  body: "Comment", text: "Comment", content: "Content", approach: "Approach", deliverables: "Deliverables",
+  problemStatement: "Problem statement", proposedSolution: "Proposed solution", expectedOutcomes: "Expected outcomes",
+};
+function humanizeKey(key) {
+  const words = String(key).replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+export function moderationFieldLabel(key, contentType, content) {
+  const own = contentType === "problem" ? PROBLEM_FIELD_LABELS
+    : contentType === "proposal" ? (content?.proposalKind === "independent" ? INDEPENDENT_FIELD_LABELS : PROPOSAL_FIELD_LABELS)
+      : {};
+  return own[key] ?? OTHER_FIELD_LABELS[key] ?? PROPOSAL_FIELD_LABELS[key] ?? PROBLEM_FIELD_LABELS[key] ?? humanizeKey(key);
+}
+export function moderationCategoryLabel(value) {
+  return PROPOSAL_CATEGORIES.find((category) => category.value === value)?.label ?? postingCategoryLabel(value);
+}
+const STATUS_FILTER_LABELS = { pending: "Pending", hidden: "Hidden", removed: "Removed", restored: "Restored", all: "All statuses" };
+
 function ContextBody({ title, content, contentType, onDownload }) {
   if (!content) return null;
-  return <section className="moderation-context"><h4>{title}</h4>{CONTENT_FIELDS.filter((key) => typeof content[key] === "string" && content[key]).map((key) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><p className="proposal-text">{content[key]}</p></div>)}
-    <dl>{content.amount != null && <><dt>Requested amount</dt><dd>{content.currency} {Number(content.amount).toLocaleString()}</dd></>}{content.category && <><dt>Category</dt><dd>{content.category}</dd></>}{content.expiresAt && <><dt>Submission deadline</dt><dd>{formatInstant(content.expiresAt)}</dd></>}</dl>
+  const categories = Array.isArray(content.categories) ? content.categories.filter(Boolean) : [];
+  return <section className="moderation-context"><h4>{title}</h4>{CONTENT_FIELDS.filter((key) => typeof content[key] === "string" && content[key]).map((key) => <div key={key}><strong>{moderationFieldLabel(key, contentType, content)}</strong><p className="proposal-text">{content[key]}</p></div>)}
+    <dl>{content.amount != null && <><dt>Requested amount</dt><dd>{content.currency} {Number(content.amount).toLocaleString()}</dd></>}{content.category && <><dt>Category</dt><dd>{moderationCategoryLabel(content.category)}</dd></>}{categories.length > 0 && <><dt>Technology areas</dt><dd>{categories.map(postingCategoryLabel).join(", ")}</dd></>}{content.expiresAt && <><dt>Submission deadline</dt><dd>{formatInstant(content.expiresAt)}</dd></>}</dl>
     {Array.isArray(content.attachments) && content.attachments.map((attachment) => <p key={attachment.id}><button type="button" className="text-button" onClick={() => onDownload(content, contentType, attachment)}>Download {attachment.name}</button></p>)}
   </section>;
 }
@@ -133,12 +170,12 @@ export function ModerationQueue({ onCountChange }) {
 
   return <section className="moderation-queue">
     <div className="table-header"><div><h2>Content moderation {data && <span className="count-pill">{data.pendingCount ?? 0} pending</span>}</h2><p>Reported content awaiting review. Every decision records a reason and can be reversed.</p></div><button className="secondary" type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>Refresh queue</button></div>
-    <div className="moderation-filters"><label>Content type<select value={filter.contentType} onChange={(event) => updateFilter("contentType", event.target.value)}><option value="">All types</option><option value="problem">Problem statements</option><option value="proposal">Proposals</option><option value="comment">Comments</option></select></label><label>Status<select value={filter.status} onChange={(event) => updateFilter("status", event.target.value)}>{["pending", "hidden", "removed", "restored", "all"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label>Sort<select value={filter.sort} onChange={(event) => updateFilter("sort", event.target.value)}><option value="oldest">Oldest first</option><option value="most_reported">Most reported</option></select></label></div>
+    <div className="moderation-filters"><label>Content type<select value={filter.contentType} onChange={(event) => updateFilter("contentType", event.target.value)}><option value="">All types</option><option value="problem">Problem statements</option><option value="proposal">Proposals</option><option value="comment">Comments</option></select></label><label>Status<select value={filter.status} onChange={(event) => updateFilter("status", event.target.value)}>{["pending", "hidden", "removed", "restored", "all"].map((value) => <option key={value} value={value}>{STATUS_FILTER_LABELS[value]}</option>)}</select></label><label>Sort<select value={filter.sort} onChange={(event) => updateFilter("sort", event.target.value)}><option value="oldest">Oldest first</option><option value="most_reported">Most reported</option></select></label></div>
     {error && <p role="alert" className="error-banner">{error}</p>}
     {loading ? <p role="status" className="table-empty">Loading moderation queue…</p> : <div className="card-table">{data?.items?.length ? data.items.map((item) => <article key={item.id} className="table-row"><div><span className="eyebrow">{typeLabel(item)} · {item.status}</span><h3>{item.title || "Submitted content"}</h3>{reportDescriptions(item).map((description) => <p key={description.key}>{description.text}</p>)}<small className="table-row-meta">{item.authorName || item.authorId} · {item.organisation || "Organisation not provided"} · {formatInstant(item.contentCreatedAt || item.createdAt)}</small><p>{item.reportCount || 0} reports · {(item.reasons ?? []).map(reasonLabel).join(", ") || "No report reason recorded"}</p></div><button className="secondary" type="button" onClick={() => setSelected(item)}>Review content</button></article>) : <p className="table-empty">No items match these filters.</p>}</div>}
     <div className="matching-actions">{page && <button className="secondary" type="button" disabled={loading} onClick={() => setPage(null)}>First page</button>}{data?.nextCursor && <button className="secondary" type="button" disabled={loading} onClick={() => setPage(data.nextCursor)}>Next page</button>}</div>
     {selected && <Modal labelledBy="moderation-review-title" onDismiss={() => { if (!busy) setSelected(null); }}><form onSubmit={submit}>
-      <div className="modal-head"><h2 id="moderation-review-title">Review {selected.contentType}</h2></div><div className="modal-body moderation-review-body">
+      <div className="modal-head"><h2 id="moderation-review-title">Review {String(typeLabel(selected) || "content").toLowerCase()}</h2></div><div className="modal-body moderation-review-body">
         {context ? <><ContextBody title="Content" content={context.content} contentType={selected.contentType} onDownload={download} /><ContextBody title="Parent context" content={context.parent} contentType={context.parent?.contentType} onDownload={download} />
           {selected.contentType === "comment" && <p className="field-hint">Comments are recorded off-chain and do not have an on-chain audit receipt.</p>}
           {auditTarget && <p><button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={openRelatedAudit}>{relatedAudit?.loading ? "Loading audit receipt…" : selected.contentType === "comment" ? "View parent audit receipt" : "View audit receipt"}</button></p>}

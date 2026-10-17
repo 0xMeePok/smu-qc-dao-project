@@ -159,14 +159,14 @@ export function fundingBlockReason(record, parent, chain, now = Date.now(), { de
 }
 
 /** Every read used in a projection is pinned to one confirmed block. */
-export async function readVerifiedFunding({ client, config, record, parent, blockNumber }) {
+export async function readVerifiedFunding({ client, config, record, parent, blockNumber, readConcurrency }) {
   if (isIndependentProposal(record)) {
     fail("failed-precondition", "Use the independent listing funding workflow for this proposal.");
   }
   const expected = isIndependentProposal(record)
     ? prepareIndependentEscrowCommit(record, { registryConfig: config })
     : prepareStoredProposal(record, { registryConfig: config });
-  client = createRequestReadClient(client, { chainId: config.chainId });
+  client = createRequestReadClient(client, { chainId: config.chainId, ...(readConcurrency ? { concurrency: readConcurrency } : {}) });
   const read = request => client.readContract({ ...request, blockNumber });
   const [proposal, escrow] = await Promise.all([
     read({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
@@ -337,9 +337,17 @@ export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
     settlement: publicSettlement(job.data()) };
 }
 
-export async function prepareEscrowDeposit({ db, client, config, uid, proposalId, amount }) {
-  await assertFundingChain(client, config);
-  const context = await loadFundingContext({ db, uid, proposalId });
+export async function prepareEscrowDeposit({ db, client, config, uid, proposalId, amount, readConcurrency }) {
+  // The chain check, the Firestore context and the head block are independent
+  // reads. Start them together (the deposit runs immediately before a member's
+  // signature), but settle them in the original order so every refusal and its
+  // message are unchanged. The block is only used once the context passes.
+  const chainCheck = assertFundingChain(client, config);
+  const contextRead = loadFundingContext({ db, uid, proposalId });
+  const headRead = client.getBlockNumber({ cacheTime: 0 });
+  for (const pending of [chainCheck, contextRead, headRead]) pending.catch(() => {});
+  await chainCheck;
+  const context = await contextRead;
   if (isIndependentProposal(context.record)) {
     if (same(context.record.researcherId, uid)) fail("permission-denied", "The listing author cannot deposit on their own listing.");
     if (!independentListingWindowOpen(context.record)) fail("failed-precondition", "This listing's funding window is closed.");
@@ -347,8 +355,8 @@ export async function prepareEscrowDeposit({ db, client, config, uid, proposalId
     if (!actor.exists || actor.data().role !== 0) fail("permission-denied", "Only a client or funder can approach this listing with funding.");
   }
   if (isOpenFunding(context.record, context.parent)) fail("failed-precondition", "Open funding is deposited by its owner into the grant pool. Use the grant workflow for this proposal.");
-  const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
-  const verified = await readVerifiedFunding({ client, config, ...context, blockNumber });
+  const blockNumber = await headRead;
+  const verified = await readVerifiedFunding({ client, config, ...context, blockNumber, readConcurrency });
   const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000, { deposit: true });
   if (reason) fail("failed-precondition", reason);
   if (amount !== undefined) {
@@ -568,7 +576,9 @@ export function settlementAction({ verified, config, record, parent, job, now })
   if (!["Locked", "Active"].includes(summary.state)) return { settlement: { status: summary.state === "Released" ? "complete" : "waiting",
     message: summary.state === "Released" ? "Both escrow payments are confirmed." : isOpenFunding(record, parent)
       ? summary.state === "Open" ? "Grant funding moves into this escrow when the researcher accepts the selected offer." : `The grant escrow is ${summary.state.toLowerCase()}.`
-      : "The posting owner must select the fully funded proposal." } };
+      : summary.state !== "Open" ? `The escrow is ${summary.state.toLowerCase()}; no platform payment is pending.`
+        : BigInt(summary.totalDeposited) >= BigInt(summary.fundingTarget) ? "The posting owner must select the fully funded proposal."
+          : "Funding is still open. The posting owner can select this proposal once it is fully funded." } };
   if (BigInt(data.approvalDeadline) * 1000n <= BigInt(chainMillis)) return { settlement: { status: "blocked", message: "The approval window has elapsed." } };
   if (!data.ownerApproved || !data.solutionApproved) return { settlement: { status: "awaiting-approvals", message: "Both owners must approve the current payment." } };
   const index = Number(data.currentTranche), milestone = milestones[index];
@@ -582,7 +592,7 @@ export function settlementAction({ verified, config, record, parent, job, now })
     args: index === 0 ? [data.selectionId] : [data.selectionId, BigInt(index), evidence] } };
 }
 
-export async function syncEscrowFunding({ db, client, config, getWallet, uid, proposalId, transactionHash, now = Timestamp.now() }) {
+export async function syncEscrowFunding({ db, client, config, getWallet, uid, proposalId, transactionHash, readConcurrency, now = Timestamp.now() }) {
   await assertFundingChain(client, config);
   if (transactionHash !== undefined && !/^0x[0-9a-fA-F]{64}$/.test(transactionHash)) fail("invalid-argument", "A valid transaction hash is required.");
   const context = await loadFundingContext({ db, uid, proposalId });
@@ -604,7 +614,7 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
       if (!same(previous.hash, job.cursorHash)) throw new Error("Escrow reconciliation mismatch: the saved checkpoint was reorganized.");
     }
     const toBlock = fromBlock + BLOCK_SPAN - 1n < safeBlock ? fromBlock + BLOCK_SPAN - 1n : safeBlock;
-    const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: safeBlock });
+    const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: safeBlock, readConcurrency });
     const event = config.abi.find(item => item.type === "event" && item.name === "FundingEventAnchored");
     const logs = fromBlock <= toBlock ? await client.getLogs({ address: config.address, event,
       args: { proposalId: verified.expected.entityId, escrow: verified.escrow.address }, fromBlock, toBlock, strict: true }) : [];
@@ -726,12 +736,18 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
 }
 
 export async function startEscrowSettlement(options) {
-  const { db, config, uid, proposalId, client, now = Timestamp.now() } = options;
-  const context = await loadFundingContext({ db, uid, proposalId });
+  const { db, config, uid, proposalId, client, readConcurrency, now = Timestamp.now() } = options;
+  // Independent reads start together and settle in the original order, so each
+  // refusal is unchanged; chain state is used only after ownership passes.
+  const contextRead = loadFundingContext({ db, uid, proposalId });
+  const chainCheck = assertFundingChain(client, config);
+  const headRead = client.getBlockNumber({ cacheTime: 0 });
+  for (const pending of [contextRead, chainCheck, headRead]) pending.catch(() => {});
+  const context = await contextRead;
   if (isOpenFunding(context.record, context.parent)) fail("failed-precondition", "Select grant proposals from the prefunded open funding pool.");
   if (!same(context.parent.ownerId, uid)) fail("permission-denied", "Only the posting owner may select the funded proposal.");
-  await assertFundingChain(client, config);
-  const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: await client.getBlockNumber({ cacheTime: 0 }) - 1n });
+  await chainCheck;
+  const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: await headRead - 1n, readConcurrency });
   const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000);
   if (reason) fail("failed-precondition", reason);
   if (!escrowSelectionGate(verified.summary).canSelect) fail("failed-precondition", "Selection requires a fully funded, open escrow with the full target held in verified custody.");

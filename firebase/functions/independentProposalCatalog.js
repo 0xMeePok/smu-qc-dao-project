@@ -32,7 +32,10 @@ async function authorOrganisations(db, docs) {
   const ids = [...new Set(docs
     .map((doc) => String(doc.data().researcherId ?? "").trim().toLowerCase())
     .filter(Boolean))];
-  const snaps = await Promise.all(ids.map((id) => db.collection("publicProfiles").doc(id).get()));
+  // One batched read for every author on the page rather than one per author.
+  const refs = ids.map((id) => db.collection("publicProfiles").doc(id));
+  const snaps = !refs.length ? []
+    : typeof db.getAll === "function" ? await db.getAll(...refs) : await Promise.all(refs.map((ref) => ref.get()));
   return new Map(ids.map((id, index) => [
     id,
     snaps[index].exists ? organisationName(snaps[index].data()) : "",

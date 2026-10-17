@@ -338,6 +338,23 @@ describe("Canonical escrow wallet integration", () => {
     assert.deepEqual(f.writes.map(request => request.functionName), ["deposit"]);
   });
 
+  it("runs chain checks alongside a caller's pre-signature check and opens no wallet until it passes", async () => {
+    let pass;
+    const gate = new Promise(resolve => { pass = resolve; });
+    const f = fixture({ allowance: target });
+    const action = writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1", beforeWalletRequest: () => gate });
+    await new Promise(resolve => setImmediate(resolve));
+    assert(f.reads.some(request => request.functionName === "allowance"));
+    assert.equal(f.writes.length, 0);
+    pass();
+    await action;
+    assert.deepEqual(f.writes.map(request => request.functionName), ["deposit"]);
+    const refused = fixture({ allowance: target });
+    await assert.rejects(writeEscrowAction({ ...refused, account: funder, action: "deposit", amount: "1",
+      beforeWalletRequest: async () => { throw new Error("The posting has been closed."); } }), /posting has been closed/);
+    assert.equal(refused.writes.length, 0);
+  });
+
   it("does not open the wallet when a concurrent wallet-state read fails", async () => {
     const f = fixture({ read: request => request.functionName === "balanceOf"
       ? Promise.reject(new Error("Wallet state RPC unavailable")) : undefined });

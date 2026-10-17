@@ -39,7 +39,7 @@ const { WalletProvider, useWallet } = await import("../../src/context/WalletCont
 const { privyConfig, chainIdOf, connectedEmbeddedWallet, linkedEmbeddedWallet } = await import("../../src/lib/privy.js");
 const {
   embeddedWalletClient, getActiveEmbeddedWallet, sendSponsoredTransaction, setActiveEmbeddedWallet, sponsoredProvider,
-  getPendingSponsoredTransaction, recoverPendingSponsoredTransaction, subscribePendingSponsoredTransactions,
+  getPendingSponsoredTransaction, recoverPendingSponsoredTransaction, subscribePendingSponsoredTransactions, isSponsoredTransactionInFlight,
   SPONSORSHIP_UNAVAILABLE_MESSAGE, SPONSORED_PENDING_MESSAGE,
 } = await import("../../src/lib/embeddedWallet.js");
 const { auditErrorMessage } = await import("../../src/lib/errors.js");
@@ -338,6 +338,27 @@ describe("[QCDAO-144] sponsored transactions", () => {
     await expect(first).resolves.toBe(HASH);
     await expect(second).resolves.toBe(HASH);
     expect(member.sendSponsoredTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks the saved record as owned by the in-flight send until that send fails", async () => {
+    let fail;
+    const held = new Promise((_, reject) => { fail = () => reject(new Error("socket hang up")); });
+    const member = wallet(() => held);
+    const notified = vi.fn();
+    const stop = subscribePendingSponsoredTransactions(notified);
+    const sent = sendSponsoredTransaction(request, { wallet: member, publicClient: chain() }).catch((caught) => caught);
+    await vi.waitFor(() => expect(member.sendSponsoredTransaction).toHaveBeenCalledOnce());
+    const saved = getPendingSponsoredTransaction(ADDRESS);
+    expect(saved?.id).toBeTruthy();
+    expect(isSponsoredTransactionInFlight(ADDRESS, saved.id)).toBe(true);
+    fail();
+    expect((await sent).walletOutcome).toBe("pending");
+    // The record stays for recovery, but no running action owns it any more.
+    const unresolved = getPendingSponsoredTransaction(ADDRESS);
+    expect(unresolved?.id).toBe(saved.id);
+    expect(isSponsoredTransactionInFlight(ADDRESS, unresolved.id)).toBe(false);
+    expect(notified).toHaveBeenCalled();
+    stop();
   });
 
   it("reports a call that failed inside a mined sponsored transaction as a revert", async () => {

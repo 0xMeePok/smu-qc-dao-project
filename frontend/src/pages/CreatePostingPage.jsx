@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatFundingAmount } from "../lib/fundingDisplay.js";
 import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
@@ -41,6 +42,7 @@ import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import { BriefPreview, ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
 import { validatePosting } from "../lib/validation.js";
+import { prewarmTransaction } from "../lib/prewarm.js";
 import { opportunityStatusLabel } from "../config/workflowStatus.js";
 
 // The four wizard steps and the validated fields each one holds.
@@ -221,6 +223,11 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
 
   const organisation = profile?.organisation ?? "";
   const editing = Boolean(editPostingId);
+  // Read-only: warm the RPC connection (and an edited posting's audit
+  // transaction) so the submit click does not wait on them.
+  useEffect(() => {
+    prewarmTransaction({ records: existing ? [existing] : [] });
+  }, [existing, wizard.isLast]);
   const materialLocked = editing && materialFieldsLocked(existing);
   // The one hash that means "still this posting". Matches parseHash in App.jsx.
   const createHash = editPostingId
@@ -389,6 +396,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
     // Progress, the receipt and any retry are shown on the Review step.
     wizard.goTo(PROBLEM_STEPS.length - 1);
     setSubmitting(true);
+    prewarmTransaction();
     let latestAudit = auditProgress;
     let savingRecord = false;
     setSaveFailed(false);
@@ -566,7 +574,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             <div><dt>Organisation</dt><dd>{published.organisation}</dd></div>
             <div>
               <dt>Funding</dt>
-              <dd>{published.currency} {Number(published.amount).toLocaleString()}</dd>
+              <dd>{formatFundingAmount(published.currency, published.amount)}</dd>
             </div>
             <div><dt>Submitted</dt><dd>{formatInstant(published.createdAt)}</dd></div>
             <div>
@@ -813,7 +821,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
                 { label: "Problem", value: form.summary.trim(), step: 0 },
                 { label: "Success criteria", value: form.successCriteria.trim(), step: 1 },
                 { label: "Technology areas", value: form.categories.map(categoryLabel).join(", "), empty: "None selected", step: 1 },
-                { label: "Funding", value: form.amount ? `${form.currency} ${Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: 2 },
+                { label: "Funding", value: form.amount ? formatFundingAmount(form.currency, form.amount) : "", empty: "Not set", step: 2 },
                 { label: editing ? "Deadline" : "Open until", value: expiryPreview, empty: "Not set", step: 2 },
                 { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: 2 },
               ]}
@@ -846,6 +854,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           </div>
           </div>
 
+          {submitting && !confirmedAudit && !auditProgress?.transactionHash && <p className="field-hint" role="status">Preparing your transaction… Your wallet’s approval prompt opens once the on-chain checks finish.</p>}
           <SubmissionProgress audit={confirmedAudit} saving={submitting} entityLabel="Posting" editing={editing} />
           <div className="form-actions wizard-secondary">
             {!editing && (
@@ -898,7 +907,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           description={form.summary}
           descriptionFallback="The problem description appears here as you type."
           fundingLabel="Funding"
-          funding={form.amount ? `${form.currency} ${Number(form.amount).toLocaleString()}` : ""}
+          funding={form.amount ? formatFundingAmount(form.currency, form.amount) : ""}
           until={expiryPreview}
           tags={form.categories.map(categoryLabel)}
         />

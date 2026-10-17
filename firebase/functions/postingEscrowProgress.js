@@ -5,6 +5,16 @@ const same = (a, b) => Boolean(a && b && String(a).toLowerCase() === String(b).t
 const units = value => typeof value === "string" && /^\d{1,78}$/.test(value) && BigInt(value) < 2n ** 256n;
 const visible = row => row.status !== "draft" && !row.moderated
   && !["hidden", "removed"].includes(row.moderationStatus);
+/** Bumped when the projection's meaning changes; clients treat older cached
+ * projections as unverified instead of showing their totals. */
+export const ESCROW_PROGRESS_VERSION = 2;
+const CLOSED_STATES = new Set(["Refunded", "Cancelled", "Expired", "Voided"]);
+/** An escrow whose selection was rejected, or that was cancelled, expired or
+ * voided, is refunding its contributors. Its deposits are no longer raised
+ * funding, even before every contributor has claimed the refund. */
+export function escrowClosedForFunding(row = {}) {
+  return CLOSED_STATES.has(row.state) || row.refundsEnabled === true || row.invalidated === true;
+}
 
 /** A keeper's new block/timestamp does not change card progress. Ignore those
  * heartbeats and body edits to avoid rebuilding a posting for every refresh. */
@@ -12,7 +22,8 @@ export function postingProgressChanged(kind, before, after) {
   if (!before || !after) return before !== after;
   const fields = kind === "summary" ? ["proposalId", "problemId", "chainId", "registryAddress", "escrowAddress",
     "tokenAddress", "tokenDecimals", "tokenSymbol", "researcherId", "postingOwnerId", "fundingTarget",
-    "totalDeposited", "totalReleased", "totalRefunded", "outstandingBalance", "custodyBalance", "state", "snapshotVerified"]
+    "totalDeposited", "totalReleased", "totalRefunded", "outstandingBalance", "custodyBalance", "state", "snapshotVerified",
+    "refundsEnabled", "invalidated"]
     : kind === "proposal" ? ["problemId", "status", "moderated", "moderationStatus", "researcherId", "proposalKind", "opportunityType"]
       : ["status", "moderated", "moderationStatus", "ownerId", "opportunityType"];
   if (fields.some(field => before[field] !== after[field])) return true;
@@ -35,7 +46,7 @@ export function postingEscrowProgress({ posting, proposals = [], summaries = [],
     if (!latest.has(row.proposalId) || latest.get(row.proposalId).blockNumber < row.blockNumber) latest.set(row.proposalId, row);
   }
   const groups = new Map();
-  let unavailableItems = 0;
+  let unavailableItems = 0, closedItems = 0;
   for (const proposal of candidates) {
     const row = latest.get(proposal.id), terms = proposal.fundingTerms;
     const valid = row && proposal.audit?.status === "confirmed"
@@ -50,6 +61,9 @@ export function postingEscrowProgress({ posting, proposals = [], summaries = [],
       && BigInt(row.totalDeposited) === BigInt(row.totalReleased) + BigInt(row.totalRefunded) + BigInt(row.outstandingBalance)
       && BigInt(row.custodyBalance) >= BigInt(row.outstandingBalance);
     if (!valid) { unavailableItems++; continue; }
+    // A rejected, cancelled or refunded escrow is not raised funding and can
+    // never be "fully funded"; count it separately instead.
+    if (escrowClosedForFunding(row)) { closedItems++; continue; }
     const key = `${row.tokenAddress.toLowerCase()}:${row.tokenDecimals}`;
     const old = groups.get(key) ?? { tokenAddress: row.tokenAddress.toLowerCase(), tokenDecimals: row.tokenDecimals,
       tokenSymbol: row.tokenSymbol, totalDeposited: 0n, fundingTarget: 0n, count: 0,
@@ -59,8 +73,8 @@ export function postingEscrowProgress({ posting, proposals = [], summaries = [],
     old.fundingRequirementMet &&= escrowFundingRequirementMet(row);
     groups.set(key, old);
   }
-  return { source: "confirmed-escrow-snapshots", available: !truncated && unavailableItems === 0,
-    unavailableItems, truncated, proposalCount: candidates.length,
+  return { source: "confirmed-escrow-snapshots", version: ESCROW_PROGRESS_VERSION, available: !truncated && unavailableItems === 0,
+    unavailableItems, closedItems, truncated, proposalCount: candidates.length,
     groups: [...groups.values()].map(row => ({ ...row, totalDeposited: row.totalDeposited.toString(),
       fundingTarget: row.fundingTarget.toString(), snapshotVerified: true })) };
 }

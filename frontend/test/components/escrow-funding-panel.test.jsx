@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const live = vi.hoisted(() => ({ options: null }));
 vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
-const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), confirm: vi.fn(), load: vi.fn(), save: vi.fn(), prepare: vi.fn(), sync: vi.fn(), history: vi.fn(), start: vi.fn(), account: null, user: null }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), wallet: vi.fn(), confirm: vi.fn(), load: vi.fn(), save: vi.fn(), prepare: vi.fn(), sync: vi.fn(), history: vi.fn(), start: vi.fn(), account: null, user: null }));
 vi.mock("../../src/lib/escrowFunding.js", async importOriginal => ({ ...await importOriginal(),
   prepareEscrowDeposit: (...args) => mocks.prepare(...args), syncEscrowFunding: (...args) => mocks.sync(...args),
   getEscrowFundingHistory: (...args) => mocks.history(...args), startEscrowSettlement: (...args) => mocks.start(...args) }));
@@ -30,7 +30,10 @@ beforeEach(() => {
   mocks.account = { isConnected: true, address: account, chainId: 421614 }; mocks.user = { id: account, roles: ["funder", "owner"] };
   mocks.prepare.mockReset().mockResolvedValue({}); mocks.sync.mockReset().mockResolvedValue({ events: [] });
   mocks.history.mockReset().mockResolvedValue({ events: [] }); mocks.start.mockReset().mockResolvedValue({ events: [], settlement: { status: "confirmed" } });
-  mocks.read.mockReset().mockResolvedValue(model()); mocks.write.mockReset().mockResolvedValue({ transactionHash: hash });
+  mocks.read.mockReset().mockResolvedValue(model()); mocks.write.mockReset().mockImplementation(async ({ beforeWalletRequest }) => {
+    // Mirrors writeEscrowAction: the caller's pre-signature check gates the wallet request.
+    await beforeWalletRequest?.(); mocks.wallet(); return { transactionHash: hash };
+  });
   mocks.confirm.mockReset().mockResolvedValue({ transactionHash: hash }); mocks.save.mockReset().mockResolvedValue({});
   mocks.load.mockReset().mockResolvedValue({ summary: "Delivery complete", url: "https://example.com/delivery", ownerId: account });
 });
@@ -47,7 +50,9 @@ describe("wallet escrow funding panel", () => {
     render(<EscrowFundingView state={model({ timestamp: 1900000000n, totalDeposited: 1000000n, outstandingBalance: 1000000n,
       can: { claimRefund: true } })} walletReady amount="" delivery={{ summary: "", url: "" }} onAction={onAction} />);
     expect(screen.getByText("Funds locked.")).toBeTruthy();
-    expect(screen.getByText(formatInstant(new Date(2000000000 * 1000)))).toBeTruthy();
+    // The custody deadline and the "Funding closes" row both use the app's UTC format.
+    expect(screen.getAllByText(formatInstant(new Date(2000000000 * 1000)))).toHaveLength(2);
+    expect(screen.getByText("Funding closes").nextSibling.textContent).toBe("2033-05-18 03:33:20 UTC");
     expect(screen.getByText(/As of verified block/).textContent).toContain(formatInstant(new Date(1900000000 * 1000)));
     expect(screen.getByText(/Ordinary early withdrawals are unavailable/)).toBeTruthy();
     const refund = screen.getByRole("button", { name: "Claim my refund" });
@@ -69,7 +74,8 @@ describe("wallet escrow funding panel", () => {
     render(<EscrowFundingView state={model({ state: 6, timestamp: 2000000001n, totalDeposited: 1000000n,
       outstandingBalance: 500000n, approvalDeadline: 2001000000n })} walletReady amount="" delivery={{ summary: "", url: "" }} />);
     expect(screen.getByText("Funds locked.")).toBeTruthy();
-    expect(screen.getByText(formatInstant(new Date(2001000000 * 1000)))).toBeTruthy();
+    expect(screen.getAllByText(formatInstant(new Date(2001000000 * 1000)))).toHaveLength(2);
+    expect(screen.getByText("Current approval deadline").nextSibling.textContent).toBe(formatInstant(new Date(2001000000 * 1000)));
     expect(screen.getByText(/Posting expiry does not unlock accepted work/)).toBeTruthy();
   });
   it("does not present an unavailable custody snapshot as settled or withdrawable", () => {
@@ -140,7 +146,7 @@ describe("wallet escrow funding panel", () => {
     fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
     await screen.findByText("The posting has been closed.");
-    expect(mocks.write).not.toHaveBeenCalled();
+    expect(mocks.wallet).not.toHaveBeenCalled();
     expect(screen.queryByText("Checking current funding status and network fees…")).toBeNull();
   });
   it("shows preparation while deposit eligibility is checked without asking for a wallet prompt yet", async () => {
@@ -151,7 +157,9 @@ describe("wallet escrow funding panel", () => {
     expect(screen.getByText("Checking current funding status and network fees…")).toBeTruthy();
     expect(screen.queryByText(/confirm the escrow deposit in your wallet/)).toBeNull();
     expect(screen.queryByText("Transaction confirmed.")).toBeNull();
-    expect(mocks.write).not.toHaveBeenCalled();
+    // Chain preparation overlaps the server check; the wallet waits for it.
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledTimes(1));
+    expect(mocks.wallet).not.toHaveBeenCalled();
   });
   it("allows the problem owner to request selection through the platform service", async () => {
     mocks.read.mockResolvedValue(model({ remaining: 0n, roles: { problemOwner: true } }));
@@ -491,7 +499,7 @@ it("stops before asking the wallet when navigation occurs during deposit prepara
   await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
   view.rerender(<EscrowFundingPanel proposal={{ ...proposal, id: "proposal2" }} />);
   await act(async () => { prepared.resolve({}); });
-  expect(mocks.write).not.toHaveBeenCalled();
+  expect(mocks.wallet).not.toHaveBeenCalled();
 });
 
 it("retains an original proposal's uncertain broadcast when navigation happens during the wallet request", async () => {
@@ -641,4 +649,93 @@ it("does not let delayed history hold up a covered activity echo", async () => {
   expect(mocks.read).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("button", { name: "Refresh escrow" }).disabled).toBe(false);
   await act(async () => { history.resolve({ events: [] }); });
+});
+
+describe("escrow actions during background refresh (QA)", () => {
+  it("keeps actions and typed input usable while a passive refresh is in flight", async () => {
+    mocks.read.mockResolvedValue(model({ can: { deposit: true, claimRefund: true } }));
+    await ready();
+    fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "5" } });
+    const pending = deferred(); mocks.read.mockReturnValueOnce(pending.promise);
+    await act(async () => { void live.options.onRefresh(); });
+    expect(screen.queryByText("Reading the verified escrow…")).toBeNull();
+    expect(screen.getByLabelText("Contribution (USDC)").value).toBe("5");
+    expect(screen.getByLabelText("Contribution (USDC)").disabled).toBe(false);
+    const refund = screen.getByRole("button", { name: "Claim my refund" });
+    expect(refund.disabled).toBe(false);
+    fireEvent.click(refund);
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "claimRefund" })));
+    await act(async () => { pending.resolve(model({ can: { deposit: true, claimRefund: true } })); });
+    expect(await screen.findByText(/Refund claimed/)).toBeTruthy();
+  });
+  it("re-reads in place on a refresh signal without unmounting controls or clearing the amount", async () => {
+    const view = render(<EscrowFundingPanel proposal={proposal} refreshVersion={0} />);
+    fireEvent.change(await screen.findByLabelText("Contribution (USDC)"), { target: { value: "7" } });
+    const pending = deferred(); mocks.read.mockReturnValueOnce(pending.promise);
+    view.rerender(<EscrowFundingPanel proposal={proposal} refreshVersion={1} />);
+    expect(screen.getByLabelText("Contribution (USDC)").value).toBe("7");
+    expect(screen.getByRole("button", { name: "Fund escrow" }).disabled).toBe(false);
+    await act(async () => { pending.resolve(model()); });
+    expect(screen.getByLabelText("Contribution (USDC)").value).toBe("7");
+  });
+  it("shows busy progress from the click and a confirmation for approvals", async () => {
+    const written = deferred();
+    mocks.read.mockResolvedValue(model({ state: 1, roles: { problemOwner: true }, can: { approveSelection: true } }));
+    mocks.write.mockReturnValue(written.promise);
+    render(<EscrowFundingPanel proposal={proposal} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve upfront payment" }));
+    expect(screen.getByText("Checking current funding status and network fees…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve upfront payment" }).disabled).toBe(true);
+    await act(async () => { written.resolve({ transactionHash: hash }); });
+    expect(await screen.findByText(/Your upfront approval is confirmed on-chain/)).toBeTruthy();
+  });
+  it("surfaces a records synchronization failure in the main alert, not only the audit trail", async () => {
+    mocks.sync.mockRejectedValue(new Error("Service unavailable"));
+    mocks.read.mockResolvedValue(model({ state: 4, can: { claimRefund: true }, wallet: { contribution: 1n, depositor: { claimable: 1n } } }));
+    render(<EscrowFundingPanel proposal={proposal} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Claim my refund" }));
+    const alert = await screen.findByText(/funding records have not caught up yet/);
+    expect(alert.getAttribute("role")).toBe("alert");
+  });
+  it("clears a one-shot deposit notice once the verified state moves on", async () => {
+    await ready();
+    fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fund escrow" }));
+    await screen.findByText(/Deposit confirmed. Your tokens are held/);
+    mocks.read.mockResolvedValue(model({ state: 1, remaining: 0n, totalDeposited: 1000000000n, roles: { problemOwner: true }, can: { approveSelection: true } }));
+    await act(async () => { await live.options.onRefresh(); });
+    await screen.findByText("Awaiting upfront approval");
+    expect(screen.queryByText(/Deposit confirmed/)).toBeNull();
+  });
+  it("runs queued payment-status recovery without disabling actions", async () => {
+    vi.useFakeTimers();
+    const synced = deferred();
+    mocks.history.mockResolvedValue({ events: [], settlement: { status: "queued", message: "Payment queued." } });
+    mocks.read.mockResolvedValue(model({ can: { deposit: true, claimRefund: true } }));
+    mocks.sync.mockReturnValue(synced.promise);
+    render(<EscrowFundingPanel proposal={proposal} />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.sync).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Claim my refund" }).disabled).toBe(false);
+    await act(async () => { synced.resolve({ events: [], settlement: { status: "complete" } }); });
+  });
+});
+
+describe("escrow notices follow the verified state (QA)", () => {
+  const view = (state, settlement) => render(<EscrowFundingView state={model(state)} walletReady amount="" delivery={{ summary: "", url: "" }} settlement={settlement} />);
+  const mustSelect = { status: "waiting", message: "The posting owner must select the fully funded proposal." };
+  it.each([[1, "selected"], [4, "cancelled"], [3, "refunded"], [2, "released"]])("hides an outdated selection instruction in state %s (%s)", state => {
+    view({ state, can: {} }, mustSelect);
+    expect(screen.queryByText(/must select the fully funded/)).toBeNull();
+  });
+  it("does not describe a fully funded escrow as open for funding", () => {
+    view({ remaining: 0n, totalDeposited: 1000000000n, timestamp: 1900000000n, blockNumber: 1n });
+    expect(screen.queryByText(/Funding is open. Contributions stay in escrow/)).toBeNull();
+    expect(screen.getByText(/Fully funded. Contributions stay in escrow/)).toBeTruthy();
+  });
+  it("keeps a pending platform action visible", () => {
+    view({ state: 1, can: {} }, { status: "pending", message: "The platform action is awaiting confirmation." });
+    expect(screen.getByText(/platform action is awaiting confirmation/)).toBeTruthy();
+  });
 });

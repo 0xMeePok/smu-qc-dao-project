@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { it } from "node:test";
+import { describe, it } from "node:test";
 import { encodeFunctionData, parseAbi } from "viem";
-import { openFundingSupported, writeOpenFundingAction } from "../../src/lib/openFunding.js";
+import { normalizeDeclineReason, openFundingDeclineReasonHash, openFundingDeclineSupported, openFundingSupported, writeOpenFundingAction } from "../../src/lib/openFunding.js";
 import { escrowConfig } from "../../../firebase/functions/test/fixtures/escrowConfigFixture.js";
 
 const pool = `0x${"7".repeat(40)}`, account = `0x${"8".repeat(40)}`, hash = `0x${"9".repeat(64)}`;
@@ -133,4 +133,47 @@ it("rejects nonpositive and imprecise withdrawals before requesting a wallet sig
     await assert.rejects(writeOpenFundingAction({ ...options, action: "withdraw", amount }), /positive|decimal/);
     assert.equal(writes.length, 0);
   }
+});
+
+describe("researcher grant decline", () => {
+  const proposalId = `0x${"4".repeat(64)}`, reason = "  We have accepted funding from another sponsor.  ";
+  const declineConfig = { ...config, escrow: { ...config.escrow, openFundingPoolAbi: [...config.escrow.openFundingPoolAbi,
+    ...parseAbi(["function declineProposal(bytes32 proposalId, bytes32 reasonHash)"])] } };
+  const reasonHash = openFundingDeclineReasonHash({ proposalId, reason: reason.trim() });
+  const declining = (prepared = {}) => {
+    const f = fixture({ prepared: { request: { address: pool, functionName: "declineProposal", args: [proposalId, reasonHash] }, reasonHash, ...prepared } });
+    const calls = [];
+    const prepare = f.options.prepare;
+    f.options = { ...f.options, config: declineConfig, action: "decline", amount: undefined, reason,
+      prepare: async payload => { calls.push(payload); return prepare(payload); } };
+    return { ...f, calls };
+  };
+
+  it("sends the trimmed reason for preparation and signs the matching commitment", async () => {
+    assert.equal(openFundingDeclineSupported(declineConfig), true);
+    const { options, writes, calls } = declining();
+    await writeOpenFundingAction(options);
+    assert.equal(calls[0].reason, reason.trim()); assert.equal(calls[0].action, "decline"); assert.equal(calls[0].amountBaseUnits, undefined);
+    assert.deepEqual(writes.map(row => [row.functionName, row.args]), [["declineProposal", [proposalId, reasonHash]]]);
+    assert.equal(writes[0].address, pool); assert.equal(writes[0].account, account);
+  });
+  it("rejects an invalid reason, an older pool and a substituted reason hash without signing", async () => {
+    for (const value of ["too short", "", "z".repeat(2001)]) {
+      const { options, writes, calls } = declining();
+      await assert.rejects(writeOpenFundingAction({ ...options, reason: value }), /10–2,000 characters/);
+      assert.equal(calls.length, 0); assert.equal(writes.length, 0);
+    }
+    const old = declining();
+    assert.equal(openFundingDeclineSupported(config), false);
+    await assert.rejects(writeOpenFundingAction({ ...old.options, config }), /cannot record a decline/);
+    assert.equal(old.calls.length, 0);
+    const other = openFundingDeclineReasonHash({ proposalId, reason: "A different reason entirely." });
+    for (const prepared of [{ reasonHash: other, request: { address: pool, functionName: "declineProposal", args: [proposalId, other] } },
+      { request: { address: pool, functionName: "declineProposal", args: [proposalId, other] } }]) {
+      const forged = declining(prepared);
+      await assert.rejects(writeOpenFundingAction(forged.options), /decline reason changed/);
+      assert.equal(forged.writes.length, 0);
+    }
+    assert.equal(normalizeDeclineReason(" ".repeat(3) + "e\u0301".repeat(10)), "\u00e9".repeat(10));
+  });
 });

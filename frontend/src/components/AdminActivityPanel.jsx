@@ -152,7 +152,7 @@ export function AdminActivityPanel({ onOpenTab }) {
               value={data.postings.feedbackGatesOutstanding}
               tone={data.postings.feedbackGatesOutstanding > 0 ? "warn" : undefined}
               hint={data.postings.feedbackGatesOutstanding > 0
-                ? "An owner cannot take these to a decision yet."
+                ? "No recommendation filed yet. Recommendations are advisory: an owner can select without one."
                 : "Every live posting has the feedback it needs."}
             />
           </Group>

@@ -26,6 +26,15 @@ it("closes when navigating to the same page or a workspace", () => {
   fireEvent.click(toggle); fireEvent.click(screen.getByRole("button", { name: "My Proposals" }));
   expect(props.onNavigate).toHaveBeenCalledWith("proposals"); expect(toggle.getAttribute("aria-expanded")).toBe("false");
 });
+it("closes when an account action opens another surface, such as the sign-in modal", () => {
+  const signIn = vi.fn();
+  render(<ResponsiveHeader {...props} accountControls={<><button type="button">Theme</button><button type="button" data-closes-menu onClick={signIn}>Sign in with email</button></>} />);
+  const toggle = screen.getByRole("button", { name: "Open navigation menu" });
+  fireEvent.click(toggle); fireEvent.click(screen.getByRole("button", { name: "Theme" }));
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Sign in with email" }));
+  expect(signIn).toHaveBeenCalledTimes(1); expect(toggle.getAttribute("aria-expanded")).toBe("false");
+});
 it("resets after browser navigation and when resizing to desktop", () => {
   const { rerender } = render(<ResponsiveHeader {...props} />);
   const toggle = screen.getByRole("button", { name: "Open navigation menu" });

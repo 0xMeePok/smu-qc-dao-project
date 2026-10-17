@@ -238,6 +238,25 @@ describe("QCDAO-59/60 submitted proposals", () => {
     await assertSucceeds(updateDoc(doc(db, "proposals", "proposal-first"), { status: "withdrawn", withdrawalReason: "Superseded by a stronger approach.", updatedAt: serverTimestamp() }));
     await assertSucceeds(submit(db, "proposal-replacement", record(id)));
   });
+  it("permits a replacement after the server rejects or declines a selection, but not while it is live", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const cases = [
+      ["rejected", { status: "rejected", escrowRefundReason: "selection_declined" }, true],
+      ["declined", { matching: { mode: "mock", status: "declined" } }, true],
+      ["admin-cancelled", { escrowAdminCancellation: { id: "c1", status: "complete" } }, true],
+      ["cancellation-queued", { escrowAdminCancellation: { id: "c1", status: "queued" } }, false],
+      ["under-review", { status: "under_review" }, false],
+      ["awaiting", { matching: { mode: "mock", status: "awaiting_confirmation" } }, false],
+    ];
+    for (const [label, patch, allowed] of cases) {
+      const id = await parent();
+      await assertSucceeds(submit(db, `released-first-${label}`, record(id)));
+      await env.withSecurityRulesDisabled(async (ctx) => {
+        await rawUpdateDoc(doc(ctx.firestore(), "proposals", `released-first-${label}`), patch);
+      });
+      await (allowed ? assertSucceeds : assertFails)(submit(db, `released-replacement-${label}`, record(id)));
+    }
+  });
   it("blocks expired, withdrawn, moderated and accepted parents", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     for (const patch of [{ expiresAt: new Date(0) }, { status: "withdrawn" }, { status: "moderated" }, { moderated: true }, { acceptedProposalId: "winner" }, { acceptedSolutionId: "winner" }, { hasAcceptedSolution: true }]) {

@@ -27,7 +27,8 @@ it("keeps independent contributions locked before the listing closes", () => {
   const p = props({ snapshot: { ...props().snapshot, summary: { ...summary, timestamp: "1900000000" }, actions: { claimRefund: true } } });
   render(<IndependentFundingView {...p} />);
   expect(screen.getByText("Funds locked.")).toBeTruthy();
-  expect(screen.getByText(formatInstant(new Date(2000000000 * 1000)))).toBeTruthy();
+  // The custody notice and the deadline row both use the app's UTC format.
+  expect(screen.getAllByText(formatInstant(new Date(2000000000 * 1000)))).toHaveLength(2);
   const refund = screen.getByRole("button", { name: "Claim my refund" });
   expect(refund.disabled).toBe(true); fireEvent.click(refund);
   expect(p.onAction).not.toHaveBeenCalled();
@@ -37,7 +38,8 @@ it("keeps accepted work locked to its completion deadline after the listing expi
     completionDeadline: "2002592000" }, actions: {} } });
   render(<IndependentFundingView {...p} />);
   expect(screen.getByText("Funds locked.")).toBeTruthy();
-  expect(screen.getByText(formatInstant(new Date(2002592000 * 1000)))).toBeTruthy();
+  // The custody notice and the deadline row both use the app's UTC format.
+  expect(screen.getAllByText(formatInstant(new Date(2002592000 * 1000)))).toHaveLength(2);
   expect(screen.getByText(/Posting expiry does not unlock accepted work/)).toBeTruthy();
 });
 it("allows confirmed cancellation refunds immediately instead of waiting for listing expiry", () => {
@@ -253,4 +255,21 @@ it("refreshes an independent balance from live activity and preserves an unfinis
   expect(screen.getByLabelText("Contribution (USDT)").value).toBe("1");
   expect(live.options).toMatchObject({ proposalId: "live-independent", channel: "funding", identity: mocks.user.id, blocked: false });
   expect(mocks.write).not.toHaveBeenCalled();
+});
+
+it("keeps controls mounted and enabled through a passive refresh, then confirms the action (QA)", async () => {
+  mocks.read.mockResolvedValue({ ...props().snapshot, actions: { deposit: true, claimRefund: true }, wallet: { deposited: "1000000", claimable: "1000000" } });
+  mocks.write.mockResolvedValue({ transactionHash: `0x${"2".repeat(64)}` });
+  const view = render(<IndependentFundingPanel proposal={{ id: "listing-qa" }} refreshVersion={0} />);
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  let finish; mocks.read.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  view.rerender(<IndependentFundingPanel proposal={{ id: "listing-qa" }} refreshVersion={1} />);
+  expect(screen.queryByText("Reading confirmed crowdfunding status…")).toBeNull();
+  expect(screen.getByLabelText("Contribution (USDT)").value).toBe("1");
+  const refund = screen.getByRole("button", { name: "Claim my refund" });
+  expect(refund.disabled).toBe(false);
+  fireEvent.click(refund);
+  await act(async () => { finish({ ...props().snapshot, actions: { deposit: true, claimRefund: true } }); });
+  expect(await screen.findByText(/Refund claimed/)).toBeTruthy();
+  expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "claimRefund" }));
 });

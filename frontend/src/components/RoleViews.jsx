@@ -21,6 +21,7 @@ import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditRecei
 import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
 import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
+import { ACCEPTANCE_WINDOW_MS } from "../lib/deadlineUrgency.js";
 import { eventWorkflowStatus, expiryReasonLabel, opportunityWorkflowStatus, workflowStatusLabel, WORKFLOW_STATUS } from "../config/workflowStatus.js";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { problemMatchingLocked } from "../lib/matching.js";
@@ -394,7 +395,7 @@ export function ActionNeeded({ onNavigate }) {
         <ActionGroup title="Selection to accept" items={data.researcher?.selectionToAccept}
           hint="An owner selected your proposal. Accept or reject it before the deadline, or the posting is invalidated."
           render={(item) => <ActionRow key={`accept-${item.id}`} item={item} onNavigate={onNavigate}
-            meta={<>Submitted {formatInstant(item.submittedAt)} · Respond by <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} /></>}>
+            meta={<>Submitted {formatInstant(item.submittedAt)} · Respond by <ExpiryCountdown expiresAt={item.deadlineAt} windowMs={ACCEPTANCE_WINDOW_MS} showInstant={false} /></>}>
             {Object.hasOwn(item, "fundingTerms")
               ? <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Open upfront approval</button>
               : <><button className="primary" type="button" disabled={isFetching} onClick={() => open("confirm", item)}>Accept…</button>
@@ -403,13 +404,13 @@ export function ActionNeeded({ onNavigate }) {
         <ActionGroup title="Grant offers to accept" items={data.researcher?.grantSelectionsToAccept}
           hint="The grant owner reserved funding for your proposal. Open grant funding to accept within its seven-day window."
           render={(item) => <ActionRow key={`grant-${item.id}`} item={item} onNavigate={onNavigate}
-            meta={<>Grant acceptance ends <ExpiryCountdown expiresAt={proposalQueueDeadline(item) ?? item.deadlineAt} showInstant={false} /></>}>
+            meta={<>Grant acceptance ends <ExpiryCountdown expiresAt={proposalQueueDeadline(item) ?? item.deadlineAt} windowMs={ACCEPTANCE_WINDOW_MS} showInstant={false} /></>}>
             <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Accept grant</button>
           </ActionRow>} />
         <ActionGroup title="Escrow actions" items={data.escrowActions}
           hint="Open the proposal’s verified escrow to select it, approve payment or submit delivery evidence."
           render={(item) => <ActionRow key={`escrow-${item.id}`} item={item} onNavigate={onNavigate}
-            meta={item.deadlineAt ? <>{item.action === "select" ? "Funding closes" : "Approval ends"} <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} /></> : undefined}>
+            meta={item.deadlineAt ? <>{item.action === "select" ? "Funding closes" : "Approval ends"} <ExpiryCountdown expiresAt={item.deadlineAt} windowMs={item.action === "approve_upfront" ? ACCEPTANCE_WINDOW_MS : undefined} showInstant={false} /></> : undefined}>
             <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>{ESCROW_ACTION_LABELS[item.action] ?? "Open escrow"}</button>
           </ActionRow>} />
         <ActionGroup title="Independent crowdfunding actions" items={data.independentActions}
@@ -546,7 +547,7 @@ export function EvaluatorQueue({ onNavigate }) {
                   </p>
                 : item.recommendationStatus === "pending" && item.gatesSelection
                   ? <p className="queue-note queue-note-gate">
-                      No recommendation has been filed yet, so the owner cannot take this solution to a decision.
+                      No recommendation has been filed yet. Recommendations are advisory: an owner can select without one.
                     </p>
                   : null}
             </div>

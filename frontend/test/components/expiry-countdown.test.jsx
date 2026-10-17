@@ -57,6 +57,24 @@ describe("ExpiryCountdown", () => {
     expect(screen.getByText("Deadline imminent")).toBeTruthy();
   });
 
+  it("does not call a fresh seven-day acceptance window approaching", () => {
+    const week = 7 * 24 * 60 * 60 * 1000;
+    const { container, rerender } = render(
+      <ExpiryCountdown expiresAt={new Date(NOW.getTime() + week - 60 * 60 * 1000)} windowMs={week} showInstant={false} />,
+    );
+    expect(screen.getByText("6d 23h 00m left")).toBeTruthy();
+    expect(screen.queryByText("Approaching deadline")).toBeNull();
+    expect(container.querySelector(".expiry-normal")).toBeTruthy();
+    // The last 48 hours are still flagged.
+    rerender(<ExpiryCountdown expiresAt={new Date(NOW.getTime() + 47 * 60 * 60 * 1000)} windowMs={week} showInstant={false} />);
+    expect(screen.getByText("Deadline imminent")).toBeTruthy();
+    // A 30-day window becomes approaching only in its last quarter.
+    rerender(<ExpiryCountdown expiresAt={new Date(NOW.getTime() + 8 * 24 * 60 * 60 * 1000)} windowMs={30 * 24 * 60 * 60 * 1000} showInstant={false} />);
+    expect(screen.queryByText("Approaching deadline")).toBeNull();
+    rerender(<ExpiryCountdown expiresAt={new Date(NOW.getTime() + 7 * 24 * 60 * 60 * 1000)} windowMs={30 * 24 * 60 * 60 * 1000} showInstant={false} />);
+    expect(screen.getByText("Approaching deadline")).toBeTruthy();
+  });
+
   it("[QCDAO-55] shows a closed status instead of a live countdown", () => {
     const { container } = render(
       <ExpiryCountdown expiresAt={new Date("2026-12-01T00:00:00Z")} status="expired" />,

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 const FOCUSABLE =
@@ -16,6 +16,20 @@ const FOCUSABLE =
  */
 export function Modal({ labelledBy, describedBy, onDismiss, className = "", initialFocusRef, children }) {
   const dialogRef = useRef(null);
+  const fallbackTitleId = `modal-title-${useId().replace(/:/g, "")}`;
+
+  // Every dialog needs an accessible name. When a caller forgets labelledBy, or
+  // its target is not rendered, name the dialog after its first heading.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (labelledBy && dialog.ownerDocument.getElementById(labelledBy)) return;
+    if (dialog.hasAttribute("aria-label")) return;
+    const heading = dialog.querySelector("h1, h2, h3, h4, [role='heading']");
+    if (!heading) return;
+    if (!heading.id) heading.id = fallbackTitleId;
+    dialog.setAttribute("aria-labelledby", heading.id);
+  });
 
   useEffect(() => {
     const opener = document.activeElement;

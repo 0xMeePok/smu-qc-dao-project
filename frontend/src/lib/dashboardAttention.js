@@ -1,4 +1,5 @@
 import { isExpired } from "./datetime.js";
+import { ACCEPTANCE_WINDOW_MS } from "./deadlineUrgency.js";
 
 /**
  * QCDAO-92/93 - the attention panel on both role dashboards.
@@ -55,8 +56,12 @@ export function byUrgency(items = []) {
   });
 }
 
+// Steps whose deadline is a fixed seven-day window rather than the posting's.
+const SEVEN_DAY_KINDS = new Set(["accept", "grant", "escrow-approve_upfront"]);
+
 function entry({ item, kind, heading, note, cta, target, dual = false }) {
   return {
+    windowMs: SEVEN_DAY_KINDS.has(kind) ? ACCEPTANCE_WINDOW_MS : null,
     key: `${kind}-${item.id}`,
     kind,
     heading,

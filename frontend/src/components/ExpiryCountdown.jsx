@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
 import {
   countdownParts,
-  expiryUrgency,
   expiryUrgencyLabel,
   formatCountdown,
   formatInstant,
 } from "../lib/datetime.js";
+import { ACCEPTANCE_WINDOW_MS, deadlineUrgency } from "../lib/deadlineUrgency.js";
 import { WORKFLOW_STATUS, closedStatusLabel, opportunityStatusLabel, workflowStatusLabel } from "../config/workflowStatus.js";
 
 /**
  * QCDAO-55 - time remaining on a posting, beside its exact UTC deadline.
  * A closed posting or confirmed match wins over the clock. Pending selections
  * count down to the creator's response deadline; reopening restores the posting deadline.
+ * `windowMs` names the length of a short fixed window (for example a seven-day
+ * acceptance or approval window) so its urgency is judged against that window.
  */
-export function ExpiryCountdown({ expiresAt, status, matching, showInstant = true }) {
+export function ExpiryCountdown({ expiresAt, status, matching, showInstant = true, windowMs }) {
   const [now, setNow] = useState(() => new Date());
 
   const matchingStatus = matching?.status;
@@ -24,7 +26,7 @@ export function ExpiryCountdown({ expiresAt, status, matching, showInstant = tru
     : closedStatusLabel(status);
   const parts = countdownParts(deadline, now);
   const expired = Boolean(closedLabel) || (parts?.expired ?? false);
-  const urgency = closedLabel ? "expired" : expiryUrgency(deadline, now);
+  const urgency = closedLabel ? "expired" : deadlineUrgency(deadline, now, { windowMs: pendingMatch ? (windowMs ?? ACCEPTANCE_WINDOW_MS) : windowMs });
   const urgencyLabel = pendingMatch ? workflowStatusLabel(WORKFLOW_STATUS.PENDING_APPROVAL) : expiryUrgencyLabel(urgency);
   const deadlineVerb = pendingMatch ? "Creator response ends" : "Closes";
   const confirmedAt = matchingStatus === "confirmed" ? matching.confirmedAt : null;

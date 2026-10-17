@@ -2,6 +2,14 @@ import { useState, useEffect } from "react";
 import { shortenAddress } from "../lib/chain.js";
 import { roleChipClass, roleLabel } from "../lib/roles.js";
 
+/** Offer a line break before "@" so a long address wraps as "name" / "@domain", not mid-word. */
+export function EmailWithBreaks({ email }) {
+  const value = String(email ?? "");
+  const at = value.lastIndexOf("@");
+  if (at <= 0) return value;
+  return <>{value.slice(0, at)}<wbr />{value.slice(at)}</>;
+}
+
 export function UserManagementTable({
   users,
   loading,
@@ -68,7 +76,7 @@ export function UserManagementTable({
             </svg>
             <input
               type="text"
-              placeholder="Search by name, email, address, or org..."
+              placeholder="Search name, email, address or org"
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
               aria-label="Search platform users"
@@ -98,9 +106,9 @@ export function UserManagementTable({
               }}
             >
               <option value="">All Roles</option>
-              <option value="0">Standard Users (0)</option>
-              <option value="2">Assigned Evaluators (2)</option>
-              <option value="1">Administrators (1)</option>
+              <option value="0">Standard users</option>
+              <option value="2">Assigned evaluators</option>
+              <option value="1">Administrators</option>
             </select>
           </div>
 
@@ -130,6 +138,7 @@ export function UserManagementTable({
 
       <div className="admin-table-container">
         <div className={`table-loading-bar ${isFetching ? "active" : ""}`} />
+        {/* Below 768px each row stacks into a card; cells label themselves from data-label. */}
         <table className="admin-users-table">
           <thead>
             <tr>
@@ -165,26 +174,26 @@ export function UserManagementTable({
                         <strong>{u.fullName || "Unnamed User"}</strong>
                         {isSelf && <span className="self-tag">You</span>}
                       </div>
-                      {u.email && <span className="user-email">{u.email}</span>}
+                      {u.email && <span className="user-email"><EmailWithBreaks email={u.email} /></span>}
                       <code className="wallet-code" title={u.address}>
                         {shortenAddress(u.address)}
                       </code>
                     </td>
-                    <td>
+                    <td data-label="Organisation">
                       <span className="org-text">{u.organisation || "—"}</span>
                     </td>
-                    <td>
+                    <td data-label="Role">
                       <span className={`role-chip ${roleChipClass(u.role)}`}>
                         {roleLabel(u.role)}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <span className={`status-badge ${isSuspended ? "status-badge-suspended" : "status-badge-active"}`}>
                         <span className="status-indicator-dot" />
                         {isSuspended ? "Suspended" : "Active"}
                       </span>
                     </td>
-                    <td className="actions-col">
+                    <td className="actions-col" data-label="Actions">
                       {isSelf ? (
                         <span className="self-action-placeholder" title="Current signed-in administrator (self-action restricted)">
                           —

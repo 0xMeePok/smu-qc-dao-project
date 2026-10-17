@@ -49,7 +49,11 @@ export function ResponsiveHeader({ route, primaryRoutes, workspaceRoutes, deskto
         </svg>
       </button>
     </div>
-    <div id="header-navigation" className={`topbar-panel${open ? " is-open" : ""}`}>
+    {/* An account action that hands over to another surface (the Privy sign-in
+        modal) closes the menu so it does not stay open behind it. */}
+    <div id="header-navigation" className={`topbar-panel${open ? " is-open" : ""}`} onClick={(event) => {
+      if (open && event.target instanceof Element && event.target.closest("[data-closes-menu]")) setOpen(false);
+    }}>
       <nav aria-label="Primary navigation">
         <div className="primary-nav-links">{primaryRoutes.map(navButton)}</div>
         {workspaceRoutes.length > 0 && <>
