@@ -353,6 +353,11 @@ describe("Canonical escrow wallet integration", () => {
     await assert.rejects(writeEscrowAction({ ...refused, account: funder, action: "deposit", amount: "1",
       beforeWalletRequest: async () => { throw new Error("The posting has been closed."); } }), /posting has been closed/);
     assert.equal(refused.writes.length, 0);
+    // A failed eligibility check also blocks the token approval that would precede the deposit.
+    const needsApproval = fixture({ allowance: 0n });
+    await assert.rejects(writeEscrowAction({ ...needsApproval, account: funder, action: "deposit", amount: "1",
+      beforeWalletRequest: async () => { throw new Error("The posting has been closed."); } }), /posting has been closed/);
+    assert.equal(needsApproval.writes.length, 0);
   });
 
   it("does not open the wallet when a concurrent wallet-state read fails", async () => {
