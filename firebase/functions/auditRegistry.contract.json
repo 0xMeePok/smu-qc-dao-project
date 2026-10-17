@@ -1,12 +1,12 @@
 {
   "contractName": "EscrowAuditRegistry",
   "chainId": 421614,
-  "address": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
+  "address": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
   "entityIdScheme": 2,
   "deployment": {
-    "blockNumber": 317407824,
-    "transactionHash": "0x48baaccbb93161f930325278166a646fb81df67cf8388c202cbcd470bf89f6cd",
-    "deployedAt": "2026-10-09T13:18:30.000Z"
+    "blockNumber": 319990437,
+    "transactionHash": "0x49ddd3d088cb6c44da35cb81bb8d9dddabc9190137f818f32656976a494d19b8",
+    "deployedAt": "2026-10-17T06:16:52.000Z"
   },
   "abi": [
     {
@@ -1690,7 +1690,7 @@
     }
   ],
   "escrow": {
-    "factoryAddress": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
+    "factoryAddress": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
     "tokens": [
       {
         "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
@@ -4255,6 +4255,43 @@
           },
           {
             "indexed": false,
+            "internalType": "bytes32",
+            "name": "reasonHash",
+            "type": "bytes32"
+          }
+        ],
+        "name": "ProposalDeclined",
+        "type": "event"
+      },
+      {
+        "anonymous": false,
+        "inputs": [
+          {
+            "indexed": true,
+            "internalType": "bytes32",
+            "name": "proposalId",
+            "type": "bytes32"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "researcher",
+            "type": "address"
+          },
+          {
+            "indexed": true,
+            "internalType": "address",
+            "name": "escrow",
+            "type": "address"
+          },
+          {
+            "indexed": false,
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "indexed": false,
             "internalType": "uint64",
             "name": "acceptanceDeadline",
             "type": "uint64"
@@ -4329,6 +4366,43 @@
             "internalType": "uint256",
             "name": "",
             "type": "uint256"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "proposalId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "reasonHash",
+            "type": "bytes32"
+          }
+        ],
+        "name": "declineProposal",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "bytes32",
+            "name": "proposalId",
+            "type": "bytes32"
+          }
+        ],
+        "name": "declineReasonHash",
+        "outputs": [
+          {
+            "internalType": "bytes32",
+            "name": "reasonHash",
+            "type": "bytes32"
           }
         ],
         "stateMutability": "view",
