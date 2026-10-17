@@ -1,21 +1,12 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { getFirestore } from "firebase-admin/firestore";
-import { decodeFunctionData, encodeFunctionResult, numberToHex } from "viem";
+import { numberToHex } from "viem";
 import { attestPublication } from "../index.js";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
 import { escrowClient, escrowConfig, escrowRecord } from "./fixtures/escrowAuditFixture.js";
 import { memoryDb } from "./memoryDb.mjs";
-
-// Encode the existing in-memory chain fixture at the HTTP boundary so the real
-// callable, viem verification, and proof transaction all run without networking.
-function emptyAbiValue(parameter) {
-  if (parameter.type === "tuple") return Object.fromEntries(parameter.components.map(item => [item.name, emptyAbiValue(item)]));
-  if (parameter.type === "bool") return false;
-  if (parameter.type === "address") return `0x${"0".repeat(40)}`;
-  if (parameter.type === "bytes32") return `0x${"0".repeat(64)}`;
-  return 0n;
-}
+import { answerEthCall } from "./answerEthCall.mjs";
 
 function mockRpc(t, client) {
   return t.mock.method(globalThis, "fetch", async (_url, options) => {
@@ -33,14 +24,13 @@ function mockRpc(t, client) {
     } else if (method === "eth_getBlockByNumber") {
       result = { ...await client.getBlock({ blockNumber: BigInt(params[0]) }), number: params[0], transactions: [] };
     } else if (method === "eth_call") {
-      const address = params[0].to.toLowerCase();
-      const abi = address === escrowConfig.address ? escrowConfig.abi
-        : address === escrowConfig.escrow.factoryAddress ? escrowConfig.escrow.factoryAbi : escrowConfig.escrow.escrowAbi;
-      const { functionName, args } = decodeFunctionData({ abi, data: params[0].data });
-      const value = await client.readContract({ address, functionName, args });
-      const output = abi.find(item => item.name === functionName).outputs[0];
-      result = encodeFunctionResult({ abi, functionName,
-        result: output.type === "tuple" ? { ...emptyAbiValue(output), ...value } : value });
+      const abiFor = (address) => {
+        const target = String(address).toLowerCase();
+        if (target === escrowConfig.address.toLowerCase()) return escrowConfig.abi;
+        if (target === escrowConfig.escrow.factoryAddress.toLowerCase()) return escrowConfig.escrow.factoryAbi;
+        return escrowConfig.escrow.escrowAbi;
+      };
+      result = await answerEthCall({ to: params[0].to, data: params[0].data, client, abiFor });
     } else {
       throw new Error(`Unexpected RPC method: ${method}`);
     }
