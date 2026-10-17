@@ -6,10 +6,12 @@ import App from "./App.jsx";
 import { SessionProvider } from "./context/SessionContext.jsx";
 import { WalletProvider } from "./context/WalletContext.jsx";
 import { isPrivyConfigured, privyAppId, privyConfig } from "./lib/privy.js";
+import { enableBrowserRpcStats } from "./lib/rpc.js";
 import { applyTheme, initialTheme } from "./lib/theme.js";
 import "./styles.css";
 
 applyTheme(initialTheme());
+if (import.meta.env.DEV) enableBrowserRpcStats();
 
 const queryClient = new QueryClient();
 

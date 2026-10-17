@@ -5,6 +5,7 @@ import { isIndependentProposal } from "./independentProposal.js";
 import { boundedMap } from "./boundedMap.js";
 import { createRequestReadClient } from "./requestReadClient.js";
 import { memberCallFromReceipt } from "./memberCall.js";
+import { readCachedReceipt, storeReceipt } from "./immutableChainCache.js";
 import { escrowSelectionGate } from "./escrowCustody.js";
 import { confirmedRefundMetadata } from "./escrowRefundMetadata.js";
 
@@ -71,8 +72,11 @@ export async function readGrantQueueMetadata({ db, client, config, uid, docs, pa
   return { grants, unavailable, blockNumber };
 }
 
-/** A member's required escrow actions. No keeper/signing path is called here. */
-export async function readEscrowQueueActions({ db, client, config, uid, docs, blockNumber, readDocument }) {
+/** A member's required escrow actions. No keeper/signing path is called here.
+ * `allowImmutableCache` skips linkage and receipts already checked for this deployment.
+ * Mutable escrow state is still read at the confirmed block.
+ */
+export async function readEscrowQueueActions({ db, client, config, uid, docs, blockNumber, readDocument, allowImmutableCache = false }) {
   const actions = [], unavailable = new Set(), states = new Map();
   if (!client || config?.contractName !== "EscrowAuditRegistry" || !config.escrow?.escrowAbi?.length) return { actions, unavailable, states };
   const candidates = docs.filter(doc => !isIndependentProposal(doc.data()) && doc.data().fundingTerms && doc.data().status !== "draft"
@@ -89,16 +93,32 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
     const rows = await db.getAll(...candidates.map(doc => db.collection(FUNDING_SUMMARIES).doc(`${deploymentKey(config)}_${doc.id}`)));
     savedSummaries = new Map(rows.map((row, index) => [candidates[index].id, row.data()]));
   } catch { /* Canonical balances/actions remain readable without advisory history. */ }
-  await boundedMap(candidates, async (doc, index) => {
+  const prepared = [];
+  await Promise.all(candidates.map(async (doc, index) => {
     try {
-      const context = await loadFundingContext({ db, uid, proposalId: doc.id, readDocument });
-      const receipt = await client.getTransactionReceipt({ hash: context.record.audit.transactionHash });
+      prepared.push({ doc, index, context: await loadFundingContext({ db, uid, proposalId: doc.id, readDocument }) });
+    } catch { unavailable.add(doc.id); }
+  }));
+  const ready = [];
+  await Promise.all(prepared.map(async (item) => {
+    try {
+      const hash = item.context.record.audit.transactionHash;
+      let receipt = allowImmutableCache ? readCachedReceipt(config.chainId, hash) : undefined;
+      if (!receipt) {
+        receipt = await client.getTransactionReceipt({ hash });
+        if (allowImmutableCache) storeReceipt(config.chainId, hash, receipt);
+      }
       // Historical deployments retain their own read/refund screens and must
       // never yield new active-deployment actions in this queue.
-      if (!same((await memberCallFromReceipt(client, receipt, { sender: context.record.researcherId }))?.to, config.address)) return;
+      if (!same((await memberCallFromReceipt(client, receipt, { sender: item.context.record.researcherId }))?.to, config.address)) return;
       if (receipt.status !== "success" || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > blockNumber
-          || !same(receipt.transactionHash, context.record.audit.transactionHash)) throw new Error("Unconfirmed publication");
-      const { summary, data, milestones } = await readVerifiedFunding({ client, config, ...context, blockNumber });
+          || !same(receipt.transactionHash, hash)) throw new Error("Unconfirmed publication");
+      ready.push(item);
+    } catch { unavailable.add(item.doc.id); }
+  }));
+  await Promise.all(ready.map(async ({ doc, index, context }) => {
+    try {
+      const { summary, data, milestones } = await readVerifiedFunding({ client, config, ...context, blockNumber, allowImmutableCache });
       const owner = same(context.parent.ownerId, uid), researcher = same(context.record.researcherId, uid);
       const validContent = !blocked(context.record) && !blocked(context.parent);
       const timestamp = BigInt(summary.timestamp), deadline = BigInt(data.approvalDeadline);
@@ -131,6 +151,6 @@ export async function readEscrowQueueActions({ db, client, config, uid, docs, bl
         workflowStatus: action === "select" ? "submitted" : action === "approve_upfront" ? "pending_approval" : "accepted",
         blockNumber: Number(blockNumber) };
     } catch { unavailable.add(doc.id); }
-  }, 2);
+  }));
   return { actions: actions.filter(Boolean), unavailable, states };
 }

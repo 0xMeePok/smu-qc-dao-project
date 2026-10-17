@@ -50,6 +50,18 @@ it("cancels scheduled events after navigation, sign out and unmount", async () =
   expect(old).not.toHaveBeenCalled(); expect(latest).not.toHaveBeenCalled(); expect(mocks.stops[0]).toHaveBeenCalled();
   act(() => mocks.handlers[1]()); view.unmount(); await tick(61000); expect(latest).not.toHaveBeenCalled();
 });
+it("refreshes funding activity without a timer or focus read", async () => {
+  const refresh = vi.fn();
+  render(<Page onRefresh={refresh} triggers="activity" />);
+  await tick(180000);
+  act(() => { window.dispatchEvent(new Event("focus")); });
+  await tick(2000);
+  expect(refresh).not.toHaveBeenCalled();
+  act(() => { mocks.handlers[0]({ fundingSnapshot: { blockNumber: 4 } }); });
+  await tick(250);
+  expect(refresh).toHaveBeenCalledTimes(1);
+});
+
 it("falls back once a minute without needing a backend signal", async () => {
   const refresh = vi.fn(); render(<Page onRefresh={refresh} intervalMs={10} />);
   await tick(59999); expect(refresh).not.toHaveBeenCalled(); await tick(251); expect(refresh).toHaveBeenCalledTimes(1);

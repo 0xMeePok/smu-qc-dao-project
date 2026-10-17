@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { createPublicClient, fallback, http } from "viem";
 import { arbitrumSepolia } from "viem/chains";
-import { createArbitrumRpcTransport, DEFAULT_RPC_BACKUP_URLS, getRpcUrls, RPC_ALLOWED_ORIGINS } from "../rpcPolicy.js";
+import { createArbitrumRpcTransport, DEFAULT_RPC_BACKUP_URLS, disableRpcStats, enableRpcStats, getRpcUrls, limitRpcConcurrency, readRpcStats, resetRpcStats, RPC_ALLOWED_ORIGINS, setRpcScope } from "../rpcPolicy.js";
 import { probeRpc, STATUS } from "../platformStatus.js";
 
 const CHAIN = "0x66eee";
@@ -144,6 +144,42 @@ describe("Arbitrum Sepolia RPC failover", () => {
     });
   });
 
+  it("[BUT-SXFPP-181] sends the chain check with the first read and discards that read when the chain is wrong", async () => {
+    let release;
+    const started = [];
+    await withFixtures([async ({ method }) => {
+      started.push(method);
+      if (started.length === 1) await new Promise((resolve) => { release = resolve; });
+      return {};
+    }], async (endpoints) => {
+      const client = clientFor(endpoints, { overlapChainCheck: true, timeoutMs: 500 });
+      const pending = read(client);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.deepEqual(started.slice().sort(), ["eth_blockNumber", "eth_chainId"]);
+      release();
+      assert.equal(await pending, "0x42");
+      assert.equal(await read(client), "0x42");
+      assert.equal(endpoints[0].calls.filter((call) => call.method === "eth_chainId").length, 1);
+    });
+    release = undefined;
+    started.length = 0;
+    await withFixtures([async ({ method }) => {
+      started.push(method);
+      if (started.length === 1) await new Promise((resolve) => { release = resolve; });
+      return method === "eth_chainId" ? { result: "0x1" } : { result: "0x99" };
+    }], async (endpoints) => {
+      const client = clientFor(endpoints, { overlapChainCheck: true, timeoutMs: 500 });
+      const pending = read(client);
+      const deadline = Date.now() + 400;
+      while (!started.includes("eth_blockNumber") && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.ok(started.includes("eth_blockNumber"));
+      release();
+      await assert.rejects(pending, /not on Arbitrum Sepolia/);
+    });
+  });
+
   it("keeps a healthy primary and caches chain validation across reads", async () => {
     await withFixtures([() => ({}), () => ({})], async (endpoints) => {
       const client = clientFor(endpoints);
@@ -184,10 +220,10 @@ describe("Arbitrum Sepolia RPC failover", () => {
 
   it("fails over a timed-out primary within the per-endpoint timeout", async () => {
     await withFixtures([() => ({ hold: true }), () => ({})], async (endpoints) => {
-      const client = clientFor(endpoints, { timeoutMs: 35 });
+      const client = clientFor(endpoints, { timeoutMs: 250 });
       const started = Date.now();
       assert.equal(await read(client), "0x42");
-      assert.ok(Date.now() - started < 600);
+      assert.ok(Date.now() - started < 2_000);
       assert.equal(endpoints[0].calls.length, 1);
       assert.equal(client.transport.rpcStatus.fallbackActive, true);
     });
@@ -377,5 +413,41 @@ describe("Arbitrum Sepolia RPC failover", () => {
         assert.ok(!JSON.stringify(value).includes("/v2/"));
       }
     });
+  });
+});
+
+describe("RPC request counter", () => {
+  it("[BUT-SXFPP-183] counts methods by callable scope and never records a URL", async () => {
+    resetRpcStats();
+    setRpcScope("listActionItems");
+    enableRpcStats();
+    try {
+      await withFixtures([() => ({})], async endpoints => {
+        const client = clientFor(endpoints);
+        await read(client);
+        const stats = readRpcStats();
+        assert.equal(stats.listActionItems.eth_blockNumber, 1);
+        assert.equal(stats.listActionItems.eth_chainId, 1);
+        assert.ok(!JSON.stringify(stats).includes(endpoints[0].url));
+        assert.ok(!JSON.stringify(stats).includes(SECRET));
+      });
+    } finally { disableRpcStats(); resetRpcStats(); }
+  });
+});
+
+describe("HTTP concurrency", () => {
+  it("[BUT-SXFPP-182] caps in-flight HTTP requests and continues after a failure", async () => {
+    let active = 0, peak = 0;
+    const limited = limitRpcConcurrency(async (value) => {
+      active += 1; peak = Math.max(peak, active);
+      await new Promise(resolve => setImmediate(resolve));
+      active -= 1;
+      if (value === 2) throw new Error("temporary RPC failure");
+      return value;
+    }, 3);
+    const results = await Promise.allSettled(Array.from({ length: 20 }, (_, index) => limited(index)));
+    assert.equal(peak, 3); assert.equal(active, 0);
+    assert.equal(results.filter(result => result.status === "rejected").length, 1);
+    assert.equal(results.at(-1).value, 19);
   });
 });

@@ -159,7 +159,7 @@ export function fundingBlockReason(record, parent, chain, now = Date.now(), { de
 }
 
 /** Every read used in a projection is pinned to one confirmed block. */
-export async function readVerifiedFunding({ client, config, record, parent, blockNumber, readConcurrency }) {
+export async function readVerifiedFunding({ client, config, record, parent, blockNumber, readConcurrency, allowImmutableCache = false }) {
   if (isIndependentProposal(record)) {
     fail("failed-precondition", "Use the independent listing funding workflow for this proposal.");
   }
@@ -170,7 +170,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
   const read = request => client.readContract({ ...request, blockNumber });
   const [proposal, escrow] = await Promise.all([
     read({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
-    verifyProposalEscrow({ expected, config, readContract: read }),
+    verifyProposalEscrow({ expected, config, readContract: read, allowImmutableCache }),
   ]);
   if (!same(at(proposal, "researcher", 0), expected.expectedResearcher)
       || !same(at(proposal, "opportunityId", 1), expected.opportunityId)

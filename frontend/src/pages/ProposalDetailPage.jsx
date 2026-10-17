@@ -8,8 +8,10 @@ import { IndependentFundingPanel } from "../components/IndependentFundingPanel.j
 import { IndependentFundingTerms } from "../components/IndependentFundingTerms.jsx";
 import { getIndependentFundingState, independentFundingLocked } from "../lib/independentEscrow.js";
 import { OpenFundingPanel } from "../components/OpenFundingPanel.jsx";
-import { readEscrow } from "../lib/escrow.js";
-import { useEffect, useRef, useState } from "react";
+import { readEscrowFundingStarted } from "../lib/escrow.js";
+import { fetchAuditVerification, useAuditVerification } from "../lib/escrowReads.js";
+import { QueryClient, QueryClientContext, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { useContext, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useSignIn } from "../context/SessionContext.jsx";
@@ -44,11 +46,13 @@ import { PosterIdentity } from "../components/PosterIdentity.jsx";
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
 // control below is for a receipt that was left in flight.
-export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false, initialTab = "overview",
+function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSubmitted = false, initialTab = "overview",
   fundingActivationError = "", pendingFundingTransaction = null }) {
   const { user } = useAuth();
   const { address, isConnected } = useWallet();
+  const queryClient = useQueryClient();
   const [proposal, setProposal] = useState(null);
+  useAuditVerification(proposal, readProposalAudit);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditBusy, setAuditBusy] = useState(false);
@@ -170,7 +174,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       if (!anchored) {
         let fundingStarted;
         if (isIndependentProposal(proposal)) fundingStarted = independentFundingLocked(await getIndependentFundingState({ proposalId }));
-        else if (proposal.fundingTerms) fundingStarted = (await readEscrow({ proposal, account: address })).totalDeposited > 0n;
+        else if (proposal.fundingTerms) fundingStarted = (await readEscrowFundingStarted({ proposal, account: address })).totalDeposited > 0n;
         else {
           const current = await getMockMatching(proposal.problemId, { proposalId });
           const candidate = current.proposals.find((item) => item.id === proposalId);
@@ -357,7 +361,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       </div>}
 
       <div className={panel("record")} role="tabpanel" id="proposal-panel-record" aria-labelledby="proposal-tab-record">
-        <AuditReceipt onVerificationChange={setAuditVerification} anchorId="entity-audit-receipt" entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => readProposalAudit(proposal)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
+        <AuditReceipt onVerificationChange={setAuditVerification} anchorId="entity-audit-receipt" entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => fetchAuditVerification(queryClient, proposal, readProposalAudit)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
         {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
         {reviewers && openedTabs.has("record") && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
         {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("overview")); highlightWhenPresent(`comment-${item.commentId}`); }} />}
@@ -405,4 +409,15 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
       <div className="modal-actions"><button className="secondary" disabled={withdrawing || Boolean(anchoredWithdrawal)} onClick={() => setConfirm(false)}>Keep proposal</button><button className="danger-btn" disabled={withdrawing} onClick={withdraw}>{withdrawing ? (anchoredWithdrawal ? "Saving…" : "Waiting for your wallet…") : (anchoredWithdrawal ? "Finish saving withdrawal" : "Sign and withdraw")}</button></div>
     </Modal>}
   </section>;
+}
+
+function IsolatedQuery({ children }) {
+  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+export default function ProposalDetailPage(props) {
+  const existing = useContext(QueryClientContext);
+  if (existing) return <ProposalDetailBody {...props} />;
+  return <IsolatedQuery><ProposalDetailBody {...props} /></IsolatedQuery>;
 }

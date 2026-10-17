@@ -5,7 +5,7 @@ const visible = () => document.visibilityState !== "hidden" && navigator.onLine 
 
 /** Coalesce push events, retain one blocked refresh and never poll hidden tabs. */
 export function useLiveActivity({ proposalId, problemId, identity = "", channel, onRefresh,
-  enabled = true, blocked = false, intervalMs = 60_000 }) {
+  enabled = true, blocked = false, intervalMs = 60_000, triggers = "live" }) {
   const latest = useRef({ onRefresh, blocked });
   latest.current = { onRefresh, blocked };
   const wake = useRef(null);
@@ -38,23 +38,23 @@ export function useLiveActivity({ proposalId, problemId, identity = "", channel,
       if (visible() && !stop) stop = subscribeToActivity({ proposalId, problemId, identity }, channel, event => changed(true, event?.fundingSnapshot ?? null));
     };
     const visibility = () => {
-      if (visible()) { connect(); changed(); }
+      if (visible()) { connect(); if (triggers !== "activity") changed(); }
       else { stop?.(); stop = null; clearTimeout(scheduled); scheduled = null; }
     };
     wake.current = schedule;
     connect();
-    const timer = setInterval(() => { if (visible()) changed(); }, Math.max(60_000, intervalMs));
+    const timer = triggers === "activity" ? null : setInterval(() => { if (visible()) changed(); }, Math.max(60_000, intervalMs));
     document.addEventListener("visibilitychange", visibility);
     window.addEventListener("online", visibility);
     window.addEventListener("offline", visibility);
     window.addEventListener("focus", visibility);
     return () => {
-      disposed = true; wake.current = null; stop?.(); clearTimeout(scheduled); clearInterval(timer);
+      disposed = true; wake.current = null; stop?.(); clearTimeout(scheduled); if (timer) clearInterval(timer);
       document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("online", visibility);
       window.removeEventListener("offline", visibility);
       window.removeEventListener("focus", visibility);
     };
-  }, [proposalId, problemId, identity, channel, enabled, intervalMs]);
+  }, [proposalId, problemId, identity, channel, enabled, intervalMs, triggers]);
   useEffect(() => { if (!blocked) wake.current?.(); }, [blocked]);
 }

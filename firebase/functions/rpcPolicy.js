@@ -83,6 +83,94 @@ function unavailableError(host) {
   return error;
 }
 
+// Dev and test counter. Off unless a caller enables it. Counts methods only;
+// scopes are page paths or callable names, never endpoint URLs.
+let rpcStatsEnabled = false;
+let rpcScope = () => "unscoped";
+let rpcScopeStore = null;
+const rpcCounts = new Map();
+
+export function enableRpcStats({ scope } = {}) {
+  rpcStatsEnabled = true;
+  if (scope) rpcScope = typeof scope === "function" ? scope : () => scope;
+}
+
+export function disableRpcStats() {
+  rpcStatsEnabled = false;
+}
+
+export function setRpcScope(scope) {
+  rpcScope = typeof scope === "function" ? scope : () => scope;
+}
+
+/** Optional AsyncLocalStorage-shaped store: `{ run(name, fn), getStore() }`. */
+export function bindRpcScopeStore(store) {
+  rpcScopeStore = store ?? null;
+}
+
+export function withRpcScope(name, fn) {
+  if (rpcScopeStore?.run) return rpcScopeStore.run(name, fn);
+  const previous = rpcScope;
+  rpcScope = () => name;
+  const restore = () => { rpcScope = previous; };
+  try {
+    const result = fn();
+    return result && typeof result.then === "function" ? result.finally(restore) : (restore(), result);
+  } catch (error) {
+    restore();
+    throw error;
+  }
+}
+
+export function resetRpcStats() {
+  rpcCounts.clear();
+}
+
+export function readRpcStats() {
+  const scopes = {};
+  for (const [scope, methods] of rpcCounts) scopes[scope] = Object.fromEntries(methods);
+  return scopes;
+}
+
+function currentRpcScope() {
+  const stored = rpcScopeStore?.getStore?.();
+  if (typeof stored === "string" && stored) return stored;
+  try { return rpcScope() || "unscoped"; }
+  catch { return "unscoped"; }
+}
+
+function recordRpcCall(method) {
+  if (!rpcStatsEnabled || typeof method !== "string") return;
+  const scope = String(currentRpcScope()).slice(0, 120);
+  let methods = rpcCounts.get(scope);
+  if (!methods) { methods = new Map(); rpcCounts.set(scope, methods); }
+  methods.set(method, (methods.get(method) ?? 0) + 1);
+}
+
+/**
+ * Cap in-flight HTTP requests. A failed request releases its slot so later
+ * reads still run. Individual contract reads are not capped here: a multicall
+ * wave is one request.
+ */
+export function limitRpcConcurrency(request, concurrency) {
+  if (!Number.isInteger(concurrency) || concurrency < 1) throw new TypeError("A positive HTTP concurrency is required.");
+  let active = 0;
+  const waiting = [];
+  const start = (args, options) => {
+    active += 1;
+    return Promise.resolve(request(args, options)).finally(() => {
+      active -= 1;
+      waiting.shift()?.();
+    });
+  };
+  return (args, options) => {
+    if (active < concurrency) return start(args, options);
+    return new Promise((resolve, reject) => {
+      waiting.push(() => { start(args, options).then(resolve, reject); });
+    });
+  };
+}
+
 // Share overlapping identical reads, then immediately discard their results.
 // A new read after settlement always contacts the chain again. Writes, nonce
 // reads and gas estimates are deliberately excluded from coalescing.
@@ -103,6 +191,7 @@ export function createArbitrumRpcTransport({
   http, fallback, primaryUrl, backupUrls, timeoutMs = 3_000,
   cooldownMs = 15_000, chainValidationTtlMs = 300_000,
   now = () => Date.now(), defaultBackupUrls = DEFAULT_RPC_BACKUP_URLS,
+  httpConcurrency = 8, overlapChainCheck = false,
 } = {}) {
   if (typeof http !== "function" || typeof fallback !== "function") throw new TypeError("RPC transport constructors are required.");
   const urls = getRpcUrls({ primaryUrl, backupUrls, defaultBackupUrls });
@@ -116,14 +205,19 @@ export function createArbitrumRpcTransport({
     };
     const transports = states.map((state) => {
       const transport = http(state.url, { timeout: timeoutMs, retryCount: 0 })({ ...context, timeout: timeoutMs, retryCount: 0 });
+      const send = limitRpcConcurrency((args, options) => {
+        recordRpcCall(args?.method);
+        return transport.request(args, options);
+      }, httpConcurrency);
       const request = async (args, options) => {
         updateUnavailable();
         if (state.unavailableUntil > now()) throw unavailableError(state.host);
         try {
-          if (state.validatedUntil <= now()) {
+          const ensureChain = () => {
+            if (state.validatedUntil > now()) return null;
             if (!state.validation) {
               state.validation = (async () => {
-                const chainId = await transport.request({ method: "eth_chainId" }, { retryCount: 0 });
+                const chainId = await send({ method: "eth_chainId" }, { retryCount: 0 });
                 if (Number(chainId) !== ARBITRUM_SEPOLIA_CHAIN_ID) {
                   const error = new Error(`RPC endpoint ${state.host} is not on Arbitrum Sepolia (${ARBITRUM_SEPOLIA_CHAIN_ID}).`);
                   error.name = "RpcEndpointChainError";
@@ -134,33 +228,47 @@ export function createArbitrumRpcTransport({
               })();
             }
             const validation = state.validation;
-            let chainId;
-            try { chainId = await validation; }
-            finally { if (state.validation === validation) state.validation = null; }
-            if (args.method === "eth_chainId") {
-              rpcStatus.activeHost = state.host;
-              rpcStatus.fallbackActive = state.url !== preferredUrl;
-              updateUnavailable();
-              return chainId;
+            return validation.finally(() => {
+              if (state.validation === validation) state.validation = null;
+            });
+          };
+          const deliver = async (value) => {
+            let response;
+            try {
+              response = await value;
+            } catch (error) {
+              throw logRangeRequestError(error, args.method, state.host);
             }
+            if (args.method === "eth_chainId" && Number(response) !== ARBITRUM_SEPOLIA_CHAIN_ID) {
+              const error = new Error(`RPC endpoint ${state.host} is not on Arbitrum Sepolia (${ARBITRUM_SEPOLIA_CHAIN_ID}).`);
+              error.name = "RpcEndpointChainError";
+              throw error;
+            }
+            state.unavailableUntil = 0;
+            rpcStatus.activeHost = state.host;
+            rpcStatus.fallbackActive = state.url !== preferredUrl;
+            updateUnavailable();
+            return response;
+          };
+          if (args.method === "eth_chainId") {
+            const chainCheck = ensureChain();
+            if (chainCheck) return await deliver(chainCheck);
+          } else if (overlapChainCheck && state.validatedUntil <= now()) {
+            // The chain check shares this wait. Its result is required before the
+            // read is returned, so a wrong chain never becomes page data.
+            const chainCheck = ensureChain();
+            const settled = send(args, { ...options, retryCount: 0 }).then(
+              (value) => ({ value }),
+              (error) => ({ error }),
+            );
+            await chainCheck;
+            const outcome = await settled;
+            if (outcome.error) return await deliver(Promise.reject(outcome.error));
+            return await deliver(outcome.value);
           }
-          let response;
-          try {
-            response = await transport.request(args, { ...options, retryCount: 0 });
-          } catch (error) {
-            throw logRangeRequestError(error, args.method, state.host);
-          }
-          // Re-check explicit chain reads even while the cached validation is fresh.
-          if (args.method === "eth_chainId" && Number(response) !== ARBITRUM_SEPOLIA_CHAIN_ID) {
-            const error = new Error(`RPC endpoint ${state.host} is not on Arbitrum Sepolia (${ARBITRUM_SEPOLIA_CHAIN_ID}).`);
-            error.name = "RpcEndpointChainError";
-            throw error;
-          }
-          state.unavailableUntil = 0;
-          rpcStatus.activeHost = state.host;
-          rpcStatus.fallbackActive = state.url !== preferredUrl;
-          updateUnavailable();
-          return response;
+          const chainCheck = ensureChain();
+          if (chainCheck) await chainCheck;
+          return await deliver(send(args, { ...options, retryCount: 0 }));
         } catch (error) {
           if (canFailOver(error)) {
             state.unavailableUntil = now() + cooldownMs;

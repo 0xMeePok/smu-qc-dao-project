@@ -22,29 +22,18 @@ function keyFor(value) {
  * share promises only when explicitly pinned to a block number. Head, latest,
  * receipt, transaction, and signing methods pass through unchanged. Rejected
  * reads are evicted so a later attempt can recover. Nothing survives a request.
+ *
+ * Reads are not queued here. A multicall wave must reach the client together;
+ * HTTP concurrency is the transport's limit (`limitRpcConcurrency`).
  */
 export function createRequestReadClient(client, { chainId = client?.chain?.id, concurrency = 8 } = {}) {
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new TypeError("A positive read concurrency is required.");
   const reads = new Map(), abiIds = new WeakMap();
   let nextAbiId = 0;
-  let active = 0;
-  const waiting = [];
-  // Limit actual read calls, not just proposals: each verifier fans out into
-  // several independent fields. This queue is local to one request.
-  const schedule = call => new Promise((resolve, reject) => {
-    const run = () => {
-      active++;
-      Promise.resolve().then(call).then(resolve, reject).finally(() => {
-        active--;
-        waiting.shift()?.();
-      });
-    };
-    if (active < concurrency) run(); else waiting.push(run);
-  });
   const share = (key, call) => {
     if (key === null) return call();
     if (reads.has(key)) return reads.get(key);
-    const promise = schedule(call);
+    const promise = Promise.resolve().then(call);
     reads.set(key, promise);
     promise.catch(() => { if (reads.get(key) === promise) reads.delete(key); });
     return promise;

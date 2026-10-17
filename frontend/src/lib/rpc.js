@@ -1,6 +1,6 @@
 import { createPublicClient, fallback, http } from "viem";
 import { arbitrumSepolia } from "viem/chains";
-import { createArbitrumRpcTransport, getRpcUrls } from "../../../firebase/functions/rpcPolicy.js";
+import { createArbitrumRpcTransport, enableRpcStats, getRpcUrls } from "../../../firebase/functions/rpcPolicy.js";
 
 const viteEnv = import.meta.env ?? {};
 export const BROWSER_RPC_URL = viteEnv.VITE_ARBITRUM_SEPOLIA_RPC_URL?.trim() ?? "";
@@ -9,7 +9,7 @@ export const BROWSER_RPC_BACKUP_URLS = viteEnv.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_
 /** The wallet simulations, receipt reads and status probe share this policy. */
 export function createBrowserRpcTransport(options = {}) {
   return createArbitrumRpcTransport({ http, fallback, primaryUrl: BROWSER_RPC_URL,
-    backupUrls: BROWSER_RPC_BACKUP_URLS, ...options });
+    backupUrls: BROWSER_RPC_BACKUP_URLS, overlapChainCheck: true, ...options });
 }
 
 /**
@@ -20,9 +20,16 @@ export function createBrowserRpcTransport(options = {}) {
  * default for Arbitrum's 250 ms blocks is 500 ms, eight times the load on the
  * rate-limited public endpoints.
  */
+export const BROWSER_READ_BATCH = Object.freeze({ multicall: { batchSize: 1024, wait: 16 } });
+
 export function createBrowserPublicClient({ transport = createBrowserRpcTransport(), ...options } = {}) {
-  return createPublicClient({ chain: arbitrumSepolia, batch: { multicall: true }, pollingInterval: 4_000,
+  return createPublicClient({ chain: arbitrumSepolia, batch: BROWSER_READ_BATCH, pollingInterval: 4_000,
     transport, ...options });
+}
+
+/** Counts RPC methods by page path while developing. Tests enable the counter themselves. */
+export function enableBrowserRpcStats() {
+  enableRpcStats({ scope: () => (typeof location === "undefined" ? "browser" : location.pathname || "browser") });
 }
 
 export const browserPublicClient = createBrowserPublicClient();

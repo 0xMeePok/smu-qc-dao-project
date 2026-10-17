@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
-import { decodeFunctionData, encodeFunctionData, encodeFunctionResult, numberToHex } from "viem";
+import { encodeFunctionData, numberToHex } from "viem";
+import { answerEthCall } from "./answerEthCall.mjs";
 import { attestPublication } from "../index.js";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
 import { INDEPENDENT_PUBLISH_VALIDATION } from "../publicationValidation.js";
@@ -146,16 +147,6 @@ function integrationDb(initial = {}) {
   };
 }
 
-function emptyAbiValue(parameter) {
-  if (parameter.type === "tuple") {
-    return Object.fromEntries(parameter.components.map((item) => [item.name, emptyAbiValue(item)]));
-  }
-  if (parameter.type === "bool") return false;
-  if (parameter.type === "address") return `0x${"0".repeat(40)}`;
-  if (parameter.type === "bytes32") return `0x${"0".repeat(64)}`;
-  return 0n;
-}
-
 function independentClient(record, { update = false } = {}) {
   const expected = prepareStoredProposal({
     ...record,
@@ -206,12 +197,8 @@ function mockRpc(t, client) {
     } else if (method === "eth_getBlockByNumber") {
       result = { ...await client.getBlock({ blockNumber: BigInt(params[0]) }), number: params[0], transactions: [] };
     } else if (method === "eth_call") {
-      const { functionName, args } = decodeFunctionData({ abi: registry.abi, data: params[0].data });
-      const value = await client.readContract({ address: params[0].to, functionName, args });
-      const output = registry.abi.find((item) => item.name === functionName).outputs[0];
-      result = encodeFunctionResult({
-        abi: registry.abi, functionName,
-        result: output.type === "tuple" ? { ...emptyAbiValue(output), ...value } : value,
+      result = await answerEthCall({
+        to: params[0].to, data: params[0].data, client, abiFor: () => registry.abi,
       });
     } else {
       throw new Error(`Unexpected RPC method: ${method}`);

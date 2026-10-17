@@ -15,7 +15,10 @@ vi.mock("../../src/lib/matching.js", async (importOriginal) => ({
   ...await importOriginal(),
   getMockMatching: (...args) => mocks.matching(...args),
 }));
-vi.mock("../../src/lib/escrow.js", () => ({ readEscrow: (...args) => mocks.escrow(...args) }));
+vi.mock("../../src/lib/escrow.js", () => ({
+  readEscrow: (...args) => mocks.escrow(...args),
+  readEscrowFundingStarted: (...args) => mocks.escrow(...args),
+}));
 vi.mock("../../src/lib/independentEscrow.js", async importOriginal => ({
   ...await importOriginal(),
   getIndependentFundingState: async () => ({ configured: true, exists: false, actions: {}, wallet: {} }),

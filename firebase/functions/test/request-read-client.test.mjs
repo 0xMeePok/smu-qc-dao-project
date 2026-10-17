@@ -10,7 +10,7 @@ const abi = [{ type: "function", name: "value", inputs: [], outputs: [{ type: "u
 const request = (overrides = {}) => ({ address: "0x1234", abi, functionName: "value", blockNumber: 100n, ...overrides });
 
 describe("request-scoped pinned reads", () => {
-  it("caps actual pinned RPC concurrency and drains the queue after a failed read", async () => {
+  it("[BUT-SXFPP-184] does not queue pinned reads, and a failed read still lets the rest finish", async () => {
     let active = 0, peak = 0;
     const client = createRequestReadClient({ readContract: async req => {
       active++; peak = Math.max(peak, active);
@@ -20,7 +20,7 @@ describe("request-scoped pinned reads", () => {
       return req.args[0];
     } }, { concurrency: 3 });
     const results = await Promise.allSettled(Array.from({ length: 20 }, (_, index) => client.readContract(request({ args: [BigInt(index)] }))));
-    assert.equal(peak, 3); assert.equal(active, 0);
+    assert.equal(peak, 20); assert.equal(active, 0);
     assert.equal(results.filter(result => result.status === "rejected").length, 1);
     assert.equal(results.at(-1).value, 19n);
   });

@@ -7,12 +7,14 @@ import {
   redactUrlPaths, RPC_QUOTA_MESSAGE, RPC_UNREACHABLE_MESSAGE, TRANSACTION_FEE_TOO_LOW_MESSAGE,
 } from "./errors.js";
 import { assertBytes32, prepareOpportunityCommit } from "../../../firebase/functions/auditCanonical.js";
-import { isEscrowRegistry, requireAddress, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
+import { isEscrowRegistry, loadEscrowVerification, requireAddress, verifyProposalEscrow } from "../../../firebase/functions/escrowAudit.js";
+import { readCachedTokenDecimals, storeTokenDecimals } from "../../../firebase/functions/immutableChainCache.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
 import { fundingOpportunityAuditPayload, postingAuditPayload } from "../../../firebase/functions/opportunityAuditPayload.js";
 import { isIndependentProposal } from "../../../firebase/functions/independentProposal.js";
 import { prepareIndependentEscrowCommit, prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { assertActiveAuditDeployment, isActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
+import { beginEscrowDisplay } from "./escrowDisplay.js";
 import { prepareRemovedProposalClaim } from "./escrowFunding.js";
 import { escrowCustodyLock, escrowSelectionGate } from "../../../firebase/functions/escrowCustody.js";
 
@@ -74,8 +76,8 @@ function depositor(value) {
 }
 
 // Request-local cache: every verification and eligibility read uses the same fresh block.
-async function escrowBlockReader(adapters, config) {
-  const block = await adapters.getBlock({ chainId: config.chainId, blockTag: "latest" });
+async function escrowBlockReader(adapters, config, existingBlock) {
+  const block = existingBlock ?? await adapters.getBlock({ chainId: config.chainId, blockTag: "latest" });
   if (typeof block?.number !== "bigint" || typeof block?.timestamp !== "bigint") throw new Error("Could not read the current escrow block. Please refresh.");
   const cache = new Map();
   const readContract = request => {
@@ -183,22 +185,38 @@ async function readUserAction({ proposal, account, action, adapters, config }) {
 /** A single-block snapshot, verified through the registry AND factory mappings.
  * Amounts and timestamps are bigint; state/currentTranche/decimals/feeBps are numbers.
  */
-export async function readEscrow({ proposal, account, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+export async function readEscrow({ proposal, account, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG, allowImmutableCache = false }) {
+  // A cached display read shares its block with the audit check. The linkage
+  // wave then also carries getProposal and anchorCount when that check is armed.
+  if (allowImmutableCache && proposal?.fundingTerms && !isIndependentProposal(proposal)) {
+    const slot = beginEscrowDisplay({ proposal, adapters, config });
+    const ready = await slot.ready;
+    return readEscrowSnapshot({
+      proposal, account, adapters, config: ready.config, isHistorical: ready.isHistorical,
+      block: ready.block, allowImmutableCache: true,
+    });
+  }
   const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
-  if (usingConfiguredDeployment) config = await resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG });
+  const [resolved, block] = await Promise.all([
+    usingConfiguredDeployment ? resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG }) : config,
+    adapters.getBlock({ chainId: config.chainId, blockTag: "latest" }),
+  ]);
+  config = resolved;
   deployment(config);
   const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
-  return readEscrowSnapshot({ proposal, account, adapters, config, isHistorical });
+  return readEscrowSnapshot({ proposal, account, adapters, config, isHistorical, block, allowImmutableCache });
 }
 
-async function readEscrowSnapshot({ proposal, account, adapters, config, isHistorical = false }) {
+async function readEscrowSnapshot({ proposal, account, adapters, config, isHistorical = false, block, allowImmutableCache = false }) {
   deployment(config);
   const expected = isIndependentProposal(proposal)
     ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
     : prepareStoredProposal(proposal, { registryConfig: config });
   const walletAddress = account ? requireAddress(account, "Wallet address") : null;
-  const { block, readContract } = await escrowBlockReader(adapters, config);
-  const canonical = await verifyProposalEscrow({ expected, config, readContract });
+  const pinned = await escrowBlockReader(adapters, config, block);
+  block = pinned.block;
+  const { readContract } = pinned;
+  const canonical = await (allowImmutableCache ? loadEscrowVerification : verifyProposalEscrow)({ expected, config, readContract, allowImmutableCache });
   const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
   const names = ["state", "platformSigner", "problemOwner", "proposalOwner", "fundingTarget", "tokenDecimals", "funderVoting",
     "totalDeposited", "totalReleased", "totalRefunded", "feePaid", "feeBps", "selectionId", "currentTranche", "expiresAt",
@@ -208,11 +226,13 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
   const supportsPendingSelection = config.abi.some(item => item.type === "function" && item.name === "pendingProposalForPosting");
   const supportsSelectionRejection = config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "rejectSelection");
   const tokenRead = (functionName, args) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
-  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused, pendingProposalId, walletValues, custodyBalance] = await Promise.all([
+  const [values, active, registered, tokenDecimals, tokenListed, invalidated, paused, pendingProposalId, walletValues, custodyBalance, milestones] = await Promise.all([
     Promise.all(names.map(name => read(name))),
     readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
-    readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName: "decimals" }),
+    (allowImmutableCache && readCachedTokenDecimals(config.chainId, expected.fundingTerms.token) !== undefined
+      ? readCachedTokenDecimals(config.chainId, expected.fundingTerms.token)
+      : readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName: "decimals" })),
     readContract({ address: canonical.factoryAddress, abi: config.escrow.factoryAbi, functionName: "allowedTokens", args: [expected.fundingTerms.token] }),
     supportsInvalidation ? readContract({ address: config.address, abi: config.abi, functionName: "isFundingInvalidated", args: [expected.entityId, canonical.address] }) : null,
     supportsPause ? readContract({ address: config.address, abi: config.abi, functionName: "postingFundingPaused", args: [expected.opportunityId] }) : false,
@@ -222,6 +242,7 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
       read("depositorSummary", [walletAddress]),
     ]) : null,
     tokenRead("balanceOf", [canonical.address]),
+    Promise.all(expected.fundingTerms.trancheBps.map((_, index) => read("milestoneAt", [BigInt(index)]).then(milestone))),
   ]);
   assertProposalContent(registered, expected);
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
@@ -239,7 +260,7 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
   for (const name of ["fundingTarget", "totalDeposited", "totalReleased", "totalRefunded", "feePaid", "expiresAt", "approvalDeadline", "yesWeight", "noWeight", "refundAvailableAt", "outstandingBalance", "funderCount"]) snapshot[name] = BigInt(snapshot[name]);
   const decimals = Number(snapshot.tokenDecimals);
   const tokenPrecisionValid = Number(tokenDecimals) === decimals;
-  const milestones = await Promise.all(expected.fundingTerms.trancheBps.map((_, index) => read("milestoneAt", [BigInt(index)]).then(milestone)));
+  if (allowImmutableCache && tokenPrecisionValid) storeTokenDecimals(config.chainId, expected.fundingTerms.token, Number(tokenDecimals));
   const currentMilestone = milestones[snapshot.currentTranche] ?? null;
   const wallet = { address: walletAddress, balance: 0n, allowance: 0n, contribution: 0n, hasVoted: false, depositor: null };
   if (walletAddress) {
@@ -286,6 +307,32 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
     remaining, milestones, currentMilestone, wallet, roles, can, isHistorical, supportsSelectionRejection, pendingProposalId,
     custodyBalance: BigInt(custodyBalance), custodyLock, selectionGate, fundingRequirementMet: selectionGate.fundingMet,
     blockedBySelection: !same(pendingProposalId, ZERO_HASH) && !same(pendingProposalId, expected.entityId) };
+}
+
+/** Withdraw and edit guards. Linkage may be cached; the deposit total is always fresh. */
+export async function readEscrowFundingStarted({ proposal, account, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
+  const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
+  const [resolved, block] = await Promise.all([
+    usingConfiguredDeployment ? resolveAuditDeployment(proposal, { getTransaction: adapters.getTransaction, activeConfig: AUDIT_REGISTRY_CONFIG }) : config,
+    adapters.getBlock({ chainId: config.chainId, blockTag: "latest" }),
+  ]);
+  config = deployment(resolved);
+  const expected = isIndependentProposal(proposal)
+    ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
+    : prepareStoredProposal(proposal, { registryConfig: config });
+  const { readContract } = await escrowBlockReader(adapters, config, block);
+  const canonical = await loadEscrowVerification({ expected, config, readContract, allowImmutableCache: true });
+  const totalDeposited = BigInt(await readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName: "totalDeposited" }));
+  let grantOfferState = 0;
+  if (proposal.opportunityType === "open-funding" && config.escrow.openFundingPoolAbi?.length
+      && config.escrow.escrowAbi.some(item => item.type === "function" && item.name === "openFundingPool")) {
+    const pool = await readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName: "openFundingPool" });
+    if (pool && !/^0x0{40}$/i.test(pool)) {
+      const offer = await readContract({ address: pool, abi: config.escrow.openFundingPoolAbi, functionName: "getOffer", args: [expected.entityId] });
+      grantOfferState = Number(field(offer, "state", 2));
+    }
+  }
+  return { totalDeposited, grantOfferState, address: canonical.address };
 }
 
 export async function readPostingFundingStarted(posting, { adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG } = {}) {
