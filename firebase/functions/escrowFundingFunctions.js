@@ -13,7 +13,11 @@ import { getEscrowAdminCancellation, startEscrowAdminCancellation, sweepEscrowAd
 
 export const escrowPlatformKey = defineSecret("ESCROW_PLATFORM_PRIVATE_KEY");
 
-export function registerEscrowFundingFunctions({ db, client, config, requireMember, options, region }) {
+// Pre-signature callables kept warm: a cold start here delays the wallet prompt.
+// Each minimum instance is billed while idle; see the deployment notes.
+const HOT_PRE_SIGNATURE_OPTIONS = { minInstances: 1 };
+
+export function registerEscrowFundingFunctions({ db, client, batchedReadClient, config, requireMember, options, region }) {
   const getWallet = () => {
     const key = escrowPlatformKey.value()?.trim();
     if (!/^0x[0-9a-fA-F]{64}$/.test(key || "")) throw new HttpsError("failed-precondition", "Configure the deployment's platform signing secret before settlement.");
@@ -23,8 +27,19 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
         backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }) });
   };
   const shared = { db, client, config, getWallet };
-  const callable = (service, signing = false) => onCall({ ...options, timeoutSeconds: 180,
-    ...(signing ? { secrets: [escrowPlatformKey] } : {}) }, async request => {
+  // Multicall batching makes each round of a request's read queue one RPC
+  // request, so the queue may be wider without adding endpoint load.
+  const batchedArgs = args => batchedReadClient ? { ...args, client: batchedReadClient, readConcurrency: 48 } : args;
+  const callable = (service, signing = false, { warmable = false, ...extra } = {}) => onCall({ ...options, timeoutSeconds: 180,
+    ...extra, ...(signing ? { secrets: [escrowPlatformKey] } : {}) }, async request => {
+    // A signed-in panel may wake this instance before the member clicks. The
+    // ping reads no member data and returns nothing; it only opens the RPC
+    // connection and its cached chain check. App Check still applies.
+    if (warmable && request.data?.warmup === true) {
+      if (!/^0x[0-9a-f]{40}$/.test(request.auth?.uid ?? "")) throw new HttpsError("unauthenticated", "Sign in with your email.");
+      try { await (batchedReadClient ?? client).getChainId(); } catch { /* The real request reports RPC failures. */ }
+      return { warm: true };
+    }
     const uid = await requireMember(request);
     try {
       return await service({ ...shared, uid, proposalId: request.data?.proposalId, problemId: request.data?.problemId,
@@ -38,12 +53,14 @@ export function registerEscrowFundingFunctions({ db, client, config, requireMemb
     }
   });
   return {
-    prepareEscrowDeposit: callable(prepareEscrowDeposit),
+    prepareEscrowDeposit: callable(args => prepareEscrowDeposit(batchedArgs(args)), false, { warmable: true, ...HOT_PRE_SIGNATURE_OPTIONS }),
     prepareRemovedProposalClaim: callable(prepareRemovedProposalClaim),
-    syncEscrowFunding: callable(syncEscrowFunding, true),
+    // Member-facing reconciliation reads through the batched client; the
+    // scheduled sweep below keeps the shared client and its default queue.
+    syncEscrowFunding: callable(args => syncEscrowFunding(batchedArgs(args)), true),
     getEscrowFundingHistory: callable(getEscrowFundingHistory),
     getEscrowFundingSummary: callable(getEscrowFundingSummary),
-    startEscrowSettlement: callable(startEscrowSettlement, true),
+    startEscrowSettlement: callable(args => startEscrowSettlement(batchedArgs(args)), true),
     getEscrowAdminCancellation: callable(getEscrowAdminCancellation),
     startEscrowAdminCancellation: callable(startEscrowAdminCancellation, true),
     queueEscrowFunding: onDocumentWritten({ document: "proposals/{proposalId}", region, retry: true, maxInstances: 5 },

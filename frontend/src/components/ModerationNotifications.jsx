@@ -1,39 +1,47 @@
-import { useEffect, useRef, useState } from "react";
-import { listModerationNotifications, markAllModerationNotificationsRead, markModerationNotificationRead, moderationError } from "../lib/moderation.js";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  NOTIFICATION_REFRESH_MS,
+  markAllNotificationsRead,
+  markNotificationRead,
+  notificationSnapshot,
+  refreshNotifications,
+  setNotificationUser,
+  subscribeNotifications,
+} from "../lib/notifications.js";
 import { formatInstant } from "../lib/datetime.js";
 import { go } from "../lib/router.js";
 import { noticeWorkflowStatus } from "../config/workflowStatus.js";
 import { StatusBadge } from "./StatusBadge.jsx";
 
 function useModerationNotifications(userId) {
-  const [items, setItems] = useState([]);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(null);
-  const generation = useRef(0);
+  const snapshot = useSyncExternalStore(subscribeNotifications, notificationSnapshot, notificationSnapshot);
   useEffect(() => {
-    let active = true;
-    generation.current++;
-    setItems([]); setError(""); setBusy(null);
+    setNotificationUser(userId);
     if (!userId) return undefined;
-    listModerationNotifications().then((data) => { if (active) setItems(data.items ?? []); })
-      .catch((err) => { if (active) setError(moderationError(err)); });
-    return () => { active = false; generation.current++; };
+    refreshNotifications();
+    // The bell stays mounted for the whole session, so it must keep up with
+    // notices written after sign-in: refresh on return to the tab and on a slow timer.
+    const refresh = () => { if (document.visibilityState !== "hidden") refreshNotifications(); };
+    const timer = setInterval(refresh, NOTIFICATION_REFRESH_MS);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, [userId]);
-  const markRead = async (id) => {
-    const version = generation.current;
-    setBusy(id); setError("");
-    try { await markModerationNotificationRead(id); if (version === generation.current) setItems((current) => current.map((item) => item.id === id ? { ...item, read: true } : item)); }
-    catch (err) { if (version === generation.current) setError(moderationError(err)); }
-    finally { if (version === generation.current) setBusy(null); }
+  // Never render another account's feed, even for the render before the effect switches it.
+  const current = userId && snapshot.userId === userId ? snapshot : null;
+  return {
+    items: current?.items ?? [],
+    error: current?.error ?? "",
+    busy: current?.busy ?? null,
+    loading: Boolean(userId) && !current?.loaded && !current?.error,
+    markRead: markNotificationRead,
+    markAllRead: markAllNotificationsRead,
+    refresh: () => refreshNotifications({ force: true }),
   };
-  const markAllRead = async () => {
-    const version = generation.current;
-    setBusy("all"); setError("");
-    try { await markAllModerationNotificationsRead(); if (version === generation.current) setItems((current) => current.map((item) => ({ ...item, read: true }))); }
-    catch (err) { if (version === generation.current) setError(moderationError(err)); }
-    finally { if (version === generation.current) setBusy(null); }
-  };
-  return { items, error, busy, markRead, markAllRead };
 }
 
 function MarkAllReadButton({ unread, busy, onMarkAllRead }) {
@@ -51,11 +59,11 @@ function recordLabel(item, target) {
   return target.startsWith("proposal/") ? "View proposal" : "View posting";
 }
 
-function NotificationFeed({ items, error, busy, onMarkRead, onNavigate }) {
+function NotificationFeed({ items, error, busy, loading, onMarkRead, onRetry, onNavigate }) {
   const openRecord = (target) => { onNavigate?.(); go(target); };
   return <>
-    {error && <p role="alert" className="error-banner">{error}</p>}
-    {items.length ? items.map((item) => {
+    {error && <p role="alert" className="error-banner">{error}{onRetry && <> <button type="button" className="text-button" onClick={onRetry}>Retry</button></>}</p>}
+    {loading && !items.length ? <p className="table-empty" role="status">Loading notices…</p> : items.length ? items.map((item) => {
       const target = recordTarget(item);
       const body = <>
         {noticeWorkflowStatus(item) && <StatusBadge status={noticeWorkflowStatus(item)} interactive={false} />}
@@ -76,19 +84,19 @@ function NotificationFeed({ items, error, busy, onMarkRead, onNavigate }) {
 }
 
 export function ModerationNotifications({ userId }) {
-  const { items, error, busy, markRead, markAllRead } = useModerationNotifications(userId);
+  const { items, error, busy, loading, markRead, markAllRead, refresh } = useModerationNotifications(userId);
   const unread = items.filter((item) => !item.read).length;
   return <section className="card-table moderation-notifications">
     <div className="table-header">
       <h2>Content, matching & payment notices</h2>
       <MarkAllReadButton unread={unread} busy={busy} onMarkAllRead={markAllRead} />
     </div>
-    <NotificationFeed items={items} error={error} busy={busy} onMarkRead={markRead} />
+    <NotificationFeed items={items} error={error} busy={busy} loading={loading} onMarkRead={markRead} onRetry={refresh} />
   </section>;
 }
 
 export function NotificationCentre({ userId }) {
-  const { items, error, busy, markRead, markAllRead } = useModerationNotifications(userId);
+  const { items, error, busy, loading, markRead, markAllRead, refresh } = useModerationNotifications(userId);
   const [open, setOpen] = useState(false);
   const panel = useRef(null);
   const unread = items.filter((item) => !item.read).length;
@@ -111,7 +119,11 @@ export function NotificationCentre({ userId }) {
       aria-haspopup="true"
       aria-controls="notification-centre-panel"
       aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
-      onClick={() => setOpen((current) => !current)}
+      onClick={() => {
+        // Opening the bell re-reads the shared feed, so it matches the Profile page.
+        if (!open) refreshNotifications();
+        setOpen((current) => !current);
+      }}
     >
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9" />
@@ -125,7 +137,7 @@ export function NotificationCentre({ userId }) {
         <MarkAllReadButton unread={unread} busy={busy} onMarkAllRead={markAllRead} />
       </div>
       <div className="notification-centre-feed">
-        <NotificationFeed items={items} error={error} busy={busy} onMarkRead={markRead} onNavigate={() => setOpen(false)} />
+        <NotificationFeed items={items} error={error} busy={busy} loading={loading} onMarkRead={markRead} onRetry={refresh} onNavigate={() => setOpen(false)} />
       </div>
     </div>}
   </div>;

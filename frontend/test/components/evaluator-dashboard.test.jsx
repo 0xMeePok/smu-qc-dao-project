@@ -49,9 +49,9 @@ describe("QCDAO-95 evaluator feedback dashboard", () => {
     render(<EvaluatorQueue onNavigate={vi.fn()} />);
     await screen.findByText("Annealing routing study");
     const gated = screen.getByText("Annealing routing study").closest(".table-row");
-    expect(within(gated).getByText(/the owner cannot take this solution to a decision/)).toBeTruthy();
+    expect(within(gated).getByText(/an owner can select without one/)).toBeTruthy();
     const open = screen.getByText("Already recommended").closest(".table-row");
-    expect(within(open).queryByText(/cannot take this solution to a decision/)).toBeNull();
+    expect(within(open).queryByText(/an owner can select without one/)).toBeNull();
   });
 
   it("explains a moderated-away recommendation rather than quietly re-queuing it", async () => {
@@ -71,7 +71,7 @@ describe("QCDAO-95 evaluator feedback dashboard", () => {
     render(<EvaluatorQueue onNavigate={vi.fn()} />);
     const item = (await screen.findByText("Annealing routing study")).closest(".table-row");
     expect(within(item).getByText(/You deleted your recommendation/)).toBeTruthy();
-    expect(within(item).queryByText(/the owner cannot take this solution/)).toBeNull();
+    expect(within(item).queryByText(/an owner can select without one/)).toBeNull();
   });
 
   it("shows my own outcome on a filing that still counts", async () => {

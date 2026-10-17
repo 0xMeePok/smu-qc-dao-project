@@ -3,16 +3,26 @@ import { formatInstant } from "../lib/datetime.js";
 
 /** Listing cards use the server's existing metric read, never an RPC per card.
  * A posting may have several separately funded proposal escrows. */
+// Projections written before cancelled and refunded escrows were excluded can
+// still count their deposits as raised; never show those totals.
+export const ESCROW_PROGRESS_VERSION = 2;
+
+function closedLabel(count) {
+  return `${count} cancelled or refunded proposal ${count === 1 ? "escrow is" : "escrows are"} not counted.`;
+}
+
 export function PostingFundingProgress({ projection }) {
   if (!projection) return null;
-  if (!projection.available || projection.truncated) return <small className="field-hint">Proposal escrow progress needs verification. Open the posting to check current custody.</small>;
-  if (!projection.groups?.length) return <small className="field-hint">No proposal escrow deposits yet.</small>;
+  if (!projection.available || projection.truncated || projection.version !== ESCROW_PROGRESS_VERSION) return <small className="field-hint">Proposal escrow progress needs verification. Open the posting to check current custody.</small>;
+  const closed = Number.isInteger(projection.closedItems) && projection.closedItems > 0 ? projection.closedItems : 0;
+  if (!projection.groups?.length) return <small className="field-hint">{closed ? `No active proposal escrow funding. ${closedLabel(closed)}` : "No proposal escrow deposits yet."}</small>;
   return <div className="escrow-card-progress">
     {projection.groups.slice(0, 3).map(row => <div key={row.tokenAddress}>
       <FundingProgress summary={row} compact label="Proposal escrow funding progress" />
       <small>{row.count} proposal {row.count === 1 ? "escrow" : "escrows"} · Verified as of {formatInstant(new Date(row.timestamp * 1000))}</small>
     </div>)}
     {projection.groups.length > 3 && <small>More tokens appear on the posting.</small>}
+    {closed > 0 && <small>{closedLabel(closed)}</small>}
     <small>Each proposal has its own target. Funding does not select a solution.</small>
   </div>;
 }

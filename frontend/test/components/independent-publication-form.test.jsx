@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INDEPENDENT_PROPOSAL_FIELDS } from "../../src/config/proposal.js";
 
@@ -83,10 +83,27 @@ describe("independent publication recovery feedback", () => {
     mocks.configured = true;
     await form(); fireEvent.click(screen.getByRole("button", { name: "Sign and publish proposal" }));
     await screen.findByRole("heading", { name: "Published independent-form" });
-    expect(mocks.activate).toHaveBeenCalledWith("independent-form", { account });
+    expect(mocks.activate).toHaveBeenCalledWith("independent-form", expect.objectContaining({ account }));
     expect(mocks.submit.mock.invocationCallOrder[0]).toBeLessThan(mocks.activate.mock.invocationCallOrder[0]);
     expect(mocks.anchor).toHaveBeenCalledOnce();
     expect(mocks.submit).toHaveBeenCalledOnce();
+  });
+
+  it("announces both wallet approvals up front and reports the escrow approval as step 2 of 2", async () => {
+    mocks.configured = true;
+    let progress, finish;
+    mocks.activate.mockImplementation((_id, options) => { progress = options.onProgress; return new Promise(resolve => { finish = resolve; }); });
+    await form("1000");
+    expect(screen.getByText(/Publishing takes two wallet approvals/)).toBeTruthy();
+    // Review row and sidebar both use the shared grouped amount format.
+    expect(screen.getAllByText("USDC 1,000")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Sign and publish proposal" }));
+    expect(await screen.findByText(/Step 2 of 2: preparing the listing’s escrow/)).toBeTruthy();
+    expect(screen.queryByText("Saving proposal…")).toBeNull();
+    await act(async () => { progress({ status: "awaiting_signature", action: "activate" }); });
+    expect(screen.getByText("Step 2 of 2: create the listing’s escrow — approve in your wallet.")).toBeTruthy();
+    await act(async () => { finish({ transactionHash: `0x${"2".repeat(64)}` }); });
+    await screen.findByRole("heading", { name: "Published independent-form" });
   });
 
   it("preserves publication after funding activation is rejected or remains pending", async () => {

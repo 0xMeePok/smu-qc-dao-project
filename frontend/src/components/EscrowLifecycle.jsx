@@ -1,4 +1,4 @@
-import { escrowLifecycle, confirmedFundingEvents, fundingAmount, fundingExplorer, validFundingTransaction } from "../lib/fundingDisplay.js";
+import { escrowLifecycle, confirmedFundingEvents, fundingAmount, fundingExplorer, fundingUnits, validFundingTransaction } from "../lib/fundingDisplay.js";
 import { formatInstant } from "../lib/datetime.js";
 import { MAIN_ESCROW_STATE, ESCROW_ADMIN_CANCELLATION_LABEL, ESCROW_REFUND_REASON_LABELS } from "../config/workflowStatus.js";
 
@@ -20,13 +20,24 @@ function confirmedEventLabel(event, summary) {
   return lifecycle && lifecycle.key !== "unverified" ? `${label} · ${lifecycle.label}` : label;
 }
 
+/** The open-state meaning must not say "funding is open" once the target is held. */
+function lifecycleMeaning(lifecycle, summary) {
+  if (lifecycle.key !== "pending" || summary.workflow === "independent-crowdfunding") return lifecycle.meaning;
+  const target = fundingUnits(summary.fundingTarget ?? summary.target), deposited = fundingUnits(summary.totalDeposited);
+  if (summary.isGrant && deposited === 0n) return "Waiting for grant funding. The grant moves into this escrow when the researcher accepts the selected offer.";
+  if (target !== null && target > 0n && deposited !== null && deposited >= target) {
+    return "Fully funded. Contributions stay in escrow until the problem owner selects this proposal and both owners approve the upfront payment, or an eligible refund opens.";
+  }
+  return lifecycle.meaning;
+}
+
 export function EscrowLifecycleBadge({ summary = {}, compact = false, stale = false }) {
   const lifecycle = escrowLifecycle(summary, { stale });
   const reason = ["refunded", "cancelled", "expired", "invalidated"].includes(lifecycle.key)
     ? ESCROW_REFUND_REASON_LABELS[summary.refundReason ?? summary.lifecycle?.refundReason] : null;
   return <div data-escrow-lifecycle={lifecycle.key}>
     <span className={`status-badge status-${lifecycle.key}`} aria-label={`Escrow state: ${lifecycle.label}`}>{lifecycle.label}</span>
-    {!compact && <p className="field-hint">{lifecycle.meaning}</p>}
+    {!compact && <p className="field-hint">{lifecycleMeaning(lifecycle, summary)}</p>}
     {reason && <p className="field-hint">Refund reason: {reason}</p>}
   </div>;
 }

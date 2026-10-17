@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { ROLES } from "../config/roles.js";
 import { listReportableComments, moderationError } from "../lib/moderation.js";
@@ -205,6 +205,7 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const fieldId = initial ? `edit-comment-${initial.id}` : parentId ? `reply-comment-${parentId}` : "new-comment";
+  const optionPrefix = `${fieldId}-recommendation-${useId().replace(/:/g, "")}`;
   const submit = async (event) => {
     event.preventDefault();
     if (busy || unavailable) return;
@@ -236,10 +237,11 @@ function CommentComposer({ proposalId, evaluator, onPosted, initial, onCancel, p
     </p>}
     {recommend && <fieldset className="comment-recommendations" disabled={busy}>
       <legend>Recommendation</legend>
-      {RECOMMENDATIONS.map(([value, label]) => <label key={value} className="comment-recommendation-option">
-        <input type="radio" name={initial ? `edit-recommendation-${initial.id}` : "comment-recommendation"}
+      {RECOMMENDATIONS.map(([value, label]) => <label key={value} className="comment-recommendation-option" htmlFor={`${optionPrefix}-${value}`}>
+        <input type="radio" id={`${optionPrefix}-${value}`} name={initial ? `edit-recommendation-${initial.id}` : "comment-recommendation"}
+          aria-labelledby={`${optionPrefix}-${value}-label`}
           value={value} checked={recommendation === value} onChange={() => setRecommendation(value)} />
-        <span>{label}</span>
+        <span id={`${optionPrefix}-${value}-label`}>{label}</span>
       </label>)}
     </fieldset>}
     {unavailable && <p role="alert" className="field-hint">This comment was removed. Your draft is still here; cancel to return to the discussion.</p>}

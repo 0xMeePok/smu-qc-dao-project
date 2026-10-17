@@ -9,7 +9,7 @@ export function SignInWithEmail() {
 
   return (
     <>
-      <button className="primary signin-button" type="button" onClick={() => { void signIn(); }} disabled={isBusy || isSigningOut}>
+      <button className="primary signin-button" type="button" data-closes-menu onClick={() => { void signIn(); }} disabled={isBusy || isSigningOut}>
         {isSigningOut ? "Signing out…" : isBusy ? "Signing in…" : "Sign in with email"}
       </button>
       {error ? <span className="signin-error" role="alert">{error}</span> : null}

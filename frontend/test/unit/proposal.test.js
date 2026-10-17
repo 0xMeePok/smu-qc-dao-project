@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS, PROPOSAL_CATEGORIES } from "../../src/config/proposal.js";
 import { proposalBlockReason, validateProposal, messageForProposalError } from "../../src/lib/proposalValidation.js";
-import { buildProposalDocument } from "../../src/lib/proposals.js";
+import { buildProposalDocument, releasesProposalSlot } from "../../src/lib/proposals.js";
 import { attachmentPath } from "../../src/lib/attachments.js";
 import { recommendationCounts } from "../../src/config/workflowStatus.js";
 import {
@@ -184,5 +184,20 @@ describe("QCDAO-62/63 proposal queues", () => {
     assert.match(queueError(denied), /assigned evaluator/);
     assert.match(queueError({ code: "functions/internal", message: "boom" }), /Could not load the queue/);
     assert.doesNotMatch(queueError({ code: "functions/internal", message: "boom" }), /boom/);
+  });
+});
+
+describe("one active proposal per posting", () => {
+  it("frees the slot after withdrawal or a rejected/declined selection, but not for a live proposal", () => {
+    for (const proposal of [null, { status: "withdrawn" }, { status: "rejected", escrowRefundReason: "selection_declined" },
+      { status: "submitted", matching: { status: "declined" } },
+      { status: "submitted", escrowAdminCancellation: { status: "complete" } }]) {
+      assert.equal(releasesProposalSlot(proposal), true, JSON.stringify(proposal));
+    }
+    for (const proposal of [{ status: "submitted" }, { status: "under_review" }, { status: "accepted" },
+      { status: "submitted", matching: { status: "awaiting_confirmation" } },
+      { status: "submitted", escrowAdminCancellation: { status: "queued" } }]) {
+      assert.equal(releasesProposalSlot(proposal), false, JSON.stringify(proposal));
+    }
   });
 });

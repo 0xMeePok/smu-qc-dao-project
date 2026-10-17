@@ -92,6 +92,38 @@ describe("QCDAO-96 and QCDAO-97 audit trail filters", () => {
   });
 });
 
+describe("audit trail loading", () => {
+  it("shows a skeleton while loading, and a failed load can be retried", async () => {
+    window.location.hash = "#/admin";
+    let fail;
+    mocks.list.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    render(<ConsolidatedAuditTrail scope="admin" />);
+    expect(screen.getByLabelText("Loading audit trail events")).toBeTruthy();
+    expect(screen.getByText("Loading audit trail…")).toBeTruthy();
+    fail(Object.assign(new Error("deadline"), { code: "functions/deadline-exceeded" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByLabelText("Loading audit trail events")).toBeNull();
+    mocks.list.mockResolvedValue({ items: [recommendation], count: 1, nextCursor: null, truncated: false });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("heading", { name: "Evaluator recommendation submitted" })).toBeTruthy();
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits for a pause in the related-record field before asking the server", async () => {
+    window.location.hash = "#/admin";
+    mocks.list.mockResolvedValue({ items: [], count: 0, nextCursor: null, truncated: false });
+    render(<ConsolidatedAuditTrail scope="admin" />);
+    await screen.findByText("0 events");
+    const field = screen.getByLabelText("Related record");
+    for (const value of ["p", "pr", "pro"]) fireEvent.change(field, { target: { value } });
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await screen.findByText("0 events");
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ related: "pro" }));
+  });
+});
+
 const token = "0x" + "1".repeat(40);
 const contributor = "0x" + "2".repeat(40);
 const escrow = "0x" + "3".repeat(40);

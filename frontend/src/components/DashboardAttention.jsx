@@ -48,7 +48,7 @@ export function DashboardAttention({
               <div className="table-row-actions">
                 {item.deadlineAt && (
                   <span className="table-row-meta">
-                    Ends <ExpiryCountdown expiresAt={item.deadlineAt} showInstant={false} />
+                    Ends <ExpiryCountdown expiresAt={item.deadlineAt} windowMs={item.windowMs ?? undefined} showInstant={false} />
                   </span>
                 )}
                 <button type="button" className="primary small" onClick={() => onNavigate?.(item.route)}>{item.cta}</button>

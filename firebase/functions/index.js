@@ -27,6 +27,7 @@ import {
 import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 import { postingProgressChanged, refreshPostingEscrowProgress } from "./postingEscrowProgress.js";
+import { notifyEscrowWorkflowEvent } from "./escrowWorkflowNotifications.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
 import { createArbitrumRpcTransport, getRpcUrls } from "./rpcPolicy.js";
@@ -186,10 +187,29 @@ export const syncEscrowMarketplacePosting = onDocumentWritten(
   { document: "problems/{problemId}", region: REGION, maxInstances: 3, retry: true },
   event => projectPostingEscrowProgress(event, "posting"),
 );
+// QCDAO-68: on-chain selection, rejection and cancellation notices for the
+// researcher and posting owner. Escrow events are immutable once written.
+export const notifyEscrowWorkflow = onDocumentCreated(
+  { document: "escrowFundingEvents/{eventId}", region: REGION, maxInstances: 3, retry: true },
+  event => notifyEscrowWorkflowEvent({ db, eventId: event.params.eventId, event: event.data?.data() }),
+);
 
 const publicClient = createPublicClient({
   chain: arbitrumSepolia,
   cacheTime: 0,
+  transport: createArbitrumRpcTransport({ http, fallback,
+    primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+    backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }),
+});
+
+// prepareEscrowDeposit runs immediately before a member's deposit signature and
+// verifies ~40 escrow fields at one pinned block. Batching those reads through
+// Multicall3 turns each round of the request's read queue into one RPC request,
+// so the queue can be wider without raising load on rate-limited endpoints.
+const batchedReadClient = createPublicClient({
+  chain: arbitrumSepolia,
+  cacheTime: 0,
+  batch: { multicall: true },
   transport: createArbitrumRpcTransport({ http, fallback,
     primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
     backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }),
@@ -217,7 +237,7 @@ const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
 export const { prepareEscrowDeposit, prepareRemovedProposalClaim, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
   startEscrowSettlement, getEscrowAdminCancellation, startEscrowAdminCancellation,
   queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
-  db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+  db, client: publicClient, batchedReadClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
 });
 
 export const { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding, getFunderDashboard } = registerOpenFundingFunctions({
@@ -364,8 +384,12 @@ export const getMockMatching = onCall(MEMBER_CALL_OPTIONS, async (request) => {
 
 // QCDAO-96 and QCDAO-97. One chronological trail over the records the caller may view.
 export const listAuditTrail = onCall(MEMBER_CALL_OPTIONS, async (request) => {
-  const uid = await requireMember(request);
-  const profile = (await db.collection("users").doc(uid).get()).data();
+  // The profile read overlaps the session check instead of following it; it is
+  // used only once requireMember has accepted this uid.
+  const claimed = request.auth?.uid;
+  const [uid, profileSnap] = await Promise.all([requireMember(request),
+    /^0x[0-9a-f]{40}$/.test(claimed ?? "") ? db.collection("users").doc(claimed).get() : null]);
+  const profile = (profileSnap ?? await db.collection("users").doc(uid).get()).data();
   return readAuditTrail({ db, uid, profile, input: request.data ?? {} });
 });
 export const fundMockProposal = onCall(MEMBER_CALL_OPTIONS, async (request) => {

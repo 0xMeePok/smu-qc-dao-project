@@ -18,6 +18,8 @@ export function openFundingFixture() {
     "function proposalCount() view returns(uint256)", "function proposalAt(uint256) view returns(bytes32)", "function deposit(uint256)",
     "function selectProposal(bytes32)", "function acceptProposal(bytes32)", "function expireProposal(bytes32)", "function withdrawAvailable(uint256)",
     "event ProposalSelected(bytes32 indexed proposalId,uint256 amount,uint64 acceptanceDeadline)",
+    "function declineProposal(bytes32,bytes32)", "function declineReasonHash(bytes32) view returns(bytes32)",
+    "event ProposalDeclined(bytes32 indexed proposalId,address indexed researcher,address indexed escrow,uint256 amount,bytes32 reasonHash)",
   ]);
   const config = { ...escrowConfig, escrow: { ...escrowConfig.escrow, openFundingPoolAbi,
     factoryAbi: [...escrowConfig.escrow.factoryAbi, ...parseAbi([
@@ -36,7 +38,7 @@ export function openFundingFixture() {
   const expectedPosting = prepareOpportunityCommit({ recordId: posting.id, payload: fundingOpportunityAuditPayload(posting), kind: 1,
     expiresAt: posting.expiresAt, actor: config.entityIdScheme === 2 ? owner : undefined });
   const expected = proposals.map(record => prepareStoredProposal(record, { registryConfig: config }));
-  const addresses = [escrowAddress, `0x${"e".repeat(40)}`], calls = [], simulations = [], offers = new Map(), receipts = new Map();
+  const addresses = [escrowAddress, `0x${"e".repeat(40)}`], calls = [], simulations = [], offers = new Map(), receipts = new Map(), declines = new Map();
   const proposalClients = proposals.map(escrowClient);
   const state = { poolAddress, timestamp: 1900000000n, totalDeposited: 100000000000n, totalAllocated: 0n, totalWithdrawn: 0n,
     reservedAmount: 0n, availableBalance: 100000000000n, proposalCount: 0n, paused: false, withdrawn: false,
@@ -67,6 +69,7 @@ export function openFundingFixture() {
         const fields = { postingId: expectedPosting.entityId, owner: state.poolOwner, token: proposals[0].fundingTerms.token, tokenDecimals: 6,
           factory: config.escrow.factoryAddress, auditRegistry: config.address, ...state };
         if (functionName === "getOffer") return offers.get(args[0]) || { amount: 0n, acceptanceDeadline: 0n, state: 0 };
+        if (functionName === "declineReasonHash") return declines.get(args[0]) || `0x${"0".repeat(64)}`;
         if (functionName === "proposalAt") return [...offers.keys()][Number(args[0])];
         if (functionName in fields) return fields[functionName];
       }
@@ -100,6 +103,20 @@ export function openFundingFixture() {
     state.availableBalance = state.totalDeposited - state.reservedAmount - state.totalAllocated - state.totalWithdrawn;
     state.escrowDeposits[index] = offerState === 2 ? 50000000000n : 0n;
   }
+  /** Mirrors declineProposal: the offer ends Voided and its reservation returns to the pool. */
+  function decline(index, reasonHash) {
+    const offer = offers.get(expected[index].entityId);
+    offers.set(expected[index].entityId, { ...offer, state: 3 });
+    declines.set(expected[index].entityId, reasonHash);
+    state.reservedAmount = [...offers.values()].filter(row => row.state === 1).reduce((sum, row) => sum + row.amount, 0n);
+    state.availableBalance = state.totalDeposited - state.reservedAmount - state.totalAllocated - state.totalWithdrawn;
+  }
+  function declineReceipt(hash, index, reasonHash) {
+    const args = { proposalId: expected[index].entityId, researcher: proposals[index].researcherId, escrow: addresses[index] };
+    receipts.set(hash, { status: "success", transactionHash: hash, blockHash, blockNumber: 99n, to: poolAddress,
+      logs: [{ address: poolAddress, logIndex: 0, topics: encodeEventTopics({ abi: openFundingPoolAbi, eventName: "ProposalDeclined", args }),
+        data: encodeAbiParameters([{ type: "uint256" }, { type: "bytes32" }], [BigInt(proposals[index].fundingTerms.target), reasonHash]) }] });
+  }
   function receipt(hash) {
     const args = { proposalId: expected[0].entityId, amount: 50000000000n, acceptanceDeadline: state.timestamp + 604800n };
     receipts.set(hash, { status: "success", transactionHash: hash, blockHash, blockNumber: 99n, to: poolAddress,
@@ -107,6 +124,6 @@ export function openFundingFixture() {
         data: encodeAbiParameters([{ type: "uint256" }, { type: "uint64" }], [args.amount, args.acceptanceDeadline]) }] });
   }
   return { db, client, config, uid: owner, problemId: posting.id, posting, proposals, expected, expectedPosting, state, offers, calls, simulations,
-    addresses, receipts, select, receipt };
+    addresses, receipts, select, receipt, declines, decline, declineReceipt };
 }
 const sameAddress = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();

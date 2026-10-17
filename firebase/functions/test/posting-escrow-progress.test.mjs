@@ -56,3 +56,24 @@ test("snapshot-trigger projection preserves listing counts and drops removed pro
   await refreshPostingEscrowProgress({ db, problemId: "posting-1", config });
   assert.deepEqual(db.records.get("opportunityMetrics/posting-1").escrowFunding.groups, []);
 });
+test("a rejected, cancelled or refunded escrow is not raised funding or fully funded", () => {
+  const refunding = { ...summary, state: "Cancelled", refundsEnabled: true };
+  const claimed = { ...summary, state: "Cancelled", totalRefunded: summary.totalDeposited, outstandingBalance: "0", custodyBalance: "0" };
+  for (const row of [refunding, claimed, { ...summary, state: "Open", invalidated: true }, { ...summary, state: "Expired" },
+    { ...summary, state: "Voided" }, { ...summary, state: "Refunded" }]) {
+    const result = project({ summaries: [row] });
+    assert.equal(result.available, true);
+    assert.equal(result.closedItems, 1);
+    assert.deepEqual(result.groups, []);
+    assert.equal(result.version, 2);
+  }
+  // A live sibling still counts; the refunded one does not inflate its totals.
+  const live = { ...proposal, id: "p2" };
+  const result = project({ proposals: [proposal, live],
+    summaries: [refunding, { ...summary, proposalId: "p2", totalDeposited: "5", outstandingBalance: "5", custodyBalance: "5" }] });
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].count, 1);
+  assert.equal(result.groups[0].totalDeposited, "5");
+  assert.equal(result.closedItems, 1);
+  assert.equal(postingProgressChanged("summary", summary, { ...summary, refundsEnabled: true }), true);
+});

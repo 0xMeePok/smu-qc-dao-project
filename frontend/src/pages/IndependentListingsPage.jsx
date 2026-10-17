@@ -52,6 +52,13 @@ export default function IndependentListingsPage({ onNavigate, params = new URLSe
   const activeFilters = hasActiveListingFilters(filters);
   const panelFilterCount = listingFilterCount(filters);
   const [filtersOpen, setFiltersOpen] = useState(panelFilterCount > 0);
+  const [slow, setSlow] = useState(false);
+
+  useEffect(() => {
+    if (!loading) { setSlow(false); return undefined; }
+    const timer = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   useEffect(() => {
     setFilters(parseListingParams(params));
@@ -165,8 +172,9 @@ export default function IndependentListingsPage({ onNavigate, params = new URLSe
       </div>
 
       {cursor && <p className="notice">Filters apply to the listings loaded so far. Load more to search further.</p>}
-      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {error && <p className="notice notice-error" role="alert">{error} <button type="button" className="text-button" disabled={loading} onClick={() => load(items.length > 0 && Boolean(cursor), cursor)}>Retry</button></p>}
       {loading && items.length === 0 && <OpportunityListSkeleton label="Loading listings" />}
+      {loading && slow && <p className="field-hint" role="status">Still loading listings. The first request after a quiet period can take longer.</p>}
       {!loading && !error && items.length === 0 && (
         <div className="discover-empty" role="status">
           <h2>No independent listings yet</h2>

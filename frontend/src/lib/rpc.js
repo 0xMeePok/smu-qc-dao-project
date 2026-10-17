@@ -27,6 +27,25 @@ export function createBrowserPublicClient({ transport = createBrowserRpcTranspor
 
 export const browserPublicClient = createBrowserPublicClient();
 
+const WARM_INTERVAL_MS = 60_000;
+let warmedAt = -Infinity;
+let warming = null;
+
+/**
+ * Opens the RPC connection and refreshes the transport's cached chain check
+ * before a member clicks, so the first pre-wallet read does not also pay for
+ * the TLS handshake and an eth_chainId round trip. Read-only, throttled, and
+ * never throws: a failed warm-up leaves the normal checks to run on click.
+ */
+export function warmBrowserRpc({ publicClient = browserPublicClient, now = Date.now() } = {}) {
+  if (warming) return warming;
+  if (now - warmedAt < WARM_INTERVAL_MS) return Promise.resolve();
+  warmedAt = now;
+  warming = Promise.resolve().then(() => publicClient.getChainId()).then(() => {}, () => { warmedAt = -Infinity; })
+    .finally(() => { warming = null; });
+  return warming;
+}
+
 export function browserRpcUrls(options = {}) {
   return getRpcUrls({ primaryUrl: BROWSER_RPC_URL, backupUrls: BROWSER_RPC_BACKUP_URLS, ...options });
 }

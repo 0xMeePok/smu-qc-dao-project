@@ -1,13 +1,37 @@
+import { useEffect, useState } from "react";
 import { StatusBadge } from "./StatusBadge.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
 import { PostingFundingProgress } from "./PostingFundingProgress.jsx";
 import { opportunityWorkflowStatus } from "../config/workflowStatus.js";
+
+// Below this width the full search hint ("Search title, description or tags")
+// no longer fits beside the icon, so the shorter search label is shown instead.
+const COMPACT_SEARCH_QUERY = "(max-width: 480px)";
+
+function compactSearchMedia() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return null;
+  return window.matchMedia(COMPACT_SEARCH_QUERY);
+}
+
+function useCompactSearch() {
+  const [compact, setCompact] = useState(() => Boolean(compactSearchMedia()?.matches));
+  useEffect(() => {
+    const media = compactSearchMedia();
+    if (!media) return undefined;
+    const update = () => setCompact(Boolean(media.matches));
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+  return compact;
+}
 
 export function DiscoverySearchRow({
   query,
   onQueryChange,
   searchLabel,
   placeholder,
+  compactPlaceholder,
   filtersOpen,
   onToggleFilters,
   filterCount,
@@ -16,6 +40,8 @@ export function DiscoverySearchRow({
   onSortChange,
   sortOptions,
 }) {
+  const compact = useCompactSearch();
+  const shownPlaceholder = compact ? (compactPlaceholder ?? searchLabel ?? placeholder) : placeholder;
   return (
     <div className="discover-search-row">
       <label className="discover-search">
@@ -27,7 +53,7 @@ export function DiscoverySearchRow({
         <input
           type="search"
           value={query}
-          placeholder={placeholder}
+          placeholder={shownPlaceholder}
           onChange={(event) => onQueryChange(event.target.value)}
         />
       </label>
@@ -127,10 +153,13 @@ export function DiscoveryPagination({ label, page, totalPages, onPrevious, onNex
   );
 }
 
+// Below 768px the rows stack into cards (styles.css, "Discover table: stacked
+// rows"): each cell shows its column name from data-label, and the value sits in
+// .cell-value so the label and value line up as two grid columns.
 export function DiscoveryTable({ columns, rows }) {
   return (
     <div className="opportunity-table-scroll">
-      <table className="opportunity-table">
+      <table className="opportunity-table discovery-stack-table">
         <thead>
           <tr>
             {columns.map((column) => (
@@ -142,7 +171,13 @@ export function DiscoveryTable({ columns, rows }) {
           {rows.map((row) => (
             <tr key={row.id}>
               {columns.map((column) => (
-                <td className={column.numeric ? "numeric" : undefined} key={column.key}>{column.render(row)}</td>
+                <td
+                  className={`col-${column.key}${column.numeric ? " numeric" : ""}`}
+                  data-label={column.label}
+                  key={column.key}
+                >
+                  <div className="cell-value">{column.render(row)}</div>
+                </td>
               ))}
             </tr>
           ))}

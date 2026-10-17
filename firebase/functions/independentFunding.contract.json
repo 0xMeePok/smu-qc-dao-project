@@ -1,11 +1,11 @@
 {
   "enabled": true,
   "chainId": 421614,
-  "registryAddress": "0xF202ECc872Be5613C184Cc07622346750f9b8fE9",
-  "tokenRegistryAddress": "0x284DB9EE5E47A1AD5E75bFb9AF6d33F050cA1F7d",
-  "factoryAddress": "0x2f5b892695F33b898FbF3a68D4cc5E7859dbf0a7",
+  "registryAddress": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
+  "tokenRegistryAddress": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
+  "factoryAddress": "0x87eaF14f3f5AEe7E6021b863Ef0803570c03003f",
   "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
-  "deploymentBlock": 317408013,
+  "deploymentBlock": 319991194,
   "defaultReviewDays": 30,
   "reviewDays": 30,
   "tokens": [

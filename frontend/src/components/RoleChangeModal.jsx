@@ -76,7 +76,7 @@ export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
       {step === "form" ? (
         <form onSubmit={handleReview} className="modal-form">
           <div className="modal-section">
-            <label className="field-label">Current Role</label>
+            <span className="field-label">Current Role</span>
             <div className="current-role-badge">
               <span className={`role-badge ${roleChipClass(currentRole)}`}>
                 {roleLabel(currentRole)}
@@ -85,10 +85,10 @@ export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
           </div>
 
           <div className="modal-section">
-            <label className="field-label" htmlFor="new-role-select">
+            <span className="field-label" id="new-role-label">
               New Role Assignment
-            </label>
-            <div className="role-radio-group">
+            </span>
+            <div className="role-radio-group" role="radiogroup" aria-labelledby="new-role-label">
               <label className={`radio-pill ${newRole === 0 ? "selected" : ""}`}>
                 <input
                   type="radio"
@@ -99,7 +99,7 @@ export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
                   disabled={currentRole === 0}
                 />
                 <div>
-                  <strong>Platform User (0)</strong>
+                  <strong>Platform User</strong>
                   <small>Standard participant access for problem ownership, research, and funding</small>
                 </div>
               </label>
@@ -114,7 +114,7 @@ export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
                   disabled={currentRole === 2}
                 />
                 <div>
-                  <strong>Assigned Evaluator (2)</strong>
+                  <strong>Assigned Evaluator</strong>
                   <small>Participant access plus evaluator authorisation for recommendation comments</small>
                 </div>
               </label>
@@ -129,7 +129,7 @@ export function RoleChangeModal({ targetUser, onClose, onSuccess }) {
                   disabled={currentRole === 1}
                 />
                 <div>
-                  <strong>DAO Administrator (1)</strong>
+                  <strong>DAO Administrator</strong>
                   <small>Full administrative governance, user management, and audit inspection</small>
                 </div>
               </label>

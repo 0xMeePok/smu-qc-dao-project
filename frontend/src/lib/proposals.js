@@ -145,12 +145,27 @@ export function buildIndependentProposalDocument({
   return record;
 }
 
+/**
+ * One active proposal per researcher per posting. A withdrawn proposal, one
+ * whose selection was rejected or declined (the escrow worker marks it
+ * `rejected` once the cancelled escrow refunds), or one whose escrow an
+ * administrator cancelled no longer holds that slot, so its author can submit
+ * a replacement. firestore.rules `releasesAuthorSlot` mirrors this; matching
+ * and status are server-written, so a client cannot release a live slot.
+ */
+export function releasesProposalSlot(proposal) {
+  if (!proposal) return true;
+  return ["withdrawn", "rejected"].includes(proposal.status)
+    || proposal.matching?.status === "declined"
+    || proposal.escrowAdminCancellation?.status === "complete";
+}
+
 export async function findActiveProposal(problemId, uid) {
   requireFirebase();
   const slot = await getDoc(authorRef(problemId, uid));
   if (!slot.exists()) return null;
   const proposal = await findProposal(slot.data().proposalId);
-  return proposal?.status !== "withdrawn" ? proposal : null;
+  return releasesProposalSlot(proposal) ? null : proposal;
 }
 
 export async function findProposalDraft(problemId, uid) {
@@ -234,7 +249,7 @@ export async function submitProposal({ proposalId, researcherId, posting, form, 
     const slot = await transaction.get(authorRef(posting.id, uid));
     if (slot.exists() && slot.data().proposalId !== proposalId) {
       const previous = await transaction.get(proposalRef(slot.data().proposalId));
-      if (!previous.exists() || previous.data().status !== "withdrawn") throw new Error("You already have an active proposal for this opportunity. View it in My Proposals.");
+      if (!previous.exists() || !releasesProposalSlot(previous.data())) throw new Error("You already have an active proposal for this opportunity. View it in My Proposals.");
     }
     const built = preparedRecord ?? buildProposalDocument({ researcherId: uid, posting: current, form, attachments });
     const record = audit ? { ...built, audit: { ...audit } } : built;

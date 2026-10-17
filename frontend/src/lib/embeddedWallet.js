@@ -124,6 +124,26 @@ function clearPending(address) {
   notifyPending();
 }
 
+/**
+ * Pending records owned by a send that is still running in this tab. The record
+ * is still saved first (so a reload or another tab can recover it), but the
+ * global recovery banner is for an earlier or abandoned send, not the action
+ * the member is completing right now.
+ */
+const inFlightSends = new Map();
+function claimInFlight(address, id) {
+  inFlightSends.set(pendingKey(address), id);
+}
+function releaseInFlight(address, id) {
+  const key = pendingKey(address);
+  if (inFlightSends.get(key) !== id) return;
+  inFlightSends.delete(key);
+  notifyPending();
+}
+export function isSponsoredTransactionInFlight(address, id) {
+  return Boolean(address && id && inFlightSends.get(pendingKey(address)) === id);
+}
+
 export function subscribePendingSponsoredTransactions(listener) {
   pendingListeners.add(listener);
   const onStorage = (event) => { if (!event.key || event.key.startsWith(PENDING_PREFIX)) listener(); };
@@ -258,7 +278,10 @@ async function submitSponsoredTransaction(request, { wallet, publicClient, timeo
   const existing = getPendingSponsoredTransaction(wallet.address);
   if (existing) {
     if (!existing.to || !sameRequest(existing, request)) throw pendingError(existing);
-    return recoverStoredTransaction(existing, { publicClient, timeoutMs });
+    // The member repeated the same call: this action now owns that recovery.
+    claimInFlight(wallet.address, existing.id);
+    try { return await recoverStoredTransaction(existing, { publicClient, timeoutMs }); }
+    finally { releaseInFlight(wallet.address, existing.id); }
   }
   // Never identify the new operation with an identical call already mined at
   // the observed tip. Disable viem's block-number cache before taking this boundary.
@@ -269,7 +292,16 @@ async function submitSponsoredTransaction(request, { wallet, publicClient, timeo
     value: BigInt(request.value ?? 0n).toString(), chainId: arbitrumSepolia.id,
     fromBlock: fromBlock.toString(), scanFromBlock: fromBlock.toString(), phase: "sending", createdAt: Date.now(),
   };
-  savePending(pending, { beforeBroadcast: true });
+  // Claimed before the record is saved so observers never see it as orphaned;
+  // released (with a notification) when this send settles, fails or is abandoned.
+  claimInFlight(wallet.address, pending.id);
+  try {
+    savePending(pending, { beforeBroadcast: true });
+    return await broadcastSponsoredTransaction(pending, request, { wallet, publicClient, timeoutMs });
+  } finally { releaseInFlight(wallet.address, pending.id); }
+}
+
+async function broadcastSponsoredTransaction(pending, request, { wallet, publicClient, timeoutMs }) {
   let result;
   try {
     result = await wallet.sendSponsoredTransaction({

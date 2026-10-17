@@ -1,0 +1,44 @@
+{
+  "contractName": "IndependentFundingFactory",
+  "status": "ready",
+  "chainId": 421614,
+  "registryAddress": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
+  "tokenRegistryAddress": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
+  "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "factoryAddress": "0x87eaF14f3f5AEe7E6021b863Ef0803570c03003f",
+  "deploymentBlock": 319991194,
+  "transactionHash": "0x35cce6a5ba92e688f55fcf5db505ad5c083a7dc805db3e80630152aca4c457ec",
+  "tokens": [
+    {
+      "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
+      "symbol": "XSGD",
+      "decimals": 6
+    },
+    {
+      "address": "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+      "symbol": "USDT",
+      "decimals": 6
+    },
+    {
+      "address": "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd",
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  ],
+  "constructorArgs": [
+    "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0"
+  ],
+  "startedAt": "2026-10-17T06:19:11.000Z",
+  "deployedAt": "2026-10-17T06:20:08.000Z",
+  "runtimeVerification": {
+    "bytecodeMatches": true,
+    "wiringMatches": true,
+    "readOnly": true,
+    "factoryAddress": "0x87eaF14f3f5AEe7E6021b863Ef0803570c03003f",
+    "registryAddress": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
+    "tokenRegistryAddress": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
+    "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "factoryCodeHash": "0x17c75ab74cb07df98325331caea0eae7e7937d6e0a5e99272518a4b88a19660d",
+    "verifiedAt": "2026-10-17T06:21:57.341Z"
+  }
+}

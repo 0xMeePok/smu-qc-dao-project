@@ -52,3 +52,17 @@ export function confirmedFundingEvents(events = []) {
     && fundingUnits(event.blockNumber) !== null && Number.isSafeInteger(event.timestamp) && event.timestamp > 0 && event.timestamp <= 8_640_000_000_000)
     .slice().sort((a, b) => a.timestamp - b.timestamp || Number(a.blockNumber) - Number(b.blockNumber) || (a.logIndex ?? 0) - (b.logIndex ?? 0));
 }
+
+/**
+ * "USDT 1,000" for a decimal amount entered or stored as text, matching how the
+ * app shows requested and target amounts elsewhere. The digits are grouped as a
+ * string, so the exact amount is never rounded through a float.
+ */
+export function formatFundingAmount(currency, value) {
+  let text = String(value ?? "").trim();
+  if (/^\d+(\.\d+)?e[+-]?\d+$/i.test(text)) text = Number(text).toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!match) return [currency, text].filter(Boolean).join(" ");
+  const whole = match[1].replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return [currency, match[2] ? `${whole}.${match[2]}` : whole].filter(Boolean).join(" ");
+}

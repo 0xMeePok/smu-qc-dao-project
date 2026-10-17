@@ -21,7 +21,8 @@ vi.mock("../../src/lib/moderation.js", async (importOriginal) => ({
 }));
 import { ReportContentButton, ContentModerationNotice } from "../../src/components/ReportContentButton.jsx";
 import { ModerationQueue } from "../../src/components/ModerationQueue.jsx";
-import { ModerationNotifications } from "../../src/components/ModerationNotifications.jsx";
+import { ModerationNotifications, NotificationCentre } from "../../src/components/ModerationNotifications.jsx";
+import { resetNotificationStore } from "../../src/lib/notifications.js";
 import { ReportableComments } from "../../src/components/ReportableComments.jsx";
 const row = { id: "proposal_proposal1", contentType: "proposal", status: "pending", title: "Routing proposal", excerpt: "Short summary", authorId: "author1", authorName: "Researcher", organisation: "Research Lab", reportCount: 2, reasons: ["misleading"], reportSummaries: [{ reason: "misleading", details: "The claimed result does not match the source." }], createdAt: "2026-09-15T00:00:00Z" };
 const notice = { id: "notice1", message: "Your proposal was hidden by a moderator.", contentType: "proposal", contentId: "proposal1", reason: "misleading", read: false, createdAt: "2026-09-15T00:00:00Z" };
@@ -39,14 +40,16 @@ beforeEach(() => {
   mocks.edit.mockReset().mockResolvedValue({ id: "comment1" });
   mocks.remove.mockReset().mockResolvedValue({ id: "comment1" });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); resetNotificationStore(); });
 
 describe("private content reports", () => {
   it("requires a reason, records a report once, and exposes no reporter identity or public count", async () => {
     let finish;
     mocks.report.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     render(<ReportContentButton contentType="proposal" contentId="proposal1" />);
+    screen.getByRole("button", { name: "Report this proposal" }).focus();
     fireEvent.click(screen.getByRole("button", { name: "Report this proposal" }));
+    expect(screen.getByRole("dialog", { name: "Report content" })).toBeTruthy();
     expect(screen.getByText(/Your identity is visible only to administrators/)).toBeTruthy();
     submitDialog();
     expect(screen.getByRole("alert").textContent).toContain("Choose a reason");
@@ -57,8 +60,13 @@ describe("private content reports", () => {
     expect(mocks.report).toHaveBeenCalledTimes(1);
     expect(mocks.report).toHaveBeenCalledWith({ contentType: "proposal", contentId: "proposal1", reason: "misleading", details: "Please inspect the accuracy claim." });
     await act(async () => { finish({ ok: true, alreadyReported: false }); });
-    expect(screen.getByRole("status").textContent).toContain("Report received");
+    expect(screen.getByRole("status").textContent).toContain("Report sent to administrators");
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("button", { name: "Report this proposal" })).toBeNull();
+    // The trigger stays in place as "Reported", so focus returns to it from the dialog.
+    const reported = screen.getByRole("button", { name: "Reported" });
+    expect(reported.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(reported);
     expect(screen.queryByText("reporter-private-id")).toBeNull();
     expect(screen.queryByText(/\d+ reports/)).toBeNull();
   });
@@ -70,7 +78,7 @@ describe("private content reports", () => {
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "abusive" } });
     submitDialog();
     expect((await screen.findByRole("alert")).textContent).toContain("already reported this item");
-    expect(screen.queryByText(/Report received/)).toBeNull();
+    expect(screen.queryByText(/Report sent to administrators/)).toBeNull();
     expect(screen.getByRole("button", { name: "Report this proposal" })).toBeTruthy();
   });
 
@@ -81,9 +89,9 @@ describe("private content reports", () => {
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "duplicate" } });
     submitDialog();
     expect((await screen.findByRole("alert")).textContent).toContain("Please try again");
-    expect(screen.queryByText(/Report received/)).toBeNull();
+    expect(screen.queryByText(/Report sent to administrators/)).toBeNull();
     submitDialog();
-    await screen.findByText(/Report received/);
+    await screen.findByText(/Report sent to administrators/);
     expect(mocks.report).toHaveBeenCalledTimes(2);
   });
 
@@ -154,6 +162,27 @@ describe("administrator moderation queue", () => {
     expect(mocks.queue).toHaveBeenCalledTimes(2);
   });
 
+  it("labels submission fields and categories the way members see them", async () => {
+    mocks.context.mockResolvedValue({
+      content: { title: "Routing proposal", summary: "Approach text", successCriteria: "Criteria text", expectedOutcomes: "Outcome text", category: "gate-model" },
+      parent: { contentType: "problem", title: "Parent challenge", summary: "Parent summary", businessContext: "Context text", currentLimitations: "Limits text", dataAvailability: "Data text", categories: ["quantum", "optimisation"] },
+      reports: [], history: [],
+    });
+    render(<ModerationQueue />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review content" }));
+    const dialog = await screen.findByRole("dialog", { name: "Review proposal" });
+    await within(dialog).findByText("Approach text");
+    for (const label of ["Proposal title", "Approach summary", "Measurable success criteria", "Expected outcomes", "Problem description", "Business context", "Limitations of that approach", "Relevant data availability"]) {
+      expect(within(dialog).getByText(label)).toBeTruthy();
+    }
+    expect(within(dialog).getByText("Gate-based quantum computing")).toBeTruthy();
+    expect(within(dialog).getByText("Quantum, Optimisation")).toBeTruthy();
+    for (const raw of ["gate-model", "summary", "success Criteria", "business Context", "data Availability"]) {
+      expect(within(dialog).queryByText(raw)).toBeNull();
+    }
+    expect(screen.getByRole("option", { name: "Pending" })).toBeTruthy();
+  });
+
   it("keeps decisions disabled when full context fails to load", async () => {
     mocks.context.mockRejectedValueOnce(new Error("offline"));
     render(<ModerationQueue />);
@@ -187,6 +216,50 @@ describe("author notices and reportable comments", () => {
     expect(screen.queryByText(notice.message)).toBeNull();
   });
 
+  it("[QCDAO-68] the header bell shows the same notices as the Profile feed and shares read state", async () => {
+    render(<><NotificationCentre userId="author1" /><ModerationNotifications userId="author1" /></>);
+    await screen.findByText(notice.message);
+    // One shared request serves both views.
+    expect(mocks.notifications).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 1 unread" }));
+    const panel = screen.getByRole("region", { name: "Notifications" });
+    expect(within(panel).getByText(notice.message)).toBeTruthy();
+    expect(within(panel).queryByText("No content notices.")).toBeNull();
+    fireEvent.click(within(panel).getByRole("button", { name: "Mark read" }));
+    await waitFor(() => expect(screen.queryAllByRole("button", { name: "Mark read" })).toHaveLength(0));
+    expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy();
+  });
+
+  it("[QCDAO-68] the bell shows loading instead of an empty feed, and re-reads notices written after sign-in", async () => {
+    let finish;
+    mocks.notifications.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    render(<NotificationCentre userId="author1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByText("Loading notices…")).toBeTruthy();
+    expect(screen.queryByText("No content notices.")).toBeNull();
+    await act(async () => { finish({ items: [] }); });
+    expect(screen.getByText("No content notices.")).toBeTruthy();
+    // Close, wait out the de-duplication window, and reopen: the feed is fetched again.
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    const later = { ...notice, id: "notice2", message: "The selected proposal was declined." };
+    mocks.notifications.mockResolvedValue({ items: [later] });
+    const realNow = Date.now;
+    Date.now = () => realNow() + 5000;
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+      expect(await screen.findByText(later.message)).toBeTruthy();
+    } finally { Date.now = realNow; }
+    expect(mocks.notifications).toHaveBeenCalledTimes(2);
+  });
+
+  it("[QCDAO-68] surfaces a failed notice load with a retry", async () => {
+    mocks.notifications.mockRejectedValueOnce(Object.assign(new Error("offline"), { code: "functions/unavailable" }));
+    render(<ModerationNotifications userId="author1" />);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText(notice.message)).toBeTruthy();
+  });
+
   it("tells an evaluator they cannot judge their own solution, and hides the picker", async () => {
     mocks.user = { id: "evaluator", roles: ["evaluator"] };
     mocks.comments.mockResolvedValue({ items: [] });
@@ -217,15 +290,29 @@ describe("author notices and reportable comments", () => {
     expect(screen.queryByText("Recommendation")).toBeNull();
   });
 
+  it("names recommendation radios by their visible labels", async () => {
+    mocks.user = { id: "evaluator", roles: ["evaluator"] };
+    mocks.comments.mockResolvedValue({ items: [] });
+    render(<ReportableComments problemId="problem1" proposalId="proposal1" authorId="alice" />);
+    const group = await screen.findByRole("group", { name: "Recommendation" });
+    for (const name of ["Recommend", "Recommend with revisions", "Do not recommend"]) {
+      expect(within(group).getByRole("radio", { name })).toBeTruthy();
+    }
+    expect(within(group).queryByRole("radio", { name: "recommend_with_revisions" })).toBeNull();
+    fireEvent.click(screen.getByText("Recommend with revisions"));
+    expect(within(group).getByRole("radio", { name: "Recommend with revisions" }).checked).toBe(true);
+  });
+
   it("renders scoped comments with per-comment report actions", async () => {
     mocks.comments.mockResolvedValue({ items: [{ id: "comment1", body: "Review this technical claim.", authorName: "Researcher", createdAt: row.createdAt }] });
     render(<ReportableComments problemId="problem1" proposalId="proposal1" />);
     await screen.findByText("Review this technical claim.");
     expect(mocks.comments).toHaveBeenCalledWith({ problemId: "problem1", proposalId: "proposal1" });
     fireEvent.click(screen.getByRole("button", { name: "Report this comment" }));
+    expect(screen.getByRole("dialog", { name: "Report content" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "abusive" } });
     submitDialog();
-    await screen.findByText(/Report received/);
+    await screen.findByText(/Report sent to administrators/);
     expect(mocks.report).toHaveBeenCalledWith({ contentType: "comment", contentId: "comment1", reason: "abusive", details: "" });
     expect(screen.queryByText(/\d+ reports/)).toBeNull();
   });

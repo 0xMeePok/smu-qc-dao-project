@@ -175,8 +175,32 @@ export function createWalletAuditAdapters({ publicClient = browserPublicClient, 
     waitForTransactionReceipt: async (request) => publicClient.waitForTransactionReceipt(onAuditChain(request)),
     readContract: async (request) => publicClient.readContract(onAuditChain(request)),
     getBlock: async (request) => publicClient.getBlock(onAuditChain(request)),
-    getTransaction: async (request) => publicClient.getTransaction(onAuditChain(request)),
+    getTransaction: async (request) => {
+      const { hash, ...rest } = onAuditChain(request);
+      // A hash commits to the transaction's sender, target, input and chain, so
+      // a mined transaction read once can identify its deployment again without
+      // another round trip. Only mined, matching results are reused; misses,
+      // failures and pending transactions are always read again.
+      const cache = minedTransactions(publicClient);
+      const key = typeof hash === "string" && !Object.keys(rest).length ? hash.toLowerCase() : null;
+      if (key && cache.has(key)) return cache.get(key);
+      const transaction = await publicClient.getTransaction({ hash, ...rest });
+      if (key && transaction && typeof transaction.blockNumber === "bigint"
+          && String(transaction.hash ?? "").toLowerCase() === key) {
+        if (cache.size >= MINED_TRANSACTION_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+        cache.set(key, transaction);
+      }
+      return transaction;
+    },
   };
+}
+
+const MINED_TRANSACTION_CACHE_LIMIT = 200;
+const minedTransactionCaches = new WeakMap();
+function minedTransactions(publicClient) {
+  let cache = minedTransactionCaches.get(publicClient);
+  if (!cache) { cache = new Map(); minedTransactionCaches.set(publicClient, cache); }
+  return cache;
 }
 
 function auditAdapters(adapters) {

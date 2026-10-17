@@ -1981,7 +1981,9 @@ footer > p { margin: 0 auto 0 0; }
 .user-email {
   font-size: 12px;
   color: var(--muted);
-  word-break: break-all;
+  /* Break before "@" (a <wbr> in the markup); split a word only when one part
+     alone is wider than the cell. */
+  overflow-wrap: break-word;
 }
 .wallet-code {
   font-family: ui-monospace, monospace;
@@ -3934,7 +3936,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 footer.footer { justify-content: space-between; gap: 16px; min-height: 0; margin-top: 0; padding: 22px max(var(--gutter), calc((100vw - var(--container)) / 2)); border-top: 1px solid var(--line); background: transparent; color: var(--subtle); font-size: 12px; }
 .footer-brand { color: var(--muted); }
 .footer-links { gap: 20px; }
-.footer-links button { min-height: 0; padding: 0; color: var(--subtle); font-size: 12px; font-weight: 400; }
+.footer-links button { display: inline-flex; align-items: center; min-height: 24px; padding: 0; color: var(--subtle); font-size: 12px; font-weight: 400; }
 .footer-links button:hover { color: var(--ink); }
 
 /* ---- Dark theme fixes for components that carry their own palette ---- */
@@ -4055,7 +4057,7 @@ footer.footer { justify-content: space-between; gap: 16px; min-height: 0; margin
   backdrop-filter: none;
 }
 :is(.detail-main, .posting-tab) > .proposal-comparison { border: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
-.opportunity-tile:hover { box-shadow: var(--glass-shadow), 0 10px 30px var(--line); }
+.opportunity-tile:hover { box-shadow: 0 10px 30px var(--line); }
 /* Selected workspace: brand tint rather than a black slab, so the label and
    icon keep their contrast in both themes. Icons are stroke drawings; without
    fill: none they render as solid blobs. */
@@ -4064,7 +4066,7 @@ footer.footer { justify-content: space-between; gap: 16px; min-height: 0; margin
 .workspace-tabs .ws-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .workspace-tabs button.selected .ws-icon { background: var(--control); color: #fff; }
 .table-header { background: transparent; }
-.comparison-card.is-checked { box-shadow: var(--glass-shadow), 0 0 0 2px var(--brand); }
+.comparison-card.is-checked { box-shadow: 0 0 0 2px var(--brand); }
 
 /* Controls that sit directly on the page read as small glass panes too. */
 .discover-search input:not([type="radio"]),
@@ -4081,7 +4083,7 @@ footer.footer { justify-content: space-between; gap: 16px; min-height: 0; margin
 .wizard-secondary > .secondary { border: 1px solid var(--glass-edge); background: var(--surface); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
 .wizard-step-pill.is-active { background: var(--surface); box-shadow: var(--glass-shadow); }
 .brief-type-switch button { border: 1px solid var(--glass-edge); background: var(--surface); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
-.brief-type-switch button.selected { box-shadow: var(--glass-shadow), 0 0 0 2px var(--brand); }
+.brief-type-switch button.selected { box-shadow: 0 0 0 2px var(--brand); }
 
 /* Anything that overlays other content stays opaque so it is always legible. */
 .modal,
@@ -5088,4 +5090,141 @@ h1, h2, h3 { font-weight: 500; }
 @media (prefers-reduced-motion: reduce) {
   .signin-progress-backdrop, .signin-progress-tip blockquote, .signin-progress-step.is-active .signin-progress-step-mark { animation: none; }
   .signin-progress-spinner span, .signin-progress-bar span { animation-duration: 6s; }
+}
+
+/* ==== QA pass: responsive tables, selected states, tap targets ==== */
+/* Footer links: at least 24px everywhere, a full 44px target on touch screens. */
+@media (pointer: coarse) {
+  .footer-links { row-gap: 0; }
+  .footer-links button { min-height: 44px; }
+}
+
+/* Opportunity type cards on Create brief: a tinted fill, a brand ring and a
+   "Selected" marker, so the choice does not rest on the ring alone. */
+.brief-type-switch button { position: relative; }
+.brief-type-switch button[aria-pressed="true"] {
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 2px var(--brand);
+}
+.brief-type-switch button[aria-pressed="true"]:hover { background: var(--brand-soft); }
+.brief-type-switch button[aria-pressed="true"] strong { padding-right: 88px; }
+/* Visible marker only; aria-pressed already announces the state. */
+.brief-type-switch button[aria-pressed="true"]::after {
+  content: "\2713  Selected";
+  content: "\2713  Selected" / "";
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  color: var(--brand-strong);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: pre;
+}
+
+/* Report content: the confirmation stays next to the trigger. */
+.content-report-done[aria-disabled="true"] { color: var(--muted); cursor: default; text-decoration: none; }
+.content-report-done[aria-disabled="true"]::before { content: "\2713  "; color: var(--success); white-space: pre; }
+.content-report-status { margin: 4px 0 0; color: var(--ink-soft); font-size: 13px; }
+.comment-actions .content-report.is-reported { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.comment-actions .content-report-status { margin: 0; }
+
+/* Proposal / posting detail: once the side panel stacks under the main column,
+   sections (the comment form among them) use the full width. */
+@media (max-width: 960px) {
+  .blotter-posting :is(.detail-main, .posting-tab) > .detail-section { max-width: none; }
+}
+
+/* Discover table: stacked rows below 768px. Each cell labels itself from
+   data-label; the title takes the full width of the card. */
+@media (max-width: 767px) {
+  .opportunity-table-scroll:has(> .discovery-stack-table) { overflow-x: visible; }
+  .opportunity-table.discovery-stack-table,
+  .discover-page .opportunity-table.discovery-stack-table { display: block; width: 100%; min-width: 0; }
+  .discovery-stack-table thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .discovery-stack-table tbody,
+  .discovery-stack-table tr { display: block; width: 100%; }
+  .discovery-stack-table tr { padding: 18px 20px; border-top: 1px solid var(--line); }
+  .discovery-stack-table tbody tr:first-child { border-top: 0; }
+  .discover-page .discovery-stack-table tr { padding-inline: 0; }
+  .opportunity-table.discovery-stack-table td,
+  .discover-page .opportunity-table.discovery-stack-table td {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 32%) minmax(0, 1fr);
+    gap: 12px;
+    align-items: baseline;
+    padding: 4px 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+  }
+  .discovery-stack-table td::before {
+    content: attr(data-label);
+    color: var(--subtle);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .opportunity-table.discovery-stack-table td.col-title { display: block; padding: 0 0 10px; }
+  .discovery-stack-table td.col-title::before { content: none; }
+  .discovery-stack-table tbody tr:hover td { background: transparent; }
+  .discovery-stack-table .cell-value { min-width: 0; overflow-wrap: break-word; }
+  .discover-page .discovery-stack-table .opportunity-table-link { font-size: 20px; line-height: 1.25; }
+}
+
+/* Admin user directory. The search icon sits inside the field's padding (the
+   generic input rule later in this file reset it), and the two actions may wrap
+   onto two lines rather than push the table past its container. */
+.table-controls-bar .search-box input:not([type="radio"], [type="checkbox"]) { padding-left: 36px; padding-right: 32px; }
+.action-buttons-group { flex-wrap: wrap; }
+
+/* Admin user directory: cards below 768px, with the actions in view. */
+@media (max-width: 767px) {
+  .admin-table-container { overflow-x: visible; }
+  .admin-users-table,
+  .admin-users-table tbody,
+  .admin-users-table tr { display: block; width: 100%; }
+  .admin-users-table thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .admin-users-table tr { padding: 14px 16px; border-bottom: 1px solid var(--line-strong); }
+  .admin-users-table tbody tr:last-child { border-bottom: 0; }
+  .admin-users-table td {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    justify-items: start;
+    padding: 6px 0;
+    border-bottom: 0;
+  }
+  .admin-users-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .admin-users-table td.user-identity-cell { display: flex; align-items: flex-start; justify-items: normal; padding: 0 0 8px; }
+  .admin-users-table td.user-identity-cell::before,
+  .admin-users-table td.table-empty-cell::before,
+  .admin-users-table td.actions-col::before { content: none; }
+  .admin-users-table td.table-empty-cell { display: block; }
+  .admin-users-table td.actions-col { display: block; justify-items: normal; padding-top: 10px; }
+  .admin-users-table .user-email { overflow-wrap: anywhere; }
+  .admin-users-table .action-buttons-group { flex-wrap: wrap; justify-content: stretch; }
+  .admin-users-table .action-buttons-group .table-action-btn { flex: 1 1 8rem; min-height: 44px !important; }
+  .admin-users-table .self-action-placeholder { text-align: left; padding-right: 0; }
+  .table-pagination { flex-wrap: wrap; gap: 12px; }
+  .search-filter-group { flex-basis: 100%; }
+  .search-box { min-width: 0; max-width: none; flex-basis: 100%; }
+  .filter-dropdown, .filter-input { flex: 1 1 10rem; }
+  .filter-dropdown select, .filter-input input { width: 100%; }
 }

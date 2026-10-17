@@ -36,12 +36,16 @@ contract OpenFundingPool is ReentrancyGuard {
     uint256 public reservedAmount;
     mapping(bytes32 => Offer) private _offers;
     bytes32[] private _proposals;
+    /// @notice Nonzero only for an offer its researcher declined; commits to the off-chain reason.
+    mapping(bytes32 proposalId => bytes32 reasonHash) public declineReasonHash;
 
     event Deposited(bytes32 indexed postingId, address indexed owner, uint256 amount, uint256 totalDeposited);
     event ProposalSelected(bytes32 indexed proposalId, address indexed researcher, address indexed escrow,
         uint256 amount, uint64 acceptanceDeadline);
     event ProposalAccepted(bytes32 indexed proposalId, address indexed researcher, address indexed escrow, uint256 amount);
     event ProposalVoided(bytes32 indexed proposalId, uint256 amount);
+    event ProposalDeclined(bytes32 indexed proposalId, address indexed researcher, address indexed escrow,
+        uint256 amount, bytes32 reasonHash);
     event AvailableWithdrawn(address indexed owner, uint256 amount);
 
     constructor(bytes32 postingId_, address owner_, address token_, address factory_, address registry_) {
@@ -129,6 +133,28 @@ contract OpenFundingPool is ReentrancyGuard {
         reservedAmount -= offer.amount;
         IFundedEscrow(escrow).voidOpenFunding();
         emit ProposalVoided(proposalId, offer.amount);
+    }
+
+    /// @notice The selected researcher may refuse a pending offer before its deadline. The
+    /// reservation returns to the available balance and the proposal's grant escrow is voided,
+    /// exactly as when an offer expires.
+    /// @dev Declining is an exit: token delisting and posting moderation pauses never block it.
+    /// The offer ends Voided (indexers also receive ProposalVoided); declineReasonHash
+    /// distinguishes a decline from an expiry. reasonHash commits to an off-chain reason.
+    function declineProposal(bytes32 proposalId, bytes32 reasonHash) external nonReentrant {
+        Offer storage offer = _offers[proposalId];
+        if (msg.sender != registry.getProposal(proposalId).researcher) revert AccessDenied();
+        if (reasonHash == bytes32(0)) revert InvalidInput();
+        if (offer.state != OfferState.Pending) revert InvalidState();
+        if (block.timestamp >= offer.acceptanceDeadline) revert WindowClosed();
+        address escrow = factory.escrowForProposal(proposalId);
+        uint256 amount = offer.amount;
+        offer.state = OfferState.Voided;
+        reservedAmount -= amount;
+        declineReasonHash[proposalId] = reasonHash;
+        IFundedEscrow(escrow).voidOpenFunding();
+        emit ProposalDeclined(proposalId, msg.sender, escrow, amount, reasonHash);
+        emit ProposalVoided(proposalId, amount);
     }
 
     /// @notice Closing the posting permits retrieval of unallocated funds; pending grants stay reserved.

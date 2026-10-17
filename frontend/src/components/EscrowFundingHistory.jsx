@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatInstant } from "../lib/datetime.js";
 import { escrowEventLabel, escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
 import { shortenAddress } from "../lib/chain.js";
 import { FundingContributors } from "./FundingProgress.jsx";
@@ -36,7 +37,7 @@ export function EscrowFundingHistory({ data, error, busy, onSync }) {
         <td>{escrowFundingAmount(event.amountBaseUnits, event.tokenDecimals ?? summary?.tokenDecimals, event.tokenSymbol ?? summary?.tokenSymbol)}</td>
         <td><small>Actor: <ParticipantAddress address={event.actor} /></small><br /><small>Counterparty: <ParticipantAddress address={event.counterparty} /></small></td>
         <td>{event.transactionHash && <a href={escrowExplorer("tx", event.transactionHash)} target="_blank" rel="noreferrer">View transaction</a>}<br /><small>Block {event.blockNumber ?? "—"}</small>
-          {Number.isFinite(event.timestamp) && <><br /><time dateTime={new Date(event.timestamp * 1000).toISOString()}>{new Date(event.timestamp * 1000).toLocaleString()}</time></>}</td>
+          {Number.isFinite(event.timestamp) && <><br /><time dateTime={new Date(event.timestamp * 1000).toISOString()}>{formatInstant(new Date(event.timestamp * 1000))}</time></>}</td>
       </tr>)}</tbody>
     </table></div></> : <p className="field-hint">{data ? "No confirmed funding events for this filter." : "Loading confirmed funding activity…"}</p>}
   </section>;

@@ -3,9 +3,21 @@ import { useSession } from "../context/SessionContext.jsx";
 import { useWallet } from "../context/WalletContext.jsx";
 import {
   getPendingSponsoredTransaction,
+  isSponsoredTransactionInFlight,
   recoverPendingSponsoredTransaction,
   subscribePendingSponsoredTransactions,
 } from "../lib/embeddedWallet.js";
+
+/**
+ * A saved operation that the action in progress in this tab still owns is not
+ * unresolved yet: that action reports its own progress. The banner is for a
+ * record from an earlier action, another tab or page load, or one the action
+ * left behind when it failed or was abandoned.
+ */
+function unresolvedSend(address) {
+  const pending = address ? getPendingSponsoredTransaction(address) : null;
+  return pending && !isSponsoredTransactionInFlight(address, pending.id) ? pending : null;
+}
 
 /** Recovery only reads an existing operation; it never opens a new wallet send. */
 export function WalletTransactionRecovery() {
@@ -22,7 +34,7 @@ export function WalletTransactionRecovery() {
   useEffect(() => {
     setBusy(false);
     setMessage(null);
-    const update = () => setPending(address ? getPendingSponsoredTransaction(address) : null);
+    const update = () => setPending(unresolvedSend(address));
     update();
     return subscribePendingSponsoredTransactions(update);
   }, [address]);
@@ -42,7 +54,7 @@ export function WalletTransactionRecovery() {
       setMessage(error.message || "Confirmation is still unavailable. Check again before starting another transaction.");
     } finally {
       if (currentAddress.current === address) {
-        setPending(getPendingSponsoredTransaction(address));
+        setPending(unresolvedSend(address));
         setBusy(false);
       }
     }

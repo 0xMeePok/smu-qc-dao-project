@@ -1,4 +1,5 @@
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
+import { formatFundingAmount } from "../lib/fundingDisplay.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
 import { EscrowFundingPanel } from "../components/EscrowFundingPanel.jsx";
@@ -361,7 +362,7 @@ export default function ProposalDetailPage({ proposalId, onNavigate, autoAnchor 
         {reviewers && openedTabs.has("record") && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
         {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("overview")); highlightWhenPresent(`comment-${item.commentId}`); }} />}
       </div>
-    </article><aside className="context-panel"><span className="eyebrow">{independent ? "Crowdfunding target" : "Requested"}</span><strong>{proposal.currency} {Number(proposal.amount).toLocaleString()}</strong><dl>
+    </article><aside className="context-panel"><span className="eyebrow">{independent ? "Crowdfunding target" : "Requested"}</span><strong>{formatFundingAmount(proposal.currency, proposal.amount)}</strong><dl>
       {independent && <PosterIdentity ownerId={proposal.researcherId} poster={author} onNavigate={onNavigate} label="Proposed by" />}
       <div><dt>Category</dt><dd>{PROPOSAL_CATEGORIES.find((item) => item.value === proposal.category)?.label || "—"}</dd></div>
       {independent && <div><dt>Maturity</dt><dd>{PROPOSAL_MATURITY_LEVELS.find((item) => item.value === proposal.maturity)?.label || "—"}</dd></div>}

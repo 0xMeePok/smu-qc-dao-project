@@ -13,6 +13,7 @@ import { getIndependentFundingState, independentFundingAmount, independentFundin
 import { Field } from "./Field.jsx";
 import { escrowCustodyLock } from "../../../firebase/functions/escrowCustody.js";
 import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
+import { formatInstant } from "../lib/datetime.js";
 
 const pending = new Map();
 const pendingKey = (id, wallet) => `qcdao:independent-funding:v1:${independentFundingDeploymentKey()}:${id}:${wallet ?? ""}`;
@@ -23,12 +24,23 @@ function savePending(key, value) {
   if (value) pending.set(key, value); else pending.delete(key);
   try { if (value) sessionStorage.setItem(key, JSON.stringify(value)); else sessionStorage.removeItem(key); } catch { /* Keep it in this tab. */ }
 }
-const instant = seconds => Number(seconds) > 0 ? new Date(Number(seconds) * 1000).toLocaleString() : "—";
+const instant = seconds => Number(seconds) > 0 ? formatInstant(new Date(Number(seconds) * 1000)) : "—";
+const SUCCESS = {
+  activate: "Crowdfunding activated. Funders can now contribute to this listing's escrow.",
+  deposit: "Contribution confirmed. Your tokens are held in this listing's escrow.",
+  accept: "Funding accepted. The upfront 50% has been released and your completion period has started.",
+  decline: "Funding declined. Every contribution is now refundable.",
+  submitEvidence: "Delivery evidence submitted for the funder vote.",
+  vote: "Your completion vote is recorded.",
+  releaseCompletion: "The final payment release is confirmed.",
+  claimRefund: "Refund claimed. Your unpaid contribution has been returned to your wallet.",
+};
 
 export function IndependentFundingView({ snapshot, loading, error, busy, progress, notice, walletReady, onConnect,
   amount, onAmount, delivery, onDelivery, reason = "", onReason, onAction, onRefresh, unresolved, onConfirm, integrityBlocked = false }) {
   const summary = snapshot?.summary, actions = snapshot?.actions ?? {}, wallet = snapshot?.wallet ?? {};
-  const disabled = loading || busy || !walletReady || Boolean(unresolved);
+  // Background reads never disable or remount controls; actions are re-prepared server-side.
+  const disabled = busy || !walletReady || Boolean(unresolved);
   const remaining = summary ? BigInt(summary.fundingTarget ?? summary.target ?? 0) - BigInt(summary.totalDeposited ?? 0) : null;
   const amountError = summary ? contributionError({ amount, decimals: summary.tokenDecimals, symbol: summary.tokenSymbol, remaining }) : "";
   const money = value => independentFundingAmount(value, summary?.tokenDecimals, summary?.tokenSymbol);
@@ -39,13 +51,13 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
   return <section className="card escrow-funding" aria-label="Independent crowdfunding">
     <div className="table-header"><div><h3>Independent crowdfunding</h3><p>50% on researcher acceptance · 50% after funder completion approval</p></div>
       <button type="button" className="secondary small" disabled={loading || busy} onClick={onRefresh}>Refresh crowdfunding</button></div>
-    {loading && <p role="status">Reading confirmed crowdfunding status…</p>}
+    {loading && !snapshot && <p role="status">Reading confirmed crowdfunding status…</p>}
     {error && <p role="alert" className="error-banner">{error}</p>}
     {notice && <p role="status" className="proposal-success">{notice}</p>}
     {progress && <p role="status">{progress.status === "awaiting_signature" ? ["approve", "resetAllowance"].includes(progress.action)
       ? "Approve the exact contribution amount in your wallet." : "Confirm this crowdfunding action in your wallet."
       : progress.status === "pending" ? "Transaction submitted. Waiting for confirmation…" : progress.status === "confirmed" ? "Transaction confirmed." : "Preparing verified crowdfunding action…"}</p>}
-    {unresolved && <p role="alert">A wallet transaction is awaiting confirmation. <a href={independentFundingExplorer("tx", unresolved.transactionHash)} target="_blank" rel="noreferrer">View transaction</a>{" "}
+    {unresolved && !busy && <p role="alert">A wallet transaction is awaiting confirmation. <a href={independentFundingExplorer("tx", unresolved.transactionHash)} target="_blank" rel="noreferrer">View transaction</a>{" "}
       <button type="button" className="secondary small" disabled={busy} onClick={onConfirm}>Retry confirmation</button></p>}
     {!walletReady && <p className="field-hint">Sign in with your email to use your QC DAO wallet. <button type="button" className="text-button" onClick={onConnect}>Sign in</button></p>}
     {!loading && snapshot?.configured === false && <p className="field-hint">Independent crowdfunding is awaiting its contract deployment.</p>}
@@ -108,6 +120,8 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
   const { user } = useAuth(), { address, isConnected, chainId } = useWallet();
   const queryClient = useContext(QueryClientContext);
   const [snapshot, setSnapshot] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
+  // A read failure clears on the next good read; an action's error stays until the next action.
+  const [readError, setReadError] = useState("");
   const [busy, setBusy] = useState(false), [progress, setProgress] = useState(null), [notice, setNotice] = useState("");
   const [amount, setAmount] = useState(""), [delivery, setDelivery] = useState({ summary: "", url: "" });
   const [reason, setReason] = useState("");
@@ -120,14 +134,22 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
   const version = useRef(0), change = useRef(onStateChange); change.current = onStateChange;
   const walletReady = Boolean(isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID);
   const load = useCallback(async () => {
-    const current = ++version.current; setLoading(true); setError("");
+    const current = ++version.current; setLoading(true);
     try { const next = await getIndependentFundingState({ proposalId: proposal.id });
-      if (alive.current && activeKey.current === key && current === version.current) { setSnapshot(next); change.current?.(next); }
-    } catch (err) { if (alive.current && activeKey.current === key && current === version.current) { setSnapshot(null); change.current?.(null); setError(independentFundingError(err, { reading: true })); } }
+      if (alive.current && activeKey.current === key && current === version.current) { setSnapshot(next); setReadError(""); change.current?.(next); }
+    } catch (err) { if (alive.current && activeKey.current === key && current === version.current) { setSnapshot(null); change.current?.(null); setReadError(independentFundingError(err, { reading: true })); } }
     finally { if (alive.current && activeKey.current === key && current === version.current) setLoading(false); }
   }, [proposal.id, user?.id, key]);
-  useEffect(() => { setSnapshot(null); setNotice(""); setProgress(null); setBusy(false); setUnresolved(initialTransaction || pendingTransaction(key));
-    if (initialTransaction) savePending(key, initialTransaction); void load();
+  // Reset only for a different listing or member; a refreshVersion bump re-reads in place
+  // so a passive refresh never unmounts the controls a member is using.
+  const scope = useRef(null);
+  useEffect(() => {
+    if (scope.current !== key) {
+      scope.current = key;
+      setSnapshot(null); setNotice(""); setError(""); setReadError(""); setProgress(null); setBusy(false); setUnresolved(initialTransaction || pendingTransaction(key));
+      if (initialTransaction) savePending(key, initialTransaction);
+    }
+    void load();
     return () => { ++version.current; }; }, [load, key, refreshVersion]);
   useLiveActivity({ proposalId: proposal.id, channel: "funding", identity: user?.id, onRefresh: load,
     enabled: Boolean(proposal.id), blocked: busy || loading });
@@ -142,7 +164,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
       if (next?.configured && typeof next.exists === "boolean"
           && (!next.summary?.proposalId || next.summary.proposalId === proposal.id)) {
         // Sync already verified this confirmed state. Supersede older background reads.
-        ++version.current; setSnapshot(next); setLoading(false); setError(""); change.current?.(next);
+        ++version.current; setSnapshot(next); setLoading(false); setReadError(""); change.current?.(next);
       } else await load(); // Approvals and older backend responses still need a fresh read.
     }
     if (currentPanel()) onConfirmed?.();
@@ -157,7 +179,12 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
       const result = await writeIndependentFundingAction({ proposalId: proposal.id, action, account: address, ...extra,
         onChange: next => { if (currentPanel()) setProgress(next); if (next.status === "pending") remember({ transactionHash: next.transactionHash, action: next.action });
           if (next.status === "confirmed" && ["approve", "resetAllowance"].includes(next.action)) remember(null); } });
-      await sync(result.transactionHash, action); if (currentPanel()) setNotice("Crowdfunding transaction confirmed.");
+      await sync(result.transactionHash, action);
+      if (currentPanel()) {
+        setNotice(SUCCESS[action] ?? "Crowdfunding transaction confirmed.");
+        if (action === "deposit") setAmount("");
+        if (action === "decline") setReason("");
+      }
     } catch (err) { if (err.transactionHash && !err.transactionSettled) remember({ transactionHash: err.transactionHash, action: err.action || action });
       else if (err.transactionSettled) remember(null); if (currentPanel()) setError(independentFundingError(err, { transactionHash: pendingTransaction(key)?.transactionHash })); }
     finally { if (currentPanel()) { setBusy(false); setProgress(null); } }
@@ -168,7 +195,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
     catch (err) { if (err.transactionSettled) remember(null); if (currentPanel()) setError(independentFundingError(err, { transactionHash: pendingTransaction(key)?.transactionHash })); }
     finally { if (currentPanel()) setBusy(false); }
   };
-  return <><IndependentFundingView snapshot={snapshot} loading={loading} error={error} busy={busy} progress={progress} notice={notice}
+  return <><IndependentFundingView snapshot={snapshot} loading={loading} error={error || readError} busy={busy} progress={progress} notice={notice}
     walletReady={walletReady} onConnect={() => { void signIn(); }} amount={amount} onAmount={setAmount} delivery={delivery} onDelivery={setDelivery}
     reason={reason} onReason={setReason}
     integrityBlocked={integrityBlocked} onAction={act} onRefresh={load} unresolved={unresolved} onConfirm={confirm} /></>;

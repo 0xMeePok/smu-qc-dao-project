@@ -2,6 +2,7 @@ import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
+import { ACCEPTANCE_WINDOW_MS } from "../lib/deadlineUrgency.js";
 import { EvaluationBadges, StatusBadge } from "./StatusBadge.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { PROPOSAL_STATUS_DRAFT } from "../lib/proposals.js";
@@ -108,9 +109,9 @@ export function ProposalTracker({ onNavigate }) {
           {isModerated(item) || item.status === "moderated_removed" || item.status === "moderated_hidden" ? (
             <span aria-label="No time remaining">—</span>
           ) : item.grant?.status === "pending" || item.grant?.status === "expired" ? (
-            <span className="table-row-meta">Grant acceptance: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} showInstant={false} /></span>
+            <span className="table-row-meta">Grant acceptance: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} windowMs={ACCEPTANCE_WINDOW_MS} showInstant={false} /></span>
           ) : item.escrow ? (proposalQueueDeadline(item) && <span className="table-row-meta">
-            {item.escrow.state === "Open" ? "Funding closes" : "Escrow approval"}: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} showInstant={false} />
+            {item.escrow.state === "Open" ? "Funding closes" : "Escrow approval"}: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} windowMs={item.escrow.state === "Locked" ? ACCEPTANCE_WINDOW_MS : undefined} showInstant={false} />
           </span>) : item.grantUnavailable || item.escrowUnavailable || ["accepted", "voided"].includes(item.grant?.status) ? null : independent && item.status !== "withdrawn"
             && ![I.RELEASED, I.DECLINED, I.EXPIRED, I.CANCELLED, I.REFUNDED].includes(item.independentFunding?.state) ? (
             <span className="table-row-meta">{item.independentFunding?.state === I.ACCEPTED ? "Completion ends" : "Funding closes"}: <ExpiryCountdown expiresAt={proposalQueueDeadline(item)} status="submitted" showInstant={false} /></span>

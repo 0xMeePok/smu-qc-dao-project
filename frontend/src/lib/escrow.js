@@ -118,26 +118,43 @@ async function readUserAction({ proposal, account, action, adapters, config }) {
     ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
     : prepareStoredProposal(proposal, { registryConfig: config });
   const { block, readContract } = await escrowBlockReader(adapters, config);
+  const names = action === "deposit"
+    ? ["state", "fundingTarget", "totalDeposited", "expiresAt", "tokenDecimals"]
+    : ["state", "currentTranche", "selectionId", "approvalDeadline", "ownerApproved", "solutionApproved", "problemOwner", "proposalOwner", "funderVoting"];
+  const tokenRead = (functionName, args = []) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
+  // The same normalized addresses verifyProposalEscrow reads with, so both share cache entries.
+  const registryAddress = requireAddress(config.address, "AuditRegistry address");
+  const factoryAddress = requireAddress(config.escrow?.factoryAddress, "Funding factory address");
+  const actionReads = escrowAddress => {
+    const read = (functionName, args = []) => readContract({ address: escrowAddress, abi: config.escrow.escrowAbi, functionName, args });
+    return Promise.all([
+      Promise.all(names.map(name => read(name))),
+      readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, escrowAddress] }),
+      action === "deposit" ? Promise.all([
+        tokenRead("decimals"),
+        readContract({ address: factoryAddress, abi: config.escrow.factoryAbi, functionName: "allowedTokens", args: [expected.fundingTerms.token] }),
+        tokenRead("balanceOf", [account]), tokenRead("allowance", [account, escrowAddress]),
+      ]) : null,
+      action === "voteMilestone" ? read("depositorSummary", [account]) : null,
+    ]);
+  };
+  // Start this action's guard reads as soon as the registry names the escrow,
+  // alongside the canonical verification instead of after it. They share the
+  // block-pinned cache, so the reads below reuse them only for the verified
+  // address; nothing here is used unless every verification check passes.
+  void readContract({ address: registryAddress, abi: config.abi, functionName: "proposalEscrow", args: [expected.entityId] })
+    .then(value => {
+      let escrowAddress;
+      try { escrowAddress = requireAddress(value, "Canonical proposal escrow"); } catch { return; }
+      return actionReads(escrowAddress);
+    }).catch(() => { /* The verified reads below report any failure. */ });
   const [canonical, registered] = await Promise.all([
     verifyProposalEscrow({ expected, config, readContract }),
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
   ]);
   assertProposalContent(registered, expected);
   const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
-  const names = action === "deposit"
-    ? ["state", "fundingTarget", "totalDeposited", "expiresAt", "tokenDecimals"]
-    : ["state", "currentTranche", "selectionId", "approvalDeadline", "ownerApproved", "solutionApproved", "problemOwner", "proposalOwner", "funderVoting"];
-  const tokenRead = (functionName, args = []) => readContract({ address: expected.fundingTerms.token, abi: erc20Abi, functionName, args });
-  const [values, active, depositValues, contributionSummary] = await Promise.all([
-    Promise.all(names.map(name => read(name))),
-    readContract({ address: config.address, abi: config.abi, functionName: "isFundingActive", args: [expected.entityId, canonical.address] }),
-    action === "deposit" ? Promise.all([
-      tokenRead("decimals"),
-      readContract({ address: canonical.factoryAddress, abi: config.escrow.factoryAbi, functionName: "allowedTokens", args: [expected.fundingTerms.token] }),
-      tokenRead("balanceOf", [account]), tokenRead("allowance", [account, canonical.address]),
-    ]) : null,
-    action === "voteMilestone" ? read("depositorSummary", [account]) : null,
-  ]);
+  const [values, active, depositValues, contributionSummary] = await actionReads(canonical.address);
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
   if (action === "deposit") {
     const [tokenDecimals, tokenListed, balance, allowance] = depositValues;
@@ -358,7 +375,7 @@ export async function claimRemovedProposalFunds({ proposalId, account }) {
 
 /** Called only from a user action. Never retries a write or signs with a server key. */
 export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve, reason,
-  onProgress, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
+  onProgress, beforeWalletRequest, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
   onProgress?.({ status: "preparing", action });
   const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
   if (usingConfiguredDeployment) {
@@ -371,6 +388,9 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
     proposal, account: walletAddress, action, adapters, config, isHistorical,
   });
   if (!Object.hasOwn(snapshot.can, action) || !snapshot.can[action]) throw new Error("This escrow action is not available to the connected wallet in the current state. Refresh and try again.");
+  // A caller's own pre-signature check (for example server eligibility) may run
+  // alongside these chain reads; no wallet request starts until it resolves.
+  if (beforeWalletRequest) await beforeWalletRequest();
   const send = async (functionName, args, { address = snapshot.address, abi = config.escrow.escrowAbi, label = functionName } = {}) => {
     let transactionHash;
     try {

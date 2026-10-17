@@ -458,7 +458,13 @@ async function loadScope(db, uid, profile, filters) {
     if (!isAdmin) fail("permission-denied", "This audit trail is not available.");
     return { isAdmin, problem: null, proposal: null };
   }
-  const tx = { get: (ref) => ref.get() };
+  // Reads are shared by path, so the parent canReadContent loads for a
+  // proposal is not fetched a second time below.
+  const reads = new Map();
+  const tx = { get: (ref) => {
+    if (!reads.has(ref.path)) reads.set(ref.path, ref.get());
+    return reads.get(ref.path);
+  } };
   if (filters.entityType === "problem") {
     const snap = await db.collection("problems").doc(filters.entityId).get();
     if (!snap.exists) {
@@ -479,7 +485,7 @@ async function loadScope(db, uid, profile, filters) {
   let problem = null;
   const problemId = snap.data().problemId;
   if (problemId) {
-    const parent = await db.collection("problems").doc(problemId).get();
+    const parent = await tx.get(db.collection("problems").doc(problemId));
     if (parent.exists) problem = { id: parent.id, ...parent.data() };
   }
   return { isAdmin, problem, proposal: { id: snap.id, ...snap.data() } };
@@ -541,14 +547,18 @@ async function collect(db, scope, filters, uid) {
     if (row.title && row.ownerId && !row.researcherId) titles.problem.set(row.id, row.title);
   }
   const missingTitles = [...proposalIds].filter((id) => id && !titles.proposal.has(id)).slice(0, 40);
-  const loadedTitles = await Promise.all(missingTitles.map(async (id) => {
-    const snap = await db.collection("proposals").doc(id).get();
+  // One batched read instead of up to 40 separate round trips.
+  const titleRefs = missingTitles.map((id) => db.collection("proposals").doc(id));
+  const titleSnaps = !titleRefs.length ? []
+    : typeof db.getAll === "function" ? await db.getAll(...titleRefs) : await Promise.all(titleRefs.map((ref) => ref.get()));
+  const loadedTitles = titleSnaps.map((snap, index) => {
+    const id = missingTitles[index];
     if (!snap.exists) return null;
     const data = snap.data();
     if (!visibleProposal(data, uid, scope.isAdmin)) return null;
     proposals.set(id, { id, ...data });
     return [id, data.title || "Proposal"];
-  }));
+  });
   for (const entry of loadedTitles) if (entry) titles.proposal.set(entry[0], entry[1]);
   const events = [];
   const seen = new Set();

@@ -89,3 +89,28 @@ it("uses the confirmed admin cancellation reason while retaining the contract re
   view.rerender(<EscrowLifecycleBadge summary={{ ...summary, state: "Refunded", refundReason: "admin_cancelled", invalidated: true }} />);
   expect(screen.getByLabelText("Escrow state: Refunded")).toBeTruthy();
 });
+
+it("does not call a cancelled or refunding escrow raised or fully funded", () => {
+  for (const closed of [{ state: "Cancelled" }, { state: "Refunded" }, { state: "Open", refundsEnabled: true }, { state: "Open", invalidated: true }]) {
+    const view = render(<FundingProgress summary={{ ...summary, ...closed }} />);
+    expect(screen.queryByText("Fully funded")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByText(/Escrow closed · 3 USDC was deposited toward 3 USDC/)).toBeTruthy();
+    view.unmount();
+  }
+});
+
+it("groups requested and target amounts exactly, matching the rest of the app", async () => {
+  const { formatFundingAmount } = await import("../../src/lib/fundingDisplay.js");
+  expect(formatFundingAmount("USDT", "1000")).toBe("USDT 1,000");
+  expect(formatFundingAmount("USDT", 1000)).toBe("USDT 1,000");
+  expect(formatFundingAmount("USDC", "1234567.25")).toBe("USDC 1,234,567.25");
+  expect(formatFundingAmount("USDC", "12")).toBe("USDC 12");
+  expect(formatFundingAmount("USDC", "abc")).toBe("USDC abc");
+});
+
+it("does not call a fully funded open escrow 'open for funding'", () => {
+  render(<EscrowLifecycleBadge summary={{ ...summary, state: "Open", totalDeposited: "3000000", fundingTarget: "3000000" }} />);
+  expect(screen.queryByText(/Funding is open/)).toBeNull();
+  expect(screen.getByText(/Fully funded/)).toBeTruthy();
+});

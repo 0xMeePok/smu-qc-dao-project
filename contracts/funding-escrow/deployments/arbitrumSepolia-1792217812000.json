@@ -1,0 +1,108 @@
+{
+  "contractName": "EscrowAuditRegistry",
+  "entityIdScheme": 2,
+  "workflowVersion": 2,
+  "capabilities": [
+    "pooled-funding",
+    "open-funding-grants",
+    "open-funding-decline"
+  ],
+  "chainId": 421614,
+  "owner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+  "feeBps": 10,
+  "tokens": [
+    "0xC2FE292771719Ae948506bab3c156A622de9a415",
+    "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+    "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
+  ],
+  "status": "ready",
+  "startedAt": "2026-10-17T06:16:52.000Z",
+  "deployedWith": "offline viem signing in the Claude workspace + browser ethers v6 broadcast (deploy-core.mjs steps)",
+  "registry": {
+    "address": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
+    "constructorArgs": [
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0"
+    ],
+    "transactionHash": "0x49ddd3d088cb6c44da35cb81bb8d9dddabc9190137f818f32656976a494d19b8",
+    "blockNumber": 319990437,
+    "status": "confirmed",
+    "verification": "not_requested",
+    "deployedAt": "2026-10-17T06:16:52.000Z"
+  },
+  "factory": {
+    "address": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
+    "constructorArgs": [
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+      "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+      [
+        "0xC2FE292771719Ae948506bab3c156A622de9a415",
+        "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+        "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd"
+      ],
+      10,
+      "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5"
+    ],
+    "transactionHash": "0xf1480bc34a20f1cbec3c7df48064556b83a666c14aa38289f2ddb86c0b432279",
+    "blockNumber": 319990723,
+    "status": "confirmed",
+    "verification": "not_requested",
+    "deployedAt": "2026-10-17T06:18:06.000Z"
+  },
+  "wiring": {
+    "transactionHash": "0x2fb8445f40e34a70bad56c27f9d3f57e1f2cf81a07af2aab4faf514ad3f0e667",
+    "status": "confirmed"
+  },
+  "escrowDeployer": {
+    "address": "0x2b2410eBf06026c25ef7E7b3d0FAD7cE5a35c392",
+    "status": "confirmed"
+  },
+  "openFundingPoolDeployer": {
+    "address": "0xdE607e8cDbEe4C7C00E821Ff03E1B3eFAe3e8Ca6",
+    "status": "confirmed"
+  },
+  "tokenMetadata": [
+    {
+      "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
+      "symbol": "XSGD",
+      "decimals": 6
+    },
+    {
+      "address": "0x5f079A5934C864D6881EF30cf74Fe1363F58B856",
+      "symbol": "USDT",
+      "decimals": 6
+    },
+    {
+      "address": "0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd",
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  ],
+  "openFunding": {
+    "version": 1,
+    "verified": true,
+    "registryAddress": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
+    "factoryAddress": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
+    "escrowDeployerAddress": "0x2b2410eBf06026c25ef7E7b3d0FAD7cE5a35c392",
+    "openFundingPoolDeployerAddress": "0xdE607e8cDbEe4C7C00E821Ff03E1B3eFAe3e8Ca6"
+  },
+  "runtimeVerification": {
+    "contractName": "EscrowAuditRegistry",
+    "address": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
+    "factoryAddress": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
+    "chainId": 421614,
+    "bytecodeMatches": true,
+    "wiringMatches": true,
+    "platformSigner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "registryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "factoryOwner": "0x1c608C148F64Fb9657bA4e5fB8992345277371C0",
+    "feeBps": 10,
+    "registryCodeHash": "0xde333c8c6efe500e884be65ddbe45f5902f423702814b85be444ba65a012f468",
+    "factoryCodeHash": "0x1876c6e8ebfb70a4fe44659cd51fa8260c45647e79bb742cdc4a102fbe275f6a",
+    "escrowDeployer": "0x2b2410eBf06026c25ef7E7b3d0FAD7cE5a35c392",
+    "openFundingPoolDeployer": "0xdE607e8cDbEe4C7C00E821Ff03E1B3eFAe3e8Ca6",
+    "openFundingGrants": true,
+    "readOnly": true,
+    "verifiedAt": "2026-10-17T06:21:54.431Z"
+  }
+}

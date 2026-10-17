@@ -1,4 +1,5 @@
 import { expect } from "chai";
+import { id as declineReason } from "ethers";
 import { at, fixture, scopedId, terms, State, Behavior } from "./helpers.js";
 
 const UNIT = 10n ** 6n;
@@ -296,5 +297,132 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
       .to.be.revertedWithCustomError(deployer, "AccessDenied");
     expect(await c.pool.factory()).to.equal(await c.factory.getAddress());
     expect(await c.pool.auditRegistry()).to.equal(c.registryAddress);
+  });
+});
+
+describe("OpenFundingPool: researcher declines a pending grant offer", function () {
+  it("returns the reservation to the available balance, voids the grant escrow and records the reason hash", async function () {
+    const c = await grantFixture();
+    const first = await proposal(c, "decline-one");
+    const second = await proposal(c, "decline-two", c.bob);
+    const third = await proposal(c, "after-decline", c.other);
+    await c.pool.connect(c.owner).selectProposal(first.id);
+    await c.pool.connect(c.owner).selectProposal(second.id);
+    expect(await c.pool.availableBalance()).to.equal(0);
+    const poolBalance = await c.token.balanceOf(c.poolAddress);
+    const reasonHash = declineReason("Our team has secured other funding for this work.");
+    const anchorsBefore = await c.registry.fundingAnchorCount(first.id);
+    await expect(c.pool.connect(c.solution).declineProposal(first.id, reasonHash))
+      .to.emit(c.pool, "ProposalDeclined").withArgs(first.id, c.solution.address, first.address, c.target, reasonHash)
+      .and.to.emit(c.pool, "ProposalVoided").withArgs(first.id, c.target)
+      .and.to.emit(first.escrow, "EscrowVoided");
+    const offer = await c.pool.getOffer(first.id);
+    expect(offer.state).to.equal(3);
+    expect(offer.amount).to.equal(c.target);
+    expect(await c.pool.offerState(first.id)).to.equal(3);
+    expect(await c.pool.declineReasonHash(first.id)).to.equal(reasonHash);
+    expect(await c.pool.declineReasonHash(second.id)).to.equal(c.ethers.ZeroHash);
+    expect(await c.pool.reservedAmount()).to.equal(c.target);
+    expect(await c.pool.availableBalance()).to.equal(GRANT - c.target);
+    expect(await c.pool.totalAllocated()).to.equal(0);
+    expect(await c.pool.totalDeposited()).to.equal(GRANT);
+    expect(await c.token.balanceOf(c.poolAddress)).to.equal(poolBalance);
+    expect(await first.escrow.state()).to.equal(State.Voided);
+    expect(await first.escrow.totalDeposited()).to.equal(0);
+    expect(await c.registry.proposalVoided(first.id)).to.equal(true);
+    expect(await c.registry.isFundingActive(first.id, first.address)).to.equal(false);
+    expect(await c.registry.fundingAnchorCount(first.id)).to.equal(anchorsBefore + 1n);
+    expect((await c.registry.fundingAnchorAt(first.id, anchorsBefore)).eventType).to.equal(9n); // FundingEvent.Voided
+    // The other offer is untouched and the released funds can back a new award.
+    expect((await c.pool.getOffer(second.id)).state).to.equal(1);
+    await c.pool.connect(c.bob).acceptProposal(second.id);
+    await c.pool.connect(c.owner).selectProposal(third.id);
+    await c.pool.connect(c.other).acceptProposal(third.id);
+    expect(await c.pool.totalAllocated()).to.equal(GRANT);
+    expect(await c.pool.availableBalance()).to.equal(0);
+  });
+
+  it("lets only the proposal's researcher decline", async function () {
+    const c = await grantFixture();
+    const p = await proposal(c, "decline-access");
+    const other = await proposal(c, "decline-access-other", c.bob);
+    await c.pool.connect(c.owner).selectProposal(p.id);
+    await c.pool.connect(c.owner).selectProposal(other.id);
+    const reasonHash = declineReason("Not the right fit for our lab at this time.");
+    for (const actor of [c.owner, c.bob, c.other, c.platform, c.admin]) {
+      await expect(c.pool.connect(actor).declineProposal(p.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "AccessDenied");
+    }
+    await expect(c.pool.connect(c.solution).declineProposal(other.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "AccessDenied");
+    expect((await c.pool.getOffer(p.id)).state).to.equal(1);
+    expect(await c.pool.reservedAmount()).to.equal(GRANT);
+  });
+
+  it("requires a reason hash and a pending offer, and rejects a second decline", async function () {
+    const c = await grantFixture();
+    const unselected = await proposal(c, "decline-unselected");
+    const accepted = await proposal(c, "decline-accepted", c.bob);
+    const reasonHash = declineReason("We would rather pursue a different sponsor.");
+    await expect(c.pool.connect(c.solution).declineProposal(unselected.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await accept(c, accepted);
+    await expect(c.pool.connect(c.bob).declineProposal(accepted.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    expect(await c.pool.totalAllocated()).to.equal(c.target);
+    await c.pool.connect(c.owner).selectProposal(unselected.id);
+    await expect(c.pool.connect(c.solution).declineProposal(unselected.id, c.ethers.ZeroHash)).to.be.revertedWithCustomError(c.pool, "InvalidInput");
+    await c.pool.connect(c.solution).declineProposal(unselected.id, reasonHash);
+    await expect(c.pool.connect(c.solution).declineProposal(unselected.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await expect(c.pool.connect(c.solution).acceptProposal(unselected.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await expect(c.pool.expireProposal(unselected.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await expect(c.pool.connect(c.owner).selectProposal(unselected.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await expect(c.registry.connect(c.solution).updateHashes(unselected.id, c.ethers.id("edit"), c.ethers.id("edit solution"), 0))
+      .to.be.revertedWithCustomError(c.registry, "InvalidState");
+    expect(await c.pool.reservedAmount()).to.equal(0);
+    expect(await c.pool.availableBalance()).to.equal(GRANT - c.target);
+  });
+
+  it("closes at the acceptance deadline, after which only expiry releases the reservation", async function () {
+    const c = await grantFixture();
+    const late = await proposal(c, "decline-late");
+    const edge = await proposal(c, "decline-edge", c.bob);
+    await c.pool.connect(c.owner).selectProposal(late.id);
+    const reasonHash = declineReason("The project timeline no longer works for us.");
+    const offer = await c.pool.getOffer(late.id);
+    await at(c, offer.acceptanceDeadline);
+    await expect(c.pool.connect(c.solution).declineProposal(late.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "WindowClosed");
+    await at(c, offer.acceptanceDeadline);
+    await c.pool.expireProposal(late.id);
+    expect(await c.pool.declineReasonHash(late.id)).to.equal(c.ethers.ZeroHash);
+    expect(await c.pool.availableBalance()).to.equal(GRANT);
+    await c.pool.connect(c.owner).selectProposal(edge.id);
+    const edgeOffer = await c.pool.getOffer(edge.id);
+    await at(c, edgeOffer.acceptanceDeadline - 1n);
+    await c.pool.connect(c.bob).declineProposal(edge.id, reasonHash);
+    expect(await c.pool.availableBalance()).to.equal(GRANT);
+    expect(await c.pool.declineReasonHash(edge.id)).to.equal(reasonHash);
+  });
+
+  it("is never blocked by token delisting, a moderation pause, a withdrawn proposal or a closed posting", async function () {
+    const c = await grantFixture({ duration: 86400 });
+    const delisted = await proposal(c, "decline-delisted");
+    const paused = await proposal(c, "decline-paused", c.bob);
+    await c.pool.connect(c.owner).selectProposal(delisted.id);
+    await c.pool.connect(c.owner).selectProposal(paused.id);
+    const reasonHash = declineReason("Circumstances changed after we applied.");
+    await c.factory.connect(c.admin).setTokenAllowed(c.tokenAddress, false);
+    await c.pool.connect(c.solution).declineProposal(delisted.id, reasonHash);
+    await c.registry.setPostingFundingPaused(c.postingId, true);
+    await at(c, c.expiresAt); // The posting closes while the offer window is still open.
+    await c.pool.connect(c.bob).declineProposal(paused.id, reasonHash);
+    expect(await c.pool.reservedAmount()).to.equal(0);
+    expect(await c.pool.availableBalance()).to.equal(GRANT);
+    await c.pool.connect(c.owner).withdrawAvailable(GRANT);
+    expect(await c.token.balanceOf(c.poolAddress)).to.equal(0);
+
+    const w = await grantFixture();
+    const withdrawn = await proposal(w, "decline-withdrawn");
+    await w.pool.connect(w.owner).selectProposal(withdrawn.id);
+    await w.registry.connect(w.solution).withdrawProposal(withdrawn.id, w.reason);
+    await w.pool.connect(w.solution).declineProposal(withdrawn.id, reasonHash);
+    expect(await w.pool.availableBalance()).to.equal(GRANT);
+    expect(await withdrawn.escrow.state()).to.equal(State.Voided);
   });
 });

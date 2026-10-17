@@ -47,8 +47,25 @@ import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/f
 import { IndependentFundingTerms } from "../components/IndependentFundingTerms.jsx";
 import { activateIndependentFunding, getIndependentFundingState, independentFundingConfigured, independentFundingLocked } from "../lib/independentEscrow.js";
 import { ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
+import { formatFundingAmount } from "../lib/fundingDisplay.js";
 
 const ESCROW_LINKED = isEscrowRegistry(AUDIT_REGISTRY_CONFIG);
+
+/**
+ * Publishing a new listing with crowdfunding takes two wallet approvals: the
+ * listing anchor, then (after the server saves and attests it) the listing's
+ * own escrow. Say which one is in progress so the second prompt is expected.
+ */
+function publicationStepMessage({ twoSteps, auditProgress, confirmedAudit, escrowStep }) {
+  const step = twoSteps ? "Step 1 of 2: " : "";
+  if (escrowStep === "preparing") return "Step 2 of 2: preparing the listing’s escrow. Your wallet asks for a second approval shortly; keep this page open.";
+  if (escrowStep === "awaiting_signature") return "Step 2 of 2: create the listing’s escrow — approve in your wallet.";
+  if (escrowStep === "pending") return "Step 2 of 2: escrow transaction submitted. Waiting for confirmation…";
+  if (escrowStep === "confirmed") return "Step 2 of 2 confirmed. Opening your listing…";
+  if (confirmedAudit) return `${step}Listing transaction confirmed. Saving and verifying your listing… This can take up to a minute; keep this page open.`;
+  if (auditProgress?.transactionHash) return `${step}Listing transaction submitted. Waiting for on-chain confirmation…`;
+  return `${step}Preparing your transaction… Approve the listing record in your wallet when it opens.`;
+}
 
 const STEPS = [
   { key: "solution", label: "Your solution", fields: ["title", "summary", "methodology", "category"] },
@@ -162,6 +179,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   const [errors, setErrors] = useState({});
   const [error, setError] = useState("");
   const [baseline, setBaseline] = useState(null);
+  const [escrowStep, setEscrowStep] = useState(null);
   const savedAttachmentIds = useRef(new Set());
   const submitting = useRef(false);
   const formRef = useRef(null);
@@ -312,7 +330,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
       return;
     }
     wizard.goTo(STEPS.length - 1);
-    submitting.current = true; setBusy(true); setError("");
+    submitting.current = true; setBusy(true); setError(""); setEscrowStep(null);
     let audit = null;
     setSaveFailed(false);
     setConfirmedAudit(null);
@@ -361,7 +379,12 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
           fromDraft: draftExists, record: built, audit: receiptForWrite(audit), expiresAt: listingExpiry,
         });
         if (independentFundingConfigured()) {
-          try { await activateIndependentFunding(proposalId, { account: address }); }
+          setEscrowStep("preparing");
+          try {
+            await activateIndependentFunding(proposalId, { account: address, onProgress: (next) => {
+              if (["awaiting_signature", "pending", "confirmed"].includes(next?.status)) setEscrowStep(next.status);
+            } });
+          }
           catch (activationError) {
             setFundingActivationError("Your listing is published. Crowdfunding is not confirmed yet; enable funding or retry the pending confirmation below.");
             if (activationError.transactionHash && !activationError.transactionSettled) {
@@ -388,7 +411,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
           : auditErrorMessage(err));
       }
     }
-    finally { submitting.current = false; setBusy(false); if (!audit) setAuditProgress(null); }
+    finally { submitting.current = false; setBusy(false); setEscrowStep(null); if (!audit) setAuditProgress(null); }
   };
 
   if (submitted) return <ProposalDetailPage proposalId={proposalId} onNavigate={onNavigate} justSubmitted initialTab="funding"
@@ -408,6 +431,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   }
 
   const disabled = busy || savingDraft;
+  const twoApprovals = !editing && independentFundingConfigured();
   const publicationStarted = Boolean(auditProgress?.transactionHash);
   const contentDisabled = disabled || publicationStarted;
   const textField = ([key, label, max]) => <Field key={key} htmlFor={`independent-${key}`} label={label} error={errors[key]}>
@@ -506,7 +530,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
               { label: "Problems this could address", value: text("addressedProblems"), step: stepIndex("fit") },
               { label: "Maturity", value: PROPOSAL_MATURITY_LEVELS.find((item) => item.value === form.maturity)?.label ?? "", empty: "Not chosen", step: stepIndex("fit") },
               { label: "Team", value: text("team"), step: stepIndex("fit") },
-              { label: "Crowdfunding target", value: form.amount ? `${form.currency} ${ESCROW_LINKED ? text("amount") : Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: stepIndex("funding") },
+              { label: "Crowdfunding target", value: form.amount ? formatFundingAmount(form.currency, text("amount")) : "", empty: "Not set", step: stepIndex("funding") },
               { label: "Completion period", value: `${form.reviewDays} days from acceptance`, step: stepIndex("funding") },
               { label: "Listing window", value: formatInstant(listingExpiry), step: stepIndex("funding") },
               { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: stepIndex("funding") },
@@ -514,16 +538,19 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             <p className="field-hint">{editing
               ? "Your wallet signs the amendment first. The listing is updated only after that transaction is confirmed on Arbitrum Sepolia, so the stored version always matches its on-chain record."
               : "Your wallet signs first. The proposal is saved only after that transaction is confirmed on Arbitrum Sepolia, so nothing is listed unverified."}</p>
+            {twoApprovals && <p className="field-hint"><strong>Publishing takes two wallet approvals.</strong> First you approve the listing record; after it is saved and verified (about 20 seconds), your wallet asks you to approve creating the listing’s crowdfunding escrow. Keep this page open until both finish.</p>}
           </WizardPanel>
           <div className="wizard-nav">
             <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>Back</button>
             <div className="wizard-nav-end">
               {!wizard.isLast && <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pending}>Continue</button>}
-              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
+              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (escrowStep ? (escrowStep === "awaiting_signature" ? "Approve the escrow in your wallet…" : "Creating the listing’s escrow…") : confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
             </div>
           </div>
         </div>
-        <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
+        {busy && <p className="field-hint" role="status">{publicationStepMessage({ twoSteps: twoApprovals, auditProgress, confirmedAudit, escrowStep })}</p>}
+        {/* Once the listing is saved, the escrow step is reported above instead of "Saving proposal…". */}
+        <SubmissionProgress audit={escrowStep ? null : confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
         {publicationStarted && !confirmedAudit && !busy && <p className="field-hint" role="status" style={{ overflowWrap: "anywhere" }}>Your entries stay fixed while publication is incomplete. Keep this page open until publication finishes. Recovery references are held only on this page; copy them before refreshing. Listing transaction: <code>{auditProgress.transactionHash}</code></p>}
         {!editing && <div className="form-actions wizard-secondary">
           <button className="secondary" type="button" disabled={disabled || pending || publicationStarted} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>
@@ -546,7 +573,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         <span className="eyebrow">Independent listing</span>
         <h2>{text("title") || "Untitled proposal"}</h2>
         <p>This is not a response to a posted problem. Funders browse independent listings separately from open opportunities.</p>
-        {form.amount ? <strong>{form.currency} {ESCROW_LINKED ? text("amount") : Number(form.amount).toLocaleString()}</strong> : null}
+        {form.amount ? <strong>{formatFundingAmount(form.currency, text("amount"))}</strong> : null}
         <ExpiryCountdown expiresAt={listingExpiry} status="submitted" />
         <p className="field-hint">{EXPIRY_WINDOWS.find((item) => item.value === Number(form.expiryDays))?.label ?? `${form.expiryDays} days`}</p>
       </aside>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatFundingAmount } from "../lib/fundingDisplay.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Field } from "../components/Field.jsx";
 import { ProposalCategorySelect } from "../components/ProposalCategorySelect.jsx";
@@ -18,6 +19,7 @@ import {
 } from "../lib/proposals.js";
 import { anchorProposalBeforeWrite, receiptForWrite } from "../lib/proposalAudit.js";
 import { assertCurrentAuditRecord } from "../lib/opportunityAuditFlow.js";
+import { prewarmTransaction } from "../lib/prewarm.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
@@ -203,6 +205,12 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     return () => { cancelled = true; clearInterval(timer); };
   }, [postingId, editProposalId, user.id, onNavigate]);
 
+  // Read-only: warm the RPC connection and the parent's (and an edited
+  // record's) audit transaction so the submit click does not wait on them.
+  useEffect(() => {
+    if (posting) prewarmTransaction({ records: [posting, ...(editProposalId && record ? [record] : [])] });
+  }, [posting, record, editProposalId, wizard.isLast]);
+
   useEffect(() => {
     if (submitted) window.scrollTo({ top: 0, left: 0 });
   }, [submitted]);
@@ -277,6 +285,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     // Progress, the receipt and any retry are shown on the Review step.
     wizard.goTo(steps.length - 1);
     submitting.current = true; setBusy(true); setError("");
+    prewarmTransaction();
     let audit = null;
     setSaveFailed(false);
     setConfirmedAudit(null);
@@ -415,7 +424,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
                 ...(isOpenFunding ? [{ label: "Proposed problem", value: text("proposedProblem"), step: stepIndex("framing") }] : []),
                 { label: "Success criteria", value: text("successCriteria"), step: stepIndex("outcomes") },
                 { label: "Timeline", value: text("timeline"), step: stepIndex("outcomes") },
-                { label: "Requested funding", value: form.amount ? `${posting.currency} ${ESCROW_LINKED ? text("amount") : Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: stepIndex("funding") },
+                { label: "Requested funding", value: form.amount ? formatFundingAmount(posting.currency, text("amount")) : "", empty: "Not set", step: stepIndex("funding") },
                 { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: stepIndex("funding") },
               ]} />
               <p className="field-hint">{editing
@@ -430,6 +439,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
               </div>
             </div>
           </div>
+          {busy && !confirmedAudit && !auditProgress?.transactionHash && <p className="field-hint" role="status">Preparing your transaction… Your wallet’s approval prompt opens once the on-chain checks finish.</p>}
           <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
           {!editing && <div className="form-actions wizard-secondary">
             <button className="secondary" type="button" disabled={disabled || pending} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>
@@ -449,7 +459,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           />
         )}
       </form>
-      <aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong>{posting.currency} {Number(posting.amount).toLocaleString()}</strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>
+      <aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong>{formatFundingAmount(posting.currency, posting.amount)}</strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>
     </div>
   </section>;
 }
