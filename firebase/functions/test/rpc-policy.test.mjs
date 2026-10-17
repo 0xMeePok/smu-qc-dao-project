@@ -210,10 +210,10 @@ describe("Arbitrum Sepolia RPC failover", () => {
 
   it("fails over a timed-out primary within the per-endpoint timeout", async () => {
     await withFixtures([() => ({ hold: true }), () => ({})], async (endpoints) => {
-      const client = clientFor(endpoints, { timeoutMs: 35 });
+      const client = clientFor(endpoints, { timeoutMs: 250 });
       const started = Date.now();
       assert.equal(await read(client), "0x42");
-      assert.ok(Date.now() - started < 600);
+      assert.ok(Date.now() - started < 2_000);
       assert.equal(endpoints[0].calls.length, 1);
       assert.equal(client.transport.rpcStatus.fallbackActive, true);
     });

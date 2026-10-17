@@ -1,7 +1,7 @@
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { proposalBlockReason } from "../lib/proposalValidation.js";
-import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useContext, useEffect, useRef, useState } from "react";
+import { QueryClient, QueryClientContext, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { fetchAuditVerification, useAuditVerification } from "../lib/escrowReads.js";
 import { flushSync } from "react-dom";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -149,7 +149,7 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
   );
 }
 
-export default function PostingDetailPage({ postingId, onNavigate, initialTab = "overview" }) {
+function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
   const { isAuthenticated, user } = useAuth();
   const { address: connectedAddress, isConnected } = useWallet();
   const queryClient = useQueryClient();
@@ -704,4 +704,15 @@ export default function PostingDetailPage({ postingId, onNavigate, initialTab = 
       )}
     </section>
   );
+}
+
+function IsolatedQuery({ children }) {
+  const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+export default function PostingDetailPage(props) {
+  const existing = useContext(QueryClientContext);
+  if (existing) return <PostingDetailBody {...props} />;
+  return <IsolatedQuery><PostingDetailBody {...props} /></IsolatedQuery>;
 }
