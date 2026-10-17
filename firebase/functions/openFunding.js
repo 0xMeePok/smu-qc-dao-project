@@ -189,8 +189,10 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
         && expected.fundingTerms.target <= BigInt(base.available) && ["submitted", "under_review"].includes(proposal.status) && !hidden(proposal) };
   });
   base.selections = selections.filter(Boolean);
-  // Owner, researcher and administrators see the researcher's verified reason.
-  await boundedMap(base.selections.filter(row => row.declined), async row => {
+  // Only the owner, the declining researcher and administrators see the verified reason.
+  // Rows are already caller-scoped above; this gate keeps the reason private if that changes.
+  const mayReadReason = row => isOwner || profile.role === 1 || same(uid, row.researcherId);
+  await boundedMap(base.selections.filter(row => row.declined && mayReadReason(row)), async row => {
     const saved = await db.collection(OPEN_FUNDING_DECLINES).doc(declineKey(config, row.declineReasonHash)).get();
     const data = saved.exists ? saved.data() : null;
     if (data?.proposalId === row.proposalId && same(data.entityId, row.entityId) && typeof data.reason === "string"

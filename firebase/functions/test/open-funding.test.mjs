@@ -433,6 +433,10 @@ describe("researcher declines a pending grant offer", () => {
     const ownerView = await getOpenFundingSummary(f);
     assert.equal(ownerView.selections.find(item => item.proposalId === f.proposals[0].id).declineReason, trimmed);
     assert.equal(ownerView.selections.find(item => item.proposalId === f.proposals[1].id).declined, false);
+    // Another researcher on the same posting never receives the decline reason.
+    const otherView = await getOpenFundingSummary({ ...f, uid: otherResearcher });
+    assert.equal(otherView.selections.some(item => item.declineReason !== undefined), false);
+    assert.equal(otherView.selections.some(item => item.proposalId === f.proposals[0].id), false);
     const snapshot = [...f.db.records.entries()].find(([path]) => path.startsWith("openFundingSelections/") && path.endsWith(f.proposals[0].id))[1];
     assert.equal(snapshot.declined, true); assert.equal(snapshot.status, "voided"); assert.equal(snapshot.declineReason, undefined);
     assert.equal(f.db.records.get(`proposals/${f.proposals[0].id}`).status, f.proposals[0].status);
