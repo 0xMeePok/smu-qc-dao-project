@@ -1,3 +1,4 @@
+import { auditEvent, AUDIT_REVISION_DIGEST } from "../auditEvent.mjs";
 import { encodeFunctionData } from "viem";
 import { escrowConfig } from "./escrowConfigFixture.js";
 export { escrowConfig } from "./escrowConfigFixture.js";
@@ -25,7 +26,8 @@ export function escrowClient(record = escrowRecord()) {
   const calls = [];
   const client = {
     calls,
-    getTransactionReceipt: async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: txHash }),
+    getTransactionReceipt: async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: txHash,
+      logs: [auditEvent({ config: escrowConfig, functionName: expected.functionName, args: expected.args, actor: researcher })] }),
     getTransaction: async () => ({ hash: txHash, to: escrowConfig.address, from: researcher, chainId: 421614,
       blockNumber: 88n, blockHash, input: encodeFunctionData({ abi: escrowConfig.abi,
         functionName: expected.functionName, args: expected.args }) }),
@@ -35,7 +37,7 @@ export function escrowClient(record = escrowRecord()) {
       calls.push({ address, functionName, args });
       if (address.toLowerCase() === escrowConfig.address) {
         if (functionName === "getProposal") return { researcher, opportunityId: expected.opportunityId,
-          opportunityRevisionIndex: 0, proposalHash: expected.proposalHash, solutionHash: expected.solutionHash };
+          opportunityRevisionIndex: 0, opportunityRevisionDigest: AUDIT_REVISION_DIGEST, exists: true, withdrawn: false, proposalHash: expected.proposalHash, solutionHash: expected.solutionHash };
         if (functionName === "getOpportunity") return { owner, expiresAt: 2_000_000_000n };
         if (functionName === "fundingFactory") return escrowConfig.escrow.factoryAddress;
         if (functionName === "proposalEscrow") return escrowAddress;

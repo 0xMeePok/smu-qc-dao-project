@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
+import { auditEvent } from "./auditEvent.mjs";
 import { encodeFunctionData } from "viem";
 import { Timestamp } from "firebase-admin/firestore";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
@@ -28,7 +29,9 @@ function clientFor(record, { config = registry, update = false } = {}) {
   const calls = [];
   return {
     calls,
-    getTransactionReceipt: async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: hash }),
+    getTransactionReceipt: async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: hash,
+      logs: [auditEvent({ config, actor: researcher, functionName: update ? "updateOpportunity" : "commitOpportunity",
+        args: update ? [expected.entityId, expected.contentHash, expected.args[3]] : expected.args })] }),
     getTransaction: async () => ({ hash, to: config.address, from: researcher, chainId: config.chainId,
       blockNumber: 88n, blockHash, input: encodeFunctionData({ abi: config.abi,
         functionName: update ? "updateOpportunity" : "commitOpportunity",
@@ -102,9 +105,9 @@ describe("independent proposal Opportunity confirmation", () => {
   it("rejects a changed listing or unrelated registry call", async () => {
     const record = listing(), expected = prepareStoredProposal(record), client = clientFor(record);
     await assert.rejects(verifyMinedProposal({ ...record, title: "Changed after anchoring" }, client), /Mismatch/);
-    const unrelated = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
-      input: encodeFunctionData({ abi: registry.abi, functionName: "withdrawOpportunity",
-        args: [expected.entityId, expected.contentHash] }) }) };
+    const unrelated = { ...client, getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(),
+      logs: [auditEvent({ config: registry, actor: researcher, functionName: "withdrawOpportunity",
+        args: [expected.entityId, expected.contentHash] })] }) };
     await assert.rejects(verifyMinedProposal(record, unrelated), /Mismatch/);
   });
 
@@ -114,22 +117,28 @@ describe("independent proposal Opportunity confirmation", () => {
     for (let index = 0; index < args.length; index++) {
       const changed = [...args];
       changed[index] = typeof args[index] === "string" ? `0x${"9".repeat(64)}` : BigInt(args[index]) + 1n;
-      const other = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
-        input: encodeFunctionData({ abi: registry.abi,
-          functionName: update ? "updateOpportunity" : "commitOpportunity", args: changed }) }) };
+      const other = { ...client, getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(),
+        logs: [auditEvent({ config: registry, actor: researcher,
+          functionName: update ? "updateOpportunity" : "commitOpportunity", args: changed })] }) };
       await assert.rejects(verifyMinedProposal(record, other), /Mismatch/);
     }
   });
 
   it("rejects the wrong wallet, deployment, chain, receipt or reverted transaction", async () => {
     const record = listing(), client = clientFor(record);
-    for (const patch of [{ from: `0x${"b".repeat(40)}` }, { to: `0x${"c".repeat(40)}` },
-      { chainId: 1 }, { hash: `0x${"9".repeat(64)}` }]) {
+    const prepared = prepareStoredProposal(record);
+    for (const log of [auditEvent({ config: registry, actor: `0x${"b".repeat(40)}`,
+      functionName: "commitOpportunity", args: prepared.args }),
+      { ...auditEvent({ config: registry, actor: researcher, functionName: "commitOpportunity", args: prepared.args }), address: `0x${"c".repeat(40)}` }]) {
+      await assert.rejects(verifyMinedProposal(record, { ...client, getTransactionReceipt: async () => ({
+        ...await client.getTransactionReceipt(), logs: [log] }) }), /does not belong|Mismatch|known AuditRegistry/);
+    }
+    for (const patch of [{ chainId: 1 }, { hash: `0x${"9".repeat(64)}` }]) {
       await assert.rejects(verifyMinedProposal(record, { ...client,
-        getTransaction: async () => ({ ...await client.getTransaction(), ...patch }) }), /does not belong/);
+        getTransaction: async () => ({ ...await client.getTransaction(), ...patch }) }), /does not belong|Mismatch/);
     }
     await assert.rejects(verifyMinedProposal(record, { ...client, getTransactionReceipt: async () => ({
-      ...await client.getTransactionReceipt(), transactionHash: `0x${"9".repeat(64)}` }) }), /does not belong/);
+      ...await client.getTransactionReceipt(), transactionHash: `0x${"9".repeat(64)}` }) }), /does not belong|Mismatch/);
     await assert.rejects(verifyMinedProposal(record, { ...client, getTransactionReceipt: async () => ({
       ...await client.getTransactionReceipt(), status: "reverted" }) }), /reverted/);
   });

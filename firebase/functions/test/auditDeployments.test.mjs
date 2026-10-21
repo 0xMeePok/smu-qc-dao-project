@@ -48,4 +48,23 @@ describe("Audit deployment resolution", () => {
     await assert.rejects(resolveAuditDeployment(record), /Reading the audit transaction/);
     await assert.rejects(resolveAuditDeployment(record, { getTransaction: async () => { throw new Error("HTTP 503"); } }), /503/);
   });
+
+  it("selects receipt effects without decoding the bundler target or account calldata", async () => {
+    const receipt = { transactionHash: hash, logs: [{ address: active.address }] };
+    const resolved = await resolveAuditDeployment(record, {
+      transaction: { hash, chainId: active.chainId, to: `0x${"e".repeat(40)}`, input: "0xdeadbeef" },
+      receipt, matchesReceipt: config => config.address === active.address,
+    });
+    assert.equal(resolved, active);
+  });
+
+  it("refuses missing, ambiguous or wrong-chain receipt deployment matches", async () => {
+    const receipt = { transactionHash: hash, logs: [] };
+    const transaction = { hash, chainId: active.chainId };
+    await assert.rejects(resolveAuditDeployment(record, { transaction, receipt, matchesReceipt: () => false }), /Mismatch/);
+    const other = { ...active, address: `0x${"e".repeat(40)}` };
+    await assert.rejects(resolveAuditDeployment(record, { transaction, receipt, activeConfig: active, history: [other], matchesReceipt: () => true }), /unambiguous/);
+    await assert.rejects(resolveAuditDeployment(record, { transaction, receipt: { ...receipt, transactionHash: `0x${"9".repeat(64)}` }, matchesReceipt: () => true }), /does not belong/);
+    await assert.rejects(resolveAuditDeployment(record, { transaction: { ...transaction, chainId: 1 }, receipt, matchesReceipt: () => true }), /chain/);
+  });
 });
