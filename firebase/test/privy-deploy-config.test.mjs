@@ -67,7 +67,7 @@ it("rejects multiline and invalid public IDs without reporting their values", as
 it("the CLI ignores shell app IDs and keeps credential values out of diagnostics", async (t) => {
   for (const assignment of ["", "PRIVY_APP_ID=invalid/private-id-sentinel-148\n"]) {
     const { directory } = await fixture(t, {
-      ".env": `PRIVY_SECRET=private-secret-sentinel-148\n${assignment}`,
+      ".env": `PRIVY_SECRET=dummy\n${assignment}`,
       ".env.local": "PRIVY_APP_ID=emulator-only-id\n",
     });
     const result = spawnSync(process.execPath, [checker, projectId], {
@@ -78,7 +78,7 @@ it("the CLI ignores shell app IDs and keeps credential values out of diagnostics
     assert.equal(result.status, 1);
     assert.match(result.stderr, /needs a valid public PRIVY_APP_ID/);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr.includes("private-secret-sentinel-148"), false);
+    assert.equal(result.stderr.includes("dummy"), false);
     assert.equal(result.stderr.includes("private-id-sentinel-148"), false);
     assert.equal(result.stderr.includes("shell-only-id"), false);
   }

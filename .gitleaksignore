@@ -46,3 +46,8 @@ d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbi
 # funding factory address, not an API key. Exempt only these exact historical findings.
 83003d62a45303707ea73eb948f075c1ec405402:firebase/functions/independentFunding.contract.json:generic-api-key:5
 83003d62a45303707ea73eb948f075c1ec405402:frontend/src/config/independentFunding.contract.json:generic-api-key:5
+
+# QCDAO-148: synthetic negative-test strings, replaced with short dummy values.
+# Ignore only these exact historical findings; future test contents stay scanned.
+6db1db319e35c2ac80ce1bad3023df26bff8e82a:firebase/test/privy-deploy-config.test.mjs:generic-api-key:70
+6db1db319e35c2ac80ce1bad3023df26bff8e82a:frontend/test/unit/privy-build-config.test.js:generic-api-key:29

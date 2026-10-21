@@ -26,7 +26,7 @@ it("rejects public Privy secret, token and private-key names without printing th
 it("the real Vite config rejects a credential loaded from a production environment file before building", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "qc-privy-build-"));
   try {
-    await writeFile(path.join(directory, ".env.production.local"), "VITE_PRIVY_APP_SECRET=private-sentinel-148\n");
+    await writeFile(path.join(directory, ".env.production.local"), "VITE_PRIVY_APP_SECRET=dummy\n");
     await assert.rejects(resolveConfig({
       root: directory,
       configFile: fileURLToPath(new URL("../../vite.config.js", import.meta.url)),
