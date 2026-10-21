@@ -236,13 +236,23 @@ describe("wallet escrow funding panel", () => {
     expect(screen.getByText(/Deposit confirmed. Your tokens are held/)).toBeTruthy();
     expect(mocks.write).toHaveBeenCalledTimes(1);
   });
-  it.each(["disconnected", "wrong wallet", "wrong network"])("prevents signing with %s", async mode => {
+  it.each(["disconnected", "wrong wallet"])("prevents signing with %s", async mode => {
     if (mode === "disconnected") mocks.account.isConnected = false;
     if (mode === "wrong wallet") mocks.account.address = `0x${"c".repeat(40)}`;
-    if (mode === "wrong network") mocks.account.chainId = 1;
     await ready();
     expect(screen.getByRole("button", { name: "Fund escrow" }).disabled).toBe(true);
     expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it("lets the matching embedded wallet reach the adapter while its reported network is stale", async () => {
+    mocks.account.chainId = 1;
+    await ready();
+    fireEvent.change(screen.getByLabelText("Contribution (USDC)"), { target: { value: "12.01" } });
+    const fund = screen.getByRole("button", { name: "Fund escrow" });
+    expect(fund.disabled).toBe(false);
+    expect(screen.queryByText(/wallet is moving to Arbitrum Sepolia/)).toBeNull();
+    fireEvent.click(fund);
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ account, action: "deposit", amount: "12.01" })));
+    expect(await screen.findByText(/Deposit confirmed. Your tokens are held/)).toBeTruthy();
   });
   it("requires evidence matching the on-chain hash before accepting delivery", async () => {
     mocks.read.mockResolvedValue(model({ state: 6, currentMilestone: { evidenceHash: hash }, roles: { problemOwner: true }, can: { approveMilestone: true } }));

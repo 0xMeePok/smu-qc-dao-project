@@ -605,3 +605,38 @@ describe("[QCDAO-144] sponsored transactions", () => {
     expect(provider.request).toHaveBeenCalledOnce();
   });
 });
+
+describe("declined sponsored transaction recovery [QCDAO-143]", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it.each([
+    ["EIP-1193 code", () => Object.assign(new Error("Request refused"), { code: 4001 })],
+    ["action rejected code", () => Object.assign(new Error("Request refused"), { code: "ACTION_REJECTED" })],
+    ["wrapped cause", () => new Error("Provider failed", { cause: Object.assign(new Error("Request refused"), { code: 4001 }) })],
+    ["original provider error", () => ({ message: "Provider failed", data: { originalError: { code: 4001 } } })],
+    ["original action rejection", () => ({ message: "Provider failed", data: { originalError: { code: "ACTION_REJECTED" } } })],
+    ["closed modal", () => new Error("User exited the modal")],
+    ["wrapped modal dismissal", () => ({ message: "Provider failed", data: { originalError: { message: "User exited the modal" } } })],
+  ])("allows a fresh retry after %s", async (_label, rejection) => {
+    const hash = `0x${"7".repeat(64)}`;
+    const request = { from: ADDRESS, to: OTHER, data: "0x1234" };
+    const member = {
+      address: ADDRESS,
+      sendSponsoredTransaction: vi.fn().mockRejectedValueOnce(rejection()).mockResolvedValueOnce({ hash }),
+    };
+    const publicClient = {
+      getBlockNumber: vi.fn(async () => 100n),
+      waitForTransactionReceipt: vi.fn(async () => ({ status: "success", transactionHash: hash, logs: [] })),
+    };
+
+    const error = await sendSponsoredTransaction(request, { wallet: member, publicClient }).catch((caught) => caught);
+    expect(auditErrorMessage(error)).toBe("The wallet transaction was declined. You can retry when ready.");
+    expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+    expect(publicClient.waitForTransactionReceipt).not.toHaveBeenCalled();
+
+    await expect(sendSponsoredTransaction(request, { wallet: member, publicClient })).resolves.toBe(hash);
+    expect(member.sendSponsoredTransaction).toHaveBeenCalledTimes(2);
+    expect(getPendingSponsoredTransaction(ADDRESS)).toBeNull();
+  });
+});

@@ -6,7 +6,6 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useSignIn } from "../context/SessionContext.jsx";
 import { useWallet } from "../context/WalletContext.jsx";
 import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
-import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { getIndependentFundingState, independentFundingAmount, independentFundingExplorer, independentFundingStatus,
   independentFundingDeploymentKey, independentFundingError, confirmIndependentFundingTransaction,
   syncIndependentFunding, writeIndependentFundingAction } from "../lib/independentEscrow.js";
@@ -117,7 +116,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
 }
 
 export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, refreshVersion = 0, initialTransaction = null, integrityBlocked = false }) {
-  const { user } = useAuth(), { address, isConnected, chainId } = useWallet();
+  const { user } = useAuth(), { address, isConnected } = useWallet();
   const queryClient = useContext(QueryClientContext);
   const [snapshot, setSnapshot] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState("");
   // A read failure clears on the next good read; an action's error stays until the next action.
@@ -132,7 +131,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const version = useRef(0), change = useRef(onStateChange); change.current = onStateChange;
-  const walletReady = Boolean(isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID);
+  const walletReady = Boolean(isConnected && address?.toLowerCase() === user?.id?.toLowerCase());
   const load = useCallback(async () => {
     const current = ++version.current; setLoading(true);
     try { const next = await getIndependentFundingState({ proposalId: proposal.id });
@@ -177,7 +176,7 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await writeIndependentFundingAction({ proposalId: proposal.id, action, account: address, ...extra,
-        onChange: next => { if (currentPanel()) setProgress(next); if (next.status === "pending") remember({ transactionHash: next.transactionHash, action: next.action });
+        onChange: next => { if (currentPanel()) setProgress(next); if (next.status === "pending" && /^0x[0-9a-f]{64}$/i.test(next.transactionHash ?? "")) remember({ transactionHash: next.transactionHash, action: next.action });
           if (next.status === "confirmed" && ["approve", "resetAllowance"].includes(next.action)) remember(null); } });
       await sync(result.transactionHash, action);
       if (currentPanel()) {

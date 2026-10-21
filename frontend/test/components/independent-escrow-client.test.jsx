@@ -48,11 +48,12 @@ describe("independent crowdfunding wallet actions", () => {
     expect(wallet.writeContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "voteCompletion", args: [4n, evidenceHash, true] }),
       expect.objectContaining({ onWalletRequest: expect.any(Function) }));
   });
-  it("asks for wallet confirmation only when the adapter has finished its prechecks", async () => {
+  it.each([false, true])("reports preparation, wallet approval and mining before the write resolves (hash=%s)", async knownHash => {
     const wallet = adapters(), updates = [];
-    let openWallet, finish;
+    let openWallet, submitted, finish;
     wallet.writeContract.mockImplementation((_request, options) => new Promise(resolve => {
       openWallet = options.onWalletRequest;
+      submitted = options.onSubmitted;
       finish = resolve;
     }));
     const pending = writeIndependentFundingAction({ proposalId: "listing", action: "vote", account,
@@ -63,6 +64,9 @@ describe("independent crowdfunding wallet actions", () => {
     expect(updates.every(update => update.status === "preparing")).toBe(true);
     openWallet();
     expect(updates.at(-1)).toEqual({ status: "awaiting_signature", action: "vote" });
+    submitted(knownHash ? { transactionHash: tx } : {});
+    expect(updates.at(-1)).toEqual({ status: "pending", action: "vote", ...(knownHash ? { transactionHash: tx } : {}) });
+    expect(mocks.confirm).not.toHaveBeenCalled();
     finish(tx);
     await pending;
     expect(updates.slice(-2).map(update => update.status)).toEqual(["pending", "confirmed"]);

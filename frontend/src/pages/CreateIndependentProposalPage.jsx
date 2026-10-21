@@ -63,7 +63,7 @@ function publicationStepMessage({ twoSteps, auditProgress, confirmedAudit, escro
   if (escrowStep === "pending") return "Step 2 of 2: escrow transaction submitted. Waiting for confirmation…";
   if (escrowStep === "confirmed") return "Step 2 of 2 confirmed. Opening your listing…";
   if (confirmedAudit) return `${step}Listing transaction confirmed. Saving and verifying your listing… This can take up to a minute; keep this page open.`;
-  if (auditProgress?.transactionHash) return `${step}Listing transaction submitted. Waiting for on-chain confirmation…`;
+  if (auditProgress?.status === "confirming" || auditProgress?.transactionHash) return `${step}Listing transaction submitted. Waiting for on-chain confirmation…`;
   return `${step}Preparing your transaction… Approve the listing record in your wallet when it opens.`;
 }
 
@@ -544,7 +544,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>Back</button>
             <div className="wizard-nav-end">
               {!wizard.isLast && <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pending}>Continue</button>}
-              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (escrowStep ? (escrowStep === "awaiting_signature" ? "Approve the escrow in your wallet…" : "Creating the listing’s escrow…") : confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
+              {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (escrowStep ? (escrowStep === "awaiting_signature" ? "Approve the escrow in your wallet…" : "Creating the listing’s escrow…") : confirmedAudit ? "Saving…" : (auditProgress?.status === "confirming" || auditProgress?.transactionHash) ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : publicationStarted ? "Retry publication" : editing ? "Sign and save changes" : "Sign and publish proposal"}</button>}
             </div>
           </div>
         </div>

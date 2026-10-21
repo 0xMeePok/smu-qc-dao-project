@@ -101,6 +101,7 @@ export async function writeIndependentFundingAction({ proposalId, action, accoun
     try {
       transactionHash = await adapters.writeContract({ ...request, account, chainId: prepared.chainId }, {
         onWalletRequest: () => onChange?.({ status: "awaiting_signature", action: step }),
+        onSubmitted: (details) => onChange?.({ status: "pending", action: step, ...details }),
       });
       onChange?.({ status: "pending", action: step, transactionHash });
       const confirmed = await confirmEscrowTransaction(transactionHash, { adapters });

@@ -156,7 +156,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
 export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
-  const { address, isConnected, chainId } = useWallet();
+  const { address, isConnected } = useWallet();
   const [data, setData] = useState(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [amount, setAmountState] = useState(""), [notice, setNotice] = useState("");
@@ -206,7 +206,7 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
   }, [refresh, key]);
   useLiveActivity({ problemId, channel: "funding", identity: user?.id, onRefresh: refresh,
     enabled: Boolean(problemId) && openFundingSupported(), blocked: busy || loading });
-  const walletReady = Boolean(user?.id && isConnected && same(address, user.id) && chainId === AUDIT_REGISTRY_CONFIG.chainId);
+  const walletReady = Boolean(user?.id && isConnected && same(address, user.id));
   // Wake the pre-signature function before a click so it does not pay a cold start.
   useEffect(() => {
     if (walletReady && data?.supported) { prewarmCallable("prepareOpenFundingAction"); prewarmTransaction(); }
@@ -228,7 +228,7 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
         onProgress: progress => {
           if (currentPanel()) setProgress(progress);
           if (progress.action) walletStep = progress.action;
-          if (progress.status === "pending") remember(pendingRecord(progress.transactionHash, walletStep || action));
+          if (progress.status === "pending" && /^0x[0-9a-f]{64}$/i.test(progress.transactionHash ?? "")) remember(pendingRecord(progress.transactionHash, walletStep || action));
           if (progress.status === "confirmed") remember(null);
         } });
       remember({ transactionHash: result.transactionHash, action, proposalId: selectedProposalId });

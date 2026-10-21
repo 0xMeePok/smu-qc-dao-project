@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auditShouldFail: false,
+  auditError: null,
   connectedAddress: `0x${"a".repeat(40)}`,
   signIn: vi.fn(async () => ({ ok: false, cancelled: true })),
   events: [],
@@ -68,6 +69,7 @@ vi.mock("../../src/lib/fundingOpportunityAudit.js", () => ({
   receiptForWrite: (audit) => audit && audit.status === "confirmed" ? { ...audit, status: "pending" } : audit,
   anchorFundingOpportunityAudit: async (_opportunity, options) => {
     mocks.events.push("audit");
+    if (mocks.auditError) throw mocks.auditError;
     if (mocks.auditShouldFail) throw new Error("RPC unavailable");
     const audit = {
       schemaVersion: 1,
@@ -110,6 +112,7 @@ function fillForm() {
 
 beforeEach(() => {
   mocks.auditShouldFail = false;
+  mocks.auditError = null;
   mocks.connectedAddress = `0x${"a".repeat(40)}`;
   mocks.events = [];
   mocks.publications = [];
@@ -185,6 +188,30 @@ describe("[QCDAO-51] create open funding", () => {
     // Privy's login modal opens through the session's sign-in.
     await waitFor(() => expect(mocks.signIn).toHaveBeenCalledOnce());
     expect(mocks.events).toEqual([]);
+  });
+
+  it("preserves open funding input after a wallet decline and publishes once on retry", async () => {
+    mocks.auditError = { message: "Provider refused the request", data: { originalError: { code: 4001 } } };
+    render(<CreateFundingOpportunityPage onNavigate={() => {}} />);
+    fillForm();
+    fireEvent.submit(document.querySelector("form"));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/wallet transaction was declined/i);
+    expect(mocks.publications).toHaveLength(0);
+    expect(mocks.events).toEqual(["audit"]);
+    expect(document.getElementById("title").value).toBe("Resilient supply chains");
+    expect(document.getElementById("fundingThesis").value).toBe("Fund research into resilient supply chains.");
+    expect(document.getElementById("amount").value).toBe("250000");
+    expect(screen.getByRole("checkbox", { name: /Quantum/i }).checked).toBe(true);
+
+    mocks.auditError = null;
+    fireEvent.submit(document.querySelector("form"));
+
+    expect(await screen.findByText("Funding opportunity submitted")).toBeTruthy();
+    expect(mocks.events).toEqual(["audit", "audit", "firestore"]);
+    expect(mocks.publications).toHaveLength(1);
+    expect(mocks.publications[0].record).toMatchObject({ title: "Resilient supply chains", amount: 250000, categories: ["quantum"] });
+    expect(screen.queryByText(/wallet transaction was declined/i)).toBeNull();
   });
 });
 

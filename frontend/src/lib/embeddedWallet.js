@@ -2,6 +2,7 @@ import { createWalletClient, custom, parseAbiItem } from "viem";
 import { arbitrumSepolia } from "viem/chains";
 import { ENTRY_POINTS, decodeMemberCall, userOperationSucceeded } from "../../../firebase/functions/memberCall.js";
 import { browserPublicClient } from "./rpc.js";
+import { isWalletRejection } from "./errors.js";
 
 /**
  * The one wallet this app signs with: the signed-in member's Privy embedded
@@ -171,14 +172,6 @@ function definiteSponsorshipRefusal(error) {
     .test(String(error?.message ?? error));
 }
 
-function isRejection(error) {
-  for (let current = error, depth = 0; current && depth < 6; current = current.cause, depth++) {
-    if (["4001", "ACTION_REJECTED"].includes(String(current.code ?? ""))) return true;
-    if (/user (?:rejected|denied|cancelled|canceled|exited)|UserRejectedRequestError/i.test(`${current.name ?? ""} ${current.message ?? ""}`)) return true;
-  }
-  return false;
-}
-
 /**
  * One sponsored send per wallet. A second action waits, so this tab cannot
  * attribute another in-flight operation to the action that is still open.
@@ -266,26 +259,38 @@ async function findSponsoredTransaction({ publicClient, pending, timeoutMs = FIN
  * fail inside a mined transaction, so the EntryPoint's own outcome is checked
  * and a failure is reported as a revert, never as success.
  */
-export async function sendSponsoredTransaction(request, { wallet = active, publicClient = browserPublicClient, timeoutMs } = {}) {
+export async function sendSponsoredTransaction(request, { wallet = active, publicClient = browserPublicClient, timeoutMs, assertCanSend, onSubmitted } = {}) {
   if (!wallet?.sendSponsoredTransaction) throw new WalletUnavailableError();
   if (request.from && !same(request.from, wallet.address)) {
     throw new WalletUnavailableError("This action belongs to a different account from the one signed in. Sign in with that account's email, then try again.");
   }
-  return enqueueSend(wallet.address, () => submitSponsoredTransaction(request, { wallet, publicClient, timeoutMs }));
+  return enqueueSend(wallet.address, () => submitSponsoredTransaction(request, { wallet, publicClient, timeoutMs, assertCanSend, onSubmitted }));
 }
 
-async function submitSponsoredTransaction(request, { wallet, publicClient, timeoutMs }) {
+// Progress observers must never alter a send's outcome or interrupt recovery.
+// The submitted record is saved first; callbacks are UI-only and never awaited.
+function notifySubmitted(onSubmitted, pending) {
+  try {
+    const result = onSubmitted?.(TX_HASH.test(pending.transactionHash ?? "") ? { transactionHash: pending.transactionHash } : {});
+    Promise.resolve(result).catch(() => {});
+  } catch { /* A broken observer must not cause a retry of a submitted operation. */ }
+}
+
+async function submitSponsoredTransaction(request, { wallet, publicClient, timeoutMs, assertCanSend, onSubmitted }) {
   const existing = getPendingSponsoredTransaction(wallet.address);
   if (existing) {
     if (!existing.to || !sameRequest(existing, request)) throw pendingError(existing);
     // The member repeated the same call: this action now owns that recovery.
     claimInFlight(wallet.address, existing.id);
+    notifySubmitted(onSubmitted, existing);
     try { return await recoverStoredTransaction(existing, { publicClient, timeoutMs }); }
     finally { releaseInFlight(wallet.address, existing.id); }
   }
+  assertCanSend?.();
   // Never identify the new operation with an identical call already mined at
   // the observed tip. Disable viem's block-number cache before taking this boundary.
   const fromBlock = (await publicClient.getBlockNumber({ cacheTime: 0 })) + 1n;
+  assertCanSend?.();
   let pending = {
     id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
     address: wallet.address, to: request.to, data: request.data ?? "0x",
@@ -297,11 +302,11 @@ async function submitSponsoredTransaction(request, { wallet, publicClient, timeo
   claimInFlight(wallet.address, pending.id);
   try {
     savePending(pending, { beforeBroadcast: true });
-    return await broadcastSponsoredTransaction(pending, request, { wallet, publicClient, timeoutMs });
+    return await broadcastSponsoredTransaction(pending, request, { wallet, publicClient, timeoutMs, onSubmitted });
   } finally { releaseInFlight(wallet.address, pending.id); }
 }
 
-async function broadcastSponsoredTransaction(pending, request, { wallet, publicClient, timeoutMs }) {
+async function broadcastSponsoredTransaction(pending, request, { wallet, publicClient, timeoutMs, onSubmitted }) {
   let result;
   try {
     result = await wallet.sendSponsoredTransaction({
@@ -312,9 +317,9 @@ async function broadcastSponsoredTransaction(pending, request, { wallet, publicC
       chainId: arbitrumSepolia.id,
     });
   } catch (error) {
-    if (isRejection(error) || error instanceof WalletUnavailableError || definiteSponsorshipRefusal(error)) {
+    if (isWalletRejection(error) || error instanceof WalletUnavailableError || definiteSponsorshipRefusal(error)) {
       clearPending(wallet.address);
-      if (isRejection(error) || error instanceof WalletUnavailableError) throw error;
+      if (isWalletRejection(error) || error instanceof WalletUnavailableError) throw error;
       throw new SponsorshipUnavailableError(error);
     }
     // A network failure after the wallet request may occur after broadcast.
@@ -325,6 +330,7 @@ async function broadcastSponsoredTransaction(pending, request, { wallet, publicC
   }
   pending = { ...pending, phase: "submitted", ...(TX_HASH.test(result?.hash ?? "") ? { transactionHash: result.hash } : {}) };
   savePending(pending);
+  notifySubmitted(onSubmitted, pending);
   return recoverStoredTransaction(pending, { publicClient, timeoutMs });
 }
 
@@ -387,7 +393,7 @@ export function sponsoredProvider(provider, options) {
  * a member to decline - the switch simply happens before signing. Members
  * never pay gas: every transaction is sponsored through Privy.
  */
-export async function embeddedWalletClient({ account, chainId = arbitrumSepolia.id } = {}) {
+export async function embeddedWalletClient({ account, chainId = arbitrumSepolia.id, onSubmitted } = {}) {
   const wallet = active;
   if (!wallet) throw new WalletUnavailableError();
   if (account && !same(account, wallet.address)) {
@@ -402,5 +408,13 @@ export async function embeddedWalletClient({ account, chainId = arbitrumSepolia.
   // Requested after any switch: Privy does not update provider instances it
   // handed out before the chain changed.
   const provider = await wallet.getEthereumProvider();
-  return createWalletClient({ account: wallet.address, chain: arbitrumSepolia, transport: custom(sponsoredProvider(provider, { wallet })) });
+  // Preparation and the per-wallet send queue may outlive the sign-in that
+  // created this client. Check the live account again at the send boundary.
+  const assertCanSend = () => {
+    if (!active || !same(active.address, wallet.address)) throw new WalletUnavailableError();
+  };
+  // Retrying an RPC read is harmless; retrying a declined signing request can
+  // reopen Privy's prompt. Only the member's explicit retry may request a send.
+  return createWalletClient({ account: wallet.address, chain: arbitrumSepolia,
+    transport: custom(sponsoredProvider(provider, { wallet, assertCanSend, onSubmitted }), { retryCount: 0 }) });
 }

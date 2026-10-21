@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   auditCalls: [],
   auditShouldFail: false,
   auditError: null,
+  waitForMining: null,
   connectedAddress: `0x${"a".repeat(40)}`,
   signIn: vi.fn(async () => ({ ok: false, cancelled: true })),
   deleted: [],
@@ -89,6 +90,10 @@ vi.mock("../../src/lib/postingAudit.js", () => ({
       persistReceipt: options.persistReceipt,
     });
     if (mocks.auditError) throw mocks.auditError;
+    if (mocks.waitForMining) {
+      options.onChange({ status: "confirming", transactionHash: "" });
+      await mocks.waitForMining;
+    }
     const audit = {
       schemaVersion: 1,
       chainId: 421614,
@@ -159,6 +164,7 @@ const DRAFT_ATTACHMENT = {
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   mocks.auditError = null;
+  mocks.waitForMining = null;
   mocks.created = [];
   mocks.createShouldFail = false;
   mocks.auditCalls = [];
@@ -198,6 +204,20 @@ describe("funding amount input", () => {
 });
 
 describe("no data loss on a failed submit", () => {
+  it("shows chain confirmation after wallet approval even before Privy returns a hash", async () => {
+    let finishMining;
+    mocks.waitForMining = new Promise(resolve => { finishMining = resolve; });
+    render(<CreatePostingPage onNavigate={() => {}} />);
+    fillRequired();
+    fireEvent.submit(document.querySelector("form"));
+    const confirming = await screen.findByRole("button", { name: "Confirming on-chain…" });
+    expect(confirming.disabled).toBe(true);
+    expect(screen.queryByText(/Preparing your transaction/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Waiting for your wallet…" })).toBeNull();
+    expect(mocks.created).toHaveLength(0);
+    await act(async () => { finishMining(); });
+    await waitFor(() => expect(mocks.created).toHaveLength(1));
+  });
   it("labels an unsaved form as a preview, never submitted", () => {
     render(<CreatePostingPage onNavigate={() => {}} />);
     expect(screen.getByLabelText("Live preview").textContent).toContain("Preview");

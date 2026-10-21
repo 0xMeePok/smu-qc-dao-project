@@ -245,7 +245,11 @@ export function createOpportunityAuditFlow({
         adapters,
         maxReceiptRetries,
         onStatus: async (event) => {
-          if (event.status === "submitted") {
+          if (event.status === "confirming") {
+            // Privy may not expose a hash until mining finishes. Keep this
+            // progress in memory without changing the persisted receipt schema.
+            onChange?.({ ...current, status: "confirming", ...(event.transactionHash ? { transactionHash: event.transactionHash } : {}) });
+          } else if (event.status === "submitted") {
             await persist({ status: "submitted", transactionHash: event.transactionHash });
           } else if (event.status === "pending") {
             await persist({ status: "pending", transactionHash: event.transactionHash });

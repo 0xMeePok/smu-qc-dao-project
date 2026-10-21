@@ -475,6 +475,40 @@ describe("Canonical escrow wallet integration", () => {
     assert.deepEqual(sufficient.writes.map(write => write.functionName), ["deposit"]);
   });
 
+  it("leaves a declined approval unconfirmed and retries the exact approval before depositing", async () => {
+    const f = fixture();
+    const progress = [];
+    const write = f.adapters.writeContract;
+    let decline = true;
+    f.adapters.writeContract = async (request, options) => {
+      if (decline) {
+        decline = false;
+        options?.onWalletRequest?.();
+        throw Object.assign(new Error("User exited the modal"), { code: 4001 });
+      }
+      return write(request, options);
+    };
+    const deposit = () => writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "2.5", onProgress: update => progress.push(update) });
+
+    await assert.rejects(deposit(), error => {
+      assert.match(error.message, /wallet transaction was declined/i);
+      assert.equal(error.action, "approve");
+      assert.equal(error.transactionHash, undefined);
+      return true;
+    });
+    assert.equal(f.writes.length, 0);
+    assert.equal(f.waits.length, 0);
+    assert.equal(progress.some(update => ["pending", "confirmed"].includes(update.status)), false);
+
+    const result = await deposit();
+    assert.equal(result.transactionHash, txHash);
+    assert.deepEqual(f.writes.map(request => request.functionName), ["approve", "deposit"]);
+    assert.deepEqual(f.writes.map(request => request.args), [[escrowAddress, 2_500_000n], [2_500_000n]]);
+    assert.ok(f.writes.every(request => request.account === funder && request.chainId === f.config.chainId));
+    assert.deepEqual(progress.filter(update => update.status === "confirmed").map(update => update.action), ["approve", "deposit"]);
+    assert.equal(f.waits.length, 2);
+  });
+
   it("rejects excessive, imprecise and unaffordable deposits before wallet approval", async () => {
     for (const amount of ["1200.250001", "0.0000001", "0", "-1", "1e2"]) {
       const f = fixture();

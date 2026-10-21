@@ -226,7 +226,7 @@ export function EscrowFundingPanel(props) {
 function EscrowFundingPanelBody({ proposal, onStateChange, onConfirmed, refreshVersion = 0, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
-  const { address, isConnected, chainId } = useWallet();
+  const { address, isConnected } = useWallet();
   const snapshotQuery = useEscrowSnapshot(proposal, address);
   const storageKey = pendingKey(proposal.id, address);
   const moderated = isModerated(proposal);
@@ -254,7 +254,7 @@ function EscrowFundingPanelBody({ proposal, onStateChange, onConfirmed, refreshV
   const generation = useRef(0), writing = useRef(false), periodicRefresh = useRef(null);
   const lastVerified = useRef(null), passiveSync = useRef(null), scope = useRef(null), versionSeen = useRef(refreshVersion);
   useEffect(() => { setUnresolvedTransaction(savedTransaction(storageKey)); }, [storageKey]);
-  const walletReady = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
+  const walletReady = isConnected && address?.toLowerCase() === user?.id?.toLowerCase();
   const roles = user?.roles ?? (user?.role ? [user.role] : []);
   const independent = isIndependentProposal(proposal);
   const canDeposit = !independent || canApproachIndependentListing({ proposal, user });
@@ -266,8 +266,7 @@ function EscrowFundingPanelBody({ proposal, onStateChange, onConfirmed, refreshV
       : !roles.some(role => ["funder", "owner"].includes(role)) ? "Sign in with a funder or problem owner account to deposit."
         : history?.summary?.fundingBlockReason;
   const walletMessage = !isConnected ? "Sign in with your email to fund, approve or claim refunds."
-    : address?.toLowerCase() !== user?.id?.toLowerCase() ? "This wallet belongs to a different account. Sign in again with your email."
-      : "Your wallet is moving to Arbitrum Sepolia. Try again in a moment.";
+    : "This wallet belongs to a different account. Sign in again with your email.";
   // Wake the deposit eligibility function while the member is still typing, so
   // "Fund escrow" does not wait for a cold start. The click still runs it in full.
   const depositOffered = walletReady && Boolean(state?.can?.deposit) && !fundingBlockReason && canDeposit && !moderated && !integrityBlocked;

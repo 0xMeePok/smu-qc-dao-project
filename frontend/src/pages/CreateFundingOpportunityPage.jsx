@@ -721,7 +721,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
               {(wizard.isLast || editing || submitting || saveFailed || pendingCount > 0) && (
                 <button className="primary" type="submit" disabled={submitting || savingDraft || loadingDraft || pendingCount > 0}>
                   {submitting
-                    ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
+                    ? (confirmedAudit ? "Saving…" : (auditProgress?.status === "confirming" || auditProgress?.transactionHash) ? "Confirming on-chain…" : "Waiting for your wallet…")
                     : pendingCount > 0
                       ? "Waiting for attachments…"
                       : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Submit funding opportunity"}
