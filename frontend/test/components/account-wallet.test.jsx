@@ -99,7 +99,8 @@ it("blocks duplicate sends and recovers a known hash without another wallet requ
 it("signs a token-specific faucet message and presents the faucet's cooldown message", async () => {
   services.claimWalletTokens.mockRejectedValueOnce(new Error("This wallet can claim USDT again at 12:30."));
   show(); await ready(); fireEvent.click(screen.getByRole("button", { name: "Faucet" }));
-  fireEvent.change(screen.getByLabelText("Token"), { target: { value: "USDT" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Token" }));
+  fireEvent.click(screen.getByRole("option", { name: "USDT" }));
   fireEvent.click(screen.getByRole("button", { name: "Claim USDT" }));
   await screen.findByText("This wallet can claim USDT again at 12:30.");
   expect(state.wallet.signMessage.mock.calls[0][0]).toMatch(/^TAP Faucet Mint\nToken: USDT\nRecipient: 0x[aA]{40}\nChain ID: 421614\nIssued At: \d+$/);

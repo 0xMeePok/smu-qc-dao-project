@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { completeMockEvaluation, confirmMockProposal, declineMockProposal, forceExpireMockMatch, fundMockProposal, getMockMatching, matchingError, proposalFundingStatus } from "../lib/matching.js";
 import { WORKFLOW_STATUS, contributionWorkflowStatus, eventLabel, eventWorkflowStatus } from "../config/workflowStatus.js";
@@ -8,6 +8,7 @@ import { formatInstant } from "../lib/datetime.js";
 import { ExpiryCountdown } from "./ExpiryCountdown.jsx";
 import { ACCEPTANCE_WINDOW_MS } from "../lib/deadlineUrgency.js";
 import { Modal } from "./Modal.jsx";
+import { TokenSelect } from "./TokenSelect.jsx";
 import { RELATED_AUDIT_KIND, RelatedAuditReceiptPane } from "./RelatedAuditReceiptPane.jsx";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { highlightElement } from "../lib/highlightTarget.js";
@@ -63,6 +64,7 @@ export function SelectionResponseDialog({ kind, problemId, proposal, onCancel, o
 }
 
 export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onOpenAuditReceipt, integrityBlocked = false }) {
+  const tokenSelectId = useId();
   const { user } = useAuth();
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
@@ -218,9 +220,8 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onO
   if (onlyEscrow) return <section id="proposal-funding" className="detail-section matching-panel" aria-label="Proposal funding">
     <div className="matching-heading"><h2>Proposal funding</h2><span className="draft-badge">On-chain escrow</span></div>
     <p className="field-hint">Choose a mock stablecoin to find proposals accepting it. Each proposal’s token is fixed in its payment plan. Open a proposal’s escrow to fund it.</p>
-    {!proposalId && <label>Funding token <select aria-label="Choose funding token" value={fundingToken} onChange={event => setFundingToken(event.target.value)}>
-      <option value="all">All configured tokens</option>{(AUDIT_REGISTRY_CONFIG.escrow?.tokens ?? []).map(token => <option key={token.address} value={token.symbol}>{token.symbol}</option>)}
-    </select></label>}
+    {!proposalId && <div className="field"><label htmlFor={tokenSelectId}>Funding token</label><TokenSelect id={tokenSelectId} aria-label="Choose funding token" value={fundingToken} onChange={event => setFundingToken(event.target.value)}
+      options={[{ value: "all", label: "All configured tokens" }, ...(AUDIT_REGISTRY_CONFIG.escrow?.tokens ?? []).map(token => ({ value: token.symbol, label: token.symbol }))]} /></div>}
     {error && <p className="error-banner" role="alert">{error}</p>}
     <div className="matching-candidates">{items.filter(item => proposalId || fundingToken === "all" || item.currency === fundingToken).map((item) => <EscrowProposalLink key={item.id} item={item} onNavigate={onNavigate} />)}</div>
     {!items.some(item => proposalId || fundingToken === "all" || item.currency === fundingToken) && <p>No proposals on this page accept {fundingToken}.</p>}

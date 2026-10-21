@@ -5254,6 +5254,55 @@ h1, h2, h3 { font-weight: 500; }
 .wallet-action-form { display: grid; gap: 14px; }
 .wallet-action-form label { display: grid; gap: 6px; font-weight: 600; }
 .wallet-action-form input, .wallet-action-form select { width: 100%; min-width: 0; }
+.wallet-token-field { display: grid; gap: 6px; min-width: 0; }
+
+/* Token choices keep the same visual treatment in browser menus and dialogs. */
+.token-select { position: relative; min-width: 0; }
+.token-select-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; min-height: 48px; padding: 9px 12px;
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  background: var(--surface-solid); color: var(--ink); text-align: left;
+  font: inherit; font-size: 14px; box-shadow: var(--shadow-xs);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+.token-select-trigger:hover:not(:disabled) { border-color: var(--brand-line); background: var(--surface-muted); }
+.token-select-trigger:focus-visible, .token-select-trigger[aria-expanded="true"] { border-color: var(--brand); box-shadow: var(--ring); outline: none; }
+.token-select-trigger[aria-invalid="true"] { border-color: #d92d20; }
+.token-select-trigger:disabled, fieldset:disabled .token-select-trigger { opacity: .6; cursor: not-allowed; }
+.token-select-trigger > svg { flex: 0 0 18px; color: var(--muted); transition: transform 160ms ease; }
+.token-select-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.token-select-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.token-select-copy { display: grid; gap: 2px; min-width: 0; line-height: 1.35; }
+.token-select-copy > span { font-weight: 600; }
+.token-select-copy small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.token-select-mark { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; font: 700 13px/1 system-ui, sans-serif; }
+.token-select-mark--usdc { background: #2775ca; color: #fff; }
+.token-select-mark--usdt { background: #147d64; color: #fff; }
+.token-select-mark--xsgd { background: #6b45a7; color: #fff; font-size: 10px; }
+.token-select-options {
+  position: absolute; z-index: 30; top: calc(100% + 8px); right: 0;
+  width: max(100%, 240px); max-width: calc(100vw - 48px); max-height: min(300px, 45dvh);
+  margin: 0; padding: 6px; overflow-y: auto; overscroll-behavior: contain;
+  list-style: none; border: 1px solid var(--line-strong); border-radius: 14px;
+  background: var(--surface-solid); box-shadow: var(--shadow-lg);
+}
+.token-select-options [role="option"] {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 56px; padding: 10px; border-radius: 9px;
+  color: var(--ink); cursor: pointer; font-size: 14px;
+}
+.token-select-options [role="option"].is-active { background: var(--brand-soft); }
+.token-select-options [aria-selected="true"] .token-select-copy > span { color: var(--brand-strong); }
+.token-select-check { flex: 0 0 18px; color: var(--brand); }
+/* In a scrolling dialog the open list takes space rather than being clipped. */
+.modal .token-select-options { position: relative; top: auto; width: 100%; max-width: none; margin-top: 8px; }
+@media (max-width: 600px) {
+  .token-select-options { position: relative; top: auto; width: 100%; max-width: none; margin-top: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-select-trigger, .token-select-trigger > svg { transition: none; }
+}
 .wallet-action-modal .modal-body p { overflow-wrap: anywhere; }
 .wallet-action-modal .modal-actions { flex-wrap: wrap; }
 @media (max-width: 900px) {

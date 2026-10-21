@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatFundingAmount } from "../lib/fundingDisplay.js";
 import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
+import { TokenSelect } from "../components/TokenSelect.jsx";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
 import { useDraftGuard } from "../lib/draftGuard.js";
 import { useSession, useSignIn } from "../context/SessionContext.jsx";
@@ -760,9 +761,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               />
               <div className={`field ${errors.currency ? "field-invalid" : ""}`}>
                 <label htmlFor="currency">Currency</label>
-                <select id="currency" name="currency" value={form.currency} onChange={update}>
-                  {CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
-                </select>
+                <TokenSelect id="currency" name="currency" value={form.currency} onChange={update}
+                  aria-invalid={Boolean(errors.currency)} options={CURRENCIES.map((code) => ({ value: code, label: code }))} />
                 {errors.currency && <p className="field-error" role="alert">{errors.currency}</p>}
               </div>
             </div>

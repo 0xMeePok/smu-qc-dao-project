@@ -6,6 +6,7 @@ import { getPendingSponsoredTransaction, recoverPendingSponsoredTransaction, sub
 import { isRpcQuotaExceeded, isRpcUnreachable, isWalletRejection, walletOutcomeError } from "../lib/errors.js";
 import { useWallet } from "../context/WalletContext.jsx";
 import { Modal } from "./Modal.jsx";
+import { TokenSelect } from "./TokenSelect.jsx";
 import { WALLET_TOKENS, readWalletBalances, validateTokenTransfer, sendWalletTokens, confirmWalletTokenTransfer, createFaucetClaim } from "../lib/walletTokens.js";
 
 const defaults = {
@@ -232,7 +233,7 @@ export function AccountWallet({ address, email, visible = true, services = defau
     } catch (cause) { if (valid(id)) setError(message(cause)); }
     finally { if (valid(id)) { locked.current = false; setBusy(false); setPhase(""); } }
   };
-  const selection = <label>Token<select value={symbol} disabled={busy} onChange={event => { setSymbol(event.target.value); setError(""); }}>{WALLET_TOKENS.map(t => <option key={t.symbol} value={t.symbol}>{t.symbol}</option>)}</select></label>;
+  const selection = <div className="wallet-token-field"><label htmlFor={`${titleId}-token`}>Token</label><TokenSelect id={`${titleId}-token`} value={symbol} disabled={busy} options={WALLET_TOKENS.map(t => ({ value: t.symbol, label: t.symbol }))} onChange={event => { setSymbol(event.target.value); setError(""); }} /></div>;
 
   return <>
     {visible && <section className="account-wallet" aria-label="Your embedded wallet">

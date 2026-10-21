@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Field } from "../components/Field.jsx";
 import { ProposalCategorySelect } from "../components/ProposalCategorySelect.jsx";
+import { TokenSelect } from "../components/TokenSelect.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
 import {
@@ -496,10 +497,8 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
               </Field>
               <Field htmlFor="independent-currency" label="Currency" error={errors.currency}>
                 {({ id, describedBy, invalid }) => (
-                  <select id={id} value={form.currency} required disabled={editing} aria-invalid={invalid} aria-describedby={describedBy}
-                    onChange={(event) => update("currency", event.target.value)}>
-                    {CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
-                  </select>
+                  <TokenSelect id={id} value={form.currency} required disabled={editing} aria-invalid={invalid} aria-describedby={describedBy}
+                    onChange={(event) => update("currency", event.target.value)} options={CURRENCIES.map((code) => ({ value: code, label: code }))} />
                 )}
               </Field>
               <Field htmlFor="independent-expiry" label="Listing window" error={errors.expiryDays} hint={`Closes on ${formatInstant(listingExpiry)}.`}>
