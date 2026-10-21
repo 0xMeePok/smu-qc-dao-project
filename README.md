@@ -91,6 +91,10 @@ smu-qc-dao-project/
 - Java — needed by the Firestore emulator (local emulators **and** the rules test suite)
 - A Privy app with **email** as its only login method; put its app id in
   `frontend/.env` as `VITE_PRIVY_APP_ID` (see [Privy email sign-in](docs/firebase-setup.md#privy-email-sign-in))
+- For hosted sign-in, set the same public ID as the GitHub Actions variable
+  `VITE_PRIVY_APP_ID` (an existing secret of that name is also supported). Store
+  the app secret only as the Firebase Functions secret `PRIVY_SECRET`; see the
+  [deployment configuration](docs/firebase-setup.md#privy-deployment-configuration).
 - A separate deployer wallet with Arbitrum Sepolia testnet ETH from a faucet, only if you
   deploy or administer the QFT contracts (members never need one)
 
@@ -210,6 +214,20 @@ deploys from GitHub Actions are unaffected, but a manual
 `firebase deploy --only hosting` straight after this would ship a build that
 talks to 127.0.0.1. Run `npm run build` in `frontend/` with
 `VITE_FIREBASE_USE_EMULATORS=false` first.
+
+**Privy deployment configuration (QCDAO-148).** The frontend build rejects
+private Privy credentials with a `VITE_` prefix. Only the public app ID belongs
+there. Production Hosting permits the exact Privy API, wallet iframe and
+Arbitrum Sepolia RPC origins used by the email-only flow. Dashboard changes,
+including enabling CAPTCHA, must be checked against that policy before release.
+The [Privy setup steps](docs/firebase-setup.md#privy-deployment-configuration)
+cover server secrets, allowed origins and verification with enforced headers.
+
+Preview deployments use the app ID found in the built frontend, so Vite's
+environment-file precedence cannot configure a different backend app. A preview
+with `--backend` preserves unrelated runtime settings and deploys rules and
+functions before hosting. A frontend-only preview leaves backend configuration
+untouched and must use the same Privy app as the existing backend.
 
 ### 5. (Optional) Deploy the QFT token
 

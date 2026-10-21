@@ -47,6 +47,7 @@ frontend/.env.*.local
 contracts/qft-tokens/.env
 contracts/audit-registry/.env
 firebase/functions/.env
+firebase/functions/.secret.local
 !**/.env.example
 
 # Firebase Hosting, Emulators & Data Exports

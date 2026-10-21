@@ -10,7 +10,16 @@ import { build } from "vite";
 const frontendDirectory = fileURLToPath(new URL("../../", import.meta.url));
 const repositoryDirectory = path.resolve(frontendDirectory, "..");
 
-it("the shipped app defers pages but never wallet helpers needed after a deployment", { timeout: 120_000 }, async () => {
+it("the shipped app defers pages, keeps wallet helpers loaded and exposes only public Privy configuration", { timeout: 120_000 }, async (t) => {
+  const sentinels = { VITE_PRIVY_APP_ID: "public-privy-build-test", PRIVY_SECRET: "server-secret-must-not-ship-148" };
+  for (const [name, value] of Object.entries(sentinels)) {
+    const previous = process.env[name];
+    process.env[name] = value;
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
   // Exercise the production config and real dependency graph. A missing lazy
   // helper masks ordinary registry reverts in tabs kept open during a deploy.
   const result = await build({
@@ -20,6 +29,9 @@ it("the shipped app defers pages but never wallet helpers needed after a deploym
     build: { write: false },
   });
   const chunks = result.output.filter((item) => item.type === "chunk");
+  const bundled = result.output.map(item => item.type === "chunk" ? item.code : String(item.source)).join("\n");
+  assert.ok(bundled.includes(sentinels.VITE_PRIVY_APP_ID), "The public app ID must reach the sign-in client");
+  assert.equal(bundled.includes(sentinels.PRIVY_SECRET), false, "The server secret must not enter any frontend artifact");
   assert.ok(chunks.some((chunk) => chunk.isEntry), "Expected a built application entry");
   assert.ok(chunks.some((chunk) => Object.keys(chunk.modules).some((id) => /viem\/.*\/ccip\.js$/.test(id))),
     "The real viem CCIP error path must be included in the build");

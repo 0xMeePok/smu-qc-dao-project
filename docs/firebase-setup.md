@@ -190,6 +190,103 @@ the account.
 6. Optional, for repeatable testing: **User management → Authentication → Advanced →
    Enable test accounts** gives a fixed `test-XXXX@privy.io` address and code.
 
+### Privy deployment configuration
+
+<a id="privy-deployment-configuration"></a>
+
+Keep these settings in their separate destinations:
+
+| Setting | Destination | Purpose |
+| --- | --- | --- |
+| `VITE_PRIVY_APP_ID` | `frontend/.env` or `.env.local`; GitHub Actions repository variable of the same name | Public app ID bundled into the frontend |
+| `PRIVY_APP_ID` | `firebase/functions/.env.<project-id>` for manual deployment | The same public ID used by server token verification |
+| `PRIVY_SECRET` | Firebase Functions Secret Manager | Server-only Privy API credential |
+
+The existing deployment workflow uses `vars.VITE_PRIVY_APP_ID`, falling back to
+`secrets.VITE_PRIVY_APP_ID` for older repository configurations. It supplies that
+same value to the frontend build and the functions environment. If both exist,
+the repository variable takes precedence. Do not add a Privy secret to the
+workflow's frontend build environment. Vite exposes every `VITE_` value; the build
+now rejects private Privy secret, token and signing-key names before bundling.
+
+Before the first functions deployment, provision the app secret interactively
+from the Firebase directory:
+
+```bash
+npx firebase functions:secrets:set PRIVY_SECRET --project YOUR_PROJECT_ID
+```
+
+Enter the value from the Privy dashboard when prompted. Do not put it in a shell
+command, the frontend environment, a committed file or the frontend's GitHub
+Actions variables. `exchangePrivySession` binds `defineSecret("PRIVY_SECRET")`;
+deploy the function again after creating or rotating a secret version. Its
+runtime service account must retain permission to access that secret. A missing
+secret or denied access must be fixed in Firebase/Google Cloud, not by putting
+the credential in the browser.
+
+For a manual backend deployment, set `PRIVY_APP_ID` in the functions dotenv file
+to the same public ID as the frontend. Firebase overlays `.env.<project-id>` on
+`.env`; an empty project-specific setting overrides the base value. A shell
+variable or emulator-only `.env.local` is not the deployed runtime environment.
+`firebase/deploy.sh` checks these files before any database or rules changes and
+requires an explicit project ID. You can run the same preflight from `firebase/`
+with `node scripts/check-privy-deploy.mjs YOUR_PROJECT_ID`.
+
+For local emulators using a real Privy app, the public ID is read from the
+frontend environment and the app secret belongs in the gitignored
+`firebase/functions/.secret.local` as `PRIVY_SECRET=...`. Never use that file as
+the production secret source. Emulator test-user fixtures need no real secret.
+
+For Hosting previews, Vite resolves shell and mode-specific environment files
+at build time. `deploy:preview -- --backend` reads the public ID from that exact
+artifact, updates only `PRIVY_APP_ID` in the backend dotenv file, and preserves
+RPC and other runtime settings. It deploys rules and functions before publishing
+the preview. This updates the shared backend for all channels. Without
+`--backend`, no backend environment file is read or changed; use the same Privy
+app ID as the already deployed backend. `--dry-run` stops before cloud changes
+and backend environment writes.
+
+### Hosting policy and verification
+
+The configured email-only embedded-wallet flow needs these exact sources in
+`firebase/firebase.json`:
+
+| Directive | Privy source | Used for |
+| --- | --- | --- |
+| `connect-src` | `https://auth.privy.io` | Login and wallet API requests |
+| `frame-src` | `https://auth.privy.io` | Embedded-wallet iframe |
+| `connect-src` | `https://arbitrum-sepolia.rpc.privy.systems` | Sponsored Arbitrum Sepolia requests |
+
+The app's CAPTCHA setting is currently disabled. If an administrator enables
+Turnstile, add `https://challenges.cloudflare.com` to `script-src` and `frame-src`
+and retest before release. Other CAPTCHA providers need their own documented
+sources. Consult [Privy's CSP guide](https://docs.privy.io/security/implementation-guide/content-security-policy)
+when changing dashboard features. External wallets are disabled in this app, so
+their relay domains are not needed. Keep exact RPC origins and the existing
+frame-ancestor, base, object and form protections.
+
+Dashboard origins must match scheme, host and port exactly. For this project,
+check both `https://qcdao-a0c7a.web.app` and
+`https://qcdao-a0c7a.firebaseapp.com`, each current preview URL, and local
+`http://localhost:5173` / `http://127.0.0.1:5173`. Remove expired or misspelled
+origins after confirming nobody uses them. Keep Email as the only dashboard
+login method, EVM embedded wallets enabled, Arbitrum Sepolia sponsorship enabled
+and smart wallets disabled.
+
+After a release:
+
+1. Run `node firebase/scripts/check-csp.mjs https://qcdao-a0c7a.web.app` to inspect
+   the effective response header, including CDN propagation retries.
+2. In a fresh browser session with DevTools open, sign in with email and OTP,
+   load the embedded wallet, sign a sponsored testnet transaction, then sign out
+   and back in. Inspect both the main page and wallet iframe for CSP errors.
+3. Confirm the same address/profile returns and the transaction is confirmed.
+   Missing dashboard origins, App Check domain entries and secret permissions
+   are separate gates from CSP; diagnose the failing gate before changing it.
+4. Run the frontend artifact test to verify the public ID is present and a
+   server-secret sentinel is absent. CI runs that real production build test.
+   Never search for or print the actual secret value to check a bundle.
+
 Signing in costs no gas: it sends no transaction at all. Every member transaction
 (publishing audits, proposals, funding approvals and deposits) is gas-sponsored, so a
 new embedded wallet holding no ETH can take part. A sponsored transaction is sent by a
