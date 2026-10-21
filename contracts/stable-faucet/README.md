@@ -29,6 +29,7 @@ The public deployment details are written to `deployments/arbitrumSepolia-faucet
 ## Run or deploy the site
 
 ```bash
+npm ci
 cd site
 cp .env.example .env
 npm ci

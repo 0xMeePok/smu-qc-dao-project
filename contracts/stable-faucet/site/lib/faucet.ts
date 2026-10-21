@@ -153,6 +153,8 @@ export async function handleFaucet(
 
   const normalizedRecipient = getAddress(recipient);
   try {
+    // An EIP-7702 delegated EOA keeps its signing key. Recover its EIP-191
+    // signature directly; deployed code alone must not select ERC-1271.
     const recovered = verifyMessage(
       mintMessage(token, normalizedRecipient, issuedAt),
       signature,
