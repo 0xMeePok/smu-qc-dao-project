@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { encodeFunctionData, numberToHex } from "viem";
 import { answerEthCall } from "./answerEthCall.mjs";
+import { auditEvent } from "./auditEvent.mjs";
 import { attestPublication } from "../index.js";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
 import { INDEPENDENT_PUBLISH_VALIDATION } from "../publicationValidation.js";
@@ -153,16 +154,20 @@ function independentClient(record, { update = false } = {}) {
     id: record.id,
     expiresAt: record.expiresAt?.toDate?.() ? record.expiresAt : Timestamp.fromDate(new Date(record.expiresAt)),
   });
+  const functionName = update ? "updateOpportunity" : "commitOpportunity";
+  const args = update ? [expected.entityId, expected.contentHash, expected.args[3]] : expected.args;
   return {
     expected,
-    getTransactionReceipt: async () => ({ status: "success", blockNumber: 10n, blockHash: BLOCK, transactionHash: HASH }),
+    getTransactionReceipt: async () => ({ status: "success", blockNumber: 10n, blockHash: BLOCK, transactionHash: HASH,
+      logs: [{ ...auditEvent({ config: registry, functionName, args, actor: record.researcherId }),
+        transactionHash: HASH, blockNumber: 10n, blockHash: BLOCK, logIndex: 0 }] }),
     getTransaction: async () => ({
       hash: HASH, to: registry.address, from: record.researcherId, chainId: registry.chainId,
       blockNumber: 10n, blockHash: BLOCK,
       input: encodeFunctionData({
         abi: registry.abi,
-        functionName: update ? "updateOpportunity" : "commitOpportunity",
-        args: update ? [expected.entityId, expected.contentHash, expected.args[3]] : expected.args,
+        functionName,
+        args,
       }),
     }),
     getBlock: async ({ blockNumber }) => blockNumber === 10n
@@ -187,7 +192,10 @@ function mockRpc(t, client) {
       result = numberToHex(registry.chainId);
     } else if (method === "eth_getTransactionReceipt") {
       const receipt = await client.getTransactionReceipt();
-      result = { ...receipt, status: "0x1", blockNumber: numberToHex(receipt.blockNumber), logs: [] };
+      result = { ...receipt, status: "0x1", blockNumber: numberToHex(receipt.blockNumber),
+        logs: (receipt.logs ?? []).map(log => ({ ...log,
+          blockNumber: numberToHex(log.blockNumber), logIndex: numberToHex(log.logIndex),
+          transactionIndex: "0x0", removed: false })) };
     } else if (method === "eth_getTransactionByHash") {
       const transaction = await client.getTransaction();
       result = {

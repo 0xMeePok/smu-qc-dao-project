@@ -6,6 +6,7 @@ import main from "../auditRegistry.contract.json" with { type: "json" };
 import independent from "../independentFunding.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { memoryDb } from "./memoryDb.mjs";
+import { auditEvent } from "./auditEvent.mjs";
 import { createFundingApproach, decideFundingApproach } from "../fundingApproach.js";
 import { assertIndependentPublicationUnlocked, getIndependentFundingState, hashIndependentFundingEvidence,
   independentFundingKey, prepareIndependentFundingAction, readIndependentFundingPortfolio,
@@ -55,7 +56,9 @@ function fixture({ activated = true, requestedAmount = 2 } = {}) {
   const calls = [], simulations = [], receipts = new Map(), transactions = new Map();
   transactions.set(publicationHash, { hash: publicationHash, from: researcher, to: config.address, chainId: config.chainId,
     blockNumber: 88n, blockHash: hash("8"), input: encodeFunctionData({ abi: config.abi, functionName: "commitOpportunity", args: prepared.args }) });
-  receipts.set(publicationHash, { transactionHash: publicationHash, status: "success", blockNumber: 88n, blockHash: hash("8"), logs: [] });
+  receipts.set(publicationHash, { transactionHash: publicationHash, status: "success", blockNumber: 88n, blockHash: hash("8"),
+    logs: [{ ...auditEvent({ config, functionName: "commitOpportunity", args: prepared.args, actor: researcher }),
+      transactionHash: publicationHash, blockNumber: 88n, blockHash: hash("8"), logIndex: 0 }] });
   const eventName = "Deposited", eventArgs = { funder, amount: 1_000_000n, totalDeposited: 1_000_000n, contribution: 1_000_000n };
   const event = config.independentFunding.escrowAbi.find(item => item.type === "event" && item.name === eventName);
   const dataInputs = event.inputs.filter(input => !input.indexed);
