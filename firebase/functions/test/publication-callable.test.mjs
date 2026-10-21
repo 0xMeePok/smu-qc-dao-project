@@ -16,7 +16,12 @@ function mockRpc(t, client) {
       result = numberToHex(escrowConfig.chainId);
     } else if (method === "eth_getTransactionReceipt") {
       const receipt = await client.getTransactionReceipt();
-      result = { ...receipt, status: "0x1", blockNumber: numberToHex(receipt.blockNumber), logs: [] };
+      result = { ...receipt, status: "0x1", blockNumber: numberToHex(receipt.blockNumber),
+        logs: (receipt.logs ?? []).map((log, index) => ({ ...log,
+          blockNumber: numberToHex(log.blockNumber ?? receipt.blockNumber),
+          blockHash: log.blockHash ?? receipt.blockHash,
+          transactionHash: log.transactionHash ?? receipt.transactionHash,
+          logIndex: numberToHex(log.logIndex ?? index), transactionIndex: numberToHex(log.transactionIndex ?? 0), removed: false })) };
     } else if (method === "eth_getTransactionByHash") {
       const transaction = await client.getTransaction();
       result = { ...transaction, blockNumber: numberToHex(transaction.blockNumber), chainId: numberToHex(transaction.chainId),

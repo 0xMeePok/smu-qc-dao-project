@@ -19,7 +19,7 @@ export function isActiveAuditDeployment(config, activeConfig = activeRegistry) {
 
 /** Receipts deliberately retain their existing nine-field Firestore schema. */
 export async function resolveAuditDeployment(record, {
-  getTransaction, activeConfig = activeRegistry, history = historicalRegistries, transaction,
+  getTransaction, activeConfig = activeRegistry, history = historicalRegistries, transaction, receipt, matchesReceipt,
 } = {}) {
   const hash = record?.audit?.transactionHash;
   if (!hash) return activeConfig;
@@ -29,6 +29,18 @@ export async function resolveAuditDeployment(record, {
   const tx = transaction ?? await getTransaction({ hash, chainId });
   if (!tx || !same(tx.hash, hash) || Number(tx.chainId) !== chainId) {
     throw new Error("The transaction does not belong to this audit receipt and chain.");
+  }
+  if (receipt && typeof matchesReceipt === "function") {
+    if (!same(receipt.transactionHash, hash)) throw new Error("The transaction does not belong to this audit receipt and chain.");
+    // A receipt can contain effects from several operations and registries.
+    // Select only repository-owned deployments with an event for this exact
+    // record; neither the bundler target nor wallet calldata identifies it.
+    const matches = [activeConfig, ...history].filter(config => {
+      if (Number(config.chainId) !== chainId) return false;
+      try { return Boolean(matchesReceipt(config, receipt)); } catch { return false; }
+    });
+    if (matches.length !== 1) throw new Error("Mismatch detected: the receipt does not belong to a known, unambiguous AuditRegistry deployment for this record.");
+    return matches[0];
   }
   return knownAuditDeployment(decodeMemberCall(tx, { sender: record.researcherId ?? record.ownerId })?.to, chainId, { activeConfig, history });
 }

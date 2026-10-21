@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { auditEvent } from "./auditEvent.mjs";
 import { encodeFunctionData } from "viem";
 import { asProposalUpdate, withOpportunityRevisionIndex } from "../auditCanonical.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
@@ -48,7 +49,7 @@ describe("Escrow-linked proposal verification", () => {
     assert.equal(update.fundingTermsHash, prepared.fundingTermsHash);
   });
 
-  it("confirms the actual transaction, both escrow mappings, immutable amounts and every tranche", async () => {
+  it("confirms the receipt event, both escrow mappings, immutable amounts and every tranche", async () => {
     const record = escrowRecord(), client = escrowClient(record);
     const result = await verifyMinedProposal(record, client, options);
     assert.equal(result.status, "confirmed");
@@ -58,18 +59,20 @@ describe("Escrow-linked proposal verification", () => {
 
   it("confirms an unfunded content amendment without allowing a replacement payment plan", async () => {
     const record = escrowRecord(), client = escrowClient(record), prepared = prepareStoredProposal(record, options);
-    const original = client.getTransaction;
-    client.getTransaction = async () => ({ ...await original(), input: encodeFunctionData({ abi: escrowConfig.abi,
-      functionName: "updateHashes", args: asProposalUpdate(prepared).args }) });
+    const receipt = client.getTransactionReceipt;
+    client.getTransactionReceipt = async () => ({ ...await receipt(), logs: [auditEvent({ config: escrowConfig,
+      actor: record.researcherId, opportunityId: prepared.opportunityId,
+      functionName: "updateHashes", args: asProposalUpdate(prepared).args })] });
     assert.equal((await verifyMinedProposal(record, client, options)).status, "confirmed");
     await assert.rejects(verifyMinedProposal({ ...record, fundingTerms: { ...record.fundingTerms, funderVoting: false } }, client, options), /Mismatch/);
   });
 
-  it("accepts nonzero parent revisions with the funding tuple after the revision argument", async () => {
+  it("accepts the nonzero parent revision bound by the receipt event", async () => {
     const record = escrowRecord(), client = escrowClient(record);
     const prepared = withOpportunityRevisionIndex(prepareStoredProposal(record, options), 4);
-    const original = client.getTransaction, read = client.readContract;
-    client.getTransaction = async () => ({ ...await original(), input: encodeFunctionData({ abi: escrowConfig.abi, functionName: prepared.functionName, args: prepared.args }) });
+    const receipt = client.getTransactionReceipt, read = client.readContract;
+    client.getTransactionReceipt = async () => ({ ...await receipt(), logs: [auditEvent({ config: escrowConfig,
+      actor: record.researcherId, functionName: prepared.functionName, args: prepared.args })] });
     client.readContract = async request => request.functionName === "getProposal"
       ? { ...await read(request), opportunityRevisionIndex: 4 } : read(request);
     assert.equal((await verifyMinedProposal(record, client, options)).status, "confirmed");
@@ -103,11 +106,13 @@ describe("Escrow-linked proposal verification", () => {
     await assert.rejects(verifyMinedProposal(record, client, options), /503/);
   });
 
-  it("does not accept the disabled legacy commit entry point on the linked registry", async () => {
+  it("does not confirm the disabled legacy commit without a registry effect", async () => {
     const record = escrowRecord(), client = escrowClient(record), prepared = prepareStoredProposal(record, options);
-    const original = client.getTransaction;
+    const original = client.getTransaction, receipt = client.getTransactionReceipt;
     client.getTransaction = async () => ({ ...await original(), input: encodeFunctionData({ abi: escrowConfig.abi,
       functionName: "commitProposal", args: prepared.args.slice(0, 5) }) });
+    // The disabled entry point cannot emit a successful ProposalCommitted log.
+    client.getTransactionReceipt = async () => ({ ...await receipt(), logs: [] });
     await assert.rejects(verifyMinedProposal(record, client, options), /Mismatch/);
   });
 

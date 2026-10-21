@@ -7,6 +7,7 @@ import { verifyPublication } from "../publication.js";
 import { prepareOpportunityCommit, prepareProposalCommit, opportunityEntityId } from "../auditCanonical.js";
 import { postingAuditPayload, fundingOpportunityAuditPayload } from "../opportunityAuditPayload.js";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
+import { auditEvent } from "./auditEvent.mjs";
 import { sponsoredTransaction } from "./sponsoredTx.mjs";
 const owner = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`, blockHash = `0x${"2".repeat(64)}`;
 function fixture(openFunding = false) {
@@ -20,7 +21,9 @@ function clientFor(record, update = false, legacy = false) {
   const expected = prepareOpportunityCommit({ actor: !legacy && registry.entityIdScheme === 2 ? record.ownerId : undefined, recordId: record.id, expiresAt: record.expiresAt, kind: funding ? 1 : 0,
     payload: funding ? fundingOpportunityAuditPayload(record) : postingAuditPayload(record) });
   return {
-    getTransactionReceipt: async () => ({ transactionHash: hash, status: "success", blockHash, blockNumber: 10n }),
+    getTransactionReceipt: async () => ({ transactionHash: hash, status: "success", blockHash, blockNumber: 10n, logs: [auditEvent({ config: registry, actor: owner,
+      functionName: update ? "updateOpportunity" : "commitOpportunity",
+      args: update ? [expected.entityId, expected.contentHash, expected.args[3]] : expected.args })] }),
     getTransaction: async () => ({ hash, to: registry.address, from: owner, chainId: 421614, blockHash, blockNumber: 10n,
       input: encodeFunctionData({ abi: registry.abi, functionName: update ? "updateOpportunity" : "commitOpportunity",
         args: update ? [expected.entityId, expected.contentHash, expected.args[3]] : expected.args }) }),
@@ -38,24 +41,39 @@ describe("QCDAO-131 trusted publication boundary", () => {
     assert.equal(registry.entityIdScheme, 2);
     await assert.rejects(verifyPublication({ scope: "problems", record, client: clientFor(record, false, true) }), /differs/);
   });
-  it("refuses missing proof, changed content, wrong sender/chain/registry and reverted transactions", async () => {
+  it("refuses missing proof, changed content, wrong event actor/chain/registry and reverted transactions", async () => {
     const record = fixture(), client = clientFor(record);
     await assert.rejects(verifyPublication({ scope: "problems", record: { ...record, audit: {} }, client }));
     await assert.rejects(verifyPublication({ scope: "problems", record: { ...record, title: "Changed" }, client }));
-    for (const patch of [{ from: `0x${"b".repeat(40)}` }, { to: `0x${"b".repeat(40)}` }, { chainId: 1 }]) {
+    for (const logs of [[], [auditEvent({ config: registry, actor: `0x${"b".repeat(40)}`,
+      functionName: "commitOpportunity", args: prepareOpportunityCommit({ actor: owner, recordId: record.id,
+        expiresAt: record.expiresAt, payload: postingAuditPayload(record) }).args })]]) {
+      await assert.rejects(verifyPublication({ scope: "problems", record, client: { ...client,
+        getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(), logs }) } }));
+    }
+    const receipt = await client.getTransactionReceipt();
+    await assert.rejects(verifyPublication({ scope: "problems", record, client: { ...client,
+      getTransactionReceipt: async () => ({ ...receipt,
+        logs: receipt.logs.map(log => ({ ...log, address: `0x${"b".repeat(40)}` })) }) } }));
+    for (const patch of [{ chainId: 1 }]) {
       await assert.rejects(verifyPublication({ scope: "problems", record,
         client: { ...client, getTransaction: async () => ({ ...await client.getTransaction(), ...patch }) } }));
     }
     await assert.rejects(verifyPublication({ scope: "problems", record,
       client: { ...client, getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(), status: "reverted" }) } }));
   });
-  it("QCDAO-144 verifies a gas-sponsored publication by the member's own call, not the bundler", async () => {
+  it("QCDAO-144 verifies a gas-sponsored publication by its registry effect", async () => {
     const record = fixture(), direct = clientFor(record);
     const plain = await direct.getTransaction();
-    const sponsored = (sender) => sponsoredTransaction({ hash, blockHash, calls: [{ sender, to: registry.address, input: plain.input }] });
+    const sponsored = async (sender) => {
+      const result = sponsoredTransaction({ hash, blockHash, calls: [{ sender, to: registry.address, input: plain.input }] });
+      const expected = prepareOpportunityCommit({ actor: owner, recordId: record.id, expiresAt: record.expiresAt, payload: postingAuditPayload(record) });
+      result.receipt.logs.push(auditEvent({ config: registry, actor: sender, functionName: "commitOpportunity", args: expected.args }));
+      return result;
+    };
     const asClient = ({ transaction, receipt }) => ({ ...direct, getTransaction: async () => transaction, getTransactionReceipt: async () => receipt });
-    assert.equal((await verifyPublication({ scope: "problems", record, client: asClient(sponsored(owner)) })).status, "confirmed");
-    await assert.rejects(verifyPublication({ scope: "problems", record, client: asClient(sponsored(`0x${"b".repeat(40)}`)) }), /does not belong/);
+    assert.equal((await verifyPublication({ scope: "problems", record, client: asClient(await sponsored(owner)) })).status, "confirmed");
+    await assert.rejects(verifyPublication({ scope: "problems", record, client: asClient(await sponsored(`0x${"b".repeat(40)}`)) }), /does not belong|differs|Mismatch/);
   });
   it("rejects reorgs, withdrawn registry records and replaced attachment bytes", async () => {
     const record = fixture(), client = clientFor(record);

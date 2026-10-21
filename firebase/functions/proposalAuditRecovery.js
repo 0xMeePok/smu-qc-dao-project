@@ -1,13 +1,12 @@
-import { decodeFunctionData } from "viem";
 import { createHash } from "node:crypto";
 import { getStorage } from "firebase-admin/storage";
 import { withOpportunityRevisionIndex } from "./auditCanonical.js";
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { isIndependentProposal } from "./independentProposal.js";
-import { fundingTermsHash, isEscrowRegistry, verifyProposalEscrow } from "./escrowAudit.js";
+import { isEscrowRegistry, verifyProposalEscrow } from "./escrowAudit.js";
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { isActiveAuditDeployment, resolveAuditDeployment } from "./auditDeployments.js";
-import { memberCall } from "./memberCall.js";
+import { opportunityReceiptEvent, proposalReceiptEvent } from "./auditReceipt.js";
 
 export const AUDIT_JOBS = "proposalAuditJobs";
 export const RETRY_LIMIT = 3;
@@ -56,14 +55,19 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
     client.getTransactionReceipt({ hash }), client.getTransaction({ hash }),
   ]);
   if (receipt.status !== "success") throw new Error("The verification transaction reverted. The proposal remains saved.");
-  registryConfig = await resolveAuditDeployment(record, { transaction, activeConfig: registryConfig });
+  const independent = isIndependentProposal(record);
+  const receiptEvent = (config) => {
+    const prepared = prepareStoredProposal(record, { registryConfig: config });
+    return (independent ? opportunityReceiptEvent : proposalReceiptEvent)(receipt, config, prepared, record.researcherId);
+  };
+  registryConfig = await resolveAuditDeployment(record, {
+    transaction, receipt, activeConfig: registryConfig, matchesReceipt: receiptEvent,
+  });
   onDeploymentResolved?.(registryConfig);
   let expected = prepareStoredProposal(record, { registryConfig });
   const address = registryAddress(registryConfig);
-  const call = memberCall(transaction, receipt, { sender: record.researcherId });
-  if (!same(call?.to, address) || !same(call.from, record.researcherId)
-      || !same(receipt.transactionHash, hash) || !same(transaction.hash, hash)
-      || Number(call.chainId) !== registryConfig.chainId) {
+  if (!same(receipt.transactionHash, hash) || !same(transaction.hash, hash)
+      || Number(transaction.chainId) !== registryConfig.chainId) {
     throw new Error("The transaction does not belong to this researcher and AuditRegistry.");
   }
   if (typeof receipt.blockNumber !== "bigint" || typeof transaction.blockNumber !== "bigint"
@@ -79,29 +83,13 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
       || !same(confirmationBlock.parentHash, receipt.blockHash)) {
     throw new Error("The transaction is not final yet; confirmation will be checked again.");
   }
-  const decoded = decodeFunctionData({ abi: registryConfig.abi, data: call.input });
-  const independent = isIndependentProposal(record);
+  const event = receiptEvent(registryConfig);
   // The registry enforces the live parent revision at transaction time. Verify
   // that same revision in the current proposal instead of assuming revision zero.
-  if (!independent && [expected.functionName, "updateHashes"].includes(decoded.functionName)) {
-    const revision = decoded.functionName === "commitProposalWithEscrow" ? decoded.args[4] : decoded.args.at(-1);
-    expected = withOpportunityRevisionIndex(expected, Number(revision));
-  }
-  const expectedArgs = independent ? {
-    commitOpportunity: expected.args,
-    updateOpportunity: [expected.entityId, expected.contentHash, expected.args[3]],
-  }[decoded.functionName] : {
-    [expected.functionName]: expected.args,
-    updateHashes: [
-      expected.entityId, expected.proposalHash, expected.solutionHash,
-      expected.expectedOpportunityRevisionIndex,
-    ],
-  }[decoded.functionName];
-  if (!expectedArgs || decoded.args.length !== expectedArgs.length
-      || decoded.args.some((arg, index) => decoded.functionName === "commitProposalWithEscrow" && index === 5
-        ? fundingTermsHash(arg) !== expected.fundingTermsHash : !same(arg, expectedArgs[index]))) {
+  if (!event) {
     throw new Error("Mismatch detected: the stored proposal differs from the submitted transaction.");
   }
+  if (!independent) expected = withOpportunityRevisionIndex(expected, Number(event.args.opportunityRevisionIndex));
   await verifyAttachmentBytes(record, readAttachment, { independent });
   const actual = await client.readContract({ address, abi: registryConfig.abi,
     functionName: independent ? "getOpportunity" : "getProposal", args: [expected.entityId] });
@@ -119,6 +107,7 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
   } else if (!same(value("researcher", 0), record.researcherId)
       || !same(value("opportunityId", 1), expected.opportunityId)
       || Number(value("opportunityRevisionIndex", 2)) !== expected.expectedOpportunityRevisionIndex
+      || !same(value("opportunityRevisionDigest", 3), event.args.opportunityRevisionDigest)
       || !same(value("proposalHash", 4), expected.proposalHash)
       || !same(value("solutionHash", 5), expected.solutionHash)) {
     throw new Error("Mismatch detected: the current proposal differs from AuditRegistry.");

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
+import { auditEvent, AUDIT_REVISION_DIGEST } from "./auditEvent.mjs";
 import { encodeFunctionData } from "viem";
 import { Timestamp } from "firebase-admin/firestore";
 import { prepareStoredProposal as prepareProposal } from "../proposalAuditPayload.js";
@@ -29,14 +30,14 @@ function fixture(type = "business-problem") {
 function clientFor(record) {
   const expected = prepareStoredProposal(record);
   return {
-    getTransactionReceipt: async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: hash }),
+    getTransactionReceipt: async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: hash, logs: [auditEvent({ config: registry, functionName: "commitProposal", args: expected.args, actor: researcher })] }),
     getTransaction: async () => ({ hash, to: registry.address, from: researcher, chainId: 421614,
       blockNumber: 88n, blockHash,
       input: encodeFunctionData({ abi: registry.abi, functionName: "commitProposal", args: expected.args }) }),
     getBlock: async ({ blockNumber }) => blockNumber === 88n
       ? { hash: blockHash }
       : { hash: `0x${"5".repeat(64)}`, parentHash: blockHash },
-    readContract: async () => ({ researcher, opportunityId: expected.opportunityId, opportunityRevisionIndex: 0,
+    readContract: async () => ({ researcher, opportunityId: expected.opportunityId, opportunityRevisionIndex: 0, opportunityRevisionDigest: AUDIT_REVISION_DIGEST, exists: true, withdrawn: false,
       proposalHash: expected.proposalHash, solutionHash: expected.solutionHash }),
   };
 }
@@ -125,22 +126,21 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
     // A corrected proposal keeps its entity id, so its second anchoring is an
     // amendment. Both calls carry the same hashes for the same stored record;
     // refusing the amendment would leave a corrected proposal unconfirmable.
-    const amended = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
-      input: encodeFunctionData({ abi: registry.abi, functionName: "updateHashes",
-        args: [expected.entityId, expected.proposalHash, expected.solutionHash, expected.expectedOpportunityRevisionIndex] }) }) };
+    const amended = { ...client, getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(),
+      logs: [auditEvent({ config: registry, functionName: "updateHashes", actor: researcher,
+        opportunityId: expected.opportunityId,
+        args: [expected.entityId, expected.proposalHash, expected.solutionHash, expected.expectedOpportunityRevisionIndex] })] }) };
     const result = await verifyMinedProposal(record, amended);
     assert.equal(result.status, "confirmed");
     assert.equal(result.contentHash, expected.contentHash);
-    // Still pinned to this record: an amendment carrying another proposal's
-    // hashes is a mismatch, exactly as a commit would be.
-    const forged = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
-      input: encodeFunctionData({ abi: registry.abi, functionName: "updateHashes",
-        args: [expected.entityId, `0x${"9".repeat(64)}`, expected.solutionHash, 0] }) }) };
+    const forged = { ...client, getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(),
+      logs: [auditEvent({ config: registry, functionName: "updateHashes", actor: researcher,
+        opportunityId: expected.opportunityId,
+        args: [expected.entityId, `0x${"9".repeat(64)}`, expected.solutionHash, 0] })] }) };
     await assert.rejects(verifyMinedProposal(record, forged), /Mismatch/);
-    // A call that is neither is not a way to confirm anything.
-    const unrelated = { ...client, getTransaction: async () => ({ ...await client.getTransaction(),
-      input: encodeFunctionData({ abi: registry.abi, functionName: "withdrawProposal",
-        args: [expected.entityId, expected.contentHash] }) }) };
+    const unrelated = { ...client, getTransactionReceipt: async () => ({ ...await client.getTransactionReceipt(),
+      logs: [auditEvent({ config: registry, functionName: "withdrawProposal", actor: researcher,
+        args: [expected.entityId, expected.contentHash] })] }) };
     await assert.rejects(verifyMinedProposal(record, unrelated), /Mismatch/);
   });
   it("detects changed content and attachments instead of trusting receipt hashes", async () => {
@@ -170,12 +170,19 @@ describe("QCDAO-76/78 trusted proposal confirmation", () => {
     const record = fixture();
     await assert.rejects(
       verifyMinedProposal({ ...record, researcherId: `0x${"b".repeat(40)}` }, clientFor(record)),
-      /does not belong/,
+      /does not belong|Mismatch/,
     );
-    for (const patch of [{ from: `0x${"b".repeat(40)}` }, { to: `0x${"c".repeat(40)}` }, { chainId: 1 }]) {
+    const prepared = prepareStoredProposal(record), base = clientFor(record);
+    for (const log of [auditEvent({ config: registry, actor: `0x${"b".repeat(40)}`,
+      functionName: "commitProposal", args: prepared.args }),
+      { ...auditEvent({ config: registry, actor: researcher, functionName: "commitProposal", args: prepared.args }), address: `0x${"c".repeat(40)}` }]) {
+      await assert.rejects(verifyMinedProposal(record, { ...base, getTransactionReceipt: async () => ({
+        ...await base.getTransactionReceipt(), logs: [log] }) }), /does not belong|Mismatch|known AuditRegistry/);
+    }
+    for (const patch of [{ chainId: 1 }]) {
       const client = clientFor(record), original = client.getTransaction;
       client.getTransaction = async () => ({ ...await original(), ...patch });
-      await assert.rejects(verifyMinedProposal(record, client), /does not belong/);
+      await assert.rejects(verifyMinedProposal(record, client), /does not belong|Mismatch/);
     }
     const client = clientFor(record);
     client.getTransactionReceipt = async () => ({ status: "reverted" });
@@ -212,7 +219,7 @@ describe("QCDAO-79 durable recovery", () => {
   it("fails an old deployment recovery job after its registry is removed from configuration", async () => {
     const record = fixture(), { db, records } = store(record), now = Timestamp.fromMillis(1000);
     await enqueueProposalAudit({ db, record, now });
-    await assert.rejects(recover({ db, client: clientFor(record), proposalId: record.id, now, Timestamp }), /known AuditRegistry/);
+    await assert.rejects(recover({ db, client: clientFor(record), proposalId: record.id, now, Timestamp }), /known.*AuditRegistry/);
     assert.equal(records.get(`proposals/${record.id}`).audit.status, "failed");
     assert.equal(records.get(`proposalAuditJobs/${record.id}`).status, "failed");
     assert.equal(records.get(`proposals/${record.id}`).fundingTerms, undefined);
