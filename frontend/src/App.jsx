@@ -19,6 +19,7 @@ import { OnboardingModal } from "./components/OnboardingModal.jsx";
 import { SignInProgress } from "./components/SignInProgress.jsx";
 import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import { WalletTransactionRecovery } from "./components/WalletTransactionRecovery.jsx";
+import { AccountWallet } from "./components/AccountWallet.jsx";
 import { useActionItems } from "./lib/actionItems.js";
 import HomePage from "./pages/HomePage.jsx";
 import { usePublishedPostings } from "./lib/usePublishedPostings.js";
@@ -171,15 +172,15 @@ function ThemeToggle({ theme, onToggle }) {
   );
 }
 
-function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut, signingOut = false }) {
+function AccountMenu({ name, roleLabel, address, email, workspaceRoutes, onSignOut, signingOut = false }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
   const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
 
   useEffect(() => {
     if (!open) return undefined;
-    const dismiss = (event) => { if (!menuRef.current?.contains(event.target)) setOpen(false); };
-    const escape = (event) => { if (event.key === "Escape") setOpen(false); };
+    const dismiss = (event) => { if (!menuRef.current?.contains(event.target) && !event.target.closest?.(".modal-backdrop")) setOpen(false); };
+    const escape = (event) => { if (event.key === "Escape" && !event.target.closest?.(".modal-backdrop")) setOpen(false); };
     document.addEventListener("mousedown", dismiss);
     document.addEventListener("keydown", escape);
     return () => {
@@ -197,15 +198,13 @@ function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut, signingOut =
         className="avatar-button"
         aria-label={signingOut ? "Signing out" : `Account menu for ${name}`}
         aria-expanded={open}
-        aria-haspopup="true"
         disabled={signingOut}
         onClick={() => setOpen((current) => !current)}
       >
         <span className="avatar" aria-hidden="true">{initial}</span>
         <span className="account-menu-inline-name">{signingOut ? "Signing out…" : name}</span>
       </button>
-      {open && (
-        <div className="account-menu-panel" role="menu">
+        <div className="account-menu-panel" role="region" aria-label="Account details and actions" style={open ? undefined : { display: "none" }}>
           <div className="account-menu-identity">
             <span className="avatar avatar-lg" aria-hidden="true">{initial}</span>
             <div>
@@ -213,15 +212,15 @@ function AccountMenu({ name, roleLabel, workspaceRoutes, onSignOut, signingOut =
               <small>{roleLabel}</small>
             </div>
           </div>
+          <AccountWallet address={address} email={email} visible={open} />
           <div className="account-menu-divider" />
-          <button type="button" role="menuitem" onClick={() => navigate("profile")}>Profile</button>
+          <button type="button" onClick={() => navigate("profile")}>Profile</button>
           {workspaceRoutes.length > 0 && (
-            <button type="button" role="menuitem" onClick={() => navigate(workspaceHome(workspaceRoutes))}>Workspaces</button>
+            <button type="button" onClick={() => navigate(workspaceHome(workspaceRoutes))}>Workspaces</button>
           )}
           <div className="account-menu-divider" />
-          <button type="button" role="menuitem" className="account-menu-signout" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
+          <button type="button" className="account-menu-signout" onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
         </div>
-      )}
     </div>
   );
 }
@@ -247,6 +246,8 @@ function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
         <NotificationCentre userId={address} />
         <AccountMenu
           name={name}
+          address={address}
+          email={profile?.email}
           roleLabel={profile?.organisation ? `${roleLabel} · ${profile.organisation}` : roleLabel}
           workspaceRoutes={workspaceRoutes}
           onSignOut={() => signOut()}

@@ -5228,3 +5228,35 @@ h1, h2, h3 { font-weight: 500; }
   .filter-dropdown, .filter-input { flex: 1 1 10rem; }
   .filter-dropdown select, .filter-input input { width: 100%; }
 }
+
+/* Private, self-service embedded wallet details within the account dropdown. */
+.account-menu-panel { width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 100px); overflow-y: auto; }
+.account-wallet { padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.account-wallet p { margin: 8px 0; }
+.account-wallet-email { overflow-wrap: anywhere; color: var(--muted); }
+.account-wallet-address, .account-wallet-heading { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.account-wallet code, .wallet-action-modal code { display: block; width: 100%; overflow-wrap: anywhere; white-space: normal; user-select: all; font-size: 12px; line-height: 1.6; }
+.account-wallet-address { margin-bottom: 14px; }
+.account-wallet button { min-height: 32px; border: 1px solid var(--line); background: var(--menu-bg); color: var(--ink); padding: 4px 8px; font-size: 12px; }
+.account-wallet button:hover:enabled { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.account-wallet button:disabled { opacity: .55; cursor: not-allowed; }
+.account-wallet-heading + small { color: var(--muted); }
+.account-wallet-balances { margin: 8px 0 12px; }
+.account-wallet-balances > div { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; }
+.account-wallet-balances dt { font-weight: 600; }
+.account-wallet-balances dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.account-wallet-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.account-wallet-actions button { flex: 1; min-height: 38px; }
+.account-wallet-unavailable { margin: 12px; font-size: 13px; color: var(--muted); }
+.account-wallet-pending { border: 1px solid var(--line); padding: 8px; margin: 8px 0; }
+.wallet-action-modal { max-width: 520px; }
+.wallet-action-modal .modal-head h2 { margin: 0; }
+.wallet-action-form { display: grid; gap: 14px; }
+.wallet-action-form label { display: grid; gap: 6px; font-weight: 600; }
+.wallet-action-form input, .wallet-action-form select { width: 100%; min-width: 0; }
+.wallet-action-modal .modal-body p { overflow-wrap: anywhere; }
+.wallet-action-modal .modal-actions { flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .account-menu-panel { width: 100%; max-height: none; }
+  .account-wallet button { min-height: 40px; }
+}

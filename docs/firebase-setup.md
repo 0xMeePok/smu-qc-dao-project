@@ -458,6 +458,32 @@ npm test --prefix firebase/functions
 
 ---
 
+## Account wallet and test-token faucet
+
+The signed-in account menu shows the member's email, embedded wallet address and
+XSGD, USDT and USDC balances on Arbitrum Sepolia. Transfers use Privy's sponsored
+wallet adapter and require an explicit review. The Add funds action is an
+informational **Privy on-ramp preview**; card funding is unavailable on testnet.
+
+Deploy `claimWalletTokens` in `asia-southeast1` with the other Cloud Functions
+before releasing the account-menu faucet action. It requires the existing
+Firebase authentication and production App Check configuration. It introduces no
+new secrets, environment variables or token contracts.
+
+The callable relays the member's signed TAP mint request to
+`https://smu-qc-dao-project.vercel.app/api/faucet`. The recipient is derived from
+the verified Firebase account, and the existing faucet enforces its per-token
+cooldown. The browser does not connect an external wallet or hold the faucet key.
+Keep the Vercel faucet's token addresses aligned with
+`frontend/src/config/auditRegistry.contract.json`; changing its Git connection or
+redeploying it requires the hosting/repository owner's access. The callable does
+not redeploy that service.
+
+A submitted transfer keeps a recovery record. Use **Check transfer status** to
+confirm that transaction before making another attempt; recovery never requests
+another signature. If faucet confirmation times out, refresh the balances before
+requesting another claim.
+
 ## FAQ
 
 ### Do I still need a WalletConnect project id, or MetaMask?
