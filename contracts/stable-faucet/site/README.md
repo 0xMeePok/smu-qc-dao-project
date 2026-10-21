@@ -28,8 +28,16 @@ Apply them to Production and any Preview environments that should mint. Never pr
 
 After a successful distribution, the server blocks that wallet from receiving the same token again for one hour. The wallet can still receive each of the other faucet tokens. This in-memory cooldown is isolated to each warm Vercel Function instance and resets when an instance restarts, so it is a best-effort control rather than a globally durable limit. The token contracts must also allow hourly claims; a longer on-chain cooldown cannot be shortened by this server.
 
-Validate before deploying:
+Validate before deploying (the real EIP-7702 test uses the parent contract
+project's development dependencies):
 
 ```bash
+npm ci --prefix ..
+npm ci
 npm test
 ```
+
+The integration test runs an isolated EVM and needs no deployment keys or live
+RPC. See [wallet compatibility](../../../docs/eip7702-wallet-compatibility.md)
+for its coverage and the live Privy verification steps. A normal Vercel build
+only needs this site's dependencies.

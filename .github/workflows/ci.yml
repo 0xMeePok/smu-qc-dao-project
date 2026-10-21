@@ -18,6 +18,7 @@ jobs:
       firebase: ${{ steps.filter.outputs.firebase }}
       functions: ${{ steps.filter.outputs.functions }}
       audit-registry: ${{ steps.filter.outputs.audit-registry }}
+      stable-faucet: ${{ steps.filter.outputs.stable-faucet }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -47,6 +48,9 @@ jobs:
               - '.github/workflows/ci.yml'
             audit-registry:
               - 'contracts/audit-registry/**'
+              - '.github/workflows/ci.yml'
+            stable-faucet:
+              - 'contracts/stable-faucet/**'
               - '.github/workflows/ci.yml'
 
   test:
@@ -172,11 +176,44 @@ jobs:
       - name: Compile and run contract tests
         run: npm test
 
+  stable-faucet-test:
+    name: Run Faucet & EIP-7702 Tests
+    needs: changes
+    if: needs.changes.outputs.stable-faucet == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ./contracts/stable-faucet
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+          cache-dependency-path: |
+            contracts/stable-faucet/package-lock.json
+            contracts/stable-faucet/site/package-lock.json
+
+      - name: Install contract and faucet dependencies
+        run: |
+          npm ci
+          npm ci --prefix site
+
+      - name: Run contract tests
+        run: npm test
+
+      - name: Check faucet and real sponsored wallet upgrade
+        run: npm test --prefix site
+
   # Always runs so a skipped test job is not treated as a failed
   # required check. Fail only when a selected job actually failed or was cancelled.
   ci:
     name: CI
-    needs: [changes, test, firebase-test, functions-test, audit-registry-test]
+    needs: [changes, test, firebase-test, functions-test, audit-registry-test, stable-faucet-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -187,11 +224,12 @@ jobs:
           firebase="${{ needs.firebase-test.result }}"
           functions="${{ needs.functions-test.result }}"
           contracts="${{ needs.audit-registry-test.result }}"
-          echo "changes=$changes frontend=$frontend firebase=$firebase functions=$functions contracts=$contracts"
+          faucet="${{ needs.stable-faucet-test.result }}"
+          echo "changes=$changes frontend=$frontend firebase=$firebase functions=$functions contracts=$contracts faucet=$faucet"
           if [ "$changes" != "success" ]; then
             exit 1
           fi
-          for result in "$frontend" "$firebase" "$functions" "$contracts"; do
+          for result in "$frontend" "$firebase" "$functions" "$contracts" "$faucet"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               exit 1
             fi
