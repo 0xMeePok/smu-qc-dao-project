@@ -119,7 +119,7 @@ export function normalizeWalletWriteError(error) {
  */
 export function createWalletAuditAdapters({ publicClient = browserPublicClient, walletClient = embeddedWalletClient } = {}) {
   return {
-    writeContract: async (request, { onWalletRequest } = {}) => {
+    writeContract: async (request, { onWalletRequest, onSubmitted } = {}) => {
       const call = onAuditChain(request);
       const estimateFeeCaps = async () => {
         const { maxFeePerGas, maxPriorityFeePerGas } = await publicClient.estimateFeesPerGas({ type: "eip1559" });
@@ -163,7 +163,7 @@ export function createWalletAuditAdapters({ publicClient = browserPublicClient, 
       const [feeCaps, , wallet] = await Promise.all([
         estimateFeeCaps(),
         simulate(),
-        walletClient({ account: call.account, chainId: request.chainId ?? arbitrumSepolia.id }),
+        walletClient({ account: call.account, chainId: request.chainId ?? arbitrumSepolia.id, ...(onSubmitted ? { onSubmitted } : {}) }),
       ]);
       // Keep UI callbacks outside the contract request so they never reach the
       // wallet RPC. Preparation is complete only at this boundary.
@@ -386,6 +386,10 @@ export async function executePreparedAudit(preparedAudit, {
       args: preparedAudit.args,
       account,
       chainId: AUDIT_REGISTRY_CHAIN_ID,
+    }, {
+      // Transient display only: unlike the receipt transitions below, this
+      // callback cannot persist state or block the provider's receipt wait.
+      onSubmitted: (details) => status(onStatus, "confirming", details),
     });
   } catch (error) {
     const normalized = normalizeWalletWriteError(error);

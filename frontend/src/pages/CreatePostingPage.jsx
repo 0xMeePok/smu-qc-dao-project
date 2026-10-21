@@ -844,7 +844,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               {(wizard.isLast || editing || submitting || saveFailed || pendingCount > 0) && (
                 <button className="primary" type="submit" disabled={submitting || pendingCount > 0}>
                   {submitting
-                    ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…")
+                    ? (confirmedAudit ? "Saving…" : (auditProgress?.status === "confirming" || auditProgress?.transactionHash) ? "Confirming on-chain…" : "Waiting for your wallet…")
                     : pendingCount > 0
                       ? "Waiting for attachments…"
                       : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Submit problem statement"}
@@ -854,7 +854,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           </div>
           </div>
 
-          {submitting && !confirmedAudit && !auditProgress?.transactionHash && <p className="field-hint" role="status">Preparing your transaction… Your wallet’s approval prompt opens once the on-chain checks finish.</p>}
+          {submitting && !confirmedAudit && !auditProgress?.transactionHash && auditProgress?.status !== "confirming" && <p className="field-hint" role="status">Preparing your transaction… Your wallet’s approval prompt opens once the on-chain checks finish.</p>}
           <SubmissionProgress audit={confirmedAudit} saving={submitting} entityLabel="Posting" editing={editing} />
           <div className="form-actions wizard-secondary">
             {!editing && (

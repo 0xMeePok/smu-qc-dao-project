@@ -7,7 +7,6 @@ import {
   recordFundingApproachDecisionAnchors, submitFundingApproachDecisions, validateApproachDecision,
 } from "../lib/fundingApproach.js";
 import { claimRemovedProposalFunds, escrowErrorMessage } from "../lib/escrow.js";
-import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useSignIn } from "../context/SessionContext.jsx";
 import { Field } from "./Field.jsx";
@@ -26,12 +25,12 @@ export function funderOutcome(item, status) {
 /** Claim the unpaid escrow balance after an administrator removes the listing. */
 export function ClaimRemovedFundsButton({ proposalId }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useWallet();
+  const { address, isConnected } = useWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const signIn = useSignIn(setError);
-  const ready = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
+  const ready = isConnected && address?.toLowerCase() === user?.id?.toLowerCase();
   const claim = async () => {
     if (!ready) { void signIn(); return; }
     setBusy(true); setError(""); setNotice("");
@@ -51,8 +50,8 @@ export function ClaimRemovedFundsButton({ proposalId }) {
   );
 }
 
-function walletReady(user, address, isConnected, chainId) {
-  return isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
+function walletReady(user, address, isConnected) {
+  return isConnected && address?.toLowerCase() === user?.id?.toLowerCase();
 }
 
 async function anchorDecisions(decisions, account) {
@@ -68,7 +67,7 @@ async function anchorDecisions(decisions, account) {
 /** Accept or decline, then ask the researcher's wallet to anchor the decision. */
 export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useWallet();
+  const { address, isConnected } = useWallet();
   const signIn = useSignIn((message) => setDraft((current) => (current?.id === draft.id ? { ...current, error: message } : current)));
   const declining = draft.decision === "decline";
   const submit = async (event) => {
@@ -78,7 +77,7 @@ export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError
       setDraft((current) => (current?.id === draft.id ? { ...current, error: fieldError } : current));
       return;
     }
-    if (!walletReady(user, address, isConnected, chainId)) { void signIn(); return; }
+    if (!walletReady(user, address, isConnected)) { void signIn(); return; }
     setDraft((current) => (current?.id === draft.id ? { ...current, busy: true, error: "", phase: "saving" } : current));
     let decided;
     try {
@@ -138,11 +137,11 @@ export function ApproachResponseForm({ draft, setDraft, onUpdated, onAnchorError
 /** Signs every still-pending decision digest for one listing. */
 export function SignDecisionAnchor({ items, proposalId, onUpdated, onError }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useWallet();
+  const { address, isConnected } = useWallet();
   const [busy, setBusy] = useState(false);
   const signIn = useSignIn(onError);
   const sign = async () => {
-    if (!walletReady(user, address, isConnected, chainId)) { void signIn(); return; }
+    if (!walletReady(user, address, isConnected)) { void signIn(); return; }
     const batch = items.filter((item) => item.proposalId === proposalId && item.decisionAnchorStatus === "pending" && item.decisionAnchorId && item.decisionRecordHash)
       .map((item) => ({ approachId: item.id, decisionAnchorId: item.decisionAnchorId, recordHash: item.decisionRecordHash }));
     setBusy(true);

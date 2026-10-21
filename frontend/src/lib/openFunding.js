@@ -73,6 +73,7 @@ export async function writeOpenFundingAction({ problemId, proposalId, account, a
       onProgress?.({ status: "preparing", action: functionName });
       transactionHash = await adapters.writeContract({ address, abi: contractAbi, functionName, args, account, chainId: config.chainId }, {
         onWalletRequest: () => onProgress?.({ status: "awaiting_signature", action: functionName }),
+        onSubmitted: (details) => onProgress?.({ status: "pending", action: functionName, ...details }),
       });
       onProgress?.({ status: "pending", action: functionName, transactionHash });
       const result = await confirmEscrowTransaction(transactionHash, { adapters, config, confirmations: 2 });

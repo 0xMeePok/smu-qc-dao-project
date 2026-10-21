@@ -435,11 +435,11 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
               <button className={`secondary wizard-back${wizard.isFirst ? " is-invisible" : ""}`} type="button" onClick={wizard.back} disabled={wizard.isFirst}>Back</button>
               <div className="wizard-nav-end">
                 {!wizard.isLast && <button className={editing ? "secondary" : "primary"} type="button" onClick={wizard.next} disabled={pending}>Continue</button>}
-                {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : auditProgress?.transactionHash ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Sign and submit proposal"}</button>}
+                {(wizard.isLast || editing || busy || saveFailed || pending) && <button className="primary" type="submit" disabled={disabled || pending}>{busy ? (confirmedAudit ? "Saving…" : (auditProgress?.status === "confirming" || auditProgress?.transactionHash) ? "Confirming on-chain…" : "Waiting for your wallet…") : pending ? "Waiting for attachments…" : saveFailed ? "Retry saving" : editing ? "Sign and save changes" : "Sign and submit proposal"}</button>}
               </div>
             </div>
           </div>
-          {busy && !confirmedAudit && !auditProgress?.transactionHash && <p className="field-hint" role="status">Preparing your transaction… Your wallet’s approval prompt opens once the on-chain checks finish.</p>}
+          {busy && !confirmedAudit && !auditProgress?.transactionHash && auditProgress?.status !== "confirming" && <p className="field-hint" role="status">Preparing your transaction… Your wallet’s approval prompt opens once the on-chain checks finish.</p>}
           <SubmissionProgress audit={confirmedAudit} saving={busy} entityLabel="Proposal" editing={editing} />
           {!editing && <div className="form-actions wizard-secondary">
             <button className="secondary" type="button" disabled={disabled || pending} onClick={persistDraft}>{savingDraft ? "Saving…" : "Save as draft"}</button>

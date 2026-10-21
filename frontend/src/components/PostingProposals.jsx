@@ -5,7 +5,6 @@ import { listProposalsForPosting, PROPOSAL_STATUS_DRAFT } from "../lib/proposals
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { claimRemovedProposalFunds, escrowErrorMessage } from "../lib/escrow.js";
 import { moderationReasonLabel } from "../lib/moderation.js";
-import { AUDIT_REGISTRY_CHAIN_ID } from "../config/auditRegistry.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { FundingMeta } from "./FundingMeta.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
@@ -17,12 +16,12 @@ const reasonLabel = moderationReasonLabel;
 
 function RemovedProposalRow({ item }) {
   const { user } = useAuth();
-  const { address, isConnected, chainId } = useWallet();
+  const { address, isConnected } = useWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const signIn = useSignIn(setError);
-  const ready = isConnected && address?.toLowerCase() === user?.id?.toLowerCase() && chainId === AUDIT_REGISTRY_CHAIN_ID;
+  const ready = isConnected && address?.toLowerCase() === user?.id?.toLowerCase();
   const claim = async () => {
     if (!ready) { void signIn(); return; }
     setBusy(true); setError(""); setNotice("");

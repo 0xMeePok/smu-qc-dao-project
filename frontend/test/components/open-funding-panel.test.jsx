@@ -64,6 +64,37 @@ describe("open funding grant workflow UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "deposit", amount: "10000.25", decimals: 6 })));
   });
+  it("keeps hashless submission progress transient and permits the same action to recover", async () => {
+    const problemId = "hashless-recovery-grant";
+    let finishScan;
+    const scan = new Promise(resolve => { finishScan = resolve; });
+    mocks.write.mockImplementationOnce(async input => {
+      input.onProgress({ status: "pending", action: "deposit" });
+      await scan;
+      throw Object.assign(new Error("Submitted operation is still unresolved"), { walletOutcome: "pending" });
+    });
+    const panelRecords = () => Object.keys(sessionStorage).filter(key => key.startsWith("qcdao:grant-pending:") && key.includes(problemId));
+    const view = render(<OpenFundingPanel problemId={problemId} />);
+    fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+    await screen.findByText("Transaction submitted. Waiting for confirmation…");
+    expect(panelRecords()).toEqual([]);
+    await act(async () => { finishScan(); });
+    await screen.findByText("Submitted operation is still unresolved");
+    expect(screen.getByRole("button", { name: "Deposit funds" }).disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Check transaction" })).toBeNull();
+    expect(panelRecords()).toEqual([]);
+    view.unmount();
+    render(<OpenFundingPanel problemId={problemId} />);
+    const amount = await screen.findByLabelText("Add funding");
+    expect(amount.value).toBe("10");
+    fireEvent.click(screen.getByRole("button", { name: "Deposit funds" }));
+    await screen.findByText("Deposit confirmed. The funds are now available in the grant pool.");
+    expect(mocks.write).toHaveBeenCalledTimes(2);
+    for (const [input] of mocks.write.mock.calls) expect(input).toEqual(expect.objectContaining({ problemId, action: "deposit", account, amount: "10" }));
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(panelRecords()).toEqual([]);
+  });
   it.each([
     ["a researcher", { canWithdraw: false, closed: true }],
     ["a posting that is still open", { canWithdraw: true, closed: false }],
@@ -255,11 +286,23 @@ describe("open funding grant workflow UI", () => {
     expect(mocks.sync).toHaveBeenCalledWith(expect.objectContaining({ problemId: "withdrawal-grant", transactionHash: hash }));
     expect(mocks.write).toHaveBeenCalledTimes(1);
   });
-  it("requires the signed-in wallet and configured network before signing", async () => {
-    mocks.account.chainId = 1; render(<OpenFundingPanel problemId="grant" />);
+  it.each(["disconnected", "wrong wallet"])("requires the signed-in wallet before signing (%s)", async mode => {
+    if (mode === "disconnected") mocks.account.isConnected = false;
+    else mocks.account.address = `0x${"c".repeat(40)}`;
+    render(<OpenFundingPanel problemId="grant" />);
     const button = await screen.findByRole("button", { name: "Select for funding" }); expect(button.disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Sign in to use your wallet" })); expect(mocks.signIn).toHaveBeenCalledOnce();
     expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it("lets the matching embedded wallet initiate grant funding on a stale reported network", async () => {
+    mocks.account.chainId = 1;
+    render(<OpenFundingPanel problemId="network-recovery-grant" />);
+    fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "2.5" } });
+    const deposit = screen.getByRole("button", { name: "Deposit funds" });
+    expect(deposit.disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Sign in to use your wallet" })).toBeNull();
+    fireEvent.click(deposit);
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ account, action: "deposit", amount: "2.5" })));
   });
 });
 

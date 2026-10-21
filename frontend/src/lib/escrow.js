@@ -444,6 +444,7 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
       onProgress?.({ status: "preparing", action: label });
       transactionHash = await adapters.writeContract({ address, abi, functionName, args, account: walletAddress, chainId: config.chainId }, {
         onWalletRequest: () => onProgress?.({ status: "awaiting_signature", action: label }),
+        onSubmitted: (details) => onProgress?.({ status: "pending", action: label, ...details }),
       });
       onProgress?.({ status: "pending", action: label, transactionHash });
       const result = await confirmEscrowTransaction(transactionHash, { adapters, config });

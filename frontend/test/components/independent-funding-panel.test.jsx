@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const live = vi.hoisted(() => ({ options: null }));
@@ -32,6 +32,59 @@ it("keeps independent contributions locked before the listing closes", () => {
   const refund = screen.getByRole("button", { name: "Claim my refund" });
   expect(refund.disabled).toBe(true); fireEvent.click(refund);
   expect(p.onAction).not.toHaveBeenCalled();
+});
+
+it("lets the matching embedded wallet fund independently while its reported network is stale", async () => {
+  mocks.account.chainId = 1;
+  mocks.write.mockResolvedValue({ transactionHash: `0x${"1".repeat(64)}` });
+  render(<IndependentFundingPanel proposal={{ id: "network-recovery-listing" }} />);
+  const amount = await screen.findByLabelText("Contribution (USDT)");
+  fireEvent.change(amount, { target: { value: "1" } });
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(false);
+  fireEvent.click(fund);
+  await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ proposalId: "network-recovery-listing", account: mocks.user.id, action: "deposit", amount: "1" })));
+});
+
+it("keeps hashless submission progress transient and permits the same action to recover", async () => {
+  const proposal = { id: "hashless-recovery-listing" };
+  let finishScan;
+  const scan = new Promise(resolve => { finishScan = resolve; });
+  mocks.write.mockReset().mockImplementationOnce(async input => {
+    input.onChange({ status: "pending", action: "deposit" });
+    await scan;
+    throw Object.assign(new Error("Submitted operation is still unresolved"), { walletOutcome: "pending" });
+  }).mockResolvedValueOnce({ transactionHash: `0x${"1".repeat(64)}` });
+  const panelRecords = () => Object.keys(sessionStorage).filter(key => key.startsWith("qcdao:independent-funding:v1:") && key.includes(proposal.id));
+  const view = render(<IndependentFundingPanel proposal={proposal} />);
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Fund independent listing" }));
+  await screen.findByText("Transaction submitted. Waiting for confirmation…");
+  expect(panelRecords()).toEqual([]);
+  await act(async () => { finishScan(); });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Fund independent listing" }).disabled).toBe(false));
+  expect(screen.queryByRole("button", { name: "Retry confirmation" })).toBeNull();
+  expect(panelRecords()).toEqual([]);
+  view.unmount();
+  render(<IndependentFundingPanel proposal={proposal} />);
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Fund independent listing" }));
+  await screen.findByText("Contribution confirmed. Your tokens are held in this listing's escrow.");
+  expect(mocks.write).toHaveBeenCalledTimes(2);
+  for (const [input] of mocks.write.mock.calls) expect(input).toEqual(expect.objectContaining({ proposalId: proposal.id, action: "deposit", account: mocks.user.id, amount: "1" }));
+  expect(mocks.confirm).not.toHaveBeenCalled();
+  expect(panelRecords()).toEqual([]);
+});
+
+it.each(["disconnected", "wrong wallet"])("keeps independent funding gated for %s", async mode => {
+  if (mode === "disconnected") mocks.account.isConnected = false;
+  else mocks.account.address = `0x${"c".repeat(40)}`;
+  render(<IndependentFundingPanel proposal={{ id: `gated-${mode}` }} />);
+  fireEvent.change(await screen.findByLabelText("Contribution (USDT)"), { target: { value: "1" } });
+  const fund = screen.getByRole("button", { name: "Fund independent listing" });
+  expect(fund.disabled).toBe(true);
+  fireEvent.click(fund);
+  expect(mocks.write).not.toHaveBeenCalled();
 });
 it("keeps accepted work locked to its completion deadline after the listing expires", () => {
   const p = props({ snapshot: { ...props().snapshot, summary: { ...summary, state: "Accepted", timestamp: "2000000001",
