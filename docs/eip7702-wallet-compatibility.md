@@ -33,10 +33,8 @@ Run the backend tests with `npm test --prefix firebase/functions`. For the fauce
 install dependencies in both `contracts/stable-faucet` and its `site` directory,
 then run `npm test --prefix contracts/stable-faucet/site`. The EVM suite compiles
 the test token itself and needs no deployment keys, live RPC or `.env` file.
-Existing CI runs the backend suite, including the new session regressions. Run
-the faucet lint, type checks, unit/integration tests, build and contract tests
-locally as described above; adding a dedicated faucet CI job is a release
-follow-up requiring GitHub workflow-write permission.
+CI runs the backend suite plus faucet lint, type checks, unit/integration tests,
+build and contract tests; a selected faucet failure fails the aggregate CI check.
 
 These checks exercise real local EIP-7702 execution and signature recovery. They
 do not exercise live Privy email OTP, its hosted signing dialog or its paymaster.
