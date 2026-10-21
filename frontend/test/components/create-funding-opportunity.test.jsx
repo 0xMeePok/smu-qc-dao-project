@@ -135,9 +135,11 @@ describe("[QCDAO-51] create open funding", () => {
     render(<CreateFundingOpportunityPage onNavigate={() => {}} />);
 
     const currency = screen.getByRole("combobox", { name: "Currency" });
-    expect(Array.from(currency.options, (option) => option.value)).toEqual([
+    fireEvent.click(currency);
+    expect(Array.from(screen.getByRole("listbox").querySelectorAll('[role="option"]'), (option) => option.getAttribute("aria-label"))).toEqual([
       "USDT", "USDC", "XSGD",
     ]);
+    fireEvent.keyDown(currency, { key: "Escape" });
     expect(document.getElementById("tags")).toBeNull();
     const generated = screen.getByTestId("generated-tags");
     expect(generated.textContent).toContain("Select a technology area");

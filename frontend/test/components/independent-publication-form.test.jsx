@@ -50,7 +50,8 @@ async function form(amount = "100") {
   fireEvent.click(screen.getByRole("option", { name: "Quantum annealing" }));
   fireEvent.change(screen.getByLabelText("Maturity or readiness level"), { target: { value: "pilot" } });
   fireEvent.change(screen.getByLabelText("Crowdfunding target"), { target: { value: amount } });
-  fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "USDC" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Currency" }));
+  fireEvent.click(screen.getByRole("option", { name: "USDC" }));
   fireEvent.click(screen.getByRole("button", { name: "Review" }));
 }
 

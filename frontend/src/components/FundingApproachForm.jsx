@@ -9,6 +9,7 @@ import {
   validateFundingApproach,
 } from "../lib/fundingApproach.js";
 import { Field } from "./Field.jsx";
+import { TokenSelect } from "./TokenSelect.jsx";
 import { Modal } from "./Modal.jsx";
 
 /**
@@ -78,10 +79,8 @@ export function FundingApproachForm({ proposal, onDismiss, onSubmit, pendingAnch
           </Field>
           <Field htmlFor="approach-currency" label="Currency" error={errors.currency}>
             {({ id, describedBy, invalid }) => (
-              <select id={id} value={form.currency} required disabled={submitting} aria-invalid={invalid} aria-describedby={describedBy}
-                onChange={update("currency")}>
-                {CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
-              </select>
+              <TokenSelect id={id} value={form.currency} required disabled={submitting} aria-invalid={invalid} aria-describedby={describedBy}
+                onChange={update("currency")} options={CURRENCIES.map((code) => ({ value: code, label: code }))} />
             )}
           </Field>
           <Field htmlFor="approach-scope" label="Intended scope or conditions" error={errors.scope} hint={`${APPROACH_TEXT_MAX} characters at most.`}>

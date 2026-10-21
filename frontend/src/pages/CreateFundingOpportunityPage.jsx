@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
+import { TokenSelect } from "../components/TokenSelect.jsx";
 import { AuditReceipt } from "../components/AuditReceipt.jsx";
 import { SubmissionProgress } from "../components/SubmissionProgress.jsx";
 import { ExpiryCountdown } from "../components/ExpiryCountdown.jsx";
@@ -636,9 +637,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
               />
               <div className={`field ${errors.currency ? "field-invalid" : ""}`}>
                 <label htmlFor="currency">Currency</label>
-                <select id="currency" name="currency" value={form.currency} onChange={update}>
-                  {CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
-                </select>
+                <TokenSelect id="currency" name="currency" value={form.currency} onChange={update}
+                  aria-invalid={Boolean(errors.currency)} options={CURRENCIES.map((code) => ({ value: code, label: code }))} />
                 {errors.currency ? <p className="field-error" role="alert">{errors.currency}</p> : null}
               </div>
             </div>
