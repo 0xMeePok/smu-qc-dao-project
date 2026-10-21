@@ -16,6 +16,7 @@ import { registerMatchingNotificationFunctions } from "./matchingNotifications.j
 import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
 import { registerOpenFundingFunctions } from "./openFundingFunctions.js";
 import { registerIndependentFundingFunctions } from "./independentFundingFunctions.js";
+import { registerWalletFaucetFunctions } from "./walletFaucetFunctions.js";
 import { assertIndependentPublicationUnlocked } from "./independentFunding.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
@@ -238,6 +239,8 @@ async function requireMember(request) {
 
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
+
+export const { claimWalletTokens } = registerWalletFaucetFunctions({ db, region: REGION });
 
 export const { prepareEscrowDeposit, prepareRemovedProposalClaim, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
   startEscrowSettlement, getEscrowAdminCancellation, startEscrowAdminCancellation,
