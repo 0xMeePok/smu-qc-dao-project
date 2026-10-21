@@ -51,6 +51,13 @@ describe("security deployment configuration", () => {
     assert.equal(/walletconnect|walletlink|metamask/i.test(contentSecurityPolicy()), false);
   });
 
+  it("[QCDAO-148] keeps the emulator Privy secret out of version control and binds the production secret only on the server", () => {
+    const ignored = fs.readFileSync(new URL("../../.gitignore", import.meta.url), "utf8");
+    assert.match(ignored, /^firebase\/functions\/\.secret\.local$/m);
+    assert.match(functionsSource, /const privySecret = defineSecret\("PRIVY_SECRET"\)/);
+    assert.match(functionsSource, /export const exchangePrivySession = onCall\(\{[^}]*secrets:\s*\[privySecret\]/);
+  });
+
   it("[BUT-OPD-020] ships Storage rules and allows the Storage endpoint", () => {
     // The rules file has to be declared, or `firebase deploy --only storage` is a
     // no-op and the bucket keeps whatever rules it had - most likely none.

@@ -80,6 +80,11 @@ if [[ -z "$PROJECT_ID" ]]; then
   exit 1
 fi
 
+if [[ ! "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]; then
+  echo "Use an explicit Firebase project ID (6–30 lowercase letters, digits or hyphens), not a project alias." >&2
+  exit 1
+fi
+
 FIREBASE="npx firebase"
 
 echo "== QC DAO Firebase backend setup =="
@@ -96,6 +101,10 @@ echo ""
 echo "-- 1. Installing dependencies --"
 npm install
 npm --prefix functions install
+
+# Fail before creating a database or deploying rules when the server would be
+# unable to verify the frontend's Privy session. Only deployed dotenv files count.
+node scripts/check-privy-deploy.mjs "$PROJECT_ID"
 
 echo ""
 echo "-- 2. Checking Firestore database --"

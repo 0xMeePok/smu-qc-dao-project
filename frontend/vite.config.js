@@ -1,8 +1,9 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { publicPrivyEnvironment } from "./scripts/privy-build-config.mjs";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [publicPrivyEnvironment(), react()],
   resolve: {
     alias: [
       // Privy bundles a fiat on-ramp screen this app never shows, and Stripe's
