@@ -1726,40 +1726,6 @@ footer > p { margin: 0 auto 0 0; }
   flex: none;
 }
 
-/* Admin Tabs */
-.admin-tabs-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--line-strong);
-  padding-bottom: 2px;
-}
-.admin-tab-btn {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 10px 18px;
-  color: var(--muted);
-  font-size: 14.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 180ms ease;
-}
-.admin-tab-btn:hover {
-  color: var(--foreground);
-}
-.admin-tab-btn.active {
-  color: var(--brand);
-  border-bottom-color: var(--brand);
-}
-@media (max-width: 720px) {
-  .admin-tab-btn {
-    padding: 8px 10px;
-    font-size: 13px;
-  }
-}
-
 .audit-toolbar-sticky {
   position: sticky;
   top: 0;
@@ -4222,6 +4188,17 @@ footer.footer { background: transparent; }
   color: var(--muted);
 }
 .escrow-funding .settings-row dd { margin: 0; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; text-align: right; }
+.escrow-funding > [data-custody-status] {
+  max-width: none;
+  margin: 20px 0 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.escrow-funding > [data-custody-status] small { display: block; margin-top: 8px; color: var(--muted); }
 .escrow-funding > .field-group,
 .escrow-funding .field-group,
 .escrow-plan,
@@ -4229,6 +4206,67 @@ footer.footer { background: transparent; }
 .escrow-funding h4,
 .escrow-plan > legend { margin: 0 0 8px; font-family: Newsreader, "Iowan Old Style", Palatino, serif; font-size: 20px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ink); }
 .escrow-funding .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.escrow-detail { display: grid; gap: 24px; min-width: 0; }
+.escrow-detail > p, .escrow-detail .table-header p { margin: 0; line-height: 1.6; }
+.escrow-detail .table-header { align-items: flex-start; }
+.escrow-detail .table-header p { margin-top: 8px; color: var(--muted); font-size: 15px; }
+.escrow-detail .table-header > button { min-height: 44px; }
+.escrow-status-summary { min-width: 0; padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-muted); }
+.escrow-status-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; }
+.escrow-status-heading > strong { font-size: 24px; font-weight: 500; line-height: 1.3; }
+.escrow-status-heading > a { font: 400 12px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
+.escrow-status-summary [data-escrow-lifecycle]:empty { display: none; }
+.escrow-status-summary .field-hint { margin: 12px 0 0; font-size: 15px; line-height: 1.65; }
+.escrow-status-summary [data-custody-status] { max-width: none; margin: 16px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
+.escrow-status-summary [data-custody-status] small { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.escrow-status-summary .rollup-meter { margin-top: 20px; }
+.escrow-status-summary .rollup-meter progress { width: 100%; max-width: none; }
+.escrow-balance-section, .escrow-wallet-section { min-width: 0; }
+.escrow-detail :is(.escrow-balance-section, .escrow-wallet-section) > h4 { margin: 0 0 16px; font-size: 20px; }
+.escrow-balance-grid, .escrow-wallet-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.escrow-wallet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.escrow-balance-grid > div, .escrow-wallet-grid > div { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 10px; }
+.escrow-detail :is(.escrow-balance-grid, .escrow-wallet-grid) dt { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.escrow-detail :is(.escrow-balance-grid, .escrow-wallet-grid) dd { margin: 10px 0 0; font-size: 24px; line-height: 1.3; overflow-wrap: anywhere; }
+.escrow-detail .escrow-deposit-reference { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 16px 0 0; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.escrow-wallet-section > .field-hint { margin: 12px 0 0; font-size: 14px; line-height: 1.6; }
+.escrow-deadline { margin: 0; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.escrow-deadline > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; }
+.escrow-deadline dt { color: var(--muted); font-size: 13px; }
+.escrow-deadline dd { margin: 0; font-size: 15px; }
+.escrow-detail > .field-group { margin-top: 0; }
+@media (max-width: 680px) {
+  .escrow-status-summary { padding: 20px; }
+  .escrow-balance-grid { grid-template-columns: minmax(0, 1fr); }
+  .escrow-wallet-grid { gap: 12px; }
+  .escrow-balance-grid > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .escrow-detail .escrow-balance-grid dd { margin: 0; flex: 0 0 auto; font-size: 22px; }
+  .escrow-wallet-grid > div { padding: 16px; }
+  .escrow-detail .escrow-wallet-grid dd { font-size: 22px; }
+}
+.open-funding-panel .grant-offers { margin-top: 24px; }
+.open-funding-panel .grant-offer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 20px; margin-top: 16px; padding: 24px; border: 1px solid var(--line); background: var(--surface-muted); }
+.open-funding-panel .grant-offer-row > div { min-width: 0; }
+.open-funding-panel .grant-offer-row strong { display: block; font-size: 22px; line-height: 1.35; }
+.open-funding-panel .grant-offer-row .table-row-meta { display: block; margin-top: 8px; line-height: 1.6; }
+.open-funding-panel .grant-offer-explanation { max-width: 54ch; margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+.open-funding-panel .table-row-actions { flex-wrap: wrap; gap: 10px; }
+.open-funding-panel .table-row-actions > button { min-height: 46px; padding: 12px 16px; white-space: normal; font-size: 14px; line-height: 1.5; }
+.open-funding-panel .grant-pool-summary { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
+.open-funding-panel .grant-pool-summary > .field-hint { margin: 8px 0 20px; line-height: 1.6; }
+.open-funding-panel .escrow-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin: 0 0 20px; }
+.open-funding-panel .escrow-stats > div { min-width: 0; }
+.open-funding-panel .escrow-stats dt { color: var(--muted); font-size: 13px; }
+.open-funding-panel .escrow-stats dd { margin: 8px 0 0; font-size: 20px; overflow-wrap: anywhere; }
+.open-funding-panel .grant-pool-topup { display: grid; gap: 16px; padding-top: 24px; border-top: 1px solid var(--line); }
+.open-funding-panel .grant-pool-topup > h4, .open-funding-panel .grant-pool-topup > .field-hint { margin: 0; line-height: 1.6; }
+.open-funding-panel .grant-pool-topup .field { gap: 10px; }
+@media (max-width: 680px) {
+  .open-funding-panel .grant-offer-row { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 20px; }
+  .open-funding-panel .table-row-actions { width: 100%; justify-content: stretch; }
+  .open-funding-panel .table-row-actions > button { width: 100%; }
+  .open-funding-panel .escrow-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .escrow-evidence { white-space: pre-wrap; }
 .escrow-plan .radio-card {
   border: 1px solid var(--line);
@@ -4265,6 +4303,7 @@ footer.footer { background: transparent; }
 }
 .escrow-release .table-row { align-items: flex-end; }
 @media (max-width: 600px) {
+  .escrow-funding > [data-custody-status] { padding: 16px; }
   .escrow-funding .settings-row,
   .escrow-release .table-row { align-items: flex-start; flex-direction: column; gap: 4px; }
   .escrow-funding .settings-row dd { text-align: left; }
@@ -4561,20 +4600,35 @@ h1, h2, h3 { font-weight: 500; }
 .discover-filter-panel,
 .discover-page .notice { border-radius: 0; }
 .discover-page .opportunity-table-scroll { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.discover-page .opportunity-table { min-width: 720px; }
+.discover-page .opportunity-table { width: 100%; min-width: 0; table-layout: fixed; }
+.discover-page .opportunity-table :is(th, td) { overflow-wrap: anywhere; }
+.discover-page .opportunity-table .numeric { white-space: normal; }
+.discover-page .opportunity-table .cell-value { min-width: 0; }
+.discover-page .opportunity-table .escrow-card-progress { min-width: 0; max-width: none; }
 .discover-page .opportunity-table th {
   padding-inline: 0 16px;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 12px;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 .discover-page .opportunity-table td { padding-inline: 0 16px; }
+@media (min-width: 1001px) {
+  .discover-page .opportunity-table :is(th, td):first-child { padding-left: 24px; }
+  .discover-page .opportunity-table :is(th, td):last-child { padding-right: 24px; }
+}
 .discover-page .opportunity-table-link { font-family: Newsreader, "Iowan Old Style", Palatino, serif; font-size: 22px; font-weight: 500; }
 
 .blotter-posting { padding-top: 40px; }
 .blotter-posting .back { margin-bottom: 40px; color: var(--muted); }
 .blotter-posting .detail-layout { gap: 72px; }
+.proposal-detail-page .detail-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 260px); gap: 40px; }
+.proposal-detail-page .context-panel { overflow-wrap: anywhere; }
+.proposal-detail-page .context-panel-actions > button { min-height: 46px; padding: 12px 16px; font-size: 14px; line-height: 1.5; white-space: normal; }
+@media (max-width: 960px) {
+  .proposal-detail-page .detail-layout { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .proposal-detail-page .detail-layout > .context-panel { position: static; }
+}
 .blotter-title { display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: 100%; margin-bottom: 28px; }
 .blotter-posting h1 { margin: 8px 0 0; max-width: none; font-size: clamp(36px, 5vw, 56px); font-weight: 500; line-height: 1.12; letter-spacing: -0.02em; overflow-wrap: break-word; word-break: normal; }
 .blotter-posting .lead { max-width: 62ch; font-size: 20px; line-height: 1.45; }
@@ -4601,6 +4655,12 @@ h1, h2, h3 { font-weight: 500; }
 .blotter-posting .context-panel dd .expiry-countdown strong { font-size: 32px; font-weight: 500; }
 .blotter-posting .context-panel > button,
 .blotter-posting .context-panel-actions > button { border-radius: 0; }
+.blotter-posting .posting-action-block { margin-top: 24px; }
+.blotter-posting .posting-action-block .context-panel-actions { gap: 12px; margin-top: 0; }
+.blotter-posting .posting-action-block > .field-hint { margin: 16px 0 0; font-size: 14px; line-height: 1.6; }
+.blotter-posting .posting-action-block > .field-hint:first-child { margin: 0 0 16px; }
+.blotter-posting .posting-owner-actions { display: grid; gap: 12px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+.blotter-posting :is(.context-panel-actions, .posting-owner-actions) > button { width: 100%; min-height: 48px; padding: 12px 16px; border-radius: 0; font-size: 14px; line-height: 1.5; white-space: normal; }
 @media (max-width: 900px) {
   .blotter-posting .detail-layout { gap: 40px; }
   .blotter-posting .context-panel { position: static; }
@@ -5024,6 +5084,30 @@ h1, h2, h3 { font-weight: 500; }
 /* Confirmed escrow progress remains readable inside listing cells. */
 .escrow-card-progress { min-width: 12rem; max-width: 24rem; text-align: left; }
 .escrow-card-progress small { display: block; white-space: normal; }
+.escrow-card-progress { min-width: 10rem; max-width: 17rem; margin-top: 10px; line-height: 1.5; }
+.posting-funding-total { display: block; font-weight: 600; color: var(--ink); }
+.escrow-card-progress .posting-funding-verified { font-size: 11px; }
+.proposal-funding-row { gap: 24px; align-items: center; }
+.proposal-funding-copy { flex: 1; min-width: 0; }
+.proposal-row-funding { margin-top: 20px; max-width: 30rem; }
+.proposal-row-funding .eyebrow { font-size: 11px; }
+.proposal-row-funding .rollup-meter { margin-top: 8px; }
+.proposal-row-funding .rollup-meter progress { max-width: none; }
+.proposal-row-funding .queue-note-ready,
+.proposal-funding-summary .queue-note-ready { display: inline-block; margin-top: 8px; }
+.proposal-funding-summary { margin: 24px 0 32px; padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.proposal-funding-summary-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.proposal-funding-summary-head p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink-soft); }
+.proposal-funding-summary-head .secondary { flex-shrink: 0; }
+.proposal-funding-summary .rollup-meter { margin-top: 20px; }
+.proposal-funding-summary .rollup-meter progress { width: 100%; max-width: none; }
+@media (max-width: 640px) {
+  .proposal-funding-row { flex-direction: column; align-items: stretch; gap: 20px; }
+  .proposal-funding-row .table-row-actions { justify-content: space-between; flex-wrap: wrap; }
+  .proposal-row-funding { max-width: none; }
+  .proposal-funding-summary { padding: 20px; margin-block: 20px 24px; }
+  .proposal-funding-summary-head { align-items: stretch; flex-direction: column; gap: 16px; }
+}
 .rollup-meter progress { width: 100%; max-width: 24rem; accent-color: var(--accent, #d23a16); }
 .audit-timeline .table-row-meta, .audit-timeline small { overflow-wrap: anywhere; }
 
@@ -5135,9 +5219,9 @@ h1, h2, h3 { font-weight: 500; }
   .blotter-posting :is(.detail-main, .posting-tab) > .detail-section { max-width: none; }
 }
 
-/* Discover table: stacked rows below 768px. Each cell labels itself from
+/* Discover table: stacked rows on tablet and mobile. Each cell labels itself from
    data-label; the title takes the full width of the card. */
-@media (max-width: 767px) {
+@media (max-width: 1000px) {
   .opportunity-table-scroll:has(> .discovery-stack-table) { overflow-x: visible; }
   .opportunity-table.discovery-stack-table,
   .discover-page .opportunity-table.discovery-stack-table { display: block; width: 100%; min-width: 0; }
@@ -5145,11 +5229,12 @@ h1, h2, h3 { font-weight: 500; }
     position: absolute; width: 1px; height: 1px; overflow: hidden;
     clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
   }
+  .discovery-stack-table colgroup { display: none; }
   .discovery-stack-table tbody,
   .discovery-stack-table tr { display: block; width: 100%; }
   .discovery-stack-table tr { padding: 18px 20px; border-top: 1px solid var(--line); }
   .discovery-stack-table tbody tr:first-child { border-top: 0; }
-  .discover-page .discovery-stack-table tr { padding-inline: 0; }
+  .discover-page .discovery-stack-table tr { padding-inline: 16px; }
   .opportunity-table.discovery-stack-table td,
   .discover-page .opportunity-table.discovery-stack-table td {
     display: grid;
@@ -5308,4 +5393,138 @@ h1, h2, h3 { font-weight: 500; }
 @media (max-width: 900px) {
   .account-menu-panel { width: 100%; max-height: none; }
   .account-wallet button { min-height: 40px; }
+}
+
+/* Escrow administration shares its cancellation panel with proposal detail. */
+.escrow-administration > .table-header p { max-width: 70ch; margin: 10px 0 0; color: var(--muted); line-height: 1.6; }
+.escrow-administration-body { display: grid; gap: 28px; min-width: 0; padding: 28px; }
+.escrow-admin-lookup { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 16px; }
+.escrow-admin-lookup > label { display: grid; gap: 10px; min-width: 0; font-size: 13px; font-weight: 600; }
+.escrow-admin-lookup input { min-height: 48px; }
+.escrow-admin-lookup > button { min-height: 48px; }
+.escrow-admin-result { display: grid; gap: 24px; min-width: 0; }
+.escrow-admin-result-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
+.escrow-admin-result-bar p { display: grid; gap: 6px; min-width: 0; margin: 0; color: var(--muted); font-size: 13px; }
+.escrow-admin-result-bar code { color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.escrow-admin-result-bar .text-button { min-height: 44px; padding-block: 10px; text-align: left; }
+.admin-escrow-cancellation { display: grid; gap: 24px; min-width: 0; overflow-wrap: anywhere; }
+.escrow-admin-result > .admin-escrow-cancellation { padding: 24px 0 0; }
+.escrow-admin-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px 24px; }
+.escrow-admin-heading > div { flex: 1 1 320px; min-width: 0; }
+.escrow-admin-heading h3 { margin: 0; font-size: 22px; line-height: 1.3; }
+.admin-escrow-cancellation .escrow-admin-heading p { max-width: 64ch; margin: 10px 0 0; font-size: 15px; line-height: 1.6; }
+.escrow-admin-heading > button { flex: 0 0 auto; min-height: 44px; }
+.escrow-admin-summary { display: grid; gap: 18px; min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-muted); }
+.escrow-admin-summary-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 20px; }
+.escrow-admin-summary-heading > div:first-child { flex: 1 1 200px; min-width: 0; }
+.escrow-admin-caption { display: block; color: var(--muted); font: 600 11px/1.5 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
+.escrow-admin-summary h4 { margin: 6px 0 0; font-size: 20px; font-weight: 500; line-height: 1.35; }
+.escrow-admin-summary .rollup-meter { margin: 0; }
+.escrow-admin-summary .rollup-meter progress { width: 100%; max-width: none; }
+.escrow-admin-summary .rollup-meter small { margin-top: 10px; font-size: 13px; line-height: 1.6; }
+.escrow-admin-summary .queue-note-ready, .escrow-admin-summary .queue-note-gate { display: inline-block; margin-top: 10px; font-size: 14px; }
+.admin-escrow-cancellation .escrow-admin-summary p { margin: 0; font-size: 14px; line-height: 1.7; }
+.escrow-admin-summary [data-custody-status] { padding-top: 16px; border-top: 1px solid var(--line); }
+.escrow-admin-summary [data-custody-status] small { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.escrow-admin-cancel-form { display: grid; gap: 20px; min-width: 0; }
+.admin-escrow-cancellation .field { gap: 10px; }
+.admin-escrow-cancellation .field > label { margin: 0; font-size: 13px; }
+.admin-escrow-cancellation .field > .field-hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.escrow-admin-cancel-form textarea { min-height: 128px; padding: 14px 16px; }
+.escrow-admin-actions { display: flex; flex-wrap: wrap; padding-top: 4px; }
+.escrow-admin-actions > button { min-height: 46px; padding: 12px 20px; border: 1px solid; border-radius: 8px; font-size: 14px; font-weight: 600; }
+.escrow-admin-actions > button:disabled { opacity: .5; cursor: not-allowed; }
+.escrow-admin-status { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-muted); }
+.admin-escrow-cancellation .escrow-admin-status p { margin: 0; font-size: 15px; line-height: 1.6; }
+.escrow-cancel-modal .modal-body > p { margin: 0; line-height: 1.65; }
+.escrow-admin-recorded-reason { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-muted); }
+.escrow-admin-recorded-reason > strong { color: var(--muted); font-size: 13px; }
+.escrow-admin-recorded-reason > p { margin: 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+@media (max-width: 680px) {
+  .escrow-administration-body { gap: 24px; padding: 20px; }
+  .escrow-admin-lookup { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .escrow-admin-result-bar { align-items: flex-start; gap: 8px; }
+  .escrow-admin-result-bar p { flex-basis: 100%; }
+  .escrow-admin-heading { gap: 14px; }
+  .escrow-admin-heading h3 { font-size: 20px; }
+  .escrow-admin-heading > button, .escrow-admin-actions > button { width: 100%; }
+  .escrow-admin-summary { gap: 16px; padding: 18px; border-radius: 12px; }
+  .escrow-admin-summary h4 { font-size: 18px; }
+  .escrow-admin-cancel-form textarea { font-size: 16px; }
+  .escrow-cancel-modal .modal-actions > button { min-height: 48px; }
+}
+
+/* Admin tools are grouped by task; mobile uses the same section list. */
+.admin-governance-page .admin-workspace-heading { max-width: none; margin-bottom: 32px; }
+.admin-governance-page .admin-workspace-heading h1 { margin-top: 12px; font-size: clamp(30px, 3.2vw, 38px); line-height: 1.15; }
+.admin-governance-page .admin-workspace-heading > p { max-width: 65ch; margin-top: 10px; font-size: 16px; line-height: 1.6; }
+.admin-workspace-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 32px; }
+.admin-workspace-sidebar { position: sticky; top: calc(var(--header-height) + 24px); max-height: calc(100dvh - var(--header-height) - 48px); overflow-y: auto; padding: 20px 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.admin-nav-group + .admin-nav-group { margin-top: 24px; }
+.admin-nav-group h2 { margin: 0 12px 8px; color: var(--muted); font: 600 11px/1.5 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.admin-nav-group ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.admin-section-link { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 11px 12px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ink-soft); font: 500 13px/1.45 "IBM Plex Mono", ui-monospace, monospace; text-align: left; }
+.admin-section-link > span:first-child { flex: 1; min-width: 0; }
+.admin-section-link:hover { background: var(--surface-muted); }
+.admin-section-link[aria-current="page"] { border-color: var(--brand-line); background: var(--brand-soft); color: var(--brand-strong); font-weight: 600; }
+.admin-section-arrow { flex: none; color: var(--muted); opacity: 0; }
+.admin-section-link[aria-current="page"] .admin-section-arrow { opacity: 1; color: currentColor; }
+.admin-nav-count { display: inline-grid; place-items: center; min-width: 24px; min-height: 24px; padding: 2px 6px; border-radius: 6px; background: var(--surface-muted); font-size: 11px; }
+.admin-nav-count-alert { color: var(--warning); background: var(--warning-soft); }
+.admin-workspace-main, .admin-tab-content, .admin-tab-content > div { min-width: 0; }
+.admin-section-heading { padding-bottom: 22px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
+.admin-section-heading .admin-section-group { margin: 0 0 8px; color: var(--muted); font: 500 11px/1.5 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.admin-section-heading h2 { margin: 0; color: var(--ink); font-size: 28px; line-height: 1.25; }
+.admin-section-heading > p:last-child { max-width: 64ch; margin: 10px 0 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
+.admin-mobile-section { display: none; }
+.admin-section-picker { min-width: 0; }
+.admin-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 52px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font: 500 14px/1.5 "IBM Plex Mono", ui-monospace, monospace; text-align: left; }
+.admin-picker-trigger > span { min-width: 0; }
+.admin-picker-trigger > svg { flex: none; color: var(--muted); transition: transform 160ms ease; }
+.admin-picker-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.admin-picker-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.admin-picker-options { display: grid; gap: 12px; max-height: min(420px, 55dvh); margin-top: 10px; padding: 10px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.admin-picker-group-label { padding: 8px 10px; color: var(--muted); font: 600 10px/1.5 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.admin-picker-option { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 11px 10px; border-radius: 8px; color: var(--ink-soft); font: 400 13px/1.5 "IBM Plex Mono", ui-monospace, monospace; cursor: pointer; }
+.admin-picker-option > span:first-child { flex: 1; min-width: 0; }
+.admin-picker-option.is-active { background: var(--brand-soft); color: var(--brand-strong); }
+.admin-picker-option[aria-selected="true"] { font-weight: 600; }
+.admin-picker-check { flex: 0 0 18px; color: var(--brand-strong); font-size: 16px; }
+.admin-quick-actions { margin-bottom: 28px; }
+.admin-quick-actions h3 { margin: 0 0 14px; font-size: 18px; font-weight: 500; }
+.admin-quick-actions > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.admin-quick-actions button { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; min-height: 104px; padding: 18px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); text-align: left; }
+.admin-quick-actions button:hover { border-color: var(--brand-line); background: var(--brand-soft); }
+.admin-quick-actions button > span:first-child { display: grid; gap: 8px; min-width: 0; }
+.admin-quick-actions strong { font: 600 13px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
+.admin-quick-actions small { color: var(--muted); font: 400 14px/1.5 Newsreader, "Iowan Old Style", Palatino, serif; }
+.admin-quick-actions button > span:last-child { color: var(--brand-strong); }
+.admin-activity-group-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.admin-workspace-main .admin-activity-panel > .audit-trail-count { display: inline-block; margin: 0 16px 0 0; color: var(--muted); font-size: 12px; }
+.admin-workspace-main .admin-activity-group { padding-top: 24px; border-top: 1px solid var(--line); }
+.admin-workspace-main .admin-activity-group-head h3 { font-size: 20px; font-weight: 500; }
+.admin-workspace-main .admin-activity-group-head p { line-height: 1.6; }
+.admin-workspace-main .admin-activity-grid { grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); }
+.admin-workspace-main .admin-activity-grid .stat-label { line-height: 1.5; }
+.admin-workspace-main .status-grid { grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); }
+@media (max-width: 1100px) and (min-width: 901px) {
+  .admin-workspace-layout { grid-template-columns: 200px minmax(0, 1fr); gap: 24px; }
+  .admin-quick-actions > div { grid-template-columns: 1fr; }
+  .admin-quick-actions button { min-height: 76px; }
+}
+@media (max-width: 900px) {
+  .admin-workspace-layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .admin-workspace-sidebar { display: none; }
+  .admin-mobile-section { display: grid; gap: 10px; margin-bottom: 24px; }
+  .admin-mobile-section label { color: var(--muted); font-size: 12px; font-weight: 600; }
+}
+@media (max-width: 600px) {
+  .admin-governance-page .admin-workspace-heading { margin-bottom: 24px; }
+  .admin-governance-page .admin-workspace-heading > p { font-size: 15px; }
+  .admin-section-heading h2 { font-size: 25px; }
+  .admin-quick-actions > div { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .admin-quick-actions button { min-height: 80px; padding: 16px; }
+  .admin-workspace-main .admin-activity-panel > .audit-trail-count { display: block; margin-bottom: 12px; line-height: 1.6; }
+  .admin-activity-group-actions { width: 100%; }
+  .admin-activity-group-actions > button { min-height: 44px; }
 }

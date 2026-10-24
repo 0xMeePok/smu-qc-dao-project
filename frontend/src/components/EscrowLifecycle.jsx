@@ -31,12 +31,12 @@ function lifecycleMeaning(lifecycle, summary) {
   return lifecycle.meaning;
 }
 
-export function EscrowLifecycleBadge({ summary = {}, compact = false, stale = false }) {
+export function EscrowLifecycleBadge({ summary = {}, compact = false, stale = false, showLabel = true }) {
   const lifecycle = escrowLifecycle(summary, { stale });
   const reason = ["refunded", "cancelled", "expired", "invalidated"].includes(lifecycle.key)
     ? ESCROW_REFUND_REASON_LABELS[summary.refundReason ?? summary.lifecycle?.refundReason] : null;
   return <div data-escrow-lifecycle={lifecycle.key}>
-    <span className={`status-badge status-${lifecycle.key}`} aria-label={`Escrow state: ${lifecycle.label}`}>{lifecycle.label}</span>
+    {showLabel && <span className={`status-badge status-${lifecycle.key}`} aria-label={`Escrow state: ${lifecycle.label}`}>{lifecycle.label}</span>}
     {!compact && <p className="field-hint">{lifecycleMeaning(lifecycle, summary)}</p>}
     {reason && <p className="field-hint">Refund reason: {reason}</p>}
   </div>;

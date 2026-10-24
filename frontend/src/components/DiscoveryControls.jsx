@@ -153,13 +153,14 @@ export function DiscoveryPagination({ label, page, totalPages, onPrevious, onNex
   );
 }
 
-// Below 768px the rows stack into cards (styles.css, "Discover table: stacked
+// Below 1001px the rows stack into cards (styles.css, "Discover table: stacked
 // rows"): each cell shows its column name from data-label, and the value sits in
 // .cell-value so the label and value line up as two grid columns.
 export function DiscoveryTable({ columns, rows }) {
   return (
     <div className="opportunity-table-scroll">
       <table className="opportunity-table discovery-stack-table">
+        <colgroup>{columns.map(column => <col key={column.key} style={column.width ? { width: column.width } : undefined} />)}</colgroup>
         <thead>
           <tr>
             {columns.map((column) => (
@@ -204,6 +205,7 @@ export function OpportunityTable({ items, onOpen }) {
         {
           key: "title",
           label: "Title",
+          width: "23%",
           render: (item) => (item.removed ? (
             <>
               <button className="opportunity-table-link" type="button" onClick={() => onOpen(item)}>{item.title}</button>
@@ -216,11 +218,11 @@ export function OpportunityTable({ items, onOpen }) {
             </>
           )),
         },
-        { key: "organisation", label: "Organisation", render: (item) => (item.removed ? "—" : item.owner) },
-        { key: "status", label: "Status", render: (item) => (item.removed ? "—" : <OpportunityTrust item={item} />) },
-        { key: "funding", label: "Funding", numeric: true, render: (item) => (item.removed ? "—" : <>{item.amount}<PostingFundingProgress projection={item.escrowFunding} /></>) },
-        { key: "proposals", label: "Proposals", numeric: true, render: (item) => (item.removed ? "—" : item.proposalCount) },
-        { key: "closes", label: "Closes", numeric: true, render: (item) => (item.removed ? "—" : item.deadline) },
+        { key: "organisation", label: "Organisation", width: "16%", render: (item) => (item.removed ? "—" : item.owner) },
+        { key: "status", label: "Status", width: "15%", render: (item) => (item.removed ? "—" : <OpportunityTrust item={item} />) },
+        { key: "funding", label: "Funding", width: "23%", render: (item) => (item.removed ? "—" : <><span className="posting-budget">Budget {item.amount}</span><PostingFundingProgress projection={item.escrowFunding} /></>) },
+        { key: "proposals", label: "Proposals", width: "9%", numeric: true, render: (item) => (item.removed ? "—" : item.proposalCount) },
+        { key: "closes", label: "Closes", width: "14%", numeric: true, render: (item) => (item.removed ? "—" : item.deadline) },
       ]}
     />
   );

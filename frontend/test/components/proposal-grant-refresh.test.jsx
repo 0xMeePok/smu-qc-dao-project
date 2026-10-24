@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -62,6 +62,7 @@ beforeEach(() => {
   }] : [] }));
 });
 afterEach(cleanup);
+const heldBalance = () => within(screen.getByRole("region", { name: "Escrow balances" })).getByText("Held in escrow").nextSibling.textContent;
 
 it.each([false, true])("refreshes the adjacent canonical escrow and funding audit after grant acceptance (recovery=%s)", async recovery => {
   if (recovery) mocks.write.mockImplementation(async input => {
@@ -70,14 +71,15 @@ it.each([false, true])("refreshes the adjacent canonical escrow and funding audi
   });
   render(<ProposalDetailPage proposalId={proposal.id} initialTab="funding" onNavigate={vi.fn()} />);
   await screen.findByText("Waiting for grant funding");
-  expect(screen.getByText("0 USDC / 50000 USDC")).toBeTruthy();
+  expect(heldBalance()).toBe("0 USDC");
+  expect(screen.getByText("Target: 50000 USDC")).toBeTruthy();
   expect(mocks.escrow).toHaveBeenCalledTimes(1);
   fireEvent.click(await screen.findByRole("button", { name: "Accept grant" }));
   if (recovery) {
     fireEvent.click(await screen.findByRole("button", { name: "Check transaction" }));
     expect(mocks.confirm).toHaveBeenCalledWith(hash, { confirmations: 2 });
   }
-  await screen.findByText("50000 USDC / 50000 USDC");
+  await waitFor(() => expect(heldBalance()).toBe("50000 USDC"));
   expect(screen.queryByText("Waiting for grant funding")).toBeNull();
   expect(screen.getByText("Upfront payment pending")).toBeTruthy();
   await screen.findByRole("row", { name: /Deposit.*50000 USDC/ });
@@ -93,7 +95,7 @@ it("refreshes canonical escrow even when a confirmed grant's backend synchroniza
   await screen.findByText("Waiting for grant funding");
   fireEvent.click(await screen.findByRole("button", { name: "Accept grant" }));
   await screen.findByText("Funding synchronization unavailable");
-  await screen.findByText("50000 USDC / 50000 USDC");
+  await waitFor(() => expect(heldBalance()).toBe("50000 USDC"));
   expect(mocks.escrow).toHaveBeenCalledTimes(2);
   expect(mocks.write).toHaveBeenCalledTimes(1);
 });
@@ -107,7 +109,7 @@ it("keeps the current escrow snapshot while grant acceptance remains unconfirmed
   await screen.findByText("Waiting for grant funding");
   fireEvent.click(await screen.findByRole("button", { name: "Accept grant" }));
   await screen.findByRole("button", { name: "Check transaction" });
-  await waitFor(() => expect(screen.getByText("0 USDC / 50000 USDC")).toBeTruthy());
+  await waitFor(() => expect(heldBalance()).toBe("0 USDC"));
   expect(mocks.escrow).toHaveBeenCalledTimes(1);
   expect(mocks.history).toHaveBeenCalledTimes(1);
 });

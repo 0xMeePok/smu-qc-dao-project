@@ -42,6 +42,7 @@ import { ReportableComments } from "../components/ReportableComments.jsx";
 import { VerifiedBadge } from "../components/VerifiedBadge.jsx";
 import { DetailGroup, DetailItem } from "../components/DetailGroup.jsx";
 import { PosterIdentity } from "../components/PosterIdentity.jsx";
+import { FundingProgress } from "../components/FundingProgress.jsx";
 
 // `justSubmitted` only shows the confirmation banner. Anchoring is done before
 // the record is written now, so this page never starts one on its own; the retry
@@ -250,7 +251,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
   const canEdit = owns && !locked && !escrowState?.grantOfferState && proposal.status === "submitted";
   const canWithdraw = owns && !locked && ["submitted", "under_review"].includes(proposal.status);
   const funding = proposalFundingStatus(independent ? { ...proposal, independentFunding: escrowState || proposal.independentFunding } : proposal);
-  return <section className="page detail-page blotter-posting">
+  return <section className="page detail-page blotter-posting proposal-detail-page">
     <button className="back" onClick={() => onNavigate(backRoute)}>{backLabel}</button>
     {(justSubmitted || autoAnchor) && <p className="proposal-success" role="status">{independent ? "Independent listing published successfully." : "Proposal submitted successfully."} <button type="button" className="text-button" onClick={openRecord}>Check its on-chain verification</button> under Record.</p>}
     {error && !confirm && <p className="error-banner" role="alert">{error}</p>}
@@ -263,12 +264,17 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
         </div>
         <div className="trust-status-row">
           {independent || proposal.fundingTerms ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}
-          {!independent && funding.detail && <span className="funding-note">{funding.detail}</span>}
+          {!independent && !showEscrow && funding.detail && <span className="funding-note">{funding.detail}</span>}
           {proposal.status !== "draft" && !independent && <EvaluationBadges counts={recommendationCounts(proposal)} />}
           <VerifiedBadge audit={proposal.audit} recordStatus={proposal.status} hidePending />
         </div>
       </div>
       <p className="lead">{proposal.summary}</p>
+      {showEscrow && activeTab !== "funding" && <section className="proposal-funding-summary" aria-label="This proposal's funding">
+        <div className="proposal-funding-summary-head"><div><span className="eyebrow">This proposal’s funding</span><p>Contributions are held separately for this solution.</p></div>
+          <button type="button" className="secondary small" onClick={() => setTab("funding")}>View escrow &amp; funding</button></div>
+        <FundingProgress summary={escrowState ?? {}} compact label="This proposal's confirmed funding" />
+      </section>}
       <ContentModerationNotice record={proposal} />
       {auditVerification?.kind === "mismatch" && <p className="error-banner" role="alert">This proposal does not match its on-chain record. New funding and approval actions are blocked. Open Record to review the differences.</p>}
 
@@ -382,7 +388,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
       {canWithdraw && <button type="button" className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
       {independent
         ? showFunding && <button type="button" className="primary" onClick={() => setTab("funding")}>Open crowdfunding</button>
-        : showEscrow && <button type="button" className="primary" onClick={() => setTab("funding")}>Open escrow</button>}
+        : showEscrow && <button type="button" className="primary" onClick={() => setTab("funding")}>{isOpenFunding ? (sponsors ? "Manage grant offer" : "View grant & escrow") : "Open escrow"}</button>}
       {owns && proposal.status === "withdrawn" && <button type="button" className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
       </div>
     </aside></div>

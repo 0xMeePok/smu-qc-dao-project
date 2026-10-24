@@ -58,6 +58,19 @@ describe("open funding grant workflow UI", () => {
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account })));
     expect(await screen.findByText("Offer recorded. The researcher has seven days to accept.")).toBeTruthy();
   });
+  it("puts this proposal's amount-specific grant offer before the shared-pool top up", async () => {
+    mocks.read.mockResolvedValue(model({ tokenSymbol: "USDT", totalDeposited: "1100000000", available: "1100000000", selections: [{ ...proposal, amountBaseUnits: "100000000" }] }));
+    render(<OpenFundingPanel problemId="grant" proposalId="solution" />);
+    const offer = await screen.findByRole("button", { name: "Offer 100 USDT grant" });
+    const topUp = screen.getByRole("button", { name: "Add to grant pool" });
+
+    expect(offer.compareDocumentPosition(topUp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/The researcher must accept before it moves into this proposal’s escrow/)).toBeTruthy();
+    fireEvent.click(offer);
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account })));
+    expect(mocks.write).toHaveBeenCalledTimes(1);
+    await screen.findByText("Offer recorded. The researcher has seven days to accept.");
+  });
   it("submits a top up using the current token's precision", async () => {
     render(<OpenFundingPanel problemId="grant" />);
     fireEvent.change(await screen.findByLabelText("Add funding"), { target: { value: "10000.25" } });

@@ -6,10 +6,16 @@ afterEach(cleanup);
 const group = { tokenAddress: `0x${"a".repeat(40)}`, tokenSymbol: "USDC", tokenDecimals: 6, totalDeposited: "50000000", fundingTarget: "100000000", count: 2, timestamp: 1900000000, blockNumber: 100, snapshotVerified: true };
 it("shows exact cached proposal-target progress without claiming the posting currency budget is escrowed", () => {
   render(<PostingFundingProgress projection={{ available: true, version: 2, groups: [group] }} />);
-  expect(screen.getByText("50 USDC raised of 100 USDC required · 50%")).toBeTruthy();
-  expect(screen.getByRole("progressbar", { name: "Proposal escrow funding progress" }).value).toBe(50);
-  expect(screen.getByText(/2 proposal escrows/)).toBeTruthy();
-  expect(screen.getByText("Each proposal has its own target. Funding does not select a solution.")).toBeTruthy();
+  expect(screen.getByText("50 USDC deposited")).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.getByText("Across 2 proposal escrows")).toBeTruthy();
+  expect(screen.getByText("Targets are per proposal.")).toBeTruthy();
+});
+it("does not label an aggregate as fully funded even when its combined target is met", () => {
+  render(<PostingFundingProgress projection={{ available: true, version: 2, groups: [{ ...group, totalDeposited: "100000000" }] }} />);
+  expect(screen.getByText("100 USDC deposited")).toBeTruthy();
+  expect(screen.queryByText("Fully funded")).toBeNull();
+  expect(screen.queryByRole("progressbar")).toBeNull();
 });
 it("keeps unavailable/truncated projections explicit instead of inventing zero funding", () => {
   render(<PostingFundingProgress projection={{ available: false, groups: [group] }} />);

@@ -6,7 +6,7 @@ import { exchangePrivySession, revokeOwnSessions } from "../lib/authFlow.js";
 import { createProfile, findProfileByAddress, updateProfile } from "../lib/profile.js";
 import { ACCOUNT_SUSPENDED_MESSAGE, isSignInCancelled, messageForFirebaseError, messageForSignInError } from "../lib/errors.js";
 import { isAdmin } from "../lib/roles.js";
-import { go } from "../lib/router.js";
+import { go, parseRoute } from "../lib/router.js";
 import { useWallet } from "./WalletContext.jsx";
 import {
   IDLE_CHECK_INTERVAL_MS,
@@ -216,7 +216,8 @@ export function SessionProvider({ children }) {
         // than on every profile update or render while an admin navigates.
         if (found && isAdmin(found.role) && !found.suspended && !hasRoutedToAdmin) {
           hasRoutedToAdmin = true;
-          go("admin");
+          // Keep a bookmarked admin section through reloads and reauthentication.
+          if (parseRoute().split("?")[0] !== "admin") go("admin");
         }
       },
       (caught) => {

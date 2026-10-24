@@ -1,19 +1,22 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RouteGuard } from "../../src/components/RouteGuard.jsx";
 import { AuthProvider } from "../../src/context/AuthContext.jsx";
 import { SessionContext } from "../../src/context/SessionContext.jsx";
-import { ROLES } from "../../src/config/roles.js";
+import { getRouteConfig } from "../../src/config/routes.js";
 
-function renderGuard(session, onNavigate = vi.fn()) {
+afterEach(cleanup);
+
+function renderGuard(session, onNavigate = vi.fn(), routeKey = "proposals") {
+  const route = getRouteConfig(routeKey);
   render(
     <SessionContext.Provider value={session}>
       <AuthProvider>
         <RouteGuard
-          targetRoute="proposals"
-          allowedRoles={[ROLES.RESEARCHER]}
-          authRequired
+          targetRoute={routeKey}
+          allowedRoles={route.allowedRoles}
+          authRequired={route.authRequired}
           onNavigate={onNavigate}
         >
           <div>Protected proposals</div>
@@ -45,5 +48,42 @@ describe("real RouteGuard and AuthContext integration", () => {
       profile: { fullName: "Ada", organisation: "SMU", role: 0 },
     });
     expect(screen.getByText("Protected proposals")).toBeTruthy();
+  });
+
+  it("admits an administrator to proposal detail for escrow administration", () => {
+    const navigate = renderGuard({
+      isLoading: false,
+      isSignedIn: true,
+      address: `0x${"a".repeat(40)}`,
+      profile: { fullName: "Admin", role: 1 },
+    }, vi.fn(), "proposal");
+
+    expect(screen.getByText("Protected proposals")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Access Denied" })).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("keeps administrator access to proposal detail separate from author editing", () => {
+    renderGuard({
+      isLoading: false,
+      isSignedIn: true,
+      address: `0x${"a".repeat(40)}`,
+      profile: { fullName: "Admin", role: 1 },
+    }, vi.fn(), "edit-proposal");
+
+    expect(screen.getByRole("heading", { name: "Access Denied" })).toBeTruthy();
+    expect(screen.queryByText("Protected proposals")).toBeNull();
+  });
+
+  it("keeps a suspended administrator out of proposal detail", async () => {
+    const navigate = renderGuard({
+      isLoading: false,
+      isSignedIn: true,
+      address: `0x${"a".repeat(40)}`,
+      profile: { fullName: "Admin", role: 1, suspended: true },
+    }, vi.fn(), "proposal");
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("login?redirect=proposal"));
+    expect(screen.queryByText("Protected proposals")).toBeNull();
   });
 });
