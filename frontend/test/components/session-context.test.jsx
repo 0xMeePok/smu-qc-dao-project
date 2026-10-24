@@ -144,21 +144,22 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     },
   );
 
-  it.each(["#/home", "#/proposal/proposal-1", "#/admin-history?tab=escrows"])(
-    "keeps the default administrator landing when restoring a session on %s",
+  it.each(["#/home", "#/discover?type=business-problem", "#/proposal/proposal-1?tab=funding", "#/posting/posting-1?tab=proposals", "#/architecture"])(
+    "keeps the administrator's current page when restoring a session on %s",
     async (hash) => {
       mocks.profile = { fullName: "Ada", role: 1 };
       window.history.replaceState(null, "", hash);
       mountProvider();
 
       await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
-      expect(mocks.go).toHaveBeenCalledExactlyOnceWith("admin");
+      expect(window.location.hash).toBe(hash);
+      expect(mocks.go).not.toHaveBeenCalled();
     },
   );
 
-  it("preserves the selected admin section when reauthenticating the same wallet", async () => {
+  it.each(["#/admin?tab=escrows", "#/proposal/proposal-1?tab=funding"])("preserves %s when reauthenticating the same administrator wallet", async hash => {
     mocks.profile = { fullName: "Ada", role: 1 };
-    window.history.replaceState(null, "", "#/admin?tab=escrows");
+    window.history.replaceState(null, "", hash);
     mountProvider();
     await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
     const previousListener = mocks.profileListener;
@@ -167,7 +168,7 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
 
     expect(currentSession.isSignedIn).toBe(true);
     expect(mocks.profileListener).not.toBe(previousListener);
-    expect(window.location.hash).toBe("#/admin?tab=escrows");
+    expect(window.location.hash).toBe(hash);
     expect(mocks.go).not.toHaveBeenCalled();
   });
 
@@ -446,10 +447,32 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     mocks.idleExpired = true;
     mountProvider();
     await waitFor(() => expect(mocks.wallet.logout).toHaveBeenCalledOnce());
-    await waitFor(() => expect(currentSession?.error).toMatch(/15 minutes of inactivity/));
+    await waitFor(() => expect(currentSession?.error).toMatch(/one hour of inactivity/));
+    expect(currentSession.signOutReason).toBe("idle");
+    expect(mocks.go).toHaveBeenCalledWith("login?redirect=home");
     expect(currentSession.isSignedIn).toBe(false);
     expect(mocks.revoke).toHaveBeenCalledOnce();
     expect(mocks.signOut).toHaveBeenCalledOnce();
+  });
+
+  it.each(["proposal/proposal-1?tab=funding", "admin?tab=escrows"])("remembers %s when an idle session expires", async destination => {
+    window.history.replaceState(null, "", `#/${destination}`);
+    mocks.idleExpired = true;
+    mountProvider();
+    await waitFor(() => expect(mocks.go).toHaveBeenCalledWith(`login?redirect=${encodeURIComponent(destination)}`));
+    expect(currentSession.signOutReason).toBe("idle");
+  });
+
+  it("clears the timeout notice when the member signs in again", async () => {
+    mocks.idleExpired = true;
+    mountProvider();
+    await waitFor(() => expect(mocks.wallet.logout).toHaveBeenCalledOnce());
+    await waitFor(() => expect(currentSession.isSigningOut).toBe(false));
+    mocks.idleExpired = false;
+    await act(async () => { await currentSession.signIn(); });
+    await waitFor(() => expect(currentSession.isSignedIn).toBe(true));
+    expect(currentSession.signOutReason).toBeNull();
+    expect(currentSession.error).toBeNull();
   });
 
   it("ends both sessions when the account is suspended, without calling back in as it", async () => {
