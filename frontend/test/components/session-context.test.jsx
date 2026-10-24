@@ -52,7 +52,10 @@ vi.mock("../../src/lib/profile.js", () => ({
   findProfileByAddress: vi.fn(),
   updateProfile: vi.fn(),
 }));
-vi.mock("../../src/lib/router.js", () => ({ go: (...args) => mocks.go(...args) }));
+vi.mock("../../src/lib/router.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  go: (...args) => mocks.go(...args),
+}));
 vi.mock("../../src/lib/idleTimeout.js", () => ({
   IDLE_CHECK_INTERVAL_MS: 60_000,
   clearActivity: vi.fn(),
@@ -103,6 +106,7 @@ const suspendedError = () => Object.assign(
 
 describe("SessionProvider: Privy email sign-in and session lockstep", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "#/home");
     currentSession = null;
     mocks.wallet = privyWallet();
     mocks.profile = { fullName: "Ada", role: 0 };
@@ -125,6 +129,46 @@ describe("SessionProvider: Privy email sign-in and session lockstep", () => {
     await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
     expect(currentSession.address).toBe(mocks.auth.currentUser.uid);
     expect(currentSession.profile.fullName).toBe("Ada");
+  });
+
+  it.each(["#/admin", "#/admin?tab=escrows", "#/admin?tab=users"])(
+    "preserves the requested administrator workspace %s when restoring a session",
+    async (hash) => {
+      mocks.profile = { fullName: "Ada", role: 1 };
+      window.history.replaceState(null, "", hash);
+      mountProvider();
+
+      await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
+      expect(window.location.hash).toBe(hash);
+      expect(mocks.go).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["#/home", "#/proposal/proposal-1", "#/admin-history?tab=escrows"])(
+    "keeps the default administrator landing when restoring a session on %s",
+    async (hash) => {
+      mocks.profile = { fullName: "Ada", role: 1 };
+      window.history.replaceState(null, "", hash);
+      mountProvider();
+
+      await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
+      expect(mocks.go).toHaveBeenCalledExactlyOnceWith("admin");
+    },
+  );
+
+  it("preserves the selected admin section when reauthenticating the same wallet", async () => {
+    mocks.profile = { fullName: "Ada", role: 1 };
+    window.history.replaceState(null, "", "#/admin?tab=escrows");
+    mountProvider();
+    await waitFor(() => expect(currentSession?.isSignedIn).toBe(true));
+    const previousListener = mocks.profileListener;
+
+    await act(async () => { await currentSession.signIn(); });
+
+    expect(currentSession.isSignedIn).toBe(true);
+    expect(mocks.profileListener).not.toBe(previousListener);
+    expect(window.location.hash).toBe("#/admin?tab=escrows");
+    expect(mocks.go).not.toHaveBeenCalled();
   });
 
   it("opens Privy's login modal, then exchanges Privy's token for the Firebase session", async () => {

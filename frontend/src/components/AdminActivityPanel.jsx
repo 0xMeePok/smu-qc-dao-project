@@ -45,7 +45,7 @@ function Group({ title, description, truncated, children, action }) {
   );
 }
 
-export function AdminActivityPanel({ onOpenTab }) {
+export function AdminActivityPanel({ onOpenTab, showHeading = true }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -72,13 +72,13 @@ export function AdminActivityPanel({ onOpenTab }) {
 
   return (
     <section className="admin-activity-panel" aria-label="Platform activity">
-      <div className="audit-trail-heading">
+      {showHeading && <div className="audit-trail-heading">
         <h2>Platform activity</h2>
         <p>
           What is on the platform right now, counted from live records. This is separate from
           Platform Status, which reports whether the services behind it are healthy.
         </p>
-      </div>
+      </div>}
 
       <p className="audit-trail-count" role="status" aria-live="polite">
         {loading ? "Loading platform activity…"
@@ -99,7 +99,7 @@ export function AdminActivityPanel({ onOpenTab }) {
           <Group
             title="Needs an administrator"
             description="Work that stays queued until someone acts on it."
-            action={link("moderation", "Open moderation queue")}
+            action={<div className="admin-activity-group-actions">{link("moderation", "Open moderation queue")}{data.anchoring.failed > 0 && link("proposals", "Review failed verifications")}</div>}
           >
             <Stat
               label="Reports awaiting moderation"

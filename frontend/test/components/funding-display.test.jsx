@@ -32,6 +32,20 @@ it("shows partial percentages without treating unavailable or stale balances as 
   expect(screen.getByText(/Funding progress needs verification/)).toBeTruthy();
 });
 
+it("does not show a live numeric cancelled escrow snapshot as fully funded", () => {
+  render(<FundingProgress summary={{ ...summary, state: 4 }} />);
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(screen.queryByText("Fully funded")).toBeNull();
+  expect(screen.getByText(/Escrow closed/)).toBeTruthy();
+});
+
+it("does not invite another refund after a closed escrow is fully settled", () => {
+  render(<FundingProgress summary={{ ...summary, state: "Refunded", outstandingBalance: "0" }} />);
+  expect(screen.getByText(/No unpaid balance remains in escrow/)).toBeTruthy();
+  expect(screen.queryByText(/contributors can claim refunds/)).toBeNull();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+});
+
 it("lists public names, wallets, exact contribution and proportional share without exposing profiles", () => {
   render(<FundingContributors summary={{ ...summary, contributors: { available: true, complete: true,
     items: [{ walletAddress: wallet, displayName: "Alicia Tan", committed: "1000000", email: "private@example.com" },

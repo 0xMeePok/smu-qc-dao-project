@@ -197,7 +197,7 @@ function FirebaseCard({ server, serverError, client, loading }) {
  * Admin pre-demo health view. Loads once when the tab opens and again on
  * "Re-check"; there is deliberately no background polling.
  */
-export function PlatformStatusPanel({ onOpenAuditTrail }) {
+export function PlatformStatusPanel({ onOpenAuditTrail, showHeading = true }) {
   const [server, setServer] = useState(null);
   const [serverError, setServerError] = useState("");
   const [browserRpc, setBrowserRpc] = useState(null);
@@ -242,15 +242,15 @@ export function PlatformStatusPanel({ onOpenAuditTrail }) {
       : overall === "degraded" ? "status-banner-degraded" : "status-banner-checking";
 
   return (
-    <section className="platform-status" aria-labelledby="platform-status-heading">
-      <div className="page-heading">
+    <section className="platform-status" aria-labelledby={showHeading ? "platform-status-heading" : undefined}>
+      {showHeading && <div className="page-heading">
         <span className="eyebrow">Pre-demo check</span>
         <h2 id="platform-status-heading">Platform status</h2>
         <p>
           A live snapshot of the blockchain connection, the active AuditRegistry, the anchoring pipeline and Firebase.
           It runs when this tab opens and when you re-check; nothing polls in the background.
         </p>
-      </div>
+      </div>}
 
       <div className={`status-banner ${bannerClass}`} role="status" aria-live="polite" aria-busy={loading}>
         <div>

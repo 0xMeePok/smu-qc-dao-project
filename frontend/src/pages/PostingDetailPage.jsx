@@ -122,7 +122,7 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
   const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
   if (!actions.length && !blocked) return null;
   return (
-    <>
+    <div className="posting-action-block">
       {blocked ? <p className="field-hint">{blocked}</p> : null}
       {actions.length > 0 && (
         <div className="context-panel-actions">
@@ -145,7 +145,7 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
       {isOpenFunding && !blocked ? (
         <p className="field-hint">Propose a problem and solution to this grant call. The owner can fund multiple proposals from their deposited pool.</p>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -632,15 +632,19 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
           />
           {/* postingActions only offers Edit on a draft, routed to the create form.
               These two are the published-posting owner actions it has no route for. */}
-          {canEditOpportunity(posting, user?.id) && (
-            <button className="secondary" type="button" onClick={() => onNavigate(`edit-posting/${posting.id}`)}>
-              Edit {entityLabel}
-            </button>
-          )}
-          {canWithdraw && (
-            <button className="secondary" type="button" disabled={withdrawing} onClick={() => setConfirm(true)}>
-              Withdraw {entityLabel}
-            </button>
+          {(canEditOpportunity(posting, user?.id) || canWithdraw) && (
+            <div className="posting-owner-actions">
+              {canEditOpportunity(posting, user?.id) && (
+                <button className="secondary" type="button" onClick={() => onNavigate(`edit-posting/${posting.id}`)}>
+                  Edit {entityLabel}
+                </button>
+              )}
+              {canWithdraw && (
+                <button className="secondary" type="button" disabled={withdrawing} onClick={() => setConfirm(true)}>
+                  Withdraw {entityLabel}
+                </button>
+              )}
+            </div>
           )}
         </aside>
       </div>

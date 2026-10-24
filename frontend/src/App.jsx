@@ -856,7 +856,7 @@ function AppContent() {
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
       >
-        <AdminPage onNavigate={go} />
+        <AdminPage onNavigate={go} initialSection={params.get("tab")} />
       </RouteGuard>
     );
   } else if (section === "architecture") {

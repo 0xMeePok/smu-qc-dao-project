@@ -88,6 +88,8 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   const amountError = state ? contributionError({ amount, decimals: state.decimals, symbol: state.symbol, remaining: state.remaining, balance: state.wallet?.balance }) : "";
   const evidenceReady = evidence && state?.currentMilestone?.evidenceHash === evidence.hash;
   const grantWaiting = state?.isGrant && state.state === 0;
+  const terminal = terminalStates.has(state?.state);
+  const deadline = state?.state === 0 ? state.expiresAt : [1, 6].includes(state?.state) ? state.approvalDeadline : 0n;
   const grantMessage = "Grant funding moves into this escrow when the researcher accepts the selected offer.";
   settlement = currentSettlement(state, settlement);
   const settlementMessage = grantWaiting && ["waiting", "not_ready", "waiting_approval"].includes(settlement?.status) ? grantMessage : settlement?.message;
@@ -109,7 +111,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   const selectionAllowed = state?.selectionGate?.canSelect !== false && state?.fundingRequirementMet !== false;
   const action = (name, label, extra = {}, allowed = state?.can[name]) => <button type="button" className="primary small"
     disabled={disabled || !allowed || (name === "claimRefund" && refundLocked) || (name === "deposit" && (Boolean(fundingBlockReason) || !String(amount ?? "").trim() || Boolean(amountError))) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => { if (name !== "claimRefund" || !refundLocked) onAction(name, extra); }}>{label}</button>;
-  return <section className="card escrow-funding" aria-labelledby="escrow-funding-title">
+  return <section className="card escrow-funding escrow-detail" aria-labelledby="escrow-funding-title">
     <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
       <button type="button" className="secondary small" disabled={busy || loading} aria-busy={loading} onClick={onRefresh}>Refresh escrow</button></div>
     {/* Background refreshes keep the verified escrow in place; only the first read shows a line here. */}
@@ -117,29 +119,40 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
     {!state && feedback}
     {!walletReady && <p className="field-hint">{walletMessage} <button type="button" className="text-button" onClick={onConnect}>Sign in</button></p>}
     {moderated && <p className="field-hint">This proposal is moderated. Funding and approval actions are paused here; available refunds can still be claimed.</p>}
-    {fundingBlockReason && !state?.isGrant && <p className="field-hint">{fundingBlockReason}</p>}
+    {fundingBlockReason && !state?.isGrant && !terminal && <p className="field-hint">{fundingBlockReason}</p>}
     {settlement && <p role="status">{settlementMessage || "Checking confirmed approvals and payment status."}
       {settlement.transactionHash && <> <a href={explorer("tx", settlement.transactionHash)} target="_blank" rel="noreferrer">View payment transaction</a></>}
       {!['confirmed', 'complete', 'released', 'not_ready', 'waiting_approval'].includes(settlement.status) && <>{" "}<button type="button" className="text-button" disabled={busy} onClick={onSync}>Retry payment status</button></>}
     </p>}
     {state && <>
       {state.isHistorical && <p className="field-hint">This escrow belongs to an earlier contract deployment. Its original balances and available refunds remain visible. Create a new posting to use the current funding workflow.</p>}
-      {state.workflowPaused && <p className="field-hint">Funding and approvals are paused while this posting is under review. A temporary pause does not open refunds.</p>}
-      {state.blockedBySelection && !state.isGrant && <p className="field-hint">Funding and selection are paused while another proposal awaits both owners’ approval. If that selection is rejected or expires, eligible proposals reopen. Once the selected proposal’s upfront payment is processed, other proposals close and their contributions become refundable.</p>}
-      <p><strong>{grantWaiting ? "Waiting for grant funding" : state.isGrant && state.state === 1 && state.ownerApproved && state.solutionApproved
-        ? "Upfront payment pending" : STATE_LABELS[state.state] ?? "Unknown state"}</strong> · <a href={explorer("address", state.address)} target="_blank" rel="noreferrer">View escrow contract</a></p>
-      <EscrowLifecycleBadge summary={state} stale={Boolean(error)} />
-      <FundingProgress summary={state} stale={Boolean(error)} />
-      <dl className="settings-group">
-        <div className="settings-row"><dt>Funded / target</dt><dd>{money(state.totalDeposited)} / {money(state.fundingTarget)}</dd></div>
-        <div className="settings-row"><dt>Released before fees</dt><dd>{money(state.totalReleased)}</dd></div>
-        <div className="settings-row"><dt>Refunded to contributors</dt><dd>{money(state.totalRefunded)}</dd></div>
-        <div className="settings-row"><dt>Held for unpaid work</dt><dd>{money(state.outstandingBalance)}</dd></div>
-        <div className="settings-row"><dt>Your contribution</dt><dd>{money(state.wallet.contribution)}</dd></div>
-        <div className="settings-row"><dt>Your available refund</dt><dd>{money(state.wallet.depositor?.claimable)}</dd></div>
-        <div className="settings-row"><dt>{state.state === 0 ? state.isGrant ? "Posting closes" : "Funding closes" : "Current approval deadline"}</dt><dd>{instant(state.state === 0 ? state.expiresAt : state.approvalDeadline)}</dd></div>
-      </dl>
-      <EscrowCustodyNotice summary={state} />
+      {state.workflowPaused && !terminal && <p className="field-hint">Funding and approvals are paused while this posting is under review. A temporary pause does not open refunds.</p>}
+      {state.blockedBySelection && !state.isGrant && !terminal && <p className="field-hint">Funding and selection are paused while another proposal awaits both owners’ approval. If that selection is rejected or expires, eligible proposals reopen. Once the selected proposal’s upfront payment is processed, other proposals close and their contributions become refundable.</p>}
+      <div className="escrow-status-summary">
+        <div className="escrow-status-heading"><strong>{grantWaiting ? "Waiting for grant funding" : state.isGrant && state.state === 1 && state.ownerApproved && state.solutionApproved
+          ? "Upfront payment pending" : STATE_LABELS[state.state] ?? "Unknown state"}</strong><a href={explorer("address", state.address)} target="_blank" rel="noreferrer">View escrow contract</a></div>
+        <EscrowLifecycleBadge summary={state} stale={Boolean(error)} compact={terminal && !error} showLabel={false} />
+        {!terminal && <FundingProgress summary={state} stale={Boolean(error)} compact />}
+        <EscrowCustodyNotice summary={state} stale={Boolean(error)} />
+      </div>
+      <section className="escrow-balance-section" aria-label="Escrow balances">
+        <h4>Escrow balances</h4>
+        <dl className="escrow-balance-grid">
+          <div><dt>Held in escrow</dt><dd>{money(state.outstandingBalance)}</dd></div>
+          <div><dt>Released before fees</dt><dd>{money(state.totalReleased)}</dd></div>
+          <div><dt>Refunded to contributors</dt><dd>{money(state.totalRefunded)}</dd></div>
+        </dl>
+        <p className="escrow-deposit-reference">{terminal ? "Originally deposited" : "Total deposited"}: {money(state.totalDeposited)}<span>Target: {money(state.fundingTarget)}</span></p>
+      </section>
+      <section className="escrow-wallet-section" aria-label="Your funds">
+        <h4>Your funds</h4>
+        <dl className="escrow-wallet-grid">
+          <div><dt>Your contribution</dt><dd>{money(state.wallet.contribution)}</dd></div>
+          <div><dt>Your available refund</dt><dd>{money(state.wallet.depositor?.claimable)}</dd></div>
+        </dl>
+        {terminal && !error && custodyLock.status === "settled" && walletReady && <p className="field-hint">No refund remains to claim from this escrow.</p>}
+      </section>
+      {deadline > 0n && <dl className="escrow-deadline"><div><dt>{state.state === 0 ? state.isGrant ? "Posting closes" : "Funding closes" : "Current approval deadline"}</dt><dd>{instant(deadline)}</dd></div></dl>}
       {feedback}
       {grantWaiting && !settlementMessage && <p className="field-hint">{grantMessage} Manage the offer in the grant funding panel.</p>}
       {state.state === 0 && state.remaining > 0n && !state.isGrant && canDeposit && <div className="field-group">

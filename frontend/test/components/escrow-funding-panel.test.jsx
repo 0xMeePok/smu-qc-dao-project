@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 const live = vi.hoisted(() => ({ options: null }));
@@ -45,6 +45,29 @@ function ActionCount({ read }) {
 }
 
 describe("wallet escrow funding panel", () => {
+  it("groups a fully refunded escrow without stale funding instructions or an empty approval deadline", () => {
+    render(<EscrowFundingView state={model({ state: 3, symbol: "USDT", timestamp: 1900000000n, blockNumber: 1n,
+      totalDeposited: 1000000000n, totalRefunded: 1000000000n, outstandingBalance: 0n, approvalDeadline: 0n,
+      wallet: { contribution: 1000000000n, depositor: { claimable: 0n } }, can: {} })}
+      walletReady amount="" delivery={{ summary: "", url: "" }} fundingBlockReason="The on-chain posting or proposal is inactive or paused." />);
+    expect(screen.getAllByText("Refunded")).toHaveLength(1);
+    expect(screen.queryByText(/inactive or paused/)).toBeNull();
+    expect(screen.queryByText("Current approval deadline")).toBeNull();
+    expect(screen.queryByText(/contributors can claim refunds of any unpaid balance/)).toBeNull();
+    const balances = screen.getByRole("region", { name: "Escrow balances" });
+    expect(within(balances).getByText("Refunded to contributors").nextSibling.textContent).toBe("1000 USDT");
+    const personal = screen.getByRole("region", { name: "Your funds" });
+    expect(within(personal).getByText("Your available refund").nextSibling.textContent).toBe("0 USDT");
+    expect(screen.getByText("Escrow settled.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Claim my refund" })).toBeNull();
+  });
+  it("marks a settled snapshot as unverified when its refresh fails", () => {
+    render(<EscrowFundingView state={model({ state: 3, timestamp: 1900000000n, totalDeposited: 1000000000n,
+      totalRefunded: 1000000000n, outstandingBalance: 0n, can: {} })} error="Refresh unavailable"
+      walletReady amount="" delivery={{ summary: "", url: "" }} />);
+    expect(screen.getByText("Custody lock status needs verification.")).toBeTruthy();
+    expect(screen.queryByText("No refund remains to claim from this escrow.")).toBeNull();
+  });
   it("shows the confirmed posting lock deadline and blocks an early refund callback", () => {
     const onAction = vi.fn();
     render(<EscrowFundingView state={model({ timestamp: 1900000000n, totalDeposited: 1000000n, outstandingBalance: 1000000n,

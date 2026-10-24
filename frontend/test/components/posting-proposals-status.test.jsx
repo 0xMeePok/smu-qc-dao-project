@@ -3,6 +3,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 const rows = vi.hoisted(() => ({ items: [] }));
+const funding = vi.hoisted(() => ({ items: [] }));
+vi.mock("../../src/lib/escrowFunding.js", () => ({ getPostingEscrowFundingSummary: async () => funding }));
 vi.mock("../../src/lib/proposals.js", () => ({
   PROPOSAL_STATUS_DRAFT: "draft",
   listProposalsForPosting: async () => rows.items,
@@ -35,4 +37,14 @@ it("shows a proposal's funding state as a pill, with the consequence as a note",
   expect(screen.getByText("Funders refunded")).toBeTruthy();
   expect(screen.getByText("USDT 9,972", { exact: false })).toBeTruthy();
   expect(screen.queryByText(/Rejected ·/)).toBeNull();
+});
+
+it("shows separate confirmed funding for each proposal without applying one target to its siblings", async () => {
+  rows.items = ["p1", "p2"].map((id, index) => ({ id, title: `Solution ${index + 1}`, status: "submitted", currency: "USDT", amount: 1000, fundingTerms: { target: "1000000000" }, createdAt: new Date() }));
+  funding.items = [{ proposalId: "p1", available: true, tokenDecimals: 6, tokenSymbol: "USDT", totalDeposited: "1000000000", fundingTarget: "1000000000" },
+    { proposalId: "p2", available: true, tokenDecimals: 6, tokenSymbol: "USDT", totalDeposited: "200000000", fundingTarget: "1000000000" }];
+  render(<PostingProposals posting={{ id: "post1" }} viewerId="0xabc" proposalCount={2} onNavigate={vi.fn()} />);
+  expect((await screen.findByRole("progressbar", { name: "Confirmed funding for Solution 1" })).value).toBe(100);
+  expect(screen.getByRole("progressbar", { name: "Confirmed funding for Solution 2" }).value).toBe(20);
+  expect(screen.getAllByText("Fully funded")).toHaveLength(1);
 });

@@ -18,11 +18,13 @@ import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
 import { PlatformStatusPanel } from "../components/PlatformStatusPanel.jsx";
 import { AdminActivityPanel } from "../components/AdminActivityPanel.jsx";
 import { EscrowAdministration } from "../components/AdminEscrowCancellation.jsx";
+import { ADMIN_SECTION_GROUPS, getAdminSection } from "../config/adminSections.js";
+import { AdminSectionPicker } from "../components/AdminSectionPicker.jsx";
 
-export default function AdminPage({ onNavigate }) {
+export default function AdminPage({ onNavigate, initialSection }) {
   const { isSignedIn, isChecking, profile, address } = useSession();
 
-  const [activeTab, setActiveTab] = useState("overview"); // "overview" | "moderation" | "users" | "proposals" | "postings" | "funding" | "audits" | "status"
+  const [activeTab, setActiveTab] = useState(() => getAdminSection(initialSection)?.key ?? "overview");
   const [users, setUsers] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -37,8 +39,19 @@ export default function AdminPage({ onNavigate }) {
   const [successBanner, setSuccessBanner] = useState(null);
   const [pendingModeration, setPendingModeration] = useState(null);
   // QCDAO-91: pending reports open first, unless the admin already picked a tab.
-  const tabChosen = useRef(false);
-  const chooseTab = (tab) => { tabChosen.current = true; setActiveTab(tab); };
+  const tabChosen = useRef(Boolean(getAdminSection(initialSection)));
+  const chooseTab = (tab) => {
+    if (!getAdminSection(tab)) return;
+    tabChosen.current = true;
+    setActiveTab(tab);
+    onNavigate?.(`admin?tab=${tab}`);
+  };
+
+  useEffect(() => {
+    const requested = getAdminSection(initialSection);
+    tabChosen.current = Boolean(requested);
+    setActiveTab(requested?.key ?? "overview");
+  }, [initialSection]);
 
   useEffect(() => {
     if (!isSignedIn || !isAdmin(profile?.role) || profile?.suspended) return undefined;
@@ -137,17 +150,16 @@ export default function AdminPage({ onNavigate }) {
     );
   }
 
+  const activeSection = getAdminSection(activeTab);
+  const countFor = key => key === "moderation" && pendingModeration > 0 ? pendingModeration
+    : key === "users" && !loading && !error ? totalUsers : null;
+
   return (
     <section className="page dashboard-page admin-governance-page">
-      <div className="page-heading">
-        <div className="eyebrow-row">
-          <span className="role-chip role-chip-admin">DAO Administrator</span>
-          <span>SMU Pilot Governance Node</span>
-        </div>
-        <h1>Platform Administration & User Management</h1>
-        <p>
-          Oversee platform user accounts, grant administrator roles, manage pilot stakeholder simulated accounts, and inspect the tamper-proof governance audit trail.
-        </p>
+      <div className="page-heading admin-workspace-heading">
+        <div className="eyebrow-row"><span className="role-chip role-chip-admin">Administrator</span><span>QC DAO</span></div>
+        <h1>Admin workspace</h1>
+        <p>Review reports, manage access, and oversee research funding.</p>
       </div>
 
       {successBanner && (
@@ -156,164 +168,111 @@ export default function AdminPage({ onNavigate }) {
         </div>
       )}
 
-      <div className="admin-tabs-nav" role="tablist" aria-label="Administrator sections">
-        <button type="button" id="admin-tab-escrows" role="tab" aria-selected={activeTab === "escrows"} aria-controls="admin-panel-escrows" className={`admin-tab-btn ${activeTab === "escrows" ? "active" : ""}`} onClick={() => chooseTab("escrows")}>Escrow administration</button>
-        <button type="button" id="admin-tab-overview" role="tab" aria-selected={activeTab === "overview"} aria-controls="admin-panel-overview" className={`admin-tab-btn ${activeTab === "overview" ? "active" : ""}`} onClick={() => chooseTab("overview")}>Platform activity</button>
-        <button type="button" id="admin-tab-moderation" role="tab" aria-selected={activeTab === "moderation"} aria-controls="admin-panel-moderation" className={`admin-tab-btn ${activeTab === "moderation" ? "active" : ""}`} onClick={() => chooseTab("moderation")}>Content moderation{pendingModeration !== null ? ` (${pendingModeration})` : ""}</button>
-        <button
-          type="button"
-          id="admin-tab-users"
-          role="tab"
-          aria-selected={activeTab === "users"}
-          aria-controls="admin-panel-users"
-          className={`admin-tab-btn ${activeTab === "users" ? "active" : ""}`}
-          onClick={() => chooseTab("users")}
-        >
-          User Directory & Roles ({totalUsers})
-        </button>
-        <button
-          type="button"
-          id="admin-tab-proposals"
-          role="tab"
-          aria-selected={activeTab === "proposals"}
-          aria-controls="admin-panel-proposals"
-          className={`admin-tab-btn ${activeTab === "proposals" ? "active" : ""}`}
-          onClick={() => chooseTab("proposals")}
-        >
-          Proposal Audit Trail
-        </button>
-        <button
-          type="button"
-          id="admin-tab-postings"
-          role="tab"
-          aria-selected={activeTab === "postings"}
-          aria-controls="admin-panel-postings"
-          className={`admin-tab-btn ${activeTab === "postings" ? "active" : ""}`}
-          onClick={() => chooseTab("postings")}
-        >
-          Problem Statement Logs
-        </button>
-        <button
-          type="button"
-          id="admin-tab-funding"
-          role="tab"
-          aria-selected={activeTab === "funding"}
-          aria-controls="admin-panel-funding"
-          className={`admin-tab-btn ${activeTab === "funding" ? "active" : ""}`}
-          onClick={() => chooseTab("funding")}
-        >
-          Open Funding Logs
-        </button>
-        <button
-          type="button"
-          id="admin-tab-audits"
-          role="tab"
-          aria-selected={activeTab === "audits"}
-          aria-controls="admin-panel-audits"
-          className={`admin-tab-btn ${activeTab === "audits" ? "active" : ""}`}
-          onClick={() => chooseTab("audits")}
-        >
-          Governance Audit Trail
-        </button>
-        <button
-          type="button"
-          id="admin-tab-status"
-          role="tab"
-          aria-selected={activeTab === "status"}
-          aria-controls="admin-panel-status"
-          className={`admin-tab-btn ${activeTab === "status" ? "active" : ""}`}
-          onClick={() => chooseTab("status")}
-        >
-          Platform Status
-        </button>
-      </div>
+      <div className="admin-workspace-layout">
+        <aside className="admin-workspace-sidebar">
+          <nav aria-label="Admin sections">
+            {ADMIN_SECTION_GROUPS.map(group => <div className="admin-nav-group" key={group.label}>
+              <h2>{group.label}</h2>
+              <ul>{group.sections.map(section => {
+                const count = countFor(section.key);
+                return <li key={section.key}><button type="button" className="admin-section-link"
+                  aria-current={activeTab === section.key ? "page" : undefined} onClick={() => chooseTab(section.key)}>
+                  <span>{section.label}</span>
+                  {count !== null && <span className={`admin-nav-count${section.key === "moderation" ? " admin-nav-count-alert" : ""}`}>
+                    <span aria-hidden="true">{count}</span><span className="sr-only">{count} {section.key === "moderation" ? "pending reports" : "users"}</span>
+                  </span>}
+                  <span className="admin-section-arrow" aria-hidden="true">→</span>
+                </button></li>;
+              })}</ul>
+            </div>)}
+          </nav>
+        </aside>
 
-      <div className="admin-tab-content">
-        {activeTab === "escrows" && <div id="admin-panel-escrows" role="tabpanel" aria-labelledby="admin-tab-escrows"><EscrowAdministration onNavigate={onNavigate} /></div>}
-        {activeTab === "overview" && <div id="admin-panel-overview" role="tabpanel" aria-labelledby="admin-tab-overview"><AdminActivityPanel onOpenTab={chooseTab} /></div>}
-        {activeTab === "moderation" && <div id="admin-panel-moderation" role="tabpanel" aria-labelledby="admin-tab-moderation"><ModerationQueue onCountChange={setPendingModeration} /></div>}
-        {activeTab === "users" && (
-          <div
-            id="admin-panel-users"
-            role="tabpanel"
-            aria-labelledby="admin-tab-users"
-          >
-            <UserManagementTable
-              users={users}
-              loading={loading}
-              isFetching={isFetching}
-              error={error}
-              search={search}
-              onSearchChange={setSearch}
-              roleFilter={roleFilter}
-              onRoleFilterChange={(val) => {
-                setRoleFilter(val);
-                setPage(1);
-              }}
-              orgFilter={orgFilter}
-              onOrgFilterChange={setOrgFilter}
-              page={page}
-              totalPages={totalPages}
-              onPageChange={setPage}
-              totalUsers={totalUsers}
-              onChangeRole={(u) => setRoleChangeTarget(u)}
-              onToggleSuspend={(u) => setSuspendTarget(u)}
-              onRefresh={loadUsers}
-              currentAdminAddress={address}
-            />
+        <div className="admin-workspace-main">
+          <div className="admin-mobile-section">
+            <label htmlFor="admin-section-select">Admin section</label>
+            <AdminSectionPicker value={activeTab} onChange={chooseTab} countFor={countFor} />
           </div>
-        )}
-        {activeTab === "proposals" && (
-          <div
-            id="admin-panel-proposals"
-            role="tabpanel"
-            aria-labelledby="admin-tab-proposals"
-          >
-            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
-            <ProposalAuditQueue />
+
+          <header className="admin-section-heading">
+            <p className="admin-section-group">{activeSection.group}</p>
+            <h2 id="admin-section-title">{activeSection.label}</h2>
+            <p>{activeSection.description}</p>
+          </header>
+
+          {activeTab === "overview" && <section className="admin-quick-actions" aria-label="Common admin tasks">
+            <h3>What would you like to do?</h3>
+            <div>
+              <button type="button" onClick={() => chooseTab("moderation")}><span><strong>Review reports</strong><small>Resolve flagged content.</small></span><span aria-hidden="true">→</span></button>
+              <button type="button" onClick={() => chooseTab("users")}><span><strong>Manage users</strong><small>Roles and suspensions.</small></span><span aria-hidden="true">→</span></button>
+              <button type="button" onClick={() => chooseTab("escrows")}><span><strong>Manage escrow</strong><small>Funding and refunds.</small></span><span aria-hidden="true">→</span></button>
+            </div>
+          </section>}
+
+          <div className="admin-tab-content" role="region" aria-labelledby="admin-section-title">
+            {activeTab === "escrows" && <div id="admin-panel-escrows"><EscrowAdministration onNavigate={onNavigate} /></div>}
+            {activeTab === "overview" && <div id="admin-panel-overview"><AdminActivityPanel onOpenTab={chooseTab} showHeading={false} /></div>}
+            {activeTab === "moderation" && <div id="admin-panel-moderation"><ModerationQueue onCountChange={setPendingModeration} /></div>}
+            {activeTab === "users" && (
+              <div id="admin-panel-users">
+                <UserManagementTable
+                  users={users}
+                  loading={loading}
+                  isFetching={isFetching}
+                  error={error}
+                  search={search}
+                  onSearchChange={setSearch}
+                  roleFilter={roleFilter}
+                  onRoleFilterChange={(val) => {
+                    setRoleFilter(val);
+                    setPage(1);
+                  }}
+                  orgFilter={orgFilter}
+                  onOrgFilterChange={setOrgFilter}
+                  page={page}
+                  totalPages={totalPages}
+                  onPageChange={setPage}
+                  totalUsers={totalUsers}
+                  onChangeRole={(u) => setRoleChangeTarget(u)}
+                  onToggleSuspend={(u) => setSuspendTarget(u)}
+                  onRefresh={loadUsers}
+                  currentAdminAddress={address}
+                />
+              </div>
+            )}
+            {activeTab === "proposals" && (
+              <div id="admin-panel-proposals">
+                <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
+                <ProposalAuditQueue />
+              </div>
+            )}
+            {activeTab === "postings" && (
+              <div id="admin-panel-postings">
+                <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
+                <PostingSubmissionLogs />
+              </div>
+            )}
+            {activeTab === "funding" && (
+              <div id="admin-panel-funding">
+                <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
+                <FundingSubmissionLogs />
+              </div>
+            )}
+            {activeTab === "audits" && (
+              <div id="admin-panel-audits">
+                <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
+                <ExpiryAdminUtility />
+                <ConsolidatedAuditTrail scope="admin" onNavigate={onNavigate} />
+                <AdminAudit />
+              </div>
+            )}
+            {activeTab === "status" && (
+              <div id="admin-panel-status">
+                <PlatformStatusPanel onOpenAuditTrail={() => chooseTab("proposals")} showHeading={false} />
+              </div>
+            )}
           </div>
-        )}
-        {activeTab === "postings" && (
-          <div
-            id="admin-panel-postings"
-            role="tabpanel"
-            aria-labelledby="admin-tab-postings"
-          >
-            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
-            <PostingSubmissionLogs />
-          </div>
-        )}
-        {activeTab === "funding" && (
-          <div
-            id="admin-panel-funding"
-            role="tabpanel"
-            aria-labelledby="admin-tab-funding"
-          >
-            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
-            <FundingSubmissionLogs />
-          </div>
-        )}
-        {activeTab === "audits" && (
-          <div
-            id="admin-panel-audits"
-            role="tabpanel"
-            aria-labelledby="admin-tab-audits"
-          >
-            <OnChainOffChainLegend compact headingLevel="h3" architectureLink onNavigate={onNavigate} />
-            <ExpiryAdminUtility />
-            <ConsolidatedAuditTrail scope="admin" onNavigate={onNavigate} />
-            <AdminAudit />
-          </div>
-        )}
-        {activeTab === "status" && (
-          <div
-            id="admin-panel-status"
-            role="tabpanel"
-            aria-labelledby="admin-tab-status"
-          >
-            <PlatformStatusPanel onOpenAuditTrail={() => chooseTab("proposals")} />
-          </div>
-        )}
+        </div>
       </div>
 
       {roleChangeTarget && (

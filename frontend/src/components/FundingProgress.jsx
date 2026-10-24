@@ -1,6 +1,6 @@
 import { fundingAmount, fundingPercentage, fundingUnits, hasConfirmedFunding } from "../lib/fundingDisplay.js";
 import { shortenAddress } from "../lib/chain.js";
-import { INDEPENDENT_FUNDING_STATE, MAIN_ESCROW_STATE } from "../config/workflowStatus.js";
+import { INDEPENDENT_FUNDING_STATE, MAIN_ESCROW_STATE, MAIN_ESCROW_STATES, INDEPENDENT_ESCROW_STATES } from "../config/workflowStatus.js";
 import { fundingExplorer, validFundingAddress } from "../lib/fundingDisplay.js";
 
 // Main and independent escrow states in which deposits are being returned.
@@ -9,7 +9,9 @@ const CLOSED_ESCROW_STATES = new Set([MAIN_ESCROW_STATE.REFUNDED, MAIN_ESCROW_ST
 
 /** A rejected, cancelled, expired or refunding escrow's deposits are not raised funding. */
 export function escrowFundingClosed(summary = {}) {
-  return CLOSED_ESCROW_STATES.has(summary.state) || summary.refundsEnabled === true || summary.invalidated === true;
+  const states = summary.workflow === "independent-crowdfunding" ? INDEPENDENT_ESCROW_STATES : MAIN_ESCROW_STATES;
+  const state = typeof summary.state === "number" ? states[summary.state] : summary.state;
+  return CLOSED_ESCROW_STATES.has(state) || summary.refundsEnabled === true || summary.invalidated === true || summary.workflowInvalidated === true;
 }
 
 export function FundingProgress({ summary = {}, compact = false, stale = false, label = "Confirmed funding progress" }) {
@@ -18,8 +20,9 @@ export function FundingProgress({ summary = {}, compact = false, stale = false, 
     && fundingAmount(summary.totalDeposited, summary) !== "—" && fundingAmount(summary.fundingTarget, summary) !== "—";
   if (!available) return <p className="field-hint" data-funding-status="unverified">Funding progress needs verification. Refresh to check the confirmed raised amount and target.</p>;
   if (escrowFundingClosed(summary)) {
+    const settled = fundingUnits(summary.outstandingBalance) === 0n;
     return <div className="rollup-meter" data-funding-status="closed">
-      <small>Escrow closed · {fundingAmount(summary.totalDeposited, summary)} was deposited toward {fundingAmount(summary.fundingTarget, summary)}. It no longer counts as raised; contributors can claim refunds of any unpaid balance.</small>
+      <small>Escrow closed · {fundingAmount(summary.totalDeposited, summary)} was deposited toward {fundingAmount(summary.fundingTarget, summary)}. {settled ? "No unpaid balance remains in escrow." : "It no longer counts as raised; contributors can claim refunds of any unpaid balance."}</small>
     </div>;
   }
   const deposited = fundingUnits(summary.totalDeposited), target = fundingUnits(summary.fundingTarget);
