@@ -913,6 +913,8 @@ input[type="radio"] { accent-color: var(--brand); }
 
 .field-group {
   display: flex;
+  /* Override fieldset's min-content default so long attachments stay in the form. */
+  min-width: 0;
   flex-direction: column;
   gap: 16px;
   padding: 24px;
@@ -2478,6 +2480,8 @@ footer > p { margin: 0 auto 0 0; }
 /* POSTING ATTACHMENTS (QCDAO-58) */
 .attachment-uploader {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -2532,6 +2536,11 @@ footer > p { margin: 0 auto 0 0; }
   color: var(--ink);
 }
 
+.attachment-input-label > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .attachment-input-label small {
   display: block;
   margin-top: 2px;
@@ -2555,11 +2564,15 @@ footer > p { margin: 0 auto 0 0; }
   margin: 0;
   padding: 0;
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
 .attachment-row {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -2585,7 +2598,7 @@ footer > p { margin: 0 auto 0 0; }
 }
 
 .attachment-meta {
-  flex: 1;
+  flex: 1 1 180px;
   min-width: 0;
 }
 
@@ -2593,9 +2606,8 @@ footer > p { margin: 0 auto 0 0; }
   display: block;
   font-size: 13.5px;
   color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .attachment-meta small {
@@ -2631,8 +2643,10 @@ footer > p { margin: 0 auto 0 0; }
 
 .attachment-actions {
   display: flex;
-  gap: 10px;
-  flex: none;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-left: auto;
+  max-width: 100%;
 }
 
 .attachment-remove {
