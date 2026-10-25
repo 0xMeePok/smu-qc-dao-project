@@ -1697,6 +1697,15 @@ footer > p { margin: 0 auto 0 0; }
 }
 
 .signin-error { max-width: 30ch; color: #b42318; font-size: 12px; font-weight: 500; line-height: 1.4; }
+.login-card.session-expired-card { max-width: 520px; padding: 40px; }
+.session-expired-card .login-header { margin-bottom: 28px; }
+.session-expired-card .login-icon { width: 60px; height: 60px; margin-bottom: 20px; color: var(--muted); border-color: var(--line); background: var(--surface-muted); }
+.session-expired-card .login-header h1 { max-width: 16ch; margin: 0 auto; font-size: clamp(28px, 4vw, 36px); font-weight: 500; line-height: 1.2; }
+.session-expired-card .session-expiry-notice { max-width: 38ch; margin: 16px auto 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
+.session-expired-card .signin-button { width: 100%; min-height: 48px; padding: 12px 20px; font-size: 14px; }
+@media (max-width: 600px) {
+  .login-card.session-expired-card { padding: 28px 24px; }
+}
 
 @media (max-width: 680px) {
 }

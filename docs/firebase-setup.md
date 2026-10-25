@@ -495,7 +495,7 @@ reads it.
 
 ### What ends a session?
 
-Signing out, 15 minutes of inactivity, or an administrator suspending the account. Each
+Signing out, one hour of inactivity, or an administrator suspending the account. Each
 ends **both** the Privy session and the Firebase session. A Privy session found without a
 Firebase session beside it (after a reload, or a sign-out in another tab) is ended too.
 

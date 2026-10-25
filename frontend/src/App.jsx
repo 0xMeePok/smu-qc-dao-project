@@ -765,7 +765,7 @@ function AppContent() {
   } else if (section === "posting") {
     pageComponent = (
       <RouteGuard
-        targetRoute={section}
+        targetRoute={fullPath}
         allowedRoles={routeConfig?.allowedRoles}
         authRequired={routeConfig?.authRequired}
         onNavigate={go}
@@ -851,7 +851,7 @@ function AppContent() {
   } else if (section === "admin") {
     pageComponent = (
       <RouteGuard
-        targetRoute={section}
+        targetRoute={fullPath}
         allowedRoles={routeConfig?.allowedRoles}
         authRequired={routeConfig?.authRequired}
         onNavigate={go}

@@ -18,5 +18,5 @@ export const SIGN_IN_TIPS = Object.freeze([
   { title: "Expert reviews", text: "Evaluators review proposals in the Evaluation Queue and leave recommendations for the problem owner." },
   { title: "Follow your funding", text: "Funders can follow every commitment and release in the Funding Portfolio." },
   { title: "Introduce yourself", text: "Complete your profile so posters and researchers know who they are working with." },
-  { title: "Stay signed in safely", text: "For your security, QC DAO signs you out after 15 minutes without activity." },
+  { title: "Stay signed in safely", text: "For your security, QC DAO signs you out after one hour without activity." },
 ]);

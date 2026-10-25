@@ -1,17 +1,15 @@
 /**
  * Idle-timeout bookkeeping for the wallet session.
  *
- * The session ends after 15 minutes of INACTIVITY, not 15 minutes after sign-in:
- * any interaction restarts the clock. An absolute 15-minute cap would sign people
- * out in the middle of a multi-step workflow, which is the exact thing session
- * persistence is here to prevent.
+ * The session ends after one hour of inactivity. Any interaction restarts the
+ * clock, so members can continue a multi-step workflow while they remain active.
  *
  * The timestamp lives in localStorage so it survives a page reload - Firebase's own
  * session is persisted in IndexedDB and would otherwise come back with no memory of
  * when the user was last actually present, letting a tab reopened the next morning
  * restore a session that should have lapsed overnight.
  */
-export const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+export const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
 // How often to re-check while the tab is open. Worst case a session outlives its
 // deadline by this much, which is not worth a tighter loop; the check also runs on

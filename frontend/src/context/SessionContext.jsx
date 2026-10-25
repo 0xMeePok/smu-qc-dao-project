@@ -5,7 +5,6 @@ import { auth, db, isFirebaseConfigured } from "../lib/firebase.js";
 import { exchangePrivySession, revokeOwnSessions } from "../lib/authFlow.js";
 import { createProfile, findProfileByAddress, updateProfile } from "../lib/profile.js";
 import { ACCOUNT_SUSPENDED_MESSAGE, isSignInCancelled, messageForFirebaseError, messageForSignInError } from "../lib/errors.js";
-import { isAdmin } from "../lib/roles.js";
 import { go, parseRoute } from "../lib/router.js";
 import { useWallet } from "./WalletContext.jsx";
 import {
@@ -18,7 +17,7 @@ import {
 
 export const SessionContext = createContext(null);
 
-const IDLE_MESSAGE = "You were signed out after 15 minutes of inactivity. Sign in again to continue.";
+const IDLE_MESSAGE = "You were signed out after one hour of inactivity. Sign in again to continue.";
 
 /**
  * Session states:
@@ -48,6 +47,7 @@ export function SessionProvider({ children }) {
   const [status, setStatus] = useState("signed-out");
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState(null);
+  const [signOutReason, setSignOutReason] = useState(null);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
   const [profileLookupVersion, setProfileLookupVersion] = useState(0);
 
@@ -82,6 +82,7 @@ export function SessionProvider({ children }) {
   const reset = useCallback(() => {
     clearSession();
     setError(null);
+    setSignOutReason(null);
   }, [clearSession]);
 
   const logoutOfPrivy = useCallback(() => walletRef.current.logout().catch(() => { }), []);
@@ -129,6 +130,7 @@ export function SessionProvider({ children }) {
       const before = current.current;
       const privyWasSignedIn = walletRef.current.authenticated;
       setError(null);
+      setSignOutReason(null);
       // A member who is already signed in keeps their session - and the page
       // they are on - while Privy's modal is open. A new sign-in shows as
       // `verifying`, which also stops the lockstep below from ending the Privy
@@ -202,8 +204,6 @@ export function SessionProvider({ children }) {
     const token = (lookupToken.current += 1);
     setStatus("checking");
 
-    let hasRoutedToAdmin = false;
-
     const unsubscribe = onSnapshot(
       doc(db, "users", verifiedAddress.toLowerCase()),
       (snapshot) => {
@@ -212,13 +212,8 @@ export function SessionProvider({ children }) {
         setProfile(found);
         setStatus(found ? "signed-in" : "needs-onboarding");
 
-        // Route once when establishing or reauthenticating a session, rather
-        // than on every profile update or render while an admin navigates.
-        if (found && isAdmin(found.role) && !found.suspended && !hasRoutedToAdmin) {
-          hasRoutedToAdmin = true;
-          // Keep a bookmarked admin section through reloads and reauthentication.
-          if (parseRoute().split("?")[0] !== "admin") go("admin");
-        }
+        // Restoring a profile keeps the current URL. Login handles the landing
+        // page after an explicit sign-in, including any interrupted destination.
       },
       (caught) => {
         // Revoking the session on sign-out makes this listener fail at once;
@@ -283,8 +278,12 @@ export function SessionProvider({ children }) {
       ending.current = true;
       clearActivity();
       reset();
+      setSignOutReason(reason);
       setError(reason === "idle" ? IDLE_MESSAGE : reason === "suspended" ? ACCOUNT_SUSPENDED_MESSAGE : null);
-      if (redirectToLogin) go("login");
+      if (reason === "idle") {
+        const destination = parseRoute();
+        go(destination.split("?")[0] === "login" ? destination : `login?redirect=${encodeURIComponent(destination)}`);
+      } else if (redirectToLogin) go("login");
 
       // Local teardown runs even if signOut throws: bailing out here would leave
       // Firebase holding a token every rule refuses, which fails as an
@@ -377,6 +376,7 @@ export function SessionProvider({ children }) {
       status,
       profile,
       error,
+      signOutReason,
       address: verifiedAddress,
       // True while the app cannot yet answer "who is this, and what may they see?" -
       // either Firebase has not reported on a persisted session, or it has and the
@@ -397,7 +397,7 @@ export function SessionProvider({ children }) {
       cancelOnboarding: signOutOfSession,
       signOut: signOutOfSession,
     }),
-    [status, profile, error, verifiedAddress, authResolved, signingOut, signInStep, signIn, completeOnboarding,
+    [status, profile, error, signOutReason, verifiedAddress, authResolved, signingOut, signInStep, signIn, completeOnboarding,
       saveProfile, signOutOfSession],
   );
 

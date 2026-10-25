@@ -42,8 +42,17 @@ describe("idle timeout", () => {
     clearActivity();
   });
 
-  it("is a 15 minute window", () => {
-    assert.equal(IDLE_TIMEOUT_MS, 15 * 60 * 1000);
+  it("is a one hour window", () => {
+    assert.equal(IDLE_TIMEOUT_MS, 60 * 60 * 1000);
+  });
+
+  it("keeps a stored session past 15 minutes and expires at exactly one hour", () => {
+    const { store } = installStorage();
+    const lastActivity = Date.now();
+    store.set("qcdao.lastActivityAt", String(lastActivity));
+    assert.equal(isIdleExpired(lastActivity + 15 * 60 * 1000), false);
+    assert.equal(isIdleExpired(lastActivity + 60 * 60 * 1000 - 1), false);
+    assert.equal(isIdleExpired(lastActivity + 60 * 60 * 1000), true);
   });
 
   it("reports no idle time before any activity is recorded", () => {
@@ -72,7 +81,7 @@ describe("idle timeout", () => {
 
   it("resets the clock when activity happens, which is what makes it idle-based", () => {
     // The whole point of an idle timeout rather than an absolute one: a user still
-    // working must not be signed out just because 15 minutes passed since login.
+    // working must not be signed out just because an hour passed since login.
     const { store } = installStorage();
     clearActivity();
 

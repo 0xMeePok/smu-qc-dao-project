@@ -1,11 +1,14 @@
 import { useEffect } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useSession } from "../context/SessionContext.jsx";
 import { landingRouteFor } from "../config/roles.js";
 import { SignInWithEmail } from "./SignInWithEmail.jsx";
 import { getRouteConfig } from "../config/routes.js";
 
 export function Login({ redirectTarget, onNavigate }) {
   const { isAuthenticated, roles, isLoading } = useAuth();
+  const { signOutReason } = useSession();
+  const expired = signOutReason === "idle";
 
   useEffect(() => {
     if (isLoading) return;
@@ -17,7 +20,7 @@ export function Login({ redirectTarget, onNavigate }) {
       // Protected detail routes retain their suffix (for example QCDAO-51's
       // create/open-funding) while still validating the top-level route against
       // the route registry before navigating.
-      const redirectSection = redirectTarget?.split("/")[0];
+      const redirectSection = redirectTarget?.split(/[/?]/)[0];
       if (redirectTarget && !getRouteConfig(redirectSection)) {
         destination = landing;
       }
@@ -32,17 +35,21 @@ export function Login({ redirectTarget, onNavigate }) {
 
   return (
     <section className="page login-page">
-      <div className="login-card">
+      <div className={`login-card${expired ? " session-expired-card" : ""}`}>
         <div className="login-header">
           <div className="login-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-              <polyline points="10 17 15 12 10 7" />
-              <line x1="15" y1="12" x2="3" y2="12" />
+              {expired ? <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></> : <>
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                <polyline points="10 17 15 12 10 7" />
+                <line x1="15" y1="12" x2="3" y2="12" />
+              </>}
             </svg>
           </div>
-          <h1>Platform Sign In</h1>
-          {redirectTarget ? (
+          <h1>{expired ? "Your session has expired" : "Platform Sign In"}</h1>
+          {expired ? <p className="login-subhead session-expiry-notice" role="status">
+            You were signed out after one hour of inactivity. Sign in again to {redirectTarget ? "return to where you left off." : "continue."}
+          </p> : redirectTarget ? (
             <div className="redirect-notice" role="status">
               <span className="notice-badge">Auth Required</span>
               <div>
@@ -60,7 +67,7 @@ export function Login({ redirectTarget, onNavigate }) {
         </div>
 
         <div className="email-signin-section">
-          <SignInWithEmail />
+          <SignInWithEmail label={expired ? "Sign in again" : undefined} />
         </div>
       </div>
     </section>
