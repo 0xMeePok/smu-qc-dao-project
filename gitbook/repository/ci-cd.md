@@ -17,7 +17,7 @@ The deploy workflow cannot be blocked by `ci.yml`, because they are separate wor
 
 ## Required checks
 
-`docs/contributing.md` asks maintainers to mark **CI**, **Semgrep** and **Gitleaks** as required status checks on `main`. Check the branch protection settings in GitHub when you take over the repository.
+On 26 October 2026, `main` required only the **Run Unit & Integration Tests** check, through a classic branch protection rule. That rule is to move into a ruleset with the GitBook app on its bypass list, as described in [Branch protection](../setup/github-actions.md#branch-protection). `docs/contributing.md` also asks maintainers to require **CI**, **Semgrep** and **Gitleaks**. Check the protection settings in GitHub when you take over the repository.
 
 ## AI security review
 

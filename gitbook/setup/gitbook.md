@@ -17,12 +17,13 @@ Do this once, after the `gitbook/` folder is on `main`.
 2. Create a new space, for example **QC DAO handover guide**.
 3. In the space header, select **Set up** next to **Git Sync**, then choose **GitHub Sync**.
 4. Connect a GitHub account that can administer `0xMeePok/smu-qc-dao-project`. If the repository is not listed, install the [GitBook GitHub app](https://github.com/apps/gitbook-com) on the `0xMeePok` account and give it access to this repository.
-5. Under **Source repository**, choose `0xMeePok/smu-qc-dao-project` and the branch `main`.
-6. For the initial sync, choose the direction from GitHub to GitBook, so the repository content replaces the empty space. Select **Swap direction** if it points the other way. Syncing from GitBook to GitHub would overwrite the book in the repository with an empty space.
-7. Set **Project directory** to `gitbook`.
-8. Under **Content mapping**, map the space to `./`, which means the project directory itself. That is where `.gitbook.yaml` lives.
-9. Select **Sync** and wait for the first import. Check that the navigation matches `SUMMARY.md`.
-10. Publish the space and choose who can read it. A public link is fine for this public repository. Choose an invite-only space if the sponsor prefers.
+5. Once the app is installed, set up the `main` ruleset with GitBook on its bypass list, following [Branch protection](github-actions.md#branch-protection). Without the bypass, `main` refuses every commit GitBook makes. If the first sync reports that GitBook could not push, add the bypass and sync again.
+6. Under **Source repository**, choose `0xMeePok/smu-qc-dao-project` and the branch `main`.
+7. For the initial sync, choose the direction from GitHub to GitBook, so the repository content replaces the empty space. Select **Swap direction** if it points the other way. Syncing from GitBook to GitHub would overwrite the book in the repository with an empty space.
+8. Set **Project directory** to `gitbook`.
+9. Under **Content mapping**, map the space to `./`, which means the project directory itself. That is where `.gitbook.yaml` lives.
+10. Select **Sync** and wait for the first import. Check that the navigation matches `SUMMARY.md`.
+11. Publish the space and choose who can read it. A public link is fine for this public repository. Choose an invite-only space if the sponsor prefers.
 
 GitBook's labels change from time to time. If a step looks different, GitBook's own guide is [Enabling GitHub Sync](https://gitbook.com/docs/docs-as-code/git-sync/enabling-github-sync).
 
@@ -33,7 +34,7 @@ GitBook's labels change from time to time. If a step looks different, GitBook's 
 * **In a pull request:** edit the Markdown, add any new page to `SUMMARY.md`, and merge. GitBook picks up the change after the merge.
 * Do not edit the same page in both places at the same time. The two edits can conflict, and one of them may need redoing.
 
-If `main` is protected against direct pushes, GitBook's commits will be refused. Either allow the GitBook app to bypass the rule, or sync GitBook to a separate branch such as `docs/gitbook` and merge that into `main` by pull request.
+GitBook pushes straight to `main`, so it must stay on the bypass list of the `main` ruleset. If the repository moves to another owner or organisation, reinstall the GitBook app there and add it to the bypass list again. See [Branch protection](github-actions.md#branch-protection).
 
 ## Writing style
 
