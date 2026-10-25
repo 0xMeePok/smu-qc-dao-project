@@ -51,3 +51,8 @@ d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbi
 # Ignore only these exact historical findings; future test contents stay scanned.
 6db1db319e35c2ac80ce1bad3023df26bff8e82a:firebase/test/privy-deploy-config.test.mjs:generic-api-key:70
 6db1db319e35c2ac80ce1bad3023df26bff8e82a:frontend/test/unit/privy-build-config.test.js:generic-api-key:29
+
+# Handover guide: this row named the public platform wallet address beside the
+# word "key". It is not a secret, and the next commit rewords the row.
+# Ignore only this exact historical finding.
+72820f8adbfca73a0946662ed3a47cf418c56b03:gitbook/handover/open-work.md:generic-api-key:24
