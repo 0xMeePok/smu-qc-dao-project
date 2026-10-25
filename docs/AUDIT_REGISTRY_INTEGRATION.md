@@ -1,7 +1,9 @@
 # Audit registry integration
 
-QCDAO-75 through QCDAO-79 use the existing `AuditRegistry` as an integrity
-anchor. Firestore remains the authoritative application database; the chain
+QCDAO-75 through QCDAO-79 use the audit registry as an integrity anchor. Since
+the escrow cutover the active contract is `EscrowAuditRegistry` in
+`contracts/funding-escrow`, which keeps the same anchoring calls and adds escrow
+links. Firestore remains the authoritative application database. The chain
 stores only deterministic hashes and the wallet that submitted each anchor.
 
 ## Canonical format
@@ -46,7 +48,11 @@ serialization changes.
   `commitOpportunity`, which reverts because the id is taken. Withdrawal is
   `withdrawOpportunity(entityId, evidenceHash)` after the owner signs a hash of
   the exact reason; Firestore then stores `cancelled` and `withdrawalReason`.
-- Proposals: `commitProposal(entityId, opportunityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
+- Proposals: `commitProposalWithEscrow(entityId, opportunityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex, terms)`
+  on the active `EscrowAuditRegistry`. `terms` is `(token, target, funderVoting, trancheBps, reviewWindows, milestoneHashes)`,
+  and the same transaction creates the proposal's escrow through the factory. The older
+  `AuditRegistry` deployments used `commitProposal(entityId, opportunityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`,
+  which the code still recognises for those registries.
 - Proposal updates: `updateHashes(entityId, proposalHash, solutionHash, expectedOpportunityRevisionIndex)`
 
 Every proposal version must carry the opportunity revision the researcher viewed.
@@ -58,13 +64,15 @@ Evaluations are platform records and are not anchored by this contract.
 ## Receipt lifecycle and retries
 
 All application contract writes (opportunity publication, proposal submission,
-and proposal hash updates) request fresh Arbitrum Sepolia EIP-1559 fees before
-opening the wallet. The shared adapter doubles the estimated `maxFeePerGas`
-while preserving `maxPriorityFeePerGas`, allowing base-fee movement during wallet
-confirmation. This is a fee cap, not a fixed charge or an increased gas limit.
-Fee-estimation failure stops before wallet submission. A fee-cap rejection is
-shown with explicit retry guidance; the next user-initiated attempt estimates
-again. Transactions are never automatically rebroadcast to adjust fees.
+and proposal hash updates) simulate the call and estimate Arbitrum Sepolia
+EIP-1559 fees before the wallet opens, in `createWalletAuditAdapters`
+(`frontend/src/lib/auditRegistry.js`). A failed simulation or fee estimate stops
+before anything is sent. Since QCDAO-144 the send itself goes through Privy gas
+sponsorship (`sendSponsoredTransaction` in `frontend/src/lib/embeddedWallet.js`).
+It passes only the target, calldata and value to Privy, so the member pays no gas
+and the estimated fee caps are not forwarded. If sponsorship is refused, nothing
+is saved and the member is told to try again later. Transactions are never
+automatically rebroadcast.
 
 Opportunity creation is chain-first: the application prepares the final Firestore content,
 asks the signed-in wallet to commit its deterministic hash, verifies the confirmed
@@ -75,18 +83,22 @@ hash is polled for its receipt and never rebroadcast. Every audit result shown i
 the frontend is read from the configured contract and compared with a freshly
 computed opportunity hash. Transient receipt reads are capped at three attempts.
 
-The current Arbitrum Sepolia deployment is
-`0x47dA28cAEf8021dD88fe18B80e367746e0036964` (transaction
-`0x02f73510e1b9e1753c14f6c2c2a0ca7ce213c94f31fee101fa7b436f59a2d36a`).
+The current Arbitrum Sepolia deployment is the `EscrowAuditRegistry` at
+`0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5`, deployed on 17 October 2026 in
+transaction `0x49ddd3d088cb6c44da35cb81bb8d9dddabc9190137f818f32656976a494d19b8`.
 It is the checked-in frontend default. `VITE_AUDIT_REGISTRY_ADDRESS` may override
-it for a later deployment; an invalid override disables on-chain verification
-without blocking the Firestore workflow.
+it for a later deployment. The override is checked as a non-zero EVM address
+before any contract request is made.
 
 Deploying the replacement contract does not move existing records or update an
 already-hosted frontend. Follow [the coordinated cutover](registry-cutover.md)
-before switching the live site's registry. A match against the historical
-`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD` is evidence from that registry,
-not evidence that the same record exists in the replacement.
+before switching the live site's registry. The backend still verifies receipts
+anchored on the registries listed in `firebase/functions/auditRegistry.history.json`
+(`0xF202ECc872Be5613C184Cc07622346750f9b8fE9` from 9 October 2026 and
+`0xc582a423bbcd08d6B9D930F53bd5ee054965b74f` from 8 October 2026). A match against
+an older registry is evidence from that registry, not evidence that the same
+record exists in the current one. Earlier registries, including the original
+`0x8E0BB204c2b805d4c8654791a56f3Bd96e8FD1CD`, are retired and no longer verified.
 
 Production builds include viem's deferred error helpers in the entry file so
 tabs kept open during a deployment do not request removed helper files later.
@@ -105,14 +117,18 @@ After compiling or deploying a replacement from this repository, refresh the
 frontend manifest with:
 
 ```bash
-cd frontend
+cd contracts/funding-escrow && npm run compile   # artifacts are not committed
+cd ../../frontend
 npm run sync:audit-registry
 ```
 
-The command reads the default Hardhat artifact and the active manifest at
-`contracts/audit-registry/manifests/arbitrumSepolia.json`, and updates both the
-frontend and Functions configuration. The older `deployments/arbitrumSepolia.json`
-is historical. A different artifact or deployment can be selected explicitly:
+The command reads the active manifest at
+`contracts/audit-registry/manifests/arbitrumSepolia.json`. For an
+`EscrowAuditRegistry` manifest it takes the ABI from
+`contracts/funding-escrow/artifacts/contracts/EscrowAuditRegistry.sol/EscrowAuditRegistry.json`,
+and it updates both the frontend and Functions configuration. Older deployment
+records are in `contracts/audit-registry/legacy/` and must be selected
+explicitly. A different artifact or deployment can be selected explicitly:
 
 ```bash
 npm run sync:audit-registry -- \
@@ -164,7 +180,7 @@ amendment was signed. Every proposal write now signs first.
 
 | Action | Contract call | Written to Firestore |
 | --- | --- | --- |
-| Submit | `commitProposal` | after the transaction is mined and verified |
+| Submit | `commitProposalWithEscrow` | after the transaction is mined and verified |
 | Correct | `updateHashes` | after the transaction is mined and verified |
 | Withdraw | `withdrawProposal` | after the transaction is mined |
 | Save draft | none | immediately — a draft is private and unevaluated |
@@ -187,7 +203,7 @@ being shown a bare write error.
 ### Corrections (QCDAO-57)
 
 A proposal corrected before evaluation keeps its entity id, so its second
-anchoring is an amendment: `commitProposal` reverts once the id is taken, and
+anchoring is an amendment: `commitProposalWithEscrow` reverts once the id is taken, and
 `updateHashes` appends a revision beside the original instead of replacing it.
 Both calls carry the same hashes for the same stored record, so
 `verifyProposalAudit` and the trusted server confirmation accept either.
@@ -268,20 +284,20 @@ A 90-second transactional lease prevents concurrent recovery workers from racing
 The original transaction reference is retained; recovery never broadcasts another
 transaction. Reverts and mismatches require attention rather than automatic retry.
 
-In **Admin → Governance Audit Trail → Verification queue**, administrators can inspect the
+In **Admin Audit → Proposal verification**, administrators can inspect the
 paginated proposal audit trail, open receipts, re-verify current content and retry
 confirmation after the automatic budget is exhausted. Jobs with no transaction
 show **Waiting for researcher wallet**. An administrator can reset wallet attempt
 limits, after which the author starts verification from their proposal receipt.
 Browser receipt polling picks up server updates without reloading the page.
 
-There is **no platform signer** in this deployment: `commitProposal` binds the
-researcher to `msg.sender`. The researcher's embedded wallet manages its own nonce and gas.
-Neither scheduled recovery nor administrators submit transactions or impersonate
-researchers, so concurrent recovery jobs do not allocate nonces or spend gas.
-Creating a platform signer, relaying researcher signatures, evaluation anchors and
-receipts for later workflow events require separate contract/workflow changes.
-Those are outside this integration against QCDAO-59/60.
+Proposal anchoring has **no platform signer**: `commitProposalWithEscrow` binds
+the researcher to `msg.sender`, and Privy sponsors the gas for the researcher's
+embedded wallet. Neither scheduled recovery nor administrators submit proposal
+transactions or impersonate researchers, so concurrent recovery jobs do not
+allocate nonces or spend gas. A platform signer does exist for escrow settlement,
+cancellation and moderation. See [the escrow integration](ESCROW_REGISTRY_INTEGRATION.md).
+Evaluations are still not anchored.
 
 During a testnet outage the submission remains saved, the receipt explains the
 verification issue, and the admin queue retains exhausted jobs. A wallet

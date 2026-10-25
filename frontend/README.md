@@ -1,13 +1,15 @@
 # QC DAO Frontend
 
 Vite + React app. Sign-in is email-only, through Privy's login modal: the one-time code
-it sends unlocks the member's embedded wallet, which signs a server-verified challenge — see the root
+it sends unlocks the member's embedded wallet. The server then verifies Privy's access
+token and mints the Firebase session for that wallet's address. See the root
 [README](../README.md) for how that works.
 
 ## Run locally
 
-Firestore, Auth, and both Cloud Functions are already deployed — ask the project
-owner for the `VITE_FIREBASE_*` values rather than setting up your own project.
+Firestore, Auth, Storage and all Cloud Functions are already deployed. Ask the
+project owner for the `VITE_FIREBASE_*` values and `VITE_PRIVY_APP_ID` rather than
+setting up your own project.
 
 ```bash
 cp .env.example .env.local
@@ -26,7 +28,9 @@ fields are required versus optional, and why.
 npm test
 ```
 
-The suite does not need an emulator or network.
+The suite does not need an emulator or network. It does need `firebase/functions`
+installed (`npm install --prefix ../firebase/functions`), because the hashing,
+escrow and status modules are shared with the Cloud Functions.
 
 ## Main business-problem funding
 
@@ -93,11 +97,12 @@ Open funding is a single-owner grant pool, separate from pooled problem funding:
 6. After the call closes, the owner can withdraw its unreserved funds. Pending
    grants remain reserved until accepted or voided.
 
-Grant controls remain unavailable on the existing testnet deployment. Enable them
-only after deploying and verifying the updated registry/factory contracts and
-syncing a verified grant manifest with `npm run sync:audit-registry`. Deploy the
-new backend callables, Firestore rules and indexes with the frontend. This change
-does not update the active deployment addresses.
+Grant controls are enabled on the current deployment (2026-10-17), because its
+synced manifest includes the grant pool ABI (`escrow.openFundingPoolAbi`) and the
+factory's `createOpenFundingPool`. A future registry or factory switch must keep
+both in the manifest synced with `npm run sync:audit-registry`, or the controls
+switch off. Deploy the backend callables, Firestore rules and indexes with the
+frontend.
 
 Before switching the active manifest, preserve the current deployment in its
 history and arrange continued settlement of any unfinished pooled escrows.
@@ -129,7 +134,7 @@ Frontend component tests cover wallet gating, exact token approvals, two chain
 confirmations, closed-call withdrawals and recovery of an existing transaction
 without rebroadcasting it. Browser layout QA also uses wallet/API fixtures.
 
-The 1 October 2026 Chrome/MetaMask run used the actual frontend, SIWE sign-in,
+The 1 October 2026 Chrome/MetaMask run, made before the move to Privy sign-in, used the actual frontend, SIWE sign-in,
 Firebase emulators and a verified local contract deployment. It published a
 100,000 USDC call and two 50,000 USDC proposals, deposited 100,000 mock USDC,
 selected both proposals and added another 10,000. The confirmed pool had 110,000
@@ -148,14 +153,9 @@ account were restored. No shared testnet deployment was changed.
 Published opportunities use the shared countdown. Owners choose or extend a live
 deadline by 30, 60, 90, or 180 days.
 
-The deploy pipeline runs a narrower set — only the files it owns:
-
-```bash
-node --test test/validation.test.js test/routeAccess.test.js test/idleTimeout.test.js
-```
-
-If you add a test file that should block a deploy, add it to that list in
-[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml); it is not globbed.
+The deploy pipeline in [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
+runs the same `npm test`, so a new test file in the existing folders blocks a deploy
+when it fails.
 
 ## Build
 
@@ -176,8 +176,8 @@ src/
 │                  #   profile.js (writes users/ + publicProfiles/ in one batch)
 ├── context/         # WalletContext (Privy + embedded wallet), SessionContext — the
 │                    #   Privy login -> verified -> onboarding/signed-in state machine
-├── components/      # Modal shell, onboarding form, sign-in button (opens Privy's login modal)
-├── pages/            # AdminPage (only reachable when the signed-in profile has role == 1)
+├── components/      # 81 components: sign-in and onboarding, wallet, forms, escrow, dashboards, audit, moderation, admin
+├── pages/            # 14 route-level pages, lazily loaded (AdminPage needs role == 1)
 ├── App.jsx            # Hash router, marketplace pages, top bar
 └── main.jsx             # PrivyProvider -> QueryClientProvider -> WalletProvider -> SessionProvider -> App
 ```

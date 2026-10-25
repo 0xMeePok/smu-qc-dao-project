@@ -89,7 +89,7 @@ Put one empty line between each part.
 2. Make sure that all the tests pass before you ask for a review.
 3. Make sure **Semgrep** (rule-based SAST on the PR) and **Gitleaks** (secret scan on each push) have passed. Maintainers should mark both as required status checks on `main`.
 
-Semgrep blocks security findings and scanner errors. The six Solidity
+Semgrep blocks security findings and scanner errors. The seven Solidity
 performance rules listed explicitly in `.github/workflows/semgrep.yml`
 are advisory: they suggest gas or style changes, including accepting native
 currency in constructors. A second Solidity scan keeps those findings visible

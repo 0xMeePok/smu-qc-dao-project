@@ -20,6 +20,13 @@ The solution uses a hybrid architecture:
 This keeps sensitive content off-chain while still giving cross-institution
 stakeholders an independently verifiable audit trail for the events that matter.
 
+![QC DAO system architecture](docs/architecture/system-architecture.svg)
+
+The [handover guide](gitbook/README.md) in `gitbook/` explains the architecture,
+the repository layout, platform setup (Firebase, Google Cloud, Privy), deployment
+and the remaining work. It syncs to GitBook. The diagram's Mermaid source is in
+[`gitbook/overview/architecture.md`](gitbook/overview/architecture.md).
+
 ## How sign-in works
 
 There is no registration form, no public sign-up URL and nothing to install. Members
@@ -30,7 +37,7 @@ the account, and the same email reaches the same address on any device. The embe
 wallet then asks the server to exchange Privy's access token for a Firebase
 session keyed to that address (`exchangePrivySession`). The server reads the
 wallet from Privy. The browser does not name the account.
-Signing out, the 15-minute idle timeout and an administrator suspension end both the
+Signing out, the one-hour idle timeout and an administrator suspension end both the
 Privy and the Firebase session.
 
 ## Tech Stack
@@ -38,7 +45,7 @@ Privy and the Firebase session.
 | Layer | Technology | Description |
 |---|---|---|
 | Frontend | React 18, Vite 6, Vanilla CSS | Single-page application with role-based routing and zero UI framework dependencies. |
-| Backend / Off-chain Data | Firebase (Firestore, Auth, Storage) | Off-chain data store for user profiles, proposal drafts, and review feedback. |
+| Backend / Off-chain Data | Firebase (Firestore, Auth, Storage, App Check, Hosting), Cloud Functions on Node 22 | Off-chain records, attachments, 93 Cloud Functions for sign-in, verification, escrow settlement, moderation and scheduled jobs. |
 | Smart Contracts | Solidity (0.8.28), Arbitrum Sepolia | Verifiable audit log and hash anchoring (Chain ID: `421614`). |
 | Contract Tooling | Hardhat, Etherscan API v2 | Local testing, deployment pipelines, and automated Arbiscan verification. |
 | Wallet Integration | Privy (email login + embedded wallets) / viem | Email sign-in, embedded-wallet signing and on-chain audit transactions. |
@@ -51,28 +58,32 @@ smu-qc-dao-project/
 │   ├── audit-registry/      # Workflow hash registry, Hardhat project, Arbitrum Sepolia
 │   ├── funding-escrow/      # Registry-linked escrow, milestones, voting and refunds
 │   ├── qft-tokens/          # QFT ERC-20 (fixed supply), Hardhat project, Arbitrum Sepolia
-│   └── stable-faucet/       # Test token faucet deployment
-├── frontend/                # Vite + React app — wallet sign-in, marketplace pages, RBAC
+│   └── stable-faucet/       # Mock XSGD/USDT/USDC tokens and the Vercel faucet site
+├── frontend/                # Vite + React app: email sign-in, marketplace pages, RBAC
 │   ├── src/
 │   │   ├── components/      # Modals, role views, RouteGuard, and UI components
-│   │   ├── config/          # Role definitions, route permissions, feature flags
-│   │   ├── context/         # AuthContext and SessionContext state machines
-│   │   ├── lib/             # Firebase/Privy setup, validation, email sign-in
-│   │   ├── pages/           # AdminPage (only reachable with role == 1)
-│   │   ├── App.jsx          # Main application shell and dynamic routing
+│   │   ├── config/          # Role definitions, route permissions, contract manifests
+│   │   ├── context/         # WalletContext, SessionContext and AuthContext
+│   │   ├── lib/             # Firebase/Privy setup, chain access, workflow logic
+│   │   ├── pages/           # 14 route-level pages (AdminPage needs role == 1)
+│   │   ├── App.jsx          # Main application shell and hash routing
 │   │   └── styles.css       # Core design system and styles
-│   └── test/                # Unit and integration test suites
-├── firebase/                # Firestore rules, Cloud Functions, their tests
-│   ├── functions/           # Cloud Functions
-│   └── test/                # Firestore rules tests (via emulator)
-├── docs/                    # Architecture and RBAC documentation
-│   └── ROLE_ROUTE_PERMISSIONS.md  # Living UAT reference for role-based access control
+│   └── test/                # Unit, integration, component and accessibility tests
+├── firebase/                # Firestore and Storage rules, indexes, Hosting config
+│   ├── functions/           # Cloud Functions (Node 22) and their tests
+│   ├── scripts/             # CSP checks, preview deploys, Privy deploy preflight
+│   └── test/                # Firestore and Storage rules tests (via emulator)
+├── docs/                    # Deep-dive design notes, setup notes, test evidence
+│   └── architecture/        # Exported architecture diagrams
+├── gitbook/                 # Handover guide, synced to GitBook
+├── scripts/                 # End-to-end funding tests and the test reporter
 └── README.md
 ```
 
 ## Prerequisites
 
-- Node.js ≥ 20.19 (frontend), Node 22 (functions — matches the deployed runtime)
+- Node.js ≥ 20.19 (frontend), Node 22 (functions — matches the deployed runtime),
+  Node ≥ 22.13 for `contracts/funding-escrow`
 - npm
 - [Firebase CLI](https://firebase.google.com/docs/cli) (`npm install -g firebase-tools`) —
   only needed if you're redeploying rules/functions or running emulators, not for
@@ -113,8 +124,8 @@ cd smu-qc-dao-project
 
 ### 2. Install dependencies (first, once, from the repo root)
 
-There is no root `package.json`. Each folder below is its own npm package — install
-all three before anything else:
+The root `package.json` only holds a shared dev dependency. Each folder below is its
+own npm package. Install all three before anything else:
 
 ```bash
 npm install --prefix firebase
@@ -131,9 +142,11 @@ Re-run these only after a clean clone, a deleted `node_modules`, or a change to 
 cp frontend/.env.example frontend/.env.local
 ```
 
-Fill in `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, and
-`VITE_FIREBASE_APP_ID` (ask Ashley, or copy from Firebase console — see
-[Connect to Firebase](#connect-to-firebase)).
+Fill in `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`,
+`VITE_FIREBASE_APP_ID` and `VITE_PRIVY_APP_ID`. Ask the project owner, or copy them
+from the Firebase console and the Privy dashboard, as described in
+[Connect to Firebase](#connect-to-firebase). Attachments also need
+`VITE_FIREBASE_STORAGE_BUCKET`.
 
 To talk to production instead of **local emulators**, else ignore:
 
@@ -245,11 +258,12 @@ address.
 
 ## Connect to Firebase
 
-Firestore, Authentication, and both Cloud Functions are already deployed to the
-project's Firebase backend. You only need the client config:
+Firestore, Authentication, Storage and all Cloud Functions are already deployed to
+the project's Firebase backend. You only need the client config:
 
-1. Ask Ashley for the six `VITE_FIREBASE_*` values (or get them yourself
-   from the Firebase console: Project settings → General → Your apps → Web app).
+1. Ask the project owner for the `VITE_FIREBASE_*` values and `VITE_PRIVY_APP_ID` (or
+   get them yourself from the Firebase console: Project settings → General → Your
+   apps → Web app, and from the Privy dashboard).
 2. Follow [Getting Started](#getting-started) steps 2–4. For production (no
    emulators), `VITE_FIREBASE_USE_EMULATORS` will need to be changed to false and only run the frontend.
 
@@ -261,35 +275,37 @@ need to redeploy, or want more detail on local emulators, see
 
 ## Documentation Reference
 
+- [Handover guide](gitbook/README.md): The full handover book, also published on GitBook. Start here.
+- [Firebase setup](docs/firebase-setup.md): Step-by-step project, Privy and deployment configuration.
 - [Role-to-Route Permission Matrix (ROLE_ROUTE_PERMISSIONS.md)](docs/ROLE_ROUTE_PERMISSIONS.md): Complete RBAC reference for all five platform roles (Problem Owner, Researcher, Evaluator, Funder, DAO Admin), detailing route permissions and opportunity creation rules.
 - [Audit Registry Integration](docs/AUDIT_REGISTRY_INTEGRATION.md): Hash format, transaction states, frontend configuration, and contract replacement workflow.
 - [Escrow Registry Integration](docs/ESCROW_REGISTRY_INTEGRATION.md): Proposal payment plans, frontend/Firebase escrow verification, and the replacement deployment rollout.
 
 ## Smart Contracts
 
-See [Funding Escrow](contracts/funding-escrow/README.md) for the new escrow
-contracts, tests, 1–5 milestone tranches, optional funder voting plus dual approval,
-admin partial refunds, token listing, owner fees, and depositor dashboard API.
-The replacement registry and factory were confirmed and verified against compiled
-runtime bytecode and reciprocal wiring on Arbitrum Sepolia on 2026-09-29. The active
-manifest and frontend/Firebase configurations select these addresses. The Firebase
-backend and [hosted application](https://qcdao-a0c7a.web.app) rollout completed;
-all 66 Functions were updated or created, the five escrow indexes are ready, and
-the settlement scheduler is enabled. The signed one-mock-USDC smoke test completed
-both 50% payments and reconciled 13 funding audit events; see the
-[transaction evidence](contracts/funding-escrow/manifests/arbitrumSepolia-2026-09-29-smoke.json).
-This tested contracts and verification modules; a full authenticated browser flow
-has not been exercised. Existing token contracts, the owner/platform signer and the
-10 BPS fee are unchanged. Historical records retain their original verification.
-Explorer source publication was not requested for the replacement deployment.
+See [Funding Escrow](contracts/funding-escrow/README.md) for the escrow contracts,
+tests, 1–5 milestone tranches, optional funder voting plus dual approval, admin
+partial refunds, token listing, owner fees and the depositor dashboard API. The
+application fixes two tranches, 50% upfront and 50% on completion.
+
+The active deployment was made on 2026-10-17. Its runtime bytecode and wiring were
+verified read-only. Explorer source publication was not requested. The active
+manifest is [`contracts/audit-registry/manifests/arbitrumSepolia.json`](contracts/audit-registry/manifests/arbitrumSepolia.json),
+synced into `frontend/src/config/` and `firebase/functions/`. Records anchored on the
+two previous registries still verify through
+[`auditRegistry.history.json`](firebase/functions/auditRegistry.history.json).
 
 | Contract | Address (Arbitrum Sepolia) | Purpose |
 |---|---|---|
-| [`EscrowAuditRegistry.sol`](contracts/funding-escrow/contracts/EscrowAuditRegistry.sol) | [`0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0`](https://sepolia.arbiscan.io/address/0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0) | Active manifest registry with canonical escrow creation, accepted-proposal binding and reversible posting pauses. |
-| [`FundingEscrowFactory.sol`](contracts/funding-escrow/contracts/FundingEscrowFactory.sol) | [`0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66`](https://sepolia.arbiscan.io/address/0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66) | Replacement factory, existing listed tokens, admin roles and 10 BPS initial fee. |
-| Previous linked registry | [`0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD`](https://sepolia.arbiscan.io/address/0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD) | Original deployment and ABI retained for historical verification and escrow reads. |
-| Previous [`AuditRegistry.sol`](contracts/audit-registry/contracts/AuditRegistry.sol) | [`0x47dA28cAEf8021dD88fe18B80e367746e0036964`](https://sepolia.arbiscan.io/address/0x47dA28cAEf8021dD88fe18B80e367746e0036964#code) | Previous scheme-2 deployment retained for historical verification. |
-| [`QFT.sol`](contracts/qft-tokens/contracts/QFT.sol) | Not yet deployed | Fixed-supply ERC-20 distributed for platform activity |
+| [`EscrowAuditRegistry.sol`](contracts/funding-escrow/contracts/EscrowAuditRegistry.sol) | [`0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5`](https://sepolia.arbiscan.io/address/0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5) | Active registry: record hashes, audit events, canonical escrow creation, accepted-proposal binding and posting pauses. |
+| [`FundingEscrowFactory.sol`](contracts/funding-escrow/contracts/FundingEscrowFactory.sol) | [`0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0`](https://sepolia.arbiscan.io/address/0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0) | Proposal escrows and open funding grant pools, token allow-list, 10 BPS fee. |
+| [`IndependentFundingFactory.sol`](contracts/funding-escrow/contracts/IndependentFundingFactory.sol) | [`0x87eaF14f3f5AEe7E6021b863Ef0803570c03003f`](https://sepolia.arbiscan.io/address/0x87eaF14f3f5AEe7E6021b863Ef0803570c03003f) | Crowdfunding escrows for independent researcher listings. |
+| [`MockFaucetToken.sol`](contracts/stable-faucet/contracts/MockFaucetToken.sol) | XSGD `0xC2FE292771719Ae948506bab3c156A622de9a415`, USDT `0x5f079A5934C864D6881EF30cf74Fe1363F58B856`, USDC `0x4CBf2C15243678206dF8F248D01a0e117C8ce0cd` | Six-decimal mock stablecoins minted by the test faucet. |
+| [`QFT.sol`](contracts/qft-tokens/contracts/QFT.sol) | No address recorded in the repository | Fixed-supply ERC-20 distributed for platform activity. |
+
+The owner, fee recipient and platform signer is `0x1c608C148F64Fb9657bA4e5fB8992345277371C0`.
+Earlier and retired deployments are listed in the handover guide's
+[contract addresses](gitbook/reference/contract-addresses.md).
 
 ## Testing
 
@@ -317,7 +333,8 @@ starts its own.
 ## Deployment
 
 Pushing to `main` deploys automatically via
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Pushes that only
+change the handover guide in `gitbook/` skip the deploy.
 
 ```
 test-backend  (Cloud Functions) ──┐
@@ -368,27 +385,31 @@ hand in the Firebase console.
 
 ## Pull request security review
 
-Every non-draft pull request is reviewed by Fireworks AI's GLM-5.3 model. The
-workflow scans only the changed diff and creates or updates a single PR comment with
-concrete, actionable security findings. Repository maintainers must add the
-`FIREWORKS_API_KEY` Actions secret once before the workflow can run.
+Non-draft pull requests from the contributors listed in
+[`ai-security-review.yml`](.github/workflows/ai-security-review.yml) are reviewed by a
+Fireworks AI model (`accounts/fireworks/models/glm-5p3-flash` by default). The
+workflow scans only the changed diff, in chunks of up to 75,000 bytes, and creates or
+updates a single PR comment with concrete, actionable security findings. Repository
+maintainers must add the `FIREWORKS_API_KEY` Actions secret once before the workflow
+can run. Add new contributors' GitHub logins to the workflow's `if:` condition.
 
 See [`docs/AI_SECURITY_REVIEW.md`](docs/AI_SECURITY_REVIEW.md) for setup, security
 boundaries, cost controls, and the later switch from Fireworks AI to OpenAI.
 
 ## Current implementation status
 
-Implemented: Privy email sign-in with a server-minted Firebase session, onboarding (name +
-organisation), a multi-role access control model and admin audit capabilities, an
-admin-only page shell, and the Firestore schema for user profiles — split into a
-private `users` record and a minimal public `publicProfiles` record — including
-placeholder contribution counters (`comments`, `businessProblems`, `openFunding`,
-`fundingRequests`, `karma`, `reputation`).
+Sprints 1 to 5 are complete: Privy email sign-in with gas-sponsored embedded wallets,
+multi-role access, posting and discovery, proposals with optional evaluator
+recommendations, threaded comments, owner selection with dual approval, moderation,
+role dashboards, the consolidated audit trail, researcher-led proposals and funding
+approaches, and the on-chain escrow lifecycle with refunds and administrator
+cancellation. The open Sprint 6 work and known gaps are in the handover guide's
+[open work](gitbook/handover/open-work.md) page.
 
 ## Team
 
 | Name | Role |
-|---|---|---|
+|---|---|
 | Ashley Chung Beng Hunn | Product Owner |
 | Anthony Chew Jian Yee | Scrum Master |
 | Daryl Yeo Yao Hong | Full Stack Developer |
@@ -401,4 +422,6 @@ Professor Paul Griffin.
 
 ## License
 
-[Placeholder: e.g. MIT License]
+The repository's [LICENSE](LICENSE) file is the GNU General Public License v3.0. The
+Solidity files declare `SPDX-License-Identifier: MIT`. Confirm the intended licence
+with the sponsor before release.

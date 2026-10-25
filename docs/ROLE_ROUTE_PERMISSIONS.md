@@ -2,79 +2,101 @@
 
 This document specifies the access control rules for SMU QC DAO across all platform roles and multi-role user accounts, delivering O1-KR4 (unauthorised route access blocked for all five roles).
 
+Checked against `main` at `7d3907b` on 25 October 2026. The sources of truth are `frontend/src/config/routes.js` (routes), `frontend/src/lib/roles.js` (capabilities) and `frontend/src/components/RouteGuard.jsx` (enforcement).
+
 ## 1. Platform Roles & Multi-Role Architecture
 
 The platform supports capability-based access control where a single registered user account can hold multiple participant capabilities without needing to switch accounts.
 
-| Role Key | Role Name | Description | Multi-Role Member Inclusion |
-|---|---|---|:---:|
-| `guest` | Unauthenticated Visitor | Public user browsing open challenges and marketing pages. | No |
-| `owner` | Problem Owner | Enterprise / institution posing challenges and reviewing researcher proposals. | Yes |
-| `researcher` | Researcher | Academic / researcher publishing funding requests and submitting technical proposals. | Yes |
-| `evaluator` | Evaluator | Domain expert conducting blind reviews and scoring proposals against rubrics. | Yes |
-| `funder` | Funder | Grant agency / investor funding open challenges and managing milestone disbursements. | Yes |
-| `admin` | DAO / Platform Admin | Platform administrator overseeing dispute arbitration, registries, and smart contract audit logs. | Standalone Admin |
+| Role key | Role name | What it covers | Held by |
+|---|---|---|---|
+| `guest` | Signed-out visitor | Opens the public pages. Posting content asks them to sign in. | Signed-out visitors |
+| `owner` | Problem owner | Posts business problems, reviews proposals and selects one once it is fully funded. | Access levels 0 and 2 |
+| `researcher` | Researcher | Submits proposals to postings and publishes independent proposals. | Access levels 0 and 2 |
+| `funder` | Funder | Funds proposals through escrow, posts open funding calls and approaches independent proposals. | Access levels 0 and 2 |
+| `evaluator` | Evaluator | Files one advisory recommendation per proposal they did not write: Recommend, Recommend with revisions or Do not recommend. There is no rubric scoring. | Access level 2 only |
+| `admin` | DAO administrator | Manages users and roles, reviews content reports, verifies audit records and cancels eligible unpaid escrows. | Access level 1 only |
+
+The access level is the number in `users/{address}.role`. Only the server can change it.
+
+| Access level | Label | Capabilities (`capabilitiesForAccessLevel`) |
+|---|---|---|
+| `0` | User | `owner`, `researcher`, `funder` |
+| `2` | Evaluator | `owner`, `researcher`, `funder`, `evaluator` |
+| `1` | Administrator | `admin` only |
 
 ---
 
 ## 2. Route Permission Matrix
 
-Access evaluation uses set intersection: an authenticated user is granted access if their account possesses at least one of the route's allowed roles (`user.roles.some(r => allowedRoles.includes(r))`).
+Access evaluation uses set intersection: a signed-in account may open a route if it holds at least one of the route's allowed capabilities. A route with no capability list and `authRequired: true` is open to any signed-in account. `RouteGuard` is a browser UX check only. Firestore rules and Cloud Functions are the security boundary.
 
-| Route Path | Description | Public / Guest | Multi-Role Member (`owner+res+eval+fund`) | Standalone Admin (`admin`) | Unauthorized Action |
-|---|---|:---:|:---:|:---:|---|
-| `#/home` | Platform Landing & Hero | Allow | Allow | Allow | None (Public) |
-| `#/discover` | Explore Opportunities | Allow | Allow | Allow | None (Public) |
-| `#/solutions` | Browse Independent Solution Listings | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/opportunity/:id` | Opportunity Detail | Allow | Allow | Allow | None (Public) |
-| `#/login` | Role Authentication | Allow | Redirect to Home | Redirect to Home | Preserves ?redirect= param |
-| `#/create` | Publish Problem Statement / Brief | 401 Redirect | Allow (All 3 Brief Types) | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/actions` | Action Needed (items waiting on the member, acted on in place) | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/my-problems` | Manage Owned Problems & Submissions | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/create-proposal` | Publish or edit Independent Solution Proposal | 401 Redirect | Allow (researcher) | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/proposals` | Researcher Proposal Dashboard | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/evaluations` | Expert Evaluation & Scoring Queue | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/funding` | Funding Commitments & Escrow | 401 Redirect | Allow | 403 Forbidden | 401 Redirect / 403 Access Denied |
-| `#/admin` | Platform Audit Trail & Registries | 401 Redirect | 403 Forbidden | Allow | 401 Redirect / 403 Access Denied |
-| `#/access-denied` | 403 Access Restricted Screen | Allow | Allow | Allow | Generic, secure 403 error boundary |
-| `*` | Unknown Route | 404 | 404 | 404 | Displays 404 Not Found screen |
+"Sign-in redirect" means the visitor is sent to `#/login?redirect=<route>` and returned there after signing in.
+
+| Route | Page | Guest | User (0) | Evaluator (2) | Admin (1) |
+|---|---|:---:|:---:|:---:|:---:|
+| `#/home` | Landing page | Allow | Allow | Allow | Allow |
+| `#/discover` | Browse postings. Guests see a sign-in notice instead of listings | Allow | Allow | Allow | Allow |
+| `#/posting/:id` | Posting detail. Guests are asked to sign in | Allow | Allow | Allow | Allow |
+| `#/profile/:address` | Public profile | Allow | Allow | Allow | Allow |
+| `#/architecture` | On-chain vs off-chain and status reference | Allow | Allow | Allow | Allow |
+| `#/profile` | Own profile | Sign-in redirect | Allow | Allow | Allow |
+| `#/proposal/:id` | Proposal detail | Sign-in redirect | Allow | Allow | Allow |
+| `#/solutions` | Independent proposals | Sign-in redirect | Allow | Allow | 403 |
+| `#/create` | New business problem. `#/create/:draftId` resumes a draft | Sign-in redirect | Allow | Allow | 403 |
+| `#/create/open-funding` | New open funding call | Sign-in redirect | Allow | Allow | 403 |
+| `#/create-funding/:draftId` | Resume an open funding draft | Sign-in redirect | Allow | Allow | 403 |
+| `#/edit-posting/:id` | Edit a posting | Sign-in redirect | Allow | Allow | 403 |
+| `#/actions` | Action Needed | Sign-in redirect | Allow | Allow | 403 |
+| `#/my-problems` | Problem owner dashboard | Sign-in redirect | Allow | Allow | 403 |
+| `#/proposals` | Researcher's proposals | Sign-in redirect | Allow | Allow | 403 |
+| `#/submit-proposal/:postingId` | Submit a proposal to a posting | Sign-in redirect | Allow | Allow | 403 |
+| `#/edit-proposal/:id` | Edit a proposal | Sign-in redirect | Allow | Allow | 403 |
+| `#/create-proposal` | Publish an independent proposal. `#/create-proposal/:id` edits one | Sign-in redirect | Allow | Allow | 403 |
+| `#/approach/:id` | Funding approach to an independent proposal | Sign-in redirect | Allow | Allow | 403 |
+| `#/funding` | Funding portfolio | Sign-in redirect | Allow | Allow | 403 |
+| `#/evaluations` | Evaluation queue | Sign-in redirect | 403 | Allow | 403 |
+| `#/admin` | Admin Audit. `?tab=<section>` opens a section | Sign-in redirect | 403 | 403 | Allow |
+| `#/login` | Sign in | Allow | Redirect | Redirect | Redirect |
+| `#/access-denied` | 403 screen | Allow | Allow | Allow | Allow |
+| Anything else | Not found | 404 | 404 | 404 | 404 |
+
+A signed-in account that opens `#/login` goes to its `redirect` target when that route exists, otherwise to `#/admin` for administrators and `#/home` for everyone else.
 
 ---
 
 ## 3. Navigation Menu Mapping
 
-Each user sees navigation links corresponding to their granted capabilities:
+Each user sees navigation links corresponding to their granted capabilities. Profile sits in the account menu and Create is the **New brief** button, so neither appears as a nav link.
 
-- **Guest / Unauthenticated**:
-  - `Home` (`#/home`)
-  - `Discover` (`#/discover`)
-  - `Sign In` (`#/login`)
-- **Multi-Role Platform Member (`owner + researcher + evaluator + funder`)**:
-  - `Home` (`#/home`)
-  - `Discover` (`#/discover`)
-  - `Solutions` (`#/solutions`)
-  - `Create Brief` (`#/create`)
-  - `Action Needed` (`#/actions`)
-  - `My Problems` (`#/my-problems`)
-  - `My Proposals` (`#/proposals`)
-  - `Evaluation Queue` (`#/evaluations`)
-  - `Funding Portfolio` (`#/funding`)
-- **DAO Admin (`admin`)**:
-  - `Home` (`#/home`)
-  - `Discover` (`#/discover`)
-  - `Admin Audit` (`#/admin`) — opens on **Content moderation** while reports are pending
+- **Guest**:
+  - Nav: `Home`, `Discover`
+  - Header: theme toggle and **Sign in with email**
+- **User (access level 0)**:
+  - Nav: `Home`, `Discover`, `Solutions`, `Workspaces`
+  - Workspaces tabs: `Action Needed`, `My Problems`, `My Proposals`, `Funding Portfolio`
+  - Header: **New brief**, theme toggle, notifications, account menu (`Profile`, `Workspaces`, `Sign out`)
+- **Evaluator (access level 2)**:
+  - As a user, plus `Evaluation Queue` in the Workspaces tabs
+- **DAO Admin (access level 1)**:
+  - Nav: `Home`, `Discover`, `Admin Audit`
+  - Header: theme toggle, notifications, account menu (`Profile`, `Sign out`)
+  - Lands on `#/admin` after sign-in. Admin Audit opens on **Content reports** while reports are pending
+
+Admin Audit sections, from `frontend/src/config/adminSections.js`: Overview, Service health, Escrows & refunds, Content reports, Users & access, Proposal verification, Problem statements, Funding calls and Governance history.
 
 ---
 
 ## 4. Opportunity Creation Access Rules
 
-When creating a brief on `#/create`:
+When creating a brief from **New brief** (`#/create`), users and evaluators choose between:
 
-- **Multi-Role Platform Member**: Can select between:
-  - **Business Problem (`business-problem`)**: Acting as Problem Owner.
-  - **Open Funding (`open-funding`)**: Acting as Funder.
-  - **Funding Request (`funding-request`)**: Acting as Researcher.
-- **Admin**: Route `#/create` is restricted (403 Forbidden).
+- **Business problem (`business-problem`)** at `#/create`, acting as problem owner.
+- **Open funding (`open-funding`)** at `#/create/open-funding`, acting as funder.
+
+Researchers do not post funding requests here. They publish an **independent proposal** from `#/create-proposal` (the **Publish independent proposal** button on `#/proposals`), which appears under **Solutions**. The older `funding-request` type is still defined in `frontend/src/data.js` but is not offered and is hidden from Discover.
+
+Administrators get 403 on every creation route.
 
 ---
 
@@ -91,15 +113,16 @@ When creating a brief on `#/create`:
 Authentication is Privy email sign-in. The server verifies Privy's access token, reads the embedded wallet Privy created for that email, and mints a Firebase custom token whose uid is that address:
 1. **Account**: The Firebase uid and `users/{address}` id are the wallet address. `email` and `privyUserId` are written by the server. One email maps to one wallet.
 2. **Session & Profile Resolution**: On successful authentication, the user's registered Firestore profile (`/users/{address}`) is loaded into `SessionContext` and mapped into `AuthContext`.
-3. **Capability Set Assignment**:
-   - **Platform Participant**: User profiles (`role == 0` in Firestore) receive the full participant capability set: `[owner, researcher, evaluator, funder]`.
-   - **DAO Administrator**: Dedicated admin profiles (`role == 1` in Firestore, assigned out-of-band/admin SDK) receive the isolated `[admin]` capability set.
-   - **Unauthenticated Visitor**: Resolves to `[guest]`.
+3. **Capability Set Assignment** (`capabilitiesForAccessLevel` in `frontend/src/lib/roles.js`):
+   - **User**: `role == 0` receives `[owner, researcher, funder]`.
+   - **Evaluator**: `role == 2` receives `[owner, researcher, funder, evaluator]`.
+   - **DAO Administrator**: `role == 1` receives only `[admin]`. Granted through **Admin Audit → Users & access** or, for the first administrator, the `ADMIN_BOOTSTRAP_EMAILS` setting on Cloud Functions.
+   - **Signed-out visitor**: Resolves to `[guest]`.
 ---
 
 ## 7. Evaluator Assignment Model (QCDAO-63)
 
-`role = 2` (assigned evaluator) is granted by a DAO administrator from **Admin Audit → User Directory & Roles**. No
+`role = 2` (assigned evaluator) is granted by a DAO administrator from **Admin Audit → Users & access**. No
 client path can set it: `firestore.rules` fixes `role` at 0 on create and immutable on every client update.
 
 Once assigned, an evaluator **self-selects from an eligible pool** rather than being allocated individual proposals.
@@ -139,4 +162,4 @@ existing records only and returns what waits on the signed-in member:
 | Selection to accept | Proposal creator | Their proposal is selected and the acceptance window is still open | The matching panel's accept / reject dialog |
 | Awaiting my recommendation | Assigned evaluator | Proposal they have not recommended (first queue page) | Links to the proposal's recommendation form |
 
-Administrators have no Action Needed tab; the admin page opens on Content moderation while reports are pending.
+Administrators have no Action Needed tab. The admin page opens on Content reports while reports are pending.

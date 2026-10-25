@@ -1,38 +1,76 @@
 # Escrow-linked registry verification
 
-This branch implements **QCDAO-110, QCDAO-113 and QCDAO-117**. The replacement linked
+This document began with **QCDAO-110, QCDAO-113 and QCDAO-117**. It records how the
+escrow-linked registry and factory are deployed, verified and used. The linked
 registry/factory provides accepted-proposal binding and reversible moderation pauses.
-Both contracts are confirmed on Arbitrum Sepolia (chain 421614), with compiled
-runtime-bytecode and reciprocal-wiring verification complete. The active stable
-manifest and generated frontend/Firebase configurations select this replacement.
 
-Rollout completed on 2026-09-29. Firebase deployment updated or created all 66
-Functions, including eight active new escrow services. All five escrow indexes are
-ready. The settlement scheduler is enabled and its 15:02:02 UTC attempt reported
-status 0. The rebuilt [hosted application](https://qcdao-a0c7a.web.app) was released
-after the backend. The signed live one-mock-USDC 50%/50% smoke test passed; the full
-authenticated browser workflow has not been exercised. The owner, platform signer,
-existing mock tokens and 10 BPS fee are unchanged. Explorer source publication was
-not requested for the replacement; compiled runtime-bytecode verification passed.
+## Current deployment (17 October 2026)
+
+Checked against `main` at `7d3907b` on 25 October 2026. The active deployment was
+confirmed on Arbitrum Sepolia (chain 421614) on 17 October 2026, and read-only
+runtime-bytecode and wiring verification passed the same day. Explorer source
+publication was not requested. The owner, platform signer, mock tokens and 10 BPS
+fee match the earlier deployments.
 
 | Setting | Deployed value |
+| --- | --- |
+| EscrowAuditRegistry | `0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5` |
+| FundingEscrowFactory | `0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0` |
+| FundingEscrowDeployer | `0x2b2410eBf06026c25ef7E7b3d0FAD7cE5a35c392` |
+| OpenFundingPoolDeployer | `0xdE607e8cDbEe4C7C00E821Ff03E1B3eFAe3e8Ca6` |
+| IndependentFundingFactory | `0x87eaF14f3f5AEe7E6021b863Ef0803570c03003f` |
+| Owner, fee recipient and platform signer | `0x1c608C148F64Fb9657bA4e5fB8992345277371C0` |
+| Fee | 10 BPS = 0.1%, charged only on payouts |
+| Capabilities | Pooled funding, open funding grants, grant proposal decline |
+
+The confirmed deployment record is
+[`contracts/audit-registry/manifests/arbitrumSepolia.json`](../contracts/audit-registry/manifests/arbitrumSepolia.json).
+The raw records are `contracts/funding-escrow/deployments/arbitrumSepolia-1792217812000.json`
+and `independent-arbitrumSepolia-1792217951000.json`, and the independent funding
+configuration is `frontend/src/config/independentFunding.contract.json`.
+
+[`auditRegistry.history.json`](../firebase/functions/auditRegistry.history.json) keeps
+the ABI configuration of the two registries before it, so receipts anchored on them
+still verify:
+
+| Registry | Deployed | Record |
+| --- | --- | --- |
+| `0xF202ECc872Be5613C184Cc07622346750f9b8fE9` | 9 October 2026 | [`pre-grant-decline-arbitrumSepolia.deployment.json`](../contracts/audit-registry/legacy/pre-grant-decline-arbitrumSepolia.deployment.json) |
+| `0xc582a423bbcd08d6B9D930F53bd5ee054965b74f` | 8 October 2026 | History file only |
+
+Earlier registries are retired and no longer verified by the app. Their records stay
+in the repository: the linked registry `0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD` and
+factory `0xe5d212491E544694d21c51EF9777F71B32fc5D41` in
+[`pre-qcdao-110-arbitrumSepolia.deployment.json`](../contracts/audit-registry/legacy/pre-qcdao-110-arbitrumSepolia.deployment.json),
+and the scheme-2 registry `0x47dA28cAEf8021dD88fe18B80e367746e0036964` in
+[`pre-escrow-arbitrumSepolia.contract.json`](../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json)
+and its adjacent `.deployment.json` file.
+
+## Historical: 29 September 2026 rollout
+
+This section is kept as a record of the first escrow-linked rollout. Its registry
+and factory were later replaced, and the backend now exports 93 Functions rather
+than 66.
+
+Rollout completed on 2026-09-29. Firebase deployment updated or created all 66
+Functions, including eight active new escrow services. All five escrow indexes were
+ready. The settlement scheduler was enabled and its 15:02:02 UTC attempt reported
+status 0. The rebuilt [hosted application](https://qcdao-a0c7a.web.app) was released
+after the backend. The signed live one-mock-USDC 50%/50% smoke test passed. The full
+authenticated browser workflow was not exercised. The owner, platform signer,
+existing mock tokens and 10 BPS fee were unchanged. Explorer source publication was
+not requested, and compiled runtime-bytecode verification passed.
+
+| Setting | Deployed value (retired) |
 | --- | --- |
 | EscrowAuditRegistry | `0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0` |
 | FundingEscrowFactory | `0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66` |
 | Owner, fee recipient and platform signer | `0x1c608C148F64Fb9657bA4e5fB8992345277371C0` |
 | Initial fee | 10 BPS = 0.1%, charged only on payouts |
 
-The confirmed deployment record is
-[`contracts/audit-registry/manifests/arbitrumSepolia.json`](../contracts/audit-registry/manifests/arbitrumSepolia.json).
-The previous linked registry `0xb901B23382322090A1Ea7bC6b8a9d2D422e855FD` and factory
-`0xe5d212491E544694d21c51EF9777F71B32fc5D41` are archived in
-[`pre-qcdao-110-arbitrumSepolia.deployment.json`](../contracts/audit-registry/legacy/pre-qcdao-110-arbitrumSepolia.deployment.json).
-Their historical ABI configuration remains in
-[`auditRegistry.history.json`](../firebase/functions/auditRegistry.history.json),
-alongside the earlier `0x47dA28cAEf8021dD88fe18B80e367746e0036964` registry.
-That earlier scheme-2 deployment and ABI are also preserved under
-[`contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json`](../contracts/audit-registry/legacy/pre-escrow-arbitrumSepolia.contract.json)
-and its adjacent `.deployment.json` file. No historical records were migrated or retired.
+The workflow sections that follow (proposal creation, wallet funding, delivery and
+settlement) describe the application rather than one deployment. The validation
+results near the end are from the September rollout.
 
 ## Proposal creation and verification
 

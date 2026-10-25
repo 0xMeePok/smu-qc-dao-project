@@ -14,6 +14,11 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # The handover book in gitbook/ syncs to GitBook and ships nothing to
+    # Firebase. A push that only changes the book skips this workflow. A push
+    # that also changes code still deploys.
+    paths-ignore:
+      - 'gitbook/**'
   # Redeploy the current main by hand from the Actions tab.
   workflow_dispatch:
 

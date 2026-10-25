@@ -67,7 +67,7 @@ reference, the schema is:
 | `privyUserId` | string | server-written `did:privy:…`. Clients cannot write it |
 | `fullName` | string | 2–80 chars |
 | `organisation` | string | 2–120 chars |
-| `role` | number | `0` (user) or `1` (administrator) access level |
+| `role` | number | `0` (user), `1` (administrator) or `2` (evaluator) access level. Server-set only |
 | `chainId` | number | `421614` (Arbitrum Sepolia) |
 | `walletVerified` | bool | `true` — the server proved it |
 | `stats` | map | `comments`, `businessProblems`, `openFunding`, `fundingRequests`, `karma`, `reputation` — all start at `0` |
@@ -88,22 +88,58 @@ when onboarding creates the profile. Admin SDK only.
 2. Nickname it `qc-dao-frontend`. Do **not** tick Firebase Hosting here
 3. Copy the `firebaseConfig` object
 
+## Step 5b — Create the Storage bucket **[YOU]**
+
+1. **Build → Storage → Get started**, in **production mode**. Test mode leaves the
+   bucket world-writable for 30 days.
+2. Note the bucket name, normally `YOUR_PROJECT_ID.firebasestorage.app`.
+3. Apply CORS and the lifecycle rule once, from `firebase/`, with the Google Cloud CLI:
+
+   ```bash
+   gcloud storage buckets update gs://YOUR_PROJECT_ID.firebasestorage.app --cors-file=storage.cors.json
+   gcloud storage buckets update gs://YOUR_PROJECT_ID.firebasestorage.app --lifecycle-file=storage.lifecycle.json
+   ```
+
+   Update the origins in `storage.cors.json` and the `storage.bucket` value in
+   `firebase.json` first if the project is not `qcdao-a0c7a`.
+
+## Step 5c — Set up App Check **[YOU]**
+
+Callable functions enforce App Check outside the emulator, so production sign-in
+fails without it.
+
+1. In the Google Cloud console, open **reCAPTCHA** (under Security) and create a
+   **Web** key. List the Hosting domains (`YOUR_PROJECT_ID.web.app`,
+   `YOUR_PROJECT_ID.firebaseapp.com` and any preview channel you test on). Leave the
+   checkbox challenge off, because App Check needs a score-based key. Do not add
+   `localhost` to a production key.
+2. In the Firebase console, open **App Check → Apps** and register the web app with
+   the **reCAPTCHA Enterprise** provider and that site key.
+3. Put the site key in `VITE_FIREBASE_APP_CHECK_SITE_KEY` (step 6) and in the GitHub
+   Actions secret of the same name.
+4. Leave App Check enforcement for Cloud Storage off until tokens are confirmed to
+   be issued. Enabling it early makes every upload fail.
+
 ## Step 6 — Fill in your environment file **[YOU]**
 
 ```bash
 cp frontend/.env.example frontend/.env.local
 ```
 
-Paste the values in. Only three are actually required:
+Paste the values in. The app starts with the first three, and sign-in also needs
+the Privy app id from step 10:
 
 ```
 VITE_FIREBASE_API_KEY=AIza...
 VITE_FIREBASE_PROJECT_ID=your-project-id
 VITE_FIREBASE_APP_ID=1:123456789012:web:abc123
+VITE_PRIVY_APP_ID=your-privy-app-id
 ```
 
-`VITE_FIREBASE_AUTH_DOMAIN`, `STORAGE_BUCKET` and `MESSAGING_SENDER_ID` are optional —
-see [FAQ](#faq). Both `.env.local` and `.env` work; both are gitignored.
+Production builds also need `VITE_FIREBASE_APP_CHECK_SITE_KEY` (step 5c), and
+attachments need `VITE_FIREBASE_STORAGE_BUCKET` (step 5b).
+`VITE_FIREBASE_AUTH_DOMAIN` and `MESSAGING_SENDER_ID` are not used, see [FAQ](#faq).
+Both `.env.local` and `.env` work. Both are gitignored.
 
 ## Step 7 — Install the CLI and link the project **[YOU]**
 
@@ -121,11 +157,22 @@ Put your real project id in `firebase/.firebaserc`.
 cd firebase
 npm install
 npm --prefix functions install
-firebase deploy --only firestore:rules,firestore:indexes,functions --project YOUR_PROJECT_ID
+firebase deploy --only firestore:rules,firestore:indexes,storage,functions --project YOUR_PROJECT_ID
 ```
 
 **Both halves are mandatory.** Without the rules, production mode denies every write.
 Without the functions, nothing can verify a Privy session and nobody can sign in.
+
+Before this deploy, set up what the functions read at runtime:
+
+* `firebase/functions/.env.YOUR_PROJECT_ID` with `PRIVY_APP_ID` (step 10) and
+  `ARBITRUM_SEPOLIA_RPC_URL`, for example `https://sepolia-rollup.arbitrum.io/rpc`.
+* The secrets `PRIVY_SECRET` (step 10) and `ESCROW_PLATFORM_PRIVATE_KEY`, the escrow
+  factory's platform signer key, with `npx firebase functions:secrets:set NAME`.
+
+`./deploy.sh --project YOUR_PROJECT_ID` runs the same preflight, creates the database
+if it is missing and deploys rules, indexes and functions. It does not deploy Storage
+rules, so run `firebase deploy --only storage` after it.
 
 The first deploy asks to enable the `cloudfunctions`, `cloudbuild`, `artifactregistry`,
 `eventarc`, and `cloudscheduler` APIs — accept. It takes several minutes.
@@ -145,8 +192,9 @@ curl -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json
   https://asia-southeast1-YOUR_PROJECT_ID.cloudfunctions.net/exchangePrivySession
 ```
 
-`200` means deployed and working. **`404` means not deployed** — see
-[Troubleshooting](#troubleshooting).
+**`404` means not deployed**, see [Troubleshooting](#troubleshooting). Any other code
+means the function exists. The request itself is refused, because curl sends no App
+Check token or Privy access token.
 
 ## Step 9 — Run it
 
@@ -318,10 +366,11 @@ signInWithCustomToken()
       +-- users/{address} exists?  --> signed in
       |
       +-- not found?               --> onboarding modal
-                                          (full name, organisation, role)
+                                          (full name, organisation, terms)
                                               |
                                               v
-                                        #/role-selection
+                                        users/ + publicProfiles/ written,
+                                        stampPrivyIdentity copies the email
 ```
 
 `request.auth.uid` **is** the wallet address. Email is stored on the same
@@ -440,9 +489,14 @@ VITE_FIREBASE_USE_EMULATORS=true
 VITE_FIREBASE_API_KEY=demo-api-key
 VITE_FIREBASE_PROJECT_ID=qc-dao-demo
 VITE_FIREBASE_APP_ID=1:000000000000:web:demo
+VITE_FIREBASE_STORAGE_BUCKET=qc-dao-demo.firebasestorage.app
+VITE_PRIVY_APP_ID=your-development-privy-app-id
 ```
 
-The emulators accept any project id and placeholder keys.
+The emulators accept any project id and placeholder keys. Privy is a hosted service,
+so sign-in still needs a real development Privy app that allows
+`http://localhost:5173` and `http://127.0.0.1:5173`, with its secret in
+`firebase/functions/.secret.local` as `PRIVY_SECRET=...`.
 
 ---
 
