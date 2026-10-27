@@ -11,7 +11,7 @@ export function CurrencyAmount({ amount, currency, tokenText }) {
   const base = currency === 'XSGD' ? 'SGD' : 'USD';
   return <span className="currency-amount" title={`Indicative testnet estimate · Google Finance, fetched ${new Date(rates.fetchedAt).toLocaleString()}. Assumes 1 ${currency} = 1 ${base}; not a redeemable balance.`}>
     <span className="currency-amount-local">≈ {converted}</span>
-    <small className="currency-amount-token">{original} <span className="currency-amount-note">· indicative testnet</span></small>
+    <small className="currency-amount-token"><span className="currency-amount-token-value">{original}</span><span className="currency-amount-note">indicative testnet estimate</span></small>
   </span>;
 }
 
