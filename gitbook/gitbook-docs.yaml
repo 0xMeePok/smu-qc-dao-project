@@ -1,7 +1,4 @@
 $schema: https://api.gitbook.com/gitbook-docs.yaml
-# Site-level Git Sync settings. GitBook reads this from the project
-# directory (gitbook/). The single space reads its pages from this folder,
-# using .gitbook.yaml, README.md and SUMMARY.md.
 site:
   title: QC DAO handover guide
   structure:
