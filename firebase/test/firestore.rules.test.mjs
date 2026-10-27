@@ -554,6 +554,13 @@ describe("users/{address} update", () => {
     );
   });
 
+  it("[BIT-OPD-261] blocks a signed-in user promoting their own role to evaluator", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertFails(
+      updateDoc(doc(db, "users", OTHER), { role: 2, updatedAt: serverTimestamp() }),
+    );
+  });
+
   it("blocks a karma increase from the client", async () => {
     const db = env.authenticatedContext(OTHER).firestore();
     await assertFails(
