@@ -11,6 +11,7 @@ Routine tasks for whoever operates the platform. Most are done in the app as an 
 | Manage | Escrows & refunds | Inspect proposal funding and cancel eligible unpaid escrows with a reason |
 | Manage | Content reports | Review reported content and hide, remove or restore it |
 | Manage | Users & access | Search accounts, change roles, suspend or reinstate |
+| Manage | Proposal export | Download an accepted posting and its comments as JSON and CSV. Grading stays outside the platform |
 | Audit records | Proposal verification | Inspect proposal receipts and retry failed confirmations |
 | Audit records | Problem statements | Review postings and their verification records |
 | Audit records | Funding calls | Review open funding calls and their verification records |
@@ -35,6 +36,7 @@ Every role change and suspension is written to the `audits` collection with the 
 | Handle a report | **Content reports**: open the item, read the context, then hide, remove or restore with a reason. The decision is anchored on-chain and appears in the audit trail |
 | Expire a posting early | Use the expiry utility on the admin page, which calls `adminForceExpireOpportunity`. Expiry records the status and opens refunds. It never moves funds itself |
 | Cancel an unpaid escrow | **Escrows & refunds**: choose the escrow and give a reason. Refused once any payment has been made. Funders then claim their own refunds |
+| Export proposals for external grading | **Proposal export**: one accepted posting, or a UTC date range. The download is JSON and CSV, and the action is written to `audits`. See [Export selected proposals](proposal-export.md) |
 | Retry a stuck proposal receipt | **Proposal verification**: retry confirmation after the automatic attempts are used up. Jobs with no transaction wait for the researcher's wallet |
 
 ## Platform upkeep

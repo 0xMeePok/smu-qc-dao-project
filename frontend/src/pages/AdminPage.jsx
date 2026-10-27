@@ -18,6 +18,7 @@ import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
 import { PlatformStatusPanel } from "../components/PlatformStatusPanel.jsx";
 import { AdminActivityPanel } from "../components/AdminActivityPanel.jsx";
 import { EscrowAdministration } from "../components/AdminEscrowCancellation.jsx";
+import { ProposalExportPanel } from "../components/ProposalExportPanel.jsx";
 import { ADMIN_SECTION_GROUPS, getAdminSection } from "../config/adminSections.js";
 import { AdminSectionPicker } from "../components/AdminSectionPicker.jsx";
 
@@ -206,6 +207,7 @@ export default function AdminPage({ onNavigate, initialSection }) {
               <button type="button" onClick={() => chooseTab("moderation")}><span><strong>Review reports</strong><small>Resolve flagged content.</small></span><span aria-hidden="true">→</span></button>
               <button type="button" onClick={() => chooseTab("users")}><span><strong>Manage users</strong><small>Roles and suspensions.</small></span><span aria-hidden="true">→</span></button>
               <button type="button" onClick={() => chooseTab("escrows")}><span><strong>Manage escrow</strong><small>Funding and refunds.</small></span><span aria-hidden="true">→</span></button>
+              <button type="button" onClick={() => chooseTab("exports")}><span><strong>Export proposals</strong><small>JSON and CSV for external grading.</small></span><span aria-hidden="true">→</span></button>
             </div>
           </section>}
 
@@ -213,6 +215,7 @@ export default function AdminPage({ onNavigate, initialSection }) {
             {activeTab === "escrows" && <div id="admin-panel-escrows"><EscrowAdministration onNavigate={onNavigate} /></div>}
             {activeTab === "overview" && <div id="admin-panel-overview"><AdminActivityPanel onOpenTab={chooseTab} showHeading={false} /></div>}
             {activeTab === "moderation" && <div id="admin-panel-moderation"><ModerationQueue onCountChange={setPendingModeration} /></div>}
+            {activeTab === "exports" && <div id="admin-panel-exports"><ProposalExportPanel /></div>}
             {activeTab === "users" && (
               <div id="admin-panel-users">
                 <UserManagementTable

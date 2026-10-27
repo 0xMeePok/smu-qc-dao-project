@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import { useSession } from "./context/SessionContext.jsx";
 import { shortenAddress } from "./lib/chain.js";
 import { isAdmin, isAssignedEvaluator } from "./lib/roles.js";
+import { CurrencyToggle } from "./components/CurrencyToggle.jsx";
 import { ResponsiveHeader } from "./components/ResponsiveHeader.jsx";
 import { useTheme } from "./lib/theme.js";
 import { NotificationCentre } from "./components/ModerationNotifications.jsx";
@@ -242,6 +243,7 @@ function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
     return (
       <div className="account-controls">
         {newBrief}
+        <CurrencyToggle />
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <NotificationCentre userId={address} />
         <AccountMenu
@@ -259,6 +261,7 @@ function AccountControls({ theme, onToggleTheme, canCreate, workspaceRoutes }) {
 
   return (
     <div className="account-controls">
+      <CurrencyToggle />
       <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       <SignInWithEmail />
     </div>

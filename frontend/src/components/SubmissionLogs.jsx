@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
@@ -299,7 +300,7 @@ function SubmissionLogs({ kind }) {
           <div className="submission-log-meta">
             <span><strong>Organisation:</strong> {selected.organisation || "—"}</span>
             <span><strong>Owner:</strong> <code>{shortenAddress(selected.ownerId)}</code></span>
-            <span><strong>{variant.fundingLabel}:</strong> {formatAmount(selected.amount, selected.currency)}</span>
+            <span><strong>{variant.fundingLabel}:</strong> <ConvertedAmount text={formatAmount(selected.amount, selected.currency)} /></span>
             <span><strong>Attachments:</strong> {selected.attachments?.length || 0}</span>
             {kind === "posting" && selected.categories?.length > 0 && (
               <span><strong>Categories:</strong> {selected.categories.map(categoryLabel).join(", ")}</span>

@@ -1,3 +1,4 @@
+import { TokenAmount } from "./CurrencyAmount.jsx";
 import { useEffect, useId, useRef, useState } from "react";
 import { encodeFunctionData, erc20Abi, formatUnits } from "viem";
 import { httpsCallable } from "firebase/functions";
@@ -241,7 +242,7 @@ export function AccountWallet({ address, email, visible = true, services = defau
       <div className="account-wallet-address"><span>Embedded wallet</span><button type="button" onClick={copy} aria-label="Copy wallet address">Copy address</button><code>{address}</code></div>
       <div className="account-wallet-heading"><strong>Test token balances</strong><button type="button" disabled={loading} onClick={() => refresh()}>{loading ? "Refreshing…" : "Refresh"}</button></div>
       <small>Arbitrum Sepolia · gas sponsored</small>
-      <dl className="account-wallet-balances">{WALLET_TOKENS.map(t => <div key={t.symbol}><dt>{t.symbol}</dt><dd>{amountText(balances?.[t.symbol], t.decimals)}</dd></div>)}</dl>
+      <dl className="account-wallet-balances">{WALLET_TOKENS.map(t => <div key={t.symbol}><dt>{t.symbol}</dt><dd>{typeof balances?.[t.symbol] === "bigint" ? <TokenAmount value={balances[t.symbol]} decimals={t.decimals} currency={t.symbol} tokenText={amountText(balances[t.symbol], t.decimals)} /> : "—"}</dd></div>)}</dl>
       {readError && <p role="alert">{readError}</p>}
       {pending && <div className="account-wallet-pending"><p>A transfer may already have been sent. Check its status before sending again.</p>{pending.unreadable ? <p>The saved transfer could not be read. Contact an administrator before sending again.</p> : <button type="button" disabled={busy} onClick={recover}>{busy ? "Checking transfer…" : "Check transfer status"}</button>}</div>}
       {notice && <p role="status">{notice}</p>}

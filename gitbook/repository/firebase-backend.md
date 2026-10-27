@@ -35,11 +35,11 @@ The `Content-Security-Policy` header is strict. It lists each Google endpoint, t
 
 ## Cloud Functions
 
-The source is `firebase/functions/`, an ES module package on Node 22. `index.js` creates the Admin SDK app and exports all 93 functions. Larger areas register their functions from their own module, for example `registerEscrowFundingFunctions()` in `escrowFundingFunctions.js`.
+The source is `firebase/functions/`, an ES module package on Node 22. `index.js` creates the Admin SDK app and exports all 94 functions. Larger areas register their functions from their own module, for example `registerEscrowFundingFunctions()` in `escrowFundingFunctions.js`.
 
 | Type | Count | Notes |
 | --- | --- | --- |
-| Callable (`onCall`) | 69 | Called from the browser with `httpsCallable`. Most use `MEMBER_CALL_OPTIONS`: region `asia-southeast1`, at most five instances, and App Check enforced outside the emulator |
+| Callable (`onCall`) | 70 | Called from the browser with `httpsCallable`. Most use `MEMBER_CALL_OPTIONS`: region `asia-southeast1`, at most five instances, and App Check enforced outside the emulator |
 | Firestore triggers | 17 | Projections, audit queues, edit trails, moderation screening and notifications |
 | Scheduled | 7 | See [Scheduled jobs](#scheduled-jobs) |
 
@@ -59,7 +59,7 @@ Every callable checks the caller itself. `requireMember` refuses callers who are
 | Independent crowdfunding | `independentFunding*.js` | `getIndependentFundingState`, `prepareIndependentFundingAction`, `syncIndependentFunding` |
 | Moderation | `moderation.js`, `moderationFunctions.js`, `moderationAnchor.js` | Eight callables including `submitContentReport` and `moderateContent`, three `screen*Content` triggers, `listRemovedProblems`, `readRemovedProblem`, `listPostedProposals` |
 | Mock matching and notices | `matching.js`, `matchingNotifications.js` | Eight mock matching callables, `expireMockMatchingWindows`, `notifyMatchingEvent`, `resumeMatchingNotificationDelivery`, `remindNearingApprovalWindows` |
-| Admin overview | `adminActivity.js`, `platformStatus.js` | `adminGetActivitySummary`, `adminGetPlatformStatus` |
+| Admin overview | `adminActivity.js`, `platformStatus.js`, `proposalExport.js` | `adminGetActivitySummary`, `adminGetPlatformStatus`, `adminExportSelectedProposals` |
 | Wallet | `walletFaucetFunctions.js` | `claimWalletTokens`, which relays a signed faucet request to the Vercel faucet |
 
 The full list with one line per function is in [Cloud Functions](../reference/cloud-functions.md).

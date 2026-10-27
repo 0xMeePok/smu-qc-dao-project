@@ -12,6 +12,8 @@ import { StatusBadge } from "../components/StatusBadge.jsx";
 import { POSTING_STATUS_DRAFT, listOwnPostings } from "../lib/postings.js";
 import { listProposals, proposalAuthorRoute } from "../lib/proposals.js";
 import { opportunityTypeLabel } from "../lib/opportunityPresentation.js";
+import { DEFAULT_LOCAL_CURRENCY, LOCAL_CURRENCIES } from "../lib/fxRates.js";
+import { CurrencyAmount } from "../components/CurrencyAmount.jsx";
 
 function formatDate(value) {
   if (!value) return "Not available";
@@ -34,6 +36,8 @@ function formFromProfile(profile) {
     organisation: profile.organisation || "",
     biography: profile.biography || "",
     expertise: Array.isArray(profile.expertise) ? profile.expertise : [],
+    localCurrency: LOCAL_CURRENCIES.includes(profile.localCurrency) ? profile.localCurrency : DEFAULT_LOCAL_CURRENCY,
+    showLocalCurrency: profile.showLocalCurrency === true,
   };
 }
 
@@ -79,7 +83,9 @@ function useProfileList(tab, address) {
       : listProposals("researcherId", address).then((items) => items.map((proposal) => ({
         id: proposal.id,
         title: proposal.title || "Untitled proposal",
-        sub: [proposal.currency && proposal.amount ? `${proposal.currency} ${Number(proposal.amount).toLocaleString()}` : "", formatDate(proposal.createdAt)].filter(Boolean).join(" · "),
+        amount: proposal.amount,
+        currency: proposal.currency,
+        sub: formatDate(proposal.createdAt),
         status: proposalWorkflowStatus(proposal),
         // Drafts open in the same editor as My Proposals (independent drafts skip the attached form).
         route: proposalAuthorRoute(proposal),
@@ -235,6 +241,7 @@ export default function ProfilePage({ onNavigate = navigateTo }) {
           <button key={item.id} type="button" className="settings-row settings-link" onClick={() => onNavigate(item.route)}>
             <span className="settings-row-main">
               <strong>{item.title}</strong>
+              {item.currency && item.amount ? <CurrencyAmount currency={item.currency} amount={item.amount} /> : null}
               {item.sub && <small>{item.sub}</small>}
             </span>
             <span className="settings-row-value"><StatusBadge status={item.status} interactive={false} /></span>
@@ -275,6 +282,19 @@ export default function ProfilePage({ onNavigate = navigateTo }) {
               <input id={id} name="expertise" value={form.expertise.join(", ")} onChange={updateExpertise} aria-describedby={describedBy} aria-invalid={invalid} />
             )}
           </Field>
+          <Field label="Local currency" htmlFor="localCurrency" error={errors.localCurrency}>
+            {({ id, describedBy, invalid }) => (
+              <select id={id} name="localCurrency" value={form.localCurrency} onChange={update} aria-describedby={describedBy} aria-invalid={invalid}>
+                {LOCAL_CURRENCIES.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+              </select>
+            )}
+          </Field>
+          <label className="checkbox-label">
+            <input type="checkbox" name="showLocalCurrency" checked={form.showLocalCurrency}
+              onChange={(event) => { setForm((current) => ({ ...current, showLocalCurrency: event.target.checked })); setSaved(false); }} />
+            Show local currency estimates
+          </label>
+          <p className="field-hint">Google FX estimates are indicative and derived from testnet token amounts. The original token amount remains visible.</p>
           <div className="profile-form-actions">
             <button className="secondary" type="button" onClick={cancelEdit} disabled={saving}>Cancel</button>
             <button className="primary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
@@ -285,6 +305,8 @@ export default function ProfilePage({ onNavigate = navigateTo }) {
           <div className="settings-row"><dt>Name</dt><dd>{profile.fullName}</dd></div>
           <div className="settings-row"><dt>Organisation</dt><dd>{profile.organisation}</dd></div>
           <div className="settings-row"><dt>Role</dt><dd>{formatRole(profile.role)}</dd></div>
+          <div className="settings-row"><dt>Local currency</dt><dd>{LOCAL_CURRENCIES.includes(profile.localCurrency) ? profile.localCurrency : DEFAULT_LOCAL_CURRENCY}</dd></div>
+          <div className="settings-row"><dt>Local currency estimates</dt><dd>{profile.showLocalCurrency === true ? "Shown" : "Hidden"}</dd></div>
           <div className="settings-row"><dt>Connected wallet</dt><dd title={address}>{shortenAddress(address)}</dd></div>
           <div className="settings-row"><dt>Member since</dt><dd>{formatDate(profile.createdAt)}</dd></div>
           <div className="settings-row"><dt>UID</dt><dd className="profile-uid" title={profile.address}>{profile.address}</dd></div>

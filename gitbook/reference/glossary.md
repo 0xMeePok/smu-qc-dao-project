@@ -31,6 +31,7 @@
 | Preview channel | A temporary Firebase Hosting URL for testing a branch against the live backend |
 | Problem owner | The member who posted a business problem or a funding call (`problems.ownerId`) |
 | Projection | A server-maintained summary document, such as `opportunityMetrics` |
+| Selected proposal export | The administrator download of an accepted posting, its selected proposal and every comment, as JSON and CSV, for grading outside QC DAO |
 | Sponsored transaction | A member transaction whose gas Privy pays |
 | TEE | Trusted execution environment. Where Privy holds embedded wallet keys |
 | Tranche | One milestone payment. The app uses two: 50% upfront and 50% on completion |

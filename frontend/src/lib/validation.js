@@ -10,6 +10,7 @@ import {
   MAX_FUNDING_TAGS,
   parseFundingTags,
 } from "../config/fundingOpportunity.js";
+import { LOCAL_CURRENCIES } from "./fxRates.js";
 
 export function validateFullName(value = "") {
   const trimmed = value.trim();
@@ -88,6 +89,10 @@ export function validateProfile(form, address) {
     biography: validateBiography(form.biography),
     expertise: validateExpertise(form.expertise),
     wallet: validateWallet(address),
+    localCurrency: !Object.hasOwn(form, "localCurrency") || LOCAL_CURRENCIES.includes(form.localCurrency)
+      ? null : "Choose a supported local currency.",
+    showLocalCurrency: !Object.hasOwn(form, "showLocalCurrency") || typeof form.showLocalCurrency === "boolean"
+      ? null : "Choose whether to show local currency estimates.",
   };
 
   for (const key of Object.keys(errors)) {

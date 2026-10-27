@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { proposalBlockReason } from "../lib/proposalValidation.js";
 import { useContext, useEffect, useRef, useState } from "react";
@@ -602,7 +603,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
 
         <aside className="context-panel">
           <span className="eyebrow">{isOpenFunding ? "Funding available" : "Indicative proposal budget"}</span>
-          <strong>{requestedLabel}</strong>
+          <strong><ConvertedAmount text={requestedLabel} /></strong>
           <dl>
             <PosterIdentity
               ownerId={posting.ownerId}

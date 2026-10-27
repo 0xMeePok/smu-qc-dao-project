@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useState } from "react";
 import { formatInstant } from "../lib/datetime.js";
 import { escrowEventLabel, escrowExplorer, escrowFundingAmount } from "../lib/escrowFunding.js";
@@ -34,7 +35,7 @@ export function EscrowFundingHistory({ data, error, busy, onSync }) {
       <thead><tr><th scope="col">Event</th><th scope="col">Amount</th><th scope="col">Participants</th><th scope="col">Record</th></tr></thead>
       <tbody>{visible.map((event, index) => <tr key={event.id ?? `${event.transactionHash}:${event.logIndex ?? index}`}>
         <td>{escrowEventLabel(event.type)}</td>
-        <td>{escrowFundingAmount(event.amountBaseUnits, event.tokenDecimals ?? summary?.tokenDecimals, event.tokenSymbol ?? summary?.tokenSymbol)}</td>
+        <td><ConvertedAmount text={escrowFundingAmount(event.amountBaseUnits, event.tokenDecimals ?? summary?.tokenDecimals, event.tokenSymbol ?? summary?.tokenSymbol)} /></td>
         <td><small>Actor: <ParticipantAddress address={event.actor} /></small><br /><small>Counterparty: <ParticipantAddress address={event.counterparty} /></small></td>
         <td>{event.transactionHash && <a href={escrowExplorer("tx", event.transactionHash)} target="_blank" rel="noreferrer">View transaction</a>}<br /><small>Block {event.blockNumber ?? "—"}</small>
           {Number.isFinite(event.timestamp) && <><br /><time dateTime={new Date(event.timestamp * 1000).toISOString()}>{formatInstant(new Date(event.timestamp * 1000))}</time></>}</td>

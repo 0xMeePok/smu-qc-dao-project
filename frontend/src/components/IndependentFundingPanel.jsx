@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -68,12 +69,12 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
     {summary && <>
       <p><strong>{independentFundingStatus(snapshot).label}</strong>{summary.escrowAddress && <> · <a href={independentFundingExplorer("address", summary.escrowAddress)} target="_blank" rel="noreferrer">Escrow contract</a></>}</p>
       <dl className="settings-group">
-        <div className="settings-row"><dt>Funded / target</dt><dd>{money(summary.totalDeposited)} / {money(summary.fundingTarget ?? summary.target)}</dd></div>
-        <div className="settings-row"><dt>Released before payout fees</dt><dd>{money(summary.totalReleased)}</dd></div>
-        {summary.feePaid != null && <div className="settings-row"><dt>Researcher received after fees</dt><dd>{money(BigInt(summary.totalReleased) - BigInt(summary.feePaid))}</dd></div>}
-        <div className="settings-row"><dt>Held for unpaid work</dt><dd>{money(summary.outstandingBalance)}</dd></div>
-        <div className="settings-row"><dt>Your contribution</dt><dd>{money(wallet.deposited)}</dd></div>
-        <div className="settings-row"><dt>Your available refund</dt><dd>{money(wallet.claimable)}</dd></div>
+        <div className="settings-row"><dt>Funded / target</dt><dd><ConvertedAmount text={money(summary.totalDeposited)} /> / <ConvertedAmount text={money(summary.fundingTarget ?? summary.target)} /></dd></div>
+        <div className="settings-row"><dt>Released before payout fees</dt><dd><ConvertedAmount text={money(summary.totalReleased)} /></dd></div>
+        {summary.feePaid != null && <div className="settings-row"><dt>Researcher received after fees</dt><dd><ConvertedAmount text={money(BigInt(summary.totalReleased) - BigInt(summary.feePaid))} /></dd></div>}
+        <div className="settings-row"><dt>Held for unpaid work</dt><dd><ConvertedAmount text={money(summary.outstandingBalance)} /></dd></div>
+        <div className="settings-row"><dt>Your contribution</dt><dd><ConvertedAmount text={money(wallet.deposited)} /></dd></div>
+        <div className="settings-row"><dt>Your available refund</dt><dd><ConvertedAmount text={money(wallet.claimable)} /></dd></div>
         <div className="settings-row"><dt>Fund and accept by</dt><dd>{instant(summary.expiresAt)}</dd></div>
         {Number(summary.completionDeadline) > 0 && <div className="settings-row"><dt>Complete and approve by</dt><dd>{instant(summary.completionDeadline)}</dd></div>}
       </dl>
@@ -101,7 +102,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
           onChange={event => onDelivery({ ...delivery, url: event.target.value })} />}</Field>
         {button("submitEvidence", "Submit evidence for funder vote", { evidence: delivery })}
       </div>}
-      {Number(summary.completionDeadline) > 0 && <p className="field-hint">Completion needs yes votes weighted by more than 50% of all deposited funds. Current yes weight: {money(summary.yesWeight)} of {money(summary.totalDeposited)}.</p>}
+      {Number(summary.completionDeadline) > 0 && <p className="field-hint">Completion needs yes votes weighted by more than 50% of all deposited funds. Current yes weight: <ConvertedAmount text={money(summary.yesWeight)} /> of <ConvertedAmount text={money(summary.totalDeposited)} />.</p>}
       {actions.vote && <div className="field-group"><h4>Funder completion vote</h4><p>Review the submitted evidence. Your vote is weighted by your deposited contribution. The yes vote that takes approval above 50% releases the final payment immediately.</p>
         {button("vote", "Vote yes for completion", { evidenceHash: summary.evidenceHash, approve: true })}
         {button("vote", "Vote no for completion", { evidenceHash: summary.evidenceHash, approve: false })}

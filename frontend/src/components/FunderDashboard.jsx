@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -89,7 +90,7 @@ export function FunderDashboard({ onNavigate }) {
       <div className="dashboard-stats-grid funder-totals">
         {[["committed", "Total committed"], ["locked", "Total held in escrow"], ["released", "Total released"], ["refunded", "Total refunded"]].map(([key, label]) => <div className="stat-card" key={key}>
           <h2 className="stat-label">{label}</h2>
-          {data?.totals?.length ? data.totals.map(item => <strong className="stat-num" key={`${item.chainId}:${item.tokenAddress}`}>{money(item, key)}</strong>) : <strong className="stat-num">—</strong>}
+          {data?.totals?.length ? data.totals.map(item => <strong className="stat-num" key={`${item.chainId}:${item.tokenAddress}`}><ConvertedAmount text={money(item, key)} /></strong>) : <strong className="stat-num">—</strong>}
         </div>)}
       </div>
       <p className="field-hint">These totals cover problem-statement and grant proposal funding, shown per token. Held funds include unpaid balances that may already be refundable; each escrow's custody status shows whether its withdrawal lock remains active. Independent crowdfunding commitments are listed separately below. Available grant pool funds count as commitments when transferred into proposal escrow.</p>
@@ -98,8 +99,8 @@ export function FunderDashboard({ onNavigate }) {
       {data?.unavailablePools > 0 && <p role="status" className="field-hint">{data.unavailablePools} grant pools could not be loaded. Open the opportunity or refresh to retry.</p>}
       {data?.unavailableDecisions > 0 && <p role="status" className="field-hint">{data.unavailableDecisions} grant decisions could not be loaded and are excluded below. Refresh to retry.</p>}
       {group("opportunities", "My open funding opportunities", "No open funding calls yet. Post a call, then deposit funds to start selecting proposals.", item => <div className="table-row" key={item.id}>
-        <div><strong>{item.title || "Untitled funding call"}</strong><small className="table-row-meta">{stateLabel(item.status)} · Indicative budget {item.currency} {Number(item.amount ?? 0).toLocaleString()}</small>
-          {item.pool?.poolAddress ? <small className="table-row-meta">Deposited {money(item.pool, "totalDeposited")} · Available {money(item.pool, "available")} · Reserved {money(item.pool, "totalReserved")}</small>
+        <div><strong>{item.title || "Untitled funding call"}</strong><small className="table-row-meta">{stateLabel(item.status)} · Indicative budget <ConvertedAmount text={`${item.currency} ${Number(item.amount ?? 0).toLocaleString()}`} /></small>
+          {item.pool?.poolAddress ? <small className="table-row-meta">Deposited <ConvertedAmount text={money(item.pool, "totalDeposited")} /> · Available <ConvertedAmount text={money(item.pool, "available")} /> · Reserved <ConvertedAmount text={money(item.pool, "totalReserved")} /></small>
             : <small className="table-row-meta">{item.status === "draft" ? "Private draft" : item.poolUnavailable ? "Grant balance is temporarily unavailable." : item.grantSupported === false ? "Grant pools are awaiting a contract deployment." : "Funds have not been deposited into a grant pool."}</small>}
         </div>{item.status === "draft" ? <button type="button" className="text-button" onClick={() => onNavigate(`create-funding/${item.id}`)}>Resume draft</button> : links(item, true)}
       </div>)}
@@ -109,8 +110,8 @@ export function FunderDashboard({ onNavigate }) {
         <div className="table-row-actions"><ClaimRemovedFundsButton proposalId={item.proposalId} /></div>
       </div> : <div className="table-row" key={item.proposalId}>
         <div><strong>{item.title}</strong><small className="table-row-meta">{item.postingTitle} · {stateLabel(item.state)}</small>
-          <small className="table-row-meta">Committed {money(item, "committed")} · Held {money(item, "locked")} · Released {money(item, "released")} · Refunded {money(item, "refunded")}</small>
-          {item.fundingTarget != null && <small className="table-row-meta">Pooled progress: {money(item, "totalDeposited")} / {money(item, "fundingTarget")}</small>}
+          <small className="table-row-meta">Committed <ConvertedAmount text={money(item, "committed")} /> · Held <ConvertedAmount text={money(item, "locked")} /> · Released <ConvertedAmount text={money(item, "released")} /> · Refunded <ConvertedAmount text={money(item, "refunded")} /></small>
+          {item.fundingTarget != null && <small className="table-row-meta">Pooled progress: <ConvertedAmount text={money(item, "totalDeposited")} /> / <ConvertedAmount text={money(item, "fundingTarget")} /></small>}
           <FundingProgress summary={item.summary ?? item} compact stale={Boolean(error) || item.stale} label={`Confirmed funding progress for ${item.title}`} />
           <EscrowLifecycleBadge summary={item.summary ?? item} stale={Boolean(error) || item.stale} />
           <EscrowCustodyNotice summary={item.summary ?? item} compact stale={dashboard.isFetching || Boolean(error) || item.stale} />
@@ -123,8 +124,8 @@ export function FunderDashboard({ onNavigate }) {
         const tokenMoney = value => independentFundingAmount(value, summary.tokenDecimals, summary.tokenSymbol);
         return <div className="table-row" key={proposalId}>
           <div><strong>{item.title || "Independent listing"}</strong><small className="table-row-meta">{independentFundingStatus({ ...item, summary }).label}</small>
-            <small className="table-row-meta">Your contribution {tokenMoney(wallet.deposited ?? wallet.committed)} · Available refund {tokenMoney(wallet.claimable)}</small>
-            <small className="table-row-meta">Funded {tokenMoney(summary.totalDeposited)} / {tokenMoney(summary.fundingTarget)}</small>
+            <small className="table-row-meta">Your contribution <ConvertedAmount text={tokenMoney(wallet.deposited ?? wallet.committed)} /> · Available refund <ConvertedAmount text={tokenMoney(wallet.claimable)} /></small>
+            <small className="table-row-meta">Funded <ConvertedAmount text={tokenMoney(summary.totalDeposited)} /> / <ConvertedAmount text={tokenMoney(summary.fundingTarget)} /></small>
             <EscrowCustodyNotice summary={summary} independent compact stale={dashboard.isFetching || Boolean(error) || item.stale || wallet.stale || item.detailRefreshRequired} />
             {(item.stale || wallet.stale || item.detailRefreshRequired) && <small className="table-row-meta">Open crowdfunding to view current balances and refund availability.</small>}
           </div><div className="table-row-actions">
@@ -135,7 +136,7 @@ export function FunderDashboard({ onNavigate }) {
       })}
       {data?.independentCommitmentsTruncated && <p className="field-hint">Showing a limited set of independent contributions. Open individual listings for their current balances.</p>}
       {group("approaches", "Funding approaches", "No funding approaches received yet.", item => <div className="table-row" key={item.proposalId}>
-        <div><strong>{item.title}</strong><small className="table-row-meta">{item.currency} {Number(item.amount ?? 0).toLocaleString()} requested · {stateLabel(item.status)}</small></div>{links(item)}
+        <div><strong>{item.title}</strong><small className="table-row-meta"><ConvertedAmount text={`${item.currency} ${Number(item.amount ?? 0).toLocaleString()}`} /> requested · {stateLabel(item.status)}</small></div>{links(item)}
       </div>)}
       {group("decisions", "Recorded decisions", data?.unavailableDecisions > 0 ? "Funding decisions are temporarily unavailable." : "No funding decisions recorded yet.", item => <div className="table-row" key={item.proposalId}>
         <div><strong>{item.title}</strong><small className="table-row-meta">{stateLabel(item.selection?.status ?? item.status)}</small>

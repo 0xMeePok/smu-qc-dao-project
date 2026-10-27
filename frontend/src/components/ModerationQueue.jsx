@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useEffect, useRef, useState } from "react";
 import { MODERATION_REASONS, REMOVE_REASONS, RESTORE_REASONS, getModerationContext, listModerationQueue, moderateContent, moderationError } from "../lib/moderation.js";
 import { INDEPENDENT_PROPOSAL_FIELDS, PROPOSAL_CATEGORIES, PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
@@ -76,7 +77,7 @@ function ContextBody({ title, content, contentType, onDownload }) {
   if (!content) return null;
   const categories = Array.isArray(content.categories) ? content.categories.filter(Boolean) : [];
   return <section className="moderation-context"><h4>{title}</h4>{CONTENT_FIELDS.filter((key) => typeof content[key] === "string" && content[key]).map((key) => <div key={key}><strong>{moderationFieldLabel(key, contentType, content)}</strong><p className="proposal-text">{content[key]}</p></div>)}
-    <dl>{content.amount != null && <><dt>Requested amount</dt><dd>{content.currency} {Number(content.amount).toLocaleString()}</dd></>}{content.category && <><dt>Category</dt><dd>{moderationCategoryLabel(content.category)}</dd></>}{categories.length > 0 && <><dt>Technology areas</dt><dd>{categories.map(postingCategoryLabel).join(", ")}</dd></>}{content.expiresAt && <><dt>Submission deadline</dt><dd>{formatInstant(content.expiresAt)}</dd></>}</dl>
+    <dl>{content.amount != null && <><dt>Requested amount</dt><dd><ConvertedAmount text={`${content.currency} ${Number(content.amount).toLocaleString()}`} /></dd></>}{content.category && <><dt>Category</dt><dd>{moderationCategoryLabel(content.category)}</dd></>}{categories.length > 0 && <><dt>Technology areas</dt><dd>{categories.map(postingCategoryLabel).join(", ")}</dd></>}{content.expiresAt && <><dt>Submission deadline</dt><dd>{formatInstant(content.expiresAt)}</dd></>}</dl>
     {Array.isArray(content.attachments) && content.attachments.map((attachment) => <p key={attachment.id}><button type="button" className="text-button" onClick={() => onDownload(content, contentType, attachment)}>Download {attachment.name}</button></p>)}
   </section>;
 }

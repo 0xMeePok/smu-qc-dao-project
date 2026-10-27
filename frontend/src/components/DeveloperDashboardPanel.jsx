@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -289,7 +290,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
               >
                 {(row) => (
                   <RowShell key={row.id} row={row} onNavigate={onNavigate}
-                    meta={row.independentFunding ? <small className="table-row-meta">Funded {independentFundingAmount(row.independentFunding.totalDeposited, row.independentFunding.tokenDecimals, row.independentFunding.tokenSymbol)} / {independentFundingAmount(row.independentFunding.fundingTarget, row.independentFunding.tokenDecimals, row.independentFunding.tokenSymbol)}</small> : null}>
+                    meta={row.independentFunding ? <small className="table-row-meta">Funded <ConvertedAmount text={independentFundingAmount(row.independentFunding.totalDeposited, row.independentFunding.tokenDecimals, row.independentFunding.tokenSymbol)} /> / <ConvertedAmount text={independentFundingAmount(row.independentFunding.fundingTarget, row.independentFunding.tokenDecimals, row.independentFunding.tokenSymbol)} /></small> : null}>
                     <button type="button" className="text-button" onClick={() => onNavigate?.(`proposal/${row.id}?tab=funding`)}>Open crowdfunding</button>
                   </RowShell>
                 )}

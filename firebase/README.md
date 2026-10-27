@@ -23,14 +23,14 @@ firebase/
 ├── scripts/                     # CSP checks, preview deploys, Privy deploy preflight
 ├── test/                        # Firestore and Storage rules tests (20 files)
 └── functions/
-    ├── index.js                 # Exports all 93 functions (69 callable, 17 triggers, 7 scheduled)
+    ├── index.js                 # Exports all 94 functions (70 callable, 17 triggers, 7 scheduled)
     ├── *.js                     # One module per area: sign-in, publication and audit,
     │                            #   escrow, open funding, independent funding,
     │                            #   moderation, matching, expiry, admin
     ├── *.contract.json          # Active contract manifests, synced from contracts/
     ├── auditRegistry.history.json # Earlier registries kept for verification
     ├── scripts/                 # Seed, reset, backfill and registry retirement scripts
-    └── test/                    # Functions tests (69 files)
+    └── test/                    # Functions tests (70 files)
 ```
 
 The handover guide's [Firebase backend](../gitbook/repository/firebase-backend.md)
