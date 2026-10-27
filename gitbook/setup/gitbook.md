@@ -7,7 +7,7 @@ This book is plain Markdown in the repository's `gitbook/` folder. GitBook reads
 | `gitbook/.gitbook.yaml` | Tells GitBook that this folder is the book, with `README.md` as the first page and `SUMMARY.md` as the navigation |
 | `gitbook/SUMMARY.md` | The table of contents. A page that is not listed here does not appear in GitBook |
 | `gitbook/**/*.md` | The pages. Mermaid code blocks render as diagrams in GitBook and on GitHub |
-| `gitbook/gitbook-docs.yaml` | Not in the repository yet. GitBook keeps its site-level Git Sync settings in this file in the project directory. If GitBook commits it, keep it |
+| `gitbook/gitbook-docs.yaml` | Site-level Git Sync settings: the site title and one space that reads its pages from `gitbook/`. GitBook needs it in the project directory before the first sync |
 
 ## Create the space and connect Git Sync
 
@@ -21,7 +21,7 @@ Do this once, after the `gitbook/` folder is on `main`.
 6. Under **Source repository**, choose `0xMeePok/smu-qc-dao-project` and the branch `main`.
 7. For the initial sync, choose the direction from GitHub to GitBook, so the repository content replaces the empty space. Select **Swap direction** if it points the other way. Syncing from GitBook to GitHub would overwrite the book in the repository with an empty space.
 8. Set **Project directory** to `gitbook`.
-9. Under **Content mapping**, map the space to `./`, which means the project directory itself. That is where `.gitbook.yaml` lives.
+9. Under **Content mapping**, check that the space maps to `./`, the project directory itself. `gitbook-docs.yaml` sets this, and `.gitbook.yaml` lives there.
 10. Select **Sync** and wait for the first import. Check that the navigation matches `SUMMARY.md`.
 11. Publish the space and choose who can read it. A public link is fine for this public repository. Choose an invite-only space if the sponsor prefers.
 
