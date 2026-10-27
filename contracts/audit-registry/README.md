@@ -15,6 +15,9 @@ On-chain registry for opportunity and proposal hashes on Arbitrum Sepolia. Full 
 
 The frontend contract manifest is `frontend/src/config/auditRegistry.contract.json`.
 
+The active deployment, from 17 October 2026, is `EscrowAuditRegistry` at
+`0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5`, built from `contracts/funding-escrow`.
+
 For the new escrow-linked replacement, see
 [Escrow registry integration](../../docs/ESCROW_REGISTRY_INTEGRATION.md). The
 read-only `verify:arbitrum-sepolia` command accepts `--deployment=PATH` for a

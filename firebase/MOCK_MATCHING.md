@@ -1,5 +1,14 @@
 # Server-side mock funding and mutual matching
 
+> **Status on 25 October 2026 (`main` at `7d3907b`).** On-chain escrow (QCDAO-109 to
+> QCDAO-117) has replaced mock settlement for new proposals. A proposal with
+> `fundingTerms` uses wallet escrow, and every mock mutation refuses it with "This
+> proposal uses wallet escrow". Mock funding, selection and confirmation also refuse
+> open funding calls, which use their prefunded grant pool. The mock workflow below
+> stays in the code for proposals created before escrow and for demonstrations. See
+> [`docs/ESCROW_REGISTRY_INTEGRATION.md`](../docs/ESCROW_REGISTRY_INTEGRATION.md) for
+> the live funding flow.
+
 QCDAO-81–86 use an entirely off-chain, server-side mock workflow. The accepted requirements override the older Jira references to evaluation prerequisites, a separate owner approval action, and on-chain matching events. The owner selects a fully funded proposal, which records owner acceptance. The creator must respond within seven days or by the original posting deadline, whichever comes first. QCDAO-87–89 moderation remains integrated with the mock ledger.
 
 ## Workflow
@@ -78,9 +87,9 @@ Selection explains the creator deadline and temporary funding pause. Confirmatio
 
 Members can report a visible problem statement, their accessible proposal, or an existing discussion comment. The server applies the original content access rules, accepts one report per member/item, and limits new reports to 20 per UTC day. Reporter identities stay in the server-only report collection and are returned only to administrators. Comments attached to private proposals are never included in the problem's public discussion view. This work adds reporting for existing comments; it does not add a comment-authoring workflow.
 
-The administrator's Content moderation tab combines member reports and rule-flagged submissions. Deterministic screening flags excessive external links, repeated text and explicit abusive phrases; screening queues review and never removes content automatically. The queue offers type/status filters, oldest/most-reported sorting, pagination, pending counts, full text and parent context, attachment downloads, reports and decision history.
+The administrator's **Content reports** section in Admin Audit combines member reports and rule-flagged submissions. Deterministic screening flags excessive external links, repeated text and explicit abusive phrases; screening queues review and never removes content automatically. The queue offers type/status filters, oldest/most-reported sorting, pagination, pending counts, full text and parent context, attachment downloads, reports and decision history.
 
-Hide, remove and restore require a reason. Server-owned moderation fields preserve original workflow status and sponsor identity, so restoring a proposal restores access. Hidden/removed content is accessible only to its author and administrators and is excluded from ordinary browse, comparison, selection and revision/attachment reads. Moderation events retain the actor, reason, sequence and future on-chain status. Authors receive a private notice in Profile → Content & matching notices.
+Hide, remove and restore require a reason. Server-owned moderation fields preserve original workflow status and sponsor identity, so restoring a proposal restores access. Hidden/removed content is accessible only to its author and administrators and is excluded from ordinary browse, comparison, selection and revision/attachment reads. Moderation events retain the actor, reason, sequence and future on-chain status. Authors receive a private notice in the header **Notifications** menu and under **Profile → Content, matching & payment notices**.
 
 Hide/remove refunds affected outstanding mock pledges in the same transaction as the visibility change. If the selected proposal is affected, its confirmation window closes and the other proposals reopen. Confirmed locked funds remain locked. Restoration preserves the evaluation result and restores eligible proposals with zero refunded funding; it never invents new pledges.
 
@@ -90,7 +99,7 @@ Moderation callables: `submitContentReport`, `listModerationQueue`, `getModerati
 
 The matching panel links completed steps to immutable application decision records: selection/owner acceptance, creator acceptance, rejection, reopening and invalidation. Each record includes an event ID, server timestamp, actor identity/role, a reason when required, and the simulated settlement result. Funding actor privacy is preserved. These records are stored by the trusted application server; they are not independently verified by a blockchain, and no matching wallet transaction is requested in QCDAO-81–86.
 
-Sprint 6 can add real escrow settlement through a separate idempotent adapter for committed decision events: `match_confirmed` locks/releases the selected allocation as specified by that sprint; `owner_declined`/`creator_declined` refund the selected proposal; `confirmation_expired`/`admin_force_expired`/`posting_expired` refund every outstanding pledge for the posting. Consume the stable event ID as an idempotency key and record real settlement separately from `mockFunding`. A future adapter must not treat simulated ledger entries as token balances or mark a real payment complete before confirmed settlement. This is a documented extension point, not a live integration or a dependency of QCDAO-81–86.
+**Superseded.** The adapter below was not built. Real funding instead uses the separate on-chain escrow path, and mock mutations refuse escrow proposals. The original plan read: Sprint 6 can add real escrow settlement through a separate idempotent adapter for committed decision events: `match_confirmed` locks/releases the selected allocation as specified by that sprint; `owner_declined`/`creator_declined` refund the selected proposal; `confirmation_expired`/`admin_force_expired`/`posting_expired` refund every outstanding pledge for the posting. Consume the stable event ID as an idempotency key and record real settlement separately from `mockFunding`. A future adapter must not treat simulated ledger entries as token balances or mark a real payment complete before confirmed settlement. This is a documented extension point, not a live integration or a dependency of QCDAO-81–86.
 
 ## Demo walkthrough
 
@@ -100,6 +109,6 @@ Sprint 6 can add real escrow settlement through a separate idempotent adapter fo
 4. As the selected creator, accept before the deadline to lock selected funding and refund/cancel sibling proposals. Review both acceptance records and the funder's portfolio.
 5. On another selection, test rejection separately as the owner and creator. Verify selected contributors are refunded and siblings retain their existing funding/comments and reopen only until the original posting deadline. Select another funded proposal and verify its new deadline cannot exceed that original expiry.
 6. On a pending selection, use the administrator's **Expire window for demonstration**, or wait for the deadline. Verify the posting is invalidated, every outstanding pledge is refunded, and further funding/selection are blocked. Also verify an open posting's original expiry closes and refunds its mock workflow.
-7. Report a posting or accessible proposal, then review it under **Admin → Content moderation**. Hide/remove it, inspect the author notice, and restore it with an appropriate recorded reason.
+7. Report a posting or accessible proposal, then review it under **Admin Audit → Content reports**. Hide/remove it, inspect the author notice, and restore it with an appropriate recorded reason.
 
 Matching receipts are off-chain server records. The optional expert evaluation control is an administrator-operated simulation. This implementation does not simulate actual token balances, smart-contract escrow or milestone payouts.

@@ -1,9 +1,21 @@
 # AI Security Review for Pull Requests
 
-The `AI Security Review` GitHub Actions workflow reviews every non-draft pull request
-when it is opened, reopened, marked ready for review, or updated with new commits. It
-sends a bounded copy of the GitHub diff to Fireworks AI's GLM-5.3 model and creates
-or updates one comment on the pull request with actionable security findings.
+The `AI Security Review` GitHub Actions workflow reviews non-draft pull requests
+when they are opened, reopened, marked ready for review, or updated with new commits.
+It splits the GitHub diff into chunks, sends each chunk to Fireworks AI's
+`glm-5p3-flash` model, and creates or updates one comment on the pull request with
+actionable security findings.
+
+Checked against `main` at `7d3907b` on 25 October 2026. The workflow is
+`.github/workflows/ai-security-review.yml` and the reviewer is
+`.github/scripts/security-review.mjs`.
+
+## Who it runs for
+
+To keep paid model usage limited, the job runs only for pull requests opened by
+these GitHub logins: `0xMeePok`, `whale93`, `Darveloper1` and `0xjunwei`. Pull
+requests from anyone else skip the review. A new team should edit the `if:` list in
+the workflow to add their own logins.
 
 ## One-time repository setup
 
@@ -14,8 +26,12 @@ the inference access needed by this workflow.
 No provider or model variable is needed initially. The defaults are:
 
 - Provider: `fireworks`
-- Model: `accounts/fireworks/models/glm-5p3`
-- Maximum diff sent per review: 180,000 bytes
+- Model: `accounts/fireworks/models/glm-5p3-flash`, with low reasoning effort
+- Diff sent per request: 75,000 bytes
+- Requests per review: at most 20
+- Provider request timeout: 600,000 ms (10 minutes). A timed-out request is not
+  retried, because the provider may still bill it
+- Job timeout: 30 minutes
 
 The first run can be started by opening or updating a pull request after this
 workflow is present on the default branch. Findings are advisory: the workflow
@@ -29,7 +45,7 @@ bot can comment on pull requests from forks. This event is privileged, so the
 workflow deliberately loads the reviewer only from the repository's trusted default
 branch. It never checks out, imports, installs dependencies from, builds, tests, or
 executes the pull request branch. The contributor's diff is fetched through the
-GitHub API and handled only as bounded, untrusted text.
+GitHub API and handled only as untrusted text.
 
 The model has no tools and never receives the GitHub or provider API keys. Model
 output is parsed into a fixed finding shape, size-limited, and escaped before it is
@@ -38,8 +54,9 @@ replacement for human review or deterministic security tooling.
 
 Because the diff is sent to the configured model provider, do not use this workflow
 for repositories whose pull request content is prohibited from being processed by
-that provider. A contributor can also create an intentionally large diff; the byte
-limit controls spend and the resulting comment records when truncation occurred.
+that provider. A large diff is reviewed in several chunks. If it needs more chunks
+than the limit allows, the job fails and says so rather than posting a partial
+review. Split the pull request or raise the limit.
 
 ## Switching to OpenAI later
 
@@ -59,11 +76,18 @@ intentionally not hard-coded: choosing it at migration time avoids silently rely
 on a stale model recommendation.
 
 To switch back, set `SECURITY_REVIEW_PROVIDER` to `fireworks` and delete the
-`SECURITY_REVIEW_MODEL` variable to restore the GLM-5.3 default.
+`SECURITY_REVIEW_MODEL` variable to restore the `glm-5p3-flash` default.
 
 ## Optional cost control
 
-Set the Actions repository variable `SECURITY_REVIEW_MAX_DIFF_BYTES` to a value from
-10,000 through 500,000 to change the amount of diff text sent to the provider. The
-default 180,000-byte cap is enforced while the HTTP response is streamed, so an
-oversized diff is never fully buffered by the reviewer.
+Set these Actions repository variables to change the defaults:
+
+| Variable | Default | Allowed range |
+| --- | --- | --- |
+| `SECURITY_REVIEW_CHUNK_BYTES` | 75,000 | 10,000 to 100,000 bytes of diff per request |
+| `SECURITY_REVIEW_MAX_CHUNKS` | 20 | 1 to 100 requests per review |
+| `SECURITY_REVIEW_PROVIDER_TIMEOUT_MS` | 600,000 | 60,000 to 900,000 ms per request |
+
+`SECURITY_REVIEW_MAX_DIFF_BYTES` is still read as a fallback for the chunk size, for
+repositories that set it before chunking existed. Values outside a range are clamped
+to the nearest limit.

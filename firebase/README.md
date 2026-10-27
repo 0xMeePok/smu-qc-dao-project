@@ -11,30 +11,31 @@ for anyone editing `firestore.rules` or `functions/index.js` and redeploying.
 ```
 firebase/
 ├── deploy.sh                    # One-shot production setup - see "Deploy" below
-├── firestore.rules              # Server-side authorisation for users/, publicProfiles/, privyIdentities/
-├── storage.rules                # Authorisation for posting attachments (QCDAO-58)
+├── firebase.json                # Hosting headers and rewrites, emulator ports, deploy targets
+├── firebase.maintenance.json    # Locked-down config used only during a registry cutover
+├── firestore.rules              # Server-side authorisation for every collection
+├── firestore.indexes.json       # 83 composite indexes
+├── storage.rules                # Authorisation for posting and proposal attachments
 ├── storage.cors.json            # Bucket CORS allow-list - see "Posting attachments"
-├── firestore.indexes.json       # Discover query indexes (QCDAO-52/53)
-├── firebase.json                # Emulator ports, hosting config, functions source path
+├── storage.lifecycle.json       # Aborts incomplete uploads after a day
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
-├── test/
-│   ├── firestore.rules.test.mjs # Rules tests via the Firestore emulator
-│   ├── security-config.test.mjs # CSP, CORS and rules-file assertions
-│   └── storage.rules.test.mjs   # Attachment rules tests via the Storage emulator
+├── maintenance/                 # Maintenance rules for firebase.maintenance.json
+├── scripts/                     # CSP checks, preview deploys, Privy deploy preflight
+├── test/                        # Firestore and Storage rules tests (20 files)
 └── functions/
-    ├── index.js                 # Callable, scheduled, and Firestore-triggered functions
-    ├── opportunityExpiry.js      # Deadline helpers
-    ├── opportunityExpiryService.js # Expiry service
-    ├── opportunityMetrics.js    # Public-safe Discover aggregates from private records
-    ├── attachmentSweeper.js     # Deletes objects no posting references
-    ├── scripts/mock_data.mjs    # Seeds three sample postings - see below
-    ├── package.json
-    └── test/
-        ├── privy-session.test.mjs # Embedded-wallet resolution for Privy email sign-in
-        ├── attachmentSweeper.test.mjs
-        ├── opportunityExpiry.test.mjs
-        └── opportunityExpiryService.test.mjs
+    ├── index.js                 # Exports all 93 functions (69 callable, 17 triggers, 7 scheduled)
+    ├── *.js                     # One module per area: sign-in, publication and audit,
+    │                            #   escrow, open funding, independent funding,
+    │                            #   moderation, matching, expiry, admin
+    ├── *.contract.json          # Active contract manifests, synced from contracts/
+    ├── auditRegistry.history.json # Earlier registries kept for verification
+    ├── scripts/                 # Seed, reset, backfill and registry retirement scripts
+    └── test/                    # Functions tests (69 files)
 ```
+
+The handover guide's [Firebase backend](../gitbook/repository/firebase-backend.md)
+and [Cloud Functions](../gitbook/reference/cloud-functions.md) pages describe each
+area and every function.
 
 ### What the Cloud Functions do
 
@@ -114,9 +115,10 @@ curl -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json
   https://asia-southeast1-<project-id>.cloudfunctions.net/exchangePrivySession
 ```
 
-`200` means it's up. If you get a CORS error in the browser console instead, it
-almost always means the URL is wrong (region or project id) rather than an actual
-CORS misconfiguration.
+`404` means the function is not deployed at that URL. Any other code means it is up:
+the request itself is refused because curl sends no App Check token or Privy access
+token. If you get a CORS error in the browser console instead, it almost always means
+the URL is wrong (region or project id) rather than an actual CORS misconfiguration.
 
 ---
 
@@ -364,6 +366,11 @@ You should see `exchangePrivySession` and `revokeOwnSessions` in `asia-southeast
 
 ## Collections
 
+The three account collections are below. Every other collection is summarised in the
+handover guide's [Firestore collections](../gitbook/reference/firestore-collections.md)
+page, and the workflow schema is in
+[`docs/FIRESTORE_WORKFLOW_SCHEMA.md`](../docs/FIRESTORE_WORKFLOW_SCHEMA.md).
+
 | Collection | Who can read | Contents |
 |---|---|---|
 | `users/{address}` | the owning wallet only (`get`, never `list`) | the full profile, including `role`, plus server-written `email` and `privyUserId` |
@@ -554,5 +561,5 @@ Locked with `hasOnly()` on both `create` and `update`, so `role`, `stats`,
 `walletVerified`, `chainId` and the timestamps cannot be written here even by the
 wallet that owns the record.
 
-`stats` can only ever move via the Admin SDK, which bypasses these rules — nothing
-currently writes to it, since comments/problems/funding/proposals are not built yet.
+`stats` can only ever move via the Admin SDK, which bypasses these rules. Nothing
+currently writes to it, so the counters stay at their starting values.

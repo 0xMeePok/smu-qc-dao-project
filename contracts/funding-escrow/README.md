@@ -52,18 +52,28 @@ a new linked deployment inheriting its posting, proposal, revision and audit log
 The existing `AuditRegistry.sol` source is preserved exactly so live bytecode
 verification remains compatible. A versioned `AuditRegistryExtensible.sol` copy
 provides the public/virtual hooks for inheritance. The active manifest and both
-application configurations now select registry `0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0`
-and factory `0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66` on chain 421614.
-Both passed runtime-bytecode and wiring verification. On 2026-09-29, the signed
+application configurations now select the 17 October 2026 deployment: registry
+`0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5` and factory
+`0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0` on chain 421614, with open funding
+grants enabled. Both passed runtime-bytecode and wiring verification on that date.
+Explorer source publication was not requested.
+
+The first linked rollout, on 2026-09-29, used registry
+`0x2C23b72d6717E982cccd6F4eBe92C9d3448BFcD0` and factory
+`0xDF28146Bfe0f4e2c926bf3bc1bb5750A72CAAc66`, both now retired. The signed
 50%/50% smoke test passed and Firebase backend and
-[Hosting](https://qcdao-a0c7a.web.app) deployment completed. All 66 Functions were
-updated or created, all eight new services are active, five escrow indexes are ready,
-and the settlement scheduler is enabled. The owner/platform signer, existing tokens
-and 10 BPS fee are unchanged. Explorer source publication was not requested for this
-replacement; runtime-bytecode verification is complete.
+[Hosting](https://qcdao-a0c7a.web.app) deployment completed. All 66 Functions of
+that time were updated or created (the backend now exports 93), all eight new
+services were active, five escrow indexes were ready, and the settlement scheduler
+was enabled. The owner/platform signer, existing tokens and 10 BPS fee were unchanged.
 See [deployment addresses and smoke-test evidence](../../docs/ESCROW_REGISTRY_INTEGRATION.md).
 
 ### Open funding grant scope (2026-10-01)
+
+**Status on 25 October 2026:** grants are deployed. The 17 October 2026 manifest
+declares the `open-funding-grants` and `open-funding-decline` capabilities, with
+`OpenFundingPoolDeployer` at `0xdE607e8cDbEe4C7C00E821Ff03E1B3eFAe3e8Ca6`. The rest
+of this section is kept as written on 2026-10-01.
 
 The source now implements open funding as a separate single-owner grant pool.
 This grant version has been tested on local chains; it has **not been deployed**.
@@ -534,10 +544,11 @@ verification modules; it did not exercise a full authenticated browser workflow.
 After manifest synchronization, 95 focused tests and nine cleanup regression tests
 passed. The rollout scope is QCDAO-110, QCDAO-113 and QCDAO-117; no Jira records were
 changed. No historical records were migrated or retired. The previous linked deployment is archived in
-`../audit-registry/legacy/pre-qcdao-110-arbitrumSepolia.deployment.json`, and its ABI
-remains in `firebase/functions/auditRegistry.history.json` at the repository root.
-The current confirmed deployment record is `../audit-registry/manifests/arbitrumSepolia.json`;
-do not deploy replacements when testing or retrying explorer source verification.
+`../audit-registry/legacy/pre-qcdao-110-arbitrumSepolia.deployment.json`. Its ABI is no
+longer in `firebase/functions/auditRegistry.history.json`, which now keeps only the
+8 and 9 October 2026 registries. The current confirmed deployment record is
+`../audit-registry/manifests/arbitrumSepolia.json`. Do not deploy replacements when
+testing or retrying explorer source verification.
 
 ## Security evidence
 
