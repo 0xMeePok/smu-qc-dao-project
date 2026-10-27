@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useEffect, useState } from "react";
 import { useWallet } from "../context/WalletContext.jsx";
 import { formatCountdown, formatInstant, isExpired } from "../lib/datetime.js";
@@ -211,7 +212,7 @@ export function FundingApproachList({ title, hint, empty, items = [], truncated 
           <strong>{showFunder ? (item.funderName || "A client or funder") : (item.proposalTitle || "Independent listing")}</strong>
           <small className="table-row-meta">
             {showFunder ? null : `${item.researcherName || "The researcher"} · `}
-            {money(item)} indicative · {fundingApproachStatusLabel(status)}
+            <ConvertedAmount text={money(item)} /> indicative · {fundingApproachStatusLabel(status)}
           </small>
           {!showFunder && <p>Outcome: {funderOutcome(item, status)}</p>}
           <small className="table-row-meta">

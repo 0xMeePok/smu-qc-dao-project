@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatFundingAmount } from "../lib/fundingDisplay.js";
 import { useWallet } from "../context/WalletContext.jsx";
@@ -575,7 +576,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             <div><dt>Organisation</dt><dd>{published.organisation}</dd></div>
             <div>
               <dt>Funding</dt>
-              <dd>{formatFundingAmount(published.currency, published.amount)}</dd>
+              <dd><ConvertedAmount text={formatFundingAmount(published.currency, published.amount)} /></dd>
             </div>
             <div><dt>Submitted</dt><dd>{formatInstant(published.createdAt)}</dd></div>
             <div>

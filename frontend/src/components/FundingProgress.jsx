@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { fundingAmount, fundingPercentage, fundingUnits, hasConfirmedFunding } from "../lib/fundingDisplay.js";
 import { shortenAddress } from "../lib/chain.js";
 import { INDEPENDENT_FUNDING_STATE, MAIN_ESCROW_STATE, MAIN_ESCROW_STATES, INDEPENDENT_ESCROW_STATES } from "../config/workflowStatus.js";
@@ -22,7 +23,7 @@ export function FundingProgress({ summary = {}, compact = false, stale = false, 
   if (escrowFundingClosed(summary)) {
     const settled = fundingUnits(summary.outstandingBalance) === 0n;
     return <div className="rollup-meter" data-funding-status="closed">
-      <small>Escrow closed · {fundingAmount(summary.totalDeposited, summary)} was deposited toward {fundingAmount(summary.fundingTarget, summary)}. {settled ? "No unpaid balance remains in escrow." : "It no longer counts as raised; contributors can claim refunds of any unpaid balance."}</small>
+      <small>Escrow closed · <ConvertedAmount text={fundingAmount(summary.totalDeposited, summary)} /> was deposited toward <ConvertedAmount text={fundingAmount(summary.fundingTarget, summary)} />. {settled ? "No unpaid balance remains in escrow." : "It no longer counts as raised; contributors can claim refunds of any unpaid balance."}</small>
     </div>;
   }
   const deposited = fundingUnits(summary.totalDeposited), target = fundingUnits(summary.fundingTarget);
@@ -30,7 +31,7 @@ export function FundingProgress({ summary = {}, compact = false, stale = false, 
   const custodyShortfall = reached && (summary.state === "Open" || summary.state === 0) && summary.fundingRequirementMet === false;
   return <div className="rollup-meter" data-funding-status={reached ? "funded" : "pending"}>
     <progress aria-label={label} aria-valuetext={`${percent.text} funded`} value={percent.value} max={100} />
-    <small>{fundingAmount(deposited, summary)} raised of {fundingAmount(target, summary)} required · {percent.text}</small>
+    <small><ConvertedAmount text={fundingAmount(deposited, summary)} /> raised of <ConvertedAmount text={fundingAmount(target, summary)} /> required · {percent.text}</small>
     {reached && <strong className={custodyShortfall ? "queue-note-gate" : "queue-note-ready"}>{custodyShortfall ? "Target reached; custody requirement not met" : "Fully funded"}</strong>}
     {!compact && <p className="field-hint">Recorded contributions determine this progress. Contract custody and workflow checks still control selection and withdrawals.</p>}
   </div>;
@@ -52,7 +53,7 @@ export function FundingContributors({ summary = {}, stale = false }) {
       <thead><tr><th scope="col">Funder</th><th scope="col">Contributed</th><th scope="col">Share</th></tr></thead>
       <tbody>{contributors.items.map(item => <tr key={item.walletAddress}>
         <td>{typeof item.displayName === "string" && item.displayName.trim() && <><strong>{item.displayName.trim()}</strong><br /></>}<ContributorWallet address={item.walletAddress} /></td>
-        <td>{fundingAmount(item.committed, summary)}</td>
+        <td><ConvertedAmount text={fundingAmount(item.committed, summary)} /></td>
         <td>{fundingPercentage(item.committed, summary.totalDeposited)?.text ?? "—"}</td>
       </tr>)}</tbody>
     </table></div>

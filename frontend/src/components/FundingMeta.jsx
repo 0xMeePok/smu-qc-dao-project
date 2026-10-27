@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { formatInstant } from "../lib/datetime.js";
 import { proposalFundingStatus } from "../lib/matching.js";
 import { StatusBadge } from "./StatusBadge.jsx";
@@ -8,6 +9,6 @@ export function FundingMeta({ item, problemMatching, showDetail = true }) {
   return <span className="funding-meta">
     {Object.hasOwn(item, "fundingTerms") ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}
     {showDetail && funding.detail && <span className="funding-note">{funding.detail}</span>}
-    <span>{item.currency} {Number(item.amount).toLocaleString()} · {formatInstant(item.createdAt)}</span>
+    <span><ConvertedAmount text={`${item.currency} ${Number(item.amount).toLocaleString()}`} /> · {formatInstant(item.createdAt)}</span>
   </span>;
 }

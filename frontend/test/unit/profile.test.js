@@ -7,6 +7,7 @@ import {
   validateExpertise,
   validateProfile,
 } from "../../src/lib/validation.js";
+import { LOCAL_CURRENCIES } from "../../src/lib/fxRates.js";
 
 const VALID_ADDRESS = `0x${"a".repeat(40)}`;
 
@@ -47,6 +48,22 @@ describe("Unit Tests: Profile Route & Navigation", () => {
 });
 
 describe("Unit Tests: Profile Field Validation", () => {
+  it("accepts every supported display currency while keeping older profile edits valid", () => {
+    for (const localCurrency of LOCAL_CURRENCIES) {
+      assert.deepEqual(validateProfile({ ...validProfile, localCurrency, showLocalCurrency: true }, VALID_ADDRESS), {});
+    }
+    assert.deepEqual(validateProfile(validProfile, VALID_ADDRESS), {});
+    assert.deepEqual(validateProfile({ ...validProfile, localCurrency: "SGD", showLocalCurrency: false }, VALID_ADDRESS), {});
+  });
+
+  it("rejects unsupported currencies and non-boolean display preferences", () => {
+    for (const localCurrency of ["USDC", "sgd", "XXX", "", null, 123]) {
+      assert.ok(validateProfile({ ...validProfile, localCurrency }, VALID_ADDRESS).localCurrency);
+    }
+    for (const showLocalCurrency of ["true", 1, null]) {
+      assert.ok(validateProfile({ ...validProfile, showLocalCurrency }, VALID_ADDRESS).showLocalCurrency);
+    }
+  });
   it("[FUT-AAR-077] should accept all four editable profile fields", () => {
     assert.deepEqual(validateProfile(validProfile, VALID_ADDRESS), {});
   });

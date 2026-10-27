@@ -483,6 +483,8 @@ describe("publicProfiles/{address}", () => {
   // leaked `stats`, or that locked create but left update open, would have passed
   // it. hasOnly() is the thing under test here, and it has to hold everywhere.
   const FORBIDDEN_PUBLIC_FIELDS = {
+    localCurrency: "SGD",
+    showLocalCurrency: true,
     role: 1,
     stats: { comments: 0, businessProblems: 0, openFunding: 0, fundingRequests: 0, karma: 0, reputation: 0 },
     walletVerified: true,
@@ -545,6 +547,27 @@ describe("users/{address} update", () => {
       organisation: "New Employer Pte Ltd",
     });
     await assertSucceeds(batch.commit());
+  });
+
+  it("[QCDAO-118] allows private currency preferences and preserves public attribution", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    await assertSucceeds(updateDoc(doc(db, "users", OTHER), {
+      localCurrency: "SGD", showLocalCurrency: true, updatedAt: serverTimestamp(),
+    }));
+    const snapshot = await getDoc(doc(db, "users", OTHER));
+    assert.equal(snapshot.data().localCurrency, "SGD");
+    assert.equal(snapshot.data().showLocalCurrency, true);
+    const publicSnapshot = await getDoc(doc(db, "publicProfiles", OTHER));
+    assert.equal("localCurrency" in publicSnapshot.data(), false);
+    assert.equal("showLocalCurrency" in publicSnapshot.data(), false);
+  });
+
+  it("[QCDAO-118] rejects malformed private currency preferences", async () => {
+    const db = env.authenticatedContext(OTHER).firestore();
+    for (const patch of [{ localCurrency: "USDC" }, { localCurrency: "sgd" }, { localCurrency: 123 },
+      { showLocalCurrency: "true" }, { showLocalCurrency: 1 }]) {
+      await assertFails(updateDoc(doc(db, "users", OTHER), { ...patch, updatedAt: serverTimestamp() }));
+    }
   });
 
   it("blocks a signed-in user promoting their own role to admin", async () => {

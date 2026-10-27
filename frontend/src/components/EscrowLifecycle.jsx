@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { escrowLifecycle, confirmedFundingEvents, fundingAmount, fundingExplorer, fundingUnits, validFundingTransaction } from "../lib/fundingDisplay.js";
 import { formatInstant } from "../lib/datetime.js";
 import { MAIN_ESCROW_STATE, ESCROW_ADMIN_CANCELLATION_LABEL, ESCROW_REFUND_REASON_LABELS } from "../config/workflowStatus.js";
@@ -46,10 +47,10 @@ export function EscrowMoneySummary({ summary = {}, compact = false, stale = fals
   const lifecycle = escrowLifecycle(summary, { stale });
   if (lifecycle.key === "unverified") return <p className="field-hint">Escrow balances need verification. Unavailable balances are not zero.</p>;
   return <dl className="settings-group" aria-label="Confirmed escrow balances">
-    <div className="settings-row"><dt>Held in escrow</dt><dd>{fundingAmount(summary.outstandingBalance, summary)}</dd></div>
+    <div className="settings-row"><dt>Held in escrow</dt><dd><ConvertedAmount text={fundingAmount(summary.outstandingBalance, summary)} /></dd></div>
     {!compact && <>
-      <div className="settings-row"><dt>Released before fees</dt><dd>{fundingAmount(summary.totalReleased, summary)}</dd></div>
-      <div className="settings-row"><dt>Refunded to contributors</dt><dd>{fundingAmount(summary.totalRefunded, summary)}</dd></div>
+      <div className="settings-row"><dt>Released before fees</dt><dd><ConvertedAmount text={fundingAmount(summary.totalReleased, summary)} /></dd></div>
+      <div className="settings-row"><dt>Refunded to contributors</dt><dd><ConvertedAmount text={fundingAmount(summary.totalRefunded, summary)} /></dd></div>
     </>}
   </dl>;
 }
@@ -63,7 +64,7 @@ export function EscrowLifecycleTimeline({ summary = {}, events = [], stale = fal
     {confirmed.length ? <ol className="audit-timeline">{confirmed.map((event, index) => <li key={event.id ?? `${event.transactionHash}:${event.logIndex ?? index}`}>
       <strong>{confirmedEventLabel(event, summary)}</strong>{" · "}
       <time dateTime={new Date(event.timestamp * 1000).toISOString()}>{formatInstant(new Date(event.timestamp * 1000))}</time>
-      {event.amountBaseUnits != null && <small className="table-row-meta">{fundingAmount(event.amountBaseUnits, { ...summary, tokenDecimals: event.tokenDecimals ?? summary.tokenDecimals ?? summary.decimals, tokenSymbol: event.tokenSymbol ?? summary.tokenSymbol ?? summary.symbol })}</small>}
+      {event.amountBaseUnits != null && <small className="table-row-meta"><ConvertedAmount text={fundingAmount(event.amountBaseUnits, { ...summary, tokenDecimals: event.tokenDecimals ?? summary.tokenDecimals ?? summary.decimals, tokenSymbol: event.tokenSymbol ?? summary.tokenSymbol ?? summary.symbol })} /></small>}
       <div className="table-row-actions">
         <a href={fundingExplorer("tx", event.transactionHash)} target="_blank" rel="noreferrer">Confirmed transaction</a>
         {onAuditReceipt ? <button type="button" className="text-button" onClick={() => onAuditReceipt(event)}>Audit receipt</button>

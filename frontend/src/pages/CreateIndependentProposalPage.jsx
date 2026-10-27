@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Field } from "../components/Field.jsx";
@@ -572,7 +573,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         <span className="eyebrow">Independent listing</span>
         <h2>{text("title") || "Untitled proposal"}</h2>
         <p>This is not a response to a posted problem. Funders browse independent listings separately from open opportunities.</p>
-        {form.amount ? <strong>{formatFundingAmount(form.currency, text("amount"))}</strong> : null}
+        {form.amount ? <strong><ConvertedAmount text={formatFundingAmount(form.currency, text("amount"))} /></strong> : null}
         <ExpiryCountdown expiresAt={listingExpiry} status="submitted" />
         <p className="field-hint">{EXPIRY_WINDOWS.find((item) => item.value === Number(form.expiryDays))?.label ?? `${form.expiryDays} days`}</p>
       </aside>
