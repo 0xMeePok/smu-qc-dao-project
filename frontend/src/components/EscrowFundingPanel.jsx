@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { contributionError } from "../lib/contributionValidation.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -138,17 +139,17 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
       <section className="escrow-balance-section" aria-label="Escrow balances">
         <h4>Escrow balances</h4>
         <dl className="escrow-balance-grid">
-          <div><dt>Held in escrow</dt><dd>{money(state.outstandingBalance)}</dd></div>
-          <div><dt>Released before fees</dt><dd>{money(state.totalReleased)}</dd></div>
-          <div><dt>Refunded to contributors</dt><dd>{money(state.totalRefunded)}</dd></div>
+          <div><dt>Held in escrow</dt><dd><ConvertedAmount text={money(state.outstandingBalance)} /></dd></div>
+          <div><dt>Released before fees</dt><dd><ConvertedAmount text={money(state.totalReleased)} /></dd></div>
+          <div><dt>Refunded to contributors</dt><dd><ConvertedAmount text={money(state.totalRefunded)} /></dd></div>
         </dl>
-        <p className="escrow-deposit-reference">{terminal ? "Originally deposited" : "Total deposited"}: {money(state.totalDeposited)}<span>Target: {money(state.fundingTarget)}</span></p>
+        <p className="escrow-deposit-reference">{terminal ? "Originally deposited" : "Total deposited"}: <ConvertedAmount text={money(state.totalDeposited)} /><span>Target: <ConvertedAmount text={money(state.fundingTarget)} /></span></p>
       </section>
       <section className="escrow-wallet-section" aria-label="Your funds">
         <h4>Your funds</h4>
         <dl className="escrow-wallet-grid">
-          <div><dt>Your contribution</dt><dd>{money(state.wallet.contribution)}</dd></div>
-          <div><dt>Your available refund</dt><dd>{money(state.wallet.depositor?.claimable)}</dd></div>
+          <div><dt>Your contribution</dt><dd><ConvertedAmount text={money(state.wallet.contribution)} /></dd></div>
+          <div><dt>Your available refund</dt><dd><ConvertedAmount text={money(state.wallet.depositor?.claimable)} /></dd></div>
         </dl>
         {terminal && !error && custodyLock.status === "settled" && walletReady && <p className="field-hint">No refund remains to claim from this escrow.</p>}
       </section>
@@ -203,7 +204,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
           <p>Problem owner: {state.ownerApproved ? "accepted as delivered" : "pending"}. Proposal owner: {state.solutionApproved ? "completion confirmed" : "pending"}.</p>
           {(state.roles.problemOwner || state.roles.proposalOwner) && action("approveMilestone", state.roles.problemOwner ? "Accept as delivered" : "Confirm completion", {}, evidenceReady && state.can.approveMilestone)}
           {state.funderVoting && <>
-            <p>Yes voting weight: {money(state.yesWeight)} of {money(state.totalDeposited)}. More than 50% of all contributed funds must vote yes.</p>
+            <p>Yes voting weight: <ConvertedAmount text={money(state.yesWeight)} /> of <ConvertedAmount text={money(state.totalDeposited)} />. More than 50% of all contributed funds must vote yes.</p>
             {state.roles.funder && (state.wallet.hasVoted ? <p>Your vote is recorded for this evidence.</p> : <div className="actions">
               {action("voteMilestone", "Vote yes", { approve: true }, evidenceReady && state.can.voteMilestone)}
               {action("voteMilestone", "Vote no", { approve: false }, evidenceReady && state.can.voteMilestone)}

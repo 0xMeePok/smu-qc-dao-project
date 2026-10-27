@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useEffect, useId, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { completeMockEvaluation, confirmMockProposal, declineMockProposal, forceExpireMockMatch, fundMockProposal, getMockMatching, matchingError, proposalFundingStatus } from "../lib/matching.js";
@@ -262,7 +263,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onO
       ? <EscrowProposalLink key={item.id} item={item} onNavigate={onNavigate} />
       : <article className="matching-candidate" key={item.id}>
       <h3>{item.title}</h3><StatusBadge status={proposalFundingStatus(item, state.matching).status} />{proposalFundingStatus(item, state.matching).detail && <span className="funding-note">{proposalFundingStatus(item, state.matching).detail}</span>}
-      <p><strong>{money(item.currency, item.fundedAmount)}</strong> of {money(item.currency, item.amount)}</p>
+      <p><strong><ConvertedAmount text={money(item.currency, item.fundedAmount)} /></strong> of <ConvertedAmount text={money(item.currency, item.amount)} /></p>
       <p className="field-hint">{["voided", "declined", "cancelled"].includes(item.matching?.status) || invalidated ? "Funding shown is historical. Contributions have been refunded; this proposal is closed." : <>Proposal funding target: {item.fundedAmount >= item.amount ? "Met" : "Not yet met"}. {waiting ? "Funding is paused during the shared acceptance window." : confirmed ? "Matching is complete for this problem." : "The problem owner can select this proposal from the comparison once it is fully funded. Expert evaluation is optional."}</>}</p>
       {item.matching?.evaluationComplete && <p className="field-hint">Optional expert evaluation: Complete</p>}
       {receiptFor("mock_evaluation_completed", item.id) && <button type="button" className="text-button" onClick={() => showReceipt(receiptFor("mock_evaluation_completed", item.id))}>View evaluation record</button>}
@@ -279,7 +280,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onO
       {cursor && <button type="button" className="secondary" disabled={loading || busy} onClick={() => setPage(null)}>First proposals</button>}
       {state?.nextCursor && <button type="button" className="secondary" disabled={loading || busy} onClick={() => setPage({ problemId, cursor: state.nextCursor })}>Next proposals</button>}
     </div>}
-    {contributions.length > 0 && <div className="matching-contributions"><h3>Your mock contributions</h3>{contributions.map((item) => <p key={item.id}>{money(item.currency, item.amount)} <StatusBadge status={contributionWorkflowStatus(item.status)} />{item.status === "refunded" && <span className="funding-note">Returned to you</span>}</p>)}</div>}
+    {contributions.length > 0 && <div className="matching-contributions"><h3>Your mock contributions</h3>{contributions.map((item) => <p key={item.id}><ConvertedAmount text={money(item.currency, item.amount)} /> <StatusBadge status={contributionWorkflowStatus(item.status)} />{item.status === "refunded" && <span className="funding-note">Returned to you</span>}</p>)}</div>}
     <button className="text-button" type="button" disabled={busy || loading} onClick={refresh}>{loading ? "Refreshing…" : "Refresh funding status"}</button>
     {state?.canForceExpire && waiting && <button className="text-button danger-text" type="button" disabled={busy || loading} onClick={() => openAction("expire", { id: state.matching.proposalId, title: "Expire the current confirmation window" })}>Expire window for demonstration</button>}
     {state?.history?.length > 0 && <div className="matching-history history-card history-card-decisions"><h3>Decision record</h3><p className="field-hint">Off-chain receipts recorded by the server. No blockchain transaction or wallet signature is required for selection or acceptance.</p>{state.history.map((entry) => <details key={entry.id} id={`matching-event-${entry.id}`}><summary>{eventLabel(entry.type)} {eventWorkflowStatus(entry.type) && <StatusBadge status={eventWorkflowStatus(entry.type)} interactive={false} />} · {formatInstant(entry.createdAt)}</summary><dl><dt>Actor</dt><dd>{entry.actorId || (["funding_contributed", "funding_target_reached"].includes(entry.type) ? "Private contributor" : "Scheduled expiry")}</dd><dt>Role</dt><dd>{entry.actorRole || "Member"}</dd>{entry.actorWallet && <><dt>Connected wallet</dt><dd>{entry.actorWallet}</dd></>}<dt>Proposal</dt><dd>{entry.proposalId || "All proposals"}</dd>{entry.reason && <><dt>Reason</dt><dd>{entry.reason}</dd></>}<dt>Receipt</dt><dd>Recorded off-chain</dd><dt>Record reference</dt><dd>{entry.id}</dd>{entry.deadlineAt && <><dt>Acceptance deadline</dt><dd>{formatInstant(entry.deadlineAt)}</dd>{waiting && entry.proposalId === state.matching.proposalId && <><dt>Time remaining</dt><dd><ExpiryCountdown expiresAt={state.matching.deadlineAt} windowMs={ACCEPTANCE_WINDOW_MS} showInstant={false} /></dd></>}</>}</dl>{["owner_selected", "owner_confirmed", "creator_confirmed", "match_confirmed"].includes(entry.type) && entry.proposalId ? <button type="button" className="text-button" disabled={relatedAudit?.loading} onClick={() => openProposalAudit(entry.proposalId)}>View audit receipt</button> : null}</details>)}{state.historyTruncated && <p className="field-hint">Showing the latest 100 events.</p>}</div>}
@@ -302,7 +303,7 @@ export function MatchingPanel({ problemId, proposalId, onChange, onNavigate, onO
 function EscrowProposalLink({ item, onNavigate }) {
   return <article className="matching-candidate">
     <h3>{item.title}</h3><span className="draft-badge">On-chain escrow</span>
-    <p>Requested: <strong>{money(item.currency, item.amount)}</strong></p>
+    <p>Requested: <strong><ConvertedAmount text={money(item.currency, item.amount)} /></strong></p>
     <p className="field-hint">50% upfront and 50% on completion. View the proposal for live funding and delivery approvals.</p>
     {onNavigate && <button type="button" className="text-button" onClick={() => onNavigate(`proposal/${item.id}`)}>View escrow proposal</button>}
   </article>;

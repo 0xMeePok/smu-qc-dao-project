@@ -6,11 +6,11 @@ const TOKEN_DETAILS = {
   XSGD: { name: "Singapore Dollar", mark: "S$", tone: "xsgd" },
 };
 
-function TokenIdentity({ value, label, detail = false }) {
+function TokenIdentity({ value, label, description, detail = false }) {
   const token = TOKEN_DETAILS[value];
   return <span className="token-select-identity">
     {token && <span className={`token-select-mark token-select-mark--${token.tone}`} aria-hidden="true">{token.mark}</span>}
-    <span className="token-select-copy"><span>{label}</span>{detail && token && <small>{token.name}</small>}</span>
+    <span className="token-select-copy"><span>{label}</span>{detail && (description || token) && <small>{description || token.name}</small>}</span>
   </span>;
 }
 
@@ -85,7 +85,7 @@ export function TokenSelect({ id, name, value, onChange, options, disabled = fal
       {options.map((option, index) => <li key={option.value} id={`${listId}-${index}`} role="option" aria-label={option.label} aria-selected={index === selected}
         className={index === activeIndex ? "is-active" : undefined} onPointerMove={() => setActive(index)}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
-        <TokenIdentity value={option.value} label={option.label} detail />
+        <TokenIdentity value={option.value} label={option.label} description={option.description} detail />
         <svg className="token-select-check" viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true" style={{ visibility: index === selected ? "visible" : "hidden" }}><path d="m4 10 4 4 8-8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </li>)}
     </ul>}

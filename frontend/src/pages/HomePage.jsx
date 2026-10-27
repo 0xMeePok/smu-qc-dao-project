@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CurrencyAmount } from "../components/CurrencyAmount.jsx";
 import { StatusBadge } from "../components/StatusBadge.jsx";
 import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 
@@ -28,7 +29,7 @@ function StepPanel({ index }) {
       <p className="desk-panel-kicker">New brief · Business problem</p>
       <div className="desk-field"><small>Title</small><span>Route optimisation for cold-chain delivery under demand spikes</span></div>
       <div className="desk-field-row">
-        <div className="desk-field"><small>Budget</small><span>USDT 60,000</span></div>
+        <div className="desk-field"><small>Budget</small><span><CurrencyAmount amount="60000" currency="USDT" tokenText="USDT 60,000" /></span></div>
         <div className="desk-field"><small>Open for</small><span>90 days</span></div>
       </div>
       <div className="desk-chips"><span>Optimisation</span><span>Data &amp; analytics</span></div>
@@ -108,7 +109,7 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
           <StatusBadge interactive={false} status={WORKFLOW_STATUS.DECISION_RECORDED} />
           <p>Variational circuits for route planning</p>
           <dl>
-            <div><dt>Budget</dt><dd>60,000 USDT</dd></div>
+            <div><dt>Budget</dt><dd><CurrencyAmount amount="60000" currency="USDT" tokenText="60,000 USDT" /></dd></div>
             <div><dt>Timeline</dt><dd>50 days left</dd></div>
             <div><dt>Proposals</dt><dd>3</dd></div>
           </dl>

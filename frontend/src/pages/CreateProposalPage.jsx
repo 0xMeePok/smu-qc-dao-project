@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatFundingAmount } from "../lib/fundingDisplay.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -459,7 +460,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           />
         )}
       </form>
-      <aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong>{formatFundingAmount(posting.currency, posting.amount)}</strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>
+      <aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong><ConvertedAmount text={formatFundingAmount(posting.currency, posting.amount)} /></strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>
     </div>
   </section>;
 }

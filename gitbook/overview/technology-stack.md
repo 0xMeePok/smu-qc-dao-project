@@ -22,7 +22,7 @@ Testing uses Node's built-in test runner, Vitest 3.2.4, Testing Library 16.3.0, 
 
 | Technology | Version | Used for |
 | --- | --- | --- |
-| Cloud Functions for Firebase, second generation (`firebase-functions`) | 7.3.2 | 69 callable, 17 Firestore-triggered and 7 scheduled functions |
+| Cloud Functions for Firebase, second generation (`firebase-functions`) | 7.3.2 | 70 callable, 17 Firestore-triggered and 7 scheduled functions |
 | Node.js runtime | 22 | Set in `firebase/functions/package.json` |
 | Firebase Admin SDK | 14.3.0 | Firestore, Auth custom tokens and Storage from the server |
 | Privy server SDK (`@privy-io/node`) | 0.35.0 | Verifying access tokens and reading a user's wallet |

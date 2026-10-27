@@ -6,9 +6,9 @@ Each package has its own test suite. Suites that need emulators start and stop t
 
 | Suite | Command, from the repository root | Test files | Needs |
 | --- | --- | --- | --- |
-| Frontend unit, integration and accessibility | `npm test --prefix frontend` | 121 | `firebase/functions` installed (shared modules) |
+| Frontend unit, integration and accessibility | `npm test --prefix frontend` | 123 | `firebase/functions` installed (shared modules) |
 | Firestore and Storage rules | `npm test --prefix firebase` | 20 | Java |
-| Cloud Functions | `npm test --prefix firebase/functions` | 69 | Java |
+| Cloud Functions | `npm test --prefix firebase/functions` | 70 | Java |
 | Audit registry contracts | `npm test --prefix contracts/audit-registry` | 3 | Nothing else |
 | Funding escrow contracts | `npm test --prefix contracts/funding-escrow` | 19, plus script and verifier tests | `contracts/audit-registry` installed, Node 22.13 or newer |
 | Faucet contracts and site | `npm test --prefix contracts/stable-faucet`, then `npm test --prefix contracts/stable-faucet/site` | 1 and 7 | Both packages installed |
@@ -26,7 +26,7 @@ If a suite fails to start with a port error, an emulator from another terminal i
 
 * **Frontend:** route access for every role (`test/routeAccess.test.js`), validation, the idle timeout, the session state machine, workflow status labels, audit hashing golden vectors, escrow adapters, and component tests for each major panel. Accessibility tests run axe-core and colour contrast checks.
 * **Rules:** a member can only create and read their own profile, `stats` cannot be written, the member list cannot be enumerated, `role` never leaks, publication proofs are required, drafts stay private, moderation boundaries hold, and Storage uploads are PDF only, owner only and immutable.
-* **Functions:** Privy sign-in (including refusing an external wallet, a missing wallet or a browser-named address), EIP-7702 upgraded wallets, admin actions, publication attestation, audit confirmation and recovery, expiry, escrow funding and settlement, moderation, notifications and the attachment sweeper.
+* **Functions:** Privy sign-in (including refusing an external wallet, a missing wallet or a browser-named address), EIP-7702 upgraded wallets, admin actions, the selected-proposal export, publication attestation, audit confirmation and recovery, expiry, escrow funding and settlement, moderation, notifications and the attachment sweeper.
 * **Contracts:** accounting, fees, decimals, milestones, refunds, voting, token policy, moderation pauses, factory wiring, grant pools and independent crowdfunding, plus reconciliation of real receipts with the production event reconciler.
 
 ## End-to-end scripts

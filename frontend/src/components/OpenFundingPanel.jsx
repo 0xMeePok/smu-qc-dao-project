@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
@@ -99,15 +100,15 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
         const status = expired ? "Offer expired" : item.declined ? "Offer declined by the researcher" : item.status === "pending" ? "Awaiting researcher acceptance"
           : item.status === "accepted" ? "Grant accepted" : item.status === "voided" ? "Offer voided" : "Seeking a grant";
         return <div className="table-row grant-offer-row" key={item.proposalId}><div><strong>{item.title || "Proposal"}</strong>
-          <small className="table-row-meta">Requested {money(item.amountBaseUnits)} · {status}</small>
-          {canSelect && <p className="grant-offer-explanation">{money(data.available)} available in the pool. Offering this grant reserves {money(item.amountBaseUnits)} for seven days. The researcher must accept before it moves into this proposal’s escrow.</p>}
+          <small className="table-row-meta">Requested <ConvertedAmount text={money(item.amountBaseUnits)} /> · {status}</small>
+          {canSelect && <p className="grant-offer-explanation"><ConvertedAmount text={money(data.available)} /> available in the pool. Offering this grant reserves <ConvertedAmount text={money(item.amountBaseUnits)} /> for seven days. The researcher must accept before it moves into this proposal’s escrow.</p>}
           {Number(item.acceptanceDeadline) > 0 && ["pending", "expired"].includes(item.status) && <small className="table-row-meta">Accept before {formatInstant(new Date(Number(item.acceptanceDeadline) * 1000))}</small>}
           {item.declined && item.declineReason && <small className="table-row-meta">Researcher’s reason: {item.declineReason}</small>}
           {item.canDecline && !declining && <small className="table-row-meta">Not taking this grant? Decline the offer to return the reserved amount to the pool’s available balance right away.</small>}
           {item.canAccept && !item.canDecline && <small className="table-row-meta">Not taking this grant? Leave it unaccepted and the reserved amount returns to the pool after this deadline. Withdrawing this proposal lets the reservation be released sooner.</small>}
           {item.status === "none" && data.canSelect && !canSelect && <small className="table-row-meta">{item.canSelect === false ? "This proposal is not currently eligible for selection." : "Deposit more funds to cover this request."}</small>}
           {declining && <div className="field-group" role="group" aria-label="Decline grant offer">
-            <p>Declining is final: this proposal cannot be offered a grant from this pool again, and the reserved {money(item.amountBaseUnits)} returns to the pool’s available balance.</p>
+            <p>Declining is final: this proposal cannot be offered a grant from this pool again, and the reserved <ConvertedAmount text={money(item.amountBaseUnits)} /> returns to the pool’s available balance.</p>
             <Field label="Reason for declining" htmlFor={reasonId} error={reasonError}
               hint={`${DECLINE_MIN}–2,000 characters (${reasonLength.toLocaleString("en-US")} entered). The grant owner sees your reason; only its hash is recorded on-chain.`}>
               {({ id, describedBy, invalid }) => <textarea id={id} rows={3} required minLength={DECLINE_MIN} maxLength={DECLINE_MAX} value={decline.reason ?? ""}
@@ -129,7 +130,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
       </div>
       <div className="grant-pool-summary"><h4>Shared grant pool</h4><p className="field-hint">This balance funds proposals across the funding opportunity.</p>
       <dl className="escrow-stats">
-        {[["Deposited", "totalDeposited"], ["Available", "available"], ["Reserved", "totalReserved"], ["Awarded to proposals", "totalAllocated"]].map(([label, key]) => <div key={key}><dt>{label}</dt><dd>{money(data[key])}</dd></div>)}
+        {[["Deposited", "totalDeposited"], ["Available", "available"], ["Reserved", "totalReserved"], ["Awarded to proposals", "totalAllocated"]].map(([label, key]) => <div key={key}><dt>{label}</dt><dd><ConvertedAmount text={money(data[key])} /></dd></div>)}
       </dl></div>
       {data.poolAddress ? <a href={escrowExplorer("address", data.poolAddress)} target="_blank" rel="noreferrer">View grant pool contract</a>
         : <p className="field-hint">The owner must create this pool, then deposit funds. The advertised budget is not a deposit.</p>}

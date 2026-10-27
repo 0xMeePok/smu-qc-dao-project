@@ -18,7 +18,7 @@ export function LeaveDraftPrompt({
   onSave,
 }) {
   return (
-    <Modal labelledBy="leave-draft-title" describedBy="leave-draft-desc" onDismiss={onKeepEditing}>
+    <Modal className="leave-draft-modal" labelledBy="leave-draft-title" describedBy="leave-draft-desc" onDismiss={onKeepEditing}>
       <div className="modal-head">
         <div>
           <h2 id="leave-draft-title">Save this as a draft?</h2>
@@ -33,11 +33,11 @@ export function LeaveDraftPrompt({
         <button className="secondary" type="button" disabled={saving} onClick={onKeepEditing}>
           Keep editing
         </button>
-        <button className="secondary" type="button" disabled={saving} onClick={onDiscard}>
+        <button className="secondary leave-draft-discard" type="button" disabled={saving} onClick={onDiscard}>
           {draftExists ? "Discard changes" : "Discard and leave"}
         </button>
-        <button className="primary" type="button" disabled={saving} onClick={onSave}>
-          {saving ? "Saving…" : "Save as draft and leave"}
+        <button className="primary" type="button" aria-label={saving ? "Saving…" : "Save as draft and leave"} disabled={saving} onClick={onSave}>
+          {saving ? "Saving…" : "Save draft & leave"}
         </button>
       </div>
     </Modal>

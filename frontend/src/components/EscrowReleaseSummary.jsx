@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -34,7 +35,7 @@ export function EscrowReleaseSummary({ onNavigate }) {
         : data.items.map(item => <div className="table-row" key={item.proposalId}><div>
           <strong>{item.title || "Proposal"}</strong><small className="table-row-meta">{item.postingTitle}</small>
           <p>Upfront 50%: {paymentStatus(item, item.upfrontReleased)} · Final 50%: {paymentStatus(item, item.finalReleased)}</p>
-          <small>Released before fees: {escrowFundingAmount(item.totalReleased, item.tokenDecimals, item.tokenSymbol)} · Held: {escrowFundingAmount(item.outstandingBalance, item.tokenDecimals, item.tokenSymbol)}</small>
+          <small>Released before fees: <ConvertedAmount text={escrowFundingAmount(item.totalReleased, item.tokenDecimals, item.tokenSymbol)} /> · Held: <ConvertedAmount text={escrowFundingAmount(item.outstandingBalance, item.tokenDecimals, item.tokenSymbol)} /></small>
         </div><button type="button" className="text-button" onClick={() => onNavigate(`proposal/${item.proposalId}?tab=funding`)}>Open escrow</button></div>)}
     </>}
   </section>;

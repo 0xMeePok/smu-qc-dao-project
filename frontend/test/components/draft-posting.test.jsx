@@ -475,7 +475,7 @@ describe("leaving with unsaved work", () => {
     render(<CreatePostingPage onNavigate={onNavigate} />);
     fireEvent.change(field("title"), { target: { value: "Keep this" } });
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
-    fireEvent.click(screen.getByText(/save as draft and leave/i));
+    fireEvent.click(screen.getByRole("button", { name: /save as draft and leave/i }));
 
     await waitFor(() => expect(mocks.drafts).toHaveLength(1));
     expect(mocks.drafts[0].form.title).toBe("Keep this");

@@ -1,6 +1,6 @@
 # Cloud Functions
 
-All 93 functions exported from `firebase/functions/index.js` at `main` @ `7d3907b`, in region `asia-southeast1`. Types: **callable** (`onCall`), **trigger** (Firestore `onDocumentCreated`, `onDocumentUpdated` or `onDocumentWritten`) and **scheduled** (`onSchedule`).
+All 94 functions exported from `firebase/functions/index.js`, in region `asia-southeast1`. Types: **callable** (`onCall`), **trigger** (Firestore `onDocumentCreated`, `onDocumentUpdated` or `onDocumentWritten`) and **scheduled** (`onSchedule`).
 
 Unless noted, callables require an onboarded, active member and enforce App Check outside the emulator. "Admin" means access level 1 is also required.
 
@@ -125,4 +125,5 @@ Unless noted, callables require an onboarded, active member and enforce App Chec
 | --- | --- | --- |
 | `adminGetActivitySummary` | callable, admin | What is happening on the platform now |
 | `adminGetPlatformStatus` | callable, admin | Health of the RPC, registry, audit queue and Firestore |
+| `adminExportSelectedProposals` | callable, admin | JSON and CSV for one accepted posting, or every accepted posting in a UTC date range. Writes an audit record |
 | `claimWalletTokens` | callable | Relays a signed faucet claim to the Vercel faucet for the caller's own address |
