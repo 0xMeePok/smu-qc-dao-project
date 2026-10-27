@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useState } from "react";
 
 /**
@@ -118,7 +119,7 @@ export function ReviewRows({ rows, onEdit }) {
       {rows.map((row) => (
         <div key={row.label}>
           <dt>{row.label}</dt>
-          <dd className={row.value ? "" : "is-empty"}>{row.value || row.empty || "Not added"}</dd>
+          <dd className={row.value ? "" : "is-empty"}>{typeof row.value === "string" && /funding|crowdfunding/i.test(row.label) ? <ConvertedAmount text={row.value || row.empty || "Not added"} /> : row.value || row.empty || "Not added"}</dd>
           <button type="button" className="text-button" onClick={() => onEdit(row.step)}>
             Edit<span className="sr-only"> {row.label}</span>
           </button>
@@ -144,7 +145,7 @@ export function BriefPreview({ kind, organisation, title, titleFallback, descrip
         <div className="preview-meta">
           <div>
             <small>{fundingLabel}</small>
-            <strong>{funding || "—"}</strong>
+            <strong><ConvertedAmount text={funding || "—"} /></strong>
           </div>
           <div>
             <small>Open until</small>

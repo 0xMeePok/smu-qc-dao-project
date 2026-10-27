@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { PrivyProvider } from "@privy-io/react-auth";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App.jsx";
+import { CurrencyProvider } from "./context/CurrencyProvider.jsx";
 import { SessionProvider } from "./context/SessionContext.jsx";
 import { WalletProvider } from "./context/WalletContext.jsx";
 import { isPrivyConfigured, privyAppId, privyConfig } from "./lib/privy.js";
@@ -19,7 +20,7 @@ const app = (
   <QueryClientProvider client={queryClient}>
     <WalletProvider>
       <SessionProvider>
-        <App />
+        <CurrencyProvider><App /></CurrencyProvider>
       </SessionProvider>
     </WalletProvider>
   </QueryClientProvider>

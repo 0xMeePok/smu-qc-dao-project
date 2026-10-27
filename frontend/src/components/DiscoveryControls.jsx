@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useEffect, useState } from "react";
 import { StatusBadge } from "./StatusBadge.jsx";
 import { VerifiedBadge } from "./VerifiedBadge.jsx";
@@ -220,7 +221,7 @@ export function OpportunityTable({ items, onOpen }) {
         },
         { key: "organisation", label: "Organisation", width: "16%", render: (item) => (item.removed ? "—" : item.owner) },
         { key: "status", label: "Status", width: "15%", render: (item) => (item.removed ? "—" : <OpportunityTrust item={item} />) },
-        { key: "funding", label: "Funding", width: "23%", render: (item) => (item.removed ? "—" : <><span className="posting-budget">Budget {item.amount}</span><PostingFundingProgress projection={item.escrowFunding} /></>) },
+        { key: "funding", label: "Funding", width: "23%", render: (item) => (item.removed ? "—" : <><span className="posting-budget">Budget <ConvertedAmount text={item.amount} /></span><PostingFundingProgress projection={item.escrowFunding} /></>) },
         { key: "proposals", label: "Proposals", width: "9%", numeric: true, render: (item) => (item.removed ? "—" : item.proposalCount) },
         { key: "closes", label: "Closes", width: "14%", numeric: true, render: (item) => (item.removed ? "—" : item.deadline) },
       ]}

@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../config/proposal.js";
@@ -99,7 +100,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
       <div className="selection-bar" role="region" aria-label="Selected proposal">
         <span className="selection-bar-text">
           <span className="muted">Chosen </span><strong>{selected.title}</strong>
-          <span className="muted"> · {money(selected.currency, selected.amount)}</span>
+          <span className="muted"> · <ConvertedAmount text={money(selected.currency, selected.amount)} /></span>
         </span>
         <button type="button" className="text-button" onClick={() => setSelectedId("")}>Clear</button>
         <button type="button" className="primary" onClick={() => { setError(""); setPending(selected); }}>Confirm match</button>
@@ -144,7 +145,7 @@ export function SelectProposalDialog({ problemId, proposal, onCancel, onSelected
       <div className="modal-body">
         <div className="selection-summary">
           <span>{proposal.title}</span>
-          <strong>{money(proposal.currency, proposal.amount)}</strong>
+          <strong><ConvertedAmount text={money(proposal.currency, proposal.amount)} /></strong>
         </div>
         <p>Selecting records your acceptance as the problem owner and your rationale in the audit record. Funding for the other proposals pauses while the researcher confirms. Recommendations are optional and advisory: this does not mark the proposal as the highest scored or the preferred submission.</p>
         <label htmlFor="comparison-rationale">Selection rationale</label>
@@ -181,7 +182,7 @@ function ComparisonRow({ row, problemMatching, showDecision, open, checked, onTo
         {decision && <span className="comparison-decision">{decision}</span>}
       </div>
       <dl className="comparison-metrics">
-        <div><dt>Requested</dt><dd className="numeric">{money(row.currency, row.amount)}</dd></div>
+        <div><dt>Requested</dt><dd className="numeric"><ConvertedAmount text={money(row.currency, row.amount)} /></dd></div>
         <div><dt>Evaluators</dt><dd className="status-badges"><EvaluationBadges counts={row.recommendations ?? {}} /></dd></div>
         <div><dt>Comments</dt><dd>{row.commentCount ? `${row.qualifyingCount || 0} qualifying · ${row.commentCount} total` : "None yet"}</dd></div>
         <div>

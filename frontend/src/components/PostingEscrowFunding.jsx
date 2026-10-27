@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
@@ -29,7 +30,7 @@ export function PostingEscrowFunding({ problemId, active = true, onNavigate }) {
     {data?.items?.map(item => <article className="table-row" key={item.proposalId}>
       <div><strong>{item.title}</strong>
         {item.available === false ? <p className="field-hint">Funding and lock status could not be verified. Open the proposal to check its original escrow.</p> : <>
-          <small className="table-row-meta">Confirmed deposits {escrowFundingAmount(item.totalDeposited, item.tokenDecimals, item.tokenSymbol)} / {escrowFundingAmount(item.fundingTarget, item.tokenDecimals, item.tokenSymbol)}</small>
+          <small className="table-row-meta">Confirmed deposits <ConvertedAmount text={escrowFundingAmount(item.totalDeposited, item.tokenDecimals, item.tokenSymbol)} /> / <ConvertedAmount text={escrowFundingAmount(item.fundingTarget, item.tokenDecimals, item.tokenSymbol)} /></small>
           <FundingProgress summary={item} compact stale={Boolean(query.error)} label={`Confirmed funding progress for ${item.title}`} />
           <EscrowLifecycleBadge summary={item} stale={Boolean(query.error)} />
           <EscrowMoneySummary summary={item} compact stale={Boolean(query.error)} />

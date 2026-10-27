@@ -124,6 +124,9 @@ export async function updateProfile({ form, address }) {
     expertise: form.expertise.map((item) => item.trim()).filter(Boolean),
     updatedAt: serverTimestamp(),
   };
+  // Older editors can still save profile details without resetting this choice.
+  if (Object.hasOwn(form, "localCurrency")) updates.localCurrency = form.localCurrency;
+  if (Object.hasOwn(form, "showLocalCurrency")) updates.showLocalCurrency = form.showLocalCurrency;
   const batch = writeBatch(db);
   batch.update(profileRef(lower), updates);
   batch.update(publicProfileRef(lower), {

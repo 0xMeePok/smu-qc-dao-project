@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
@@ -478,7 +479,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             <div><dt>Organisation</dt><dd>{published.organisation}</dd></div>
             <div>
               <dt>Indicative funding</dt>
-              <dd>{published.currency} {Number(published.amount).toLocaleString()}</dd>
+              <dd><ConvertedAmount text={`${published.currency} ${Number(published.amount).toLocaleString()}`} /></dd>
             </div>
             <div><dt>Submitted</dt><dd>{formatInstant(published.createdAt)}</dd></div>
             <div><dt>Closes</dt><dd><ExpiryCountdown expiresAt={published.expiresAt} /></dd></div>

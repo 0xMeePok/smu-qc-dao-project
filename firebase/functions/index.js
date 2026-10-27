@@ -17,6 +17,7 @@ import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
 import { registerOpenFundingFunctions } from "./openFundingFunctions.js";
 import { registerIndependentFundingFunctions } from "./independentFundingFunctions.js";
 import { registerWalletFaucetFunctions } from "./walletFaucetFunctions.js";
+import { registerFxRateFunctions } from "./fxRates.js";
 import { assertIndependentPublicationUnlocked } from "./independentFunding.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
@@ -132,6 +133,8 @@ const SIGN_IN_MAX_INSTANCES = 10;
 // Must match FUNCTIONS_REGION in frontend/src/lib/firebase.js and the Firestore
 // database location. Otherwise every sign-in crosses regions.
 const REGION = "asia-southeast1";
+
+export const { getFxRates } = registerFxRateFunctions({ region: REGION });
 
 export const { notifyMatchingEvent, resumeMatchingNotificationDelivery, remindNearingApprovalWindows } = registerMatchingNotificationFunctions({ db, region: REGION });
 

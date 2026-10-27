@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { LIVE_DASHBOARD_OPTIONS } from "../lib/liveDashboard.js";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -96,7 +97,7 @@ function EscrowReadiness({ posting, stale = false }) {
             <>
               <FundingProgress summary={item} compact stale={stale} label={`Confirmed escrow funding for ${item.title || "this solution"}`} />
               <EscrowLifecycleBadge summary={item} compact stale={stale} />
-              <small>{tokenAmount(item.outstandingBalance, item)} held in escrow · Confirmed block {item.blockNumber}</small>
+              <small><ConvertedAmount text={tokenAmount(item.outstandingBalance, item)} /> held in escrow · Confirmed block {item.blockNumber}</small>
               <small>
                 {item.canSelect ? "Funding requirement met; selection can begin." : item.fundingMet
                   ? "Funding requirement met; selection is unavailable in the current escrow state."
@@ -150,9 +151,9 @@ function PostingRollup({ posting, onNavigate, stale = false }) {
             max={posting.fundingTarget}
           />
           <small>
-            {money(posting.currency, posting.fundingCommitted)} committed of{" "}
-            {money(posting.currency, posting.fundingTarget)} asked across open solutions · {posting.fundingPercent}%
-            {" · "}Posting requirement {money(posting.currency, posting.requestedAmount)}
+            <ConvertedAmount text={money(posting.currency, posting.fundingCommitted)} /> committed of{" "}
+            <ConvertedAmount text={money(posting.currency, posting.fundingTarget)} /> asked across open solutions · {posting.fundingPercent}%
+            {" · "}Posting requirement <ConvertedAmount text={money(posting.currency, posting.requestedAmount)} />
           </small>
         </div>
       )}
@@ -284,7 +285,7 @@ export function OwnerDashboardPanel({ onNavigate }) {
                     <strong>{item.title || "Untitled solution"}</strong>
                     <small className="table-row-meta">On: {item.postingTitle || "Untitled posting"}</small>
                     <small className="table-row-meta">
-                      {money(item.currency, item.amount)}
+                      <ConvertedAmount text={money(item.currency, item.amount)} />
                       {item.escrowBacked ? " · Escrow-backed" : ""}
                       {item.acceptedAt ? ` · Accepted ${formatInstant(item.acceptedAt)}` : ""}
                     </small>

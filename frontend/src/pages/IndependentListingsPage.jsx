@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { listIndependentListings } from "../lib/proposals.js";
@@ -206,7 +207,7 @@ export default function IndependentListingsPage({ onNavigate, params = new URLSe
                 },
                 { key: "organisation", label: "Organisation", render: (item) => item.organisation || "—" },
                 { key: "readiness", label: "Readiness", render: (item) => readinessLabel(item.maturity) },
-                { key: "funding", label: "Funding sought", numeric: true, render: (item) => fundingLabel(item) },
+                { key: "funding", label: "Funding sought", numeric: true, render: (item) => <ConvertedAmount text={fundingLabel(item)} /> },
                 { key: "closes", label: "Closes", numeric: true, render: (item) => formatInstantDate(item.expiresAt) },
               ]}
             />

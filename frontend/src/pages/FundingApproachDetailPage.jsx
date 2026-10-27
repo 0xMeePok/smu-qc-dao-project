@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { funderOutcome } from "../components/FundingApproachList.jsx";
@@ -56,7 +57,7 @@ export default function FundingApproachDetailPage({ approachId, onNavigate }) {
             <div><dt>Listing</dt><dd>{record.proposalTitle || "Independent listing"}</dd></div>
             <div><dt>Funder</dt><dd>{record.funderName || "A client or funder"}</dd></div>
             <div><dt>Researcher</dt><dd>{record.researcherName || "The researcher"}</dd></div>
-            <div><dt>Amount</dt><dd>{money(record)} indicative</dd></div>
+            <div><dt>Amount</dt><dd><ConvertedAmount text={money(record)} /> indicative</dd></div>
             <div><dt>Status</dt><dd>{fundingApproachStatusLabel(status)}</dd></div>
             <div><dt>Outcome</dt><dd>{outcomeLine(record, status)}</dd></div>
             {pending && (
