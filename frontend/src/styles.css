@@ -5570,3 +5570,19 @@ span.currency-amount { display: inline-flex; font-size: inherit; color: inherit;
   .currency-toggle .token-select-trigger { min-height: 40px; }
   .currency-toggle-status { max-width: calc(100vw - 32px); white-space: normal; }
 }
+
+/* Equal action widths and gaps keep all three draft choices balanced. */
+.modal.leave-draft-modal { width: min(620px, calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); margin: auto; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; }
+.leave-draft-modal .modal-head { display: block; min-height: 0; padding: 26px; overflow-y: auto; }
+.leave-draft-modal .modal-head h2 { font-size: 24px; font-weight: 500; line-height: 1.25; letter-spacing: -0.02em; }
+.leave-draft-modal .modal-head p { margin-top: 12px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+.leave-draft-modal .modal-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 10px; padding: 20px 26px; }
+.leave-draft-modal .modal-actions > button { width: 100%; min-width: 0; min-height: 44px; margin: 0; padding: 10px 10px; border-radius: 7px; font-size: 12px; line-height: 1.5; text-align: center; white-space: normal; }
+.leave-draft-modal .modal-actions > .secondary { border: 1px solid var(--line-strong); background: transparent; color: var(--ink); }
+.leave-draft-modal .modal-actions > .secondary:hover:not(:disabled) { background: var(--surface-hover); }
+.leave-draft-modal .modal-actions > .leave-draft-discard:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+@media (max-width: 560px) {
+  .leave-draft-modal .modal-head { padding: 24px 20px; }
+  .leave-draft-modal .modal-head h2 { font-size: 22px; }
+  .leave-draft-modal .modal-actions { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+}
