@@ -34,9 +34,11 @@
 | Collection | Holds | Client access |
 | --- | --- | --- |
 | `escrowFundingEvents`, `escrowFundingSummaries`, `escrowFundingPositions` | Reconciled on-chain escrow events, totals and per-wallet positions | Callable only |
-| `escrowFundingJobs`, `escrowAdminCancellationJobs`, `escrowPostingPauseJobs`, `escrowModerationVoidJobs`, `escrowModerationAnchorJobs`, `escrowRefundNotificationJobs`, `escrowRefundTriggers` | Server work queues and the platform transaction outbox | None |
-| `openFundingSummaries`, `openFundingSelections` | Grant pool projections | Callable only |
-| `independentFundingSummaries`, `independentFundingEvidence`, `independentFundingJobs`, `independentFundingCancellationJobs` | Independent crowdfunding state and work queues | None |
+| `escrowFundingJobs`, `escrowAdminCancellationJobs`, `escrowPostingPauseJobs`, `escrowModerationVoidJobs`, `escrowModerationAnchorJobs`, `escrowRefundNotificationJobs`, `escrowRefundTriggers` | Server work queues | None |
+| `escrowPlatformOutbox` | The platform signer's transaction outbox, so a settlement is sent once | None |
+| `openFundingSummaries`, `openFundingSelections`, `openFundingDeclines` | Grant pool projections, selections and declined grant offers | Callable only |
+| `independentFundingSummaries`, `independentFundingEvents`, `independentFundingPositions` | Independent crowdfunding totals, reconciled events and per-wallet positions | Callable only |
+| `independentFundingEvidence`, `independentFundingJobs`, `independentFundingCancellationJobs` | Independent crowdfunding evidence and work queues | None |
 | `fundingApproaches`, `fundingApproachSlots` | Funding approaches to independent proposals | Callable only |
 | `funding/{id}`, `evaluations/{id}` | Older collections from the first schema | Limited reads by the funder or evaluator. Not used by the current flows |
 | `mockFunding`, `matchingEvents`, `matchingNotificationJobs` | Legacy mock matching ledger, events and notices | None |

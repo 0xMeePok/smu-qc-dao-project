@@ -66,6 +66,20 @@ node scripts/reset-dev-data.mjs --target production --project qcdao-a0c7a --conf
 
 On-chain records cannot be reset. After a reset, old anchors simply have no matching Firestore record.
 
+If the reset stops with a message ending in `adc-troubleshooting/user-creds`, the credentials have no quota project. Run `gcloud auth application-default set-quota-project qcdao-a0c7a` and try again. The dry run lists everything before deleting, so a failed run has deleted nothing.
+
+### Clearing content but keeping accounts
+
+To start the platform empty but keep everyone's account, delete every collection except these three, and every Storage object. No script in the repository does this; run the reset's dry run first to list the collections, then delete the others from the Firebase console or with the Admin SDK's `recursiveDelete`.
+
+| Keep | Why |
+| --- | --- |
+| `users` | Accounts, roles, emails and Privy ids |
+| `publicProfiles` | Public names and organisations. Nothing recreates these for members who have already onboarded |
+| `sessionRevocations` | Sign-out cutoffs. Without them a token issued before a sign-out works again until it expires |
+
+Leave Firebase Auth alone so members can still sign in. `privyIdentities` and `privySessionRateLimits` are rebuilt at the next sign-in. Check afterwards that `users.stats` counters do not refer to deleted content. Escrow contracts for deleted proposals stay on Arbitrum Sepolia with any deposited test tokens, but the app no longer tracks them.
+
 ## Backups
 
 The repository does not configure scheduled Firestore backups. Before risky work, such as a registry cutover or a data reset, take a managed export:

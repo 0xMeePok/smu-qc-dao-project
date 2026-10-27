@@ -43,6 +43,18 @@ Firebase loads `.env` first, then `.env.<project-id>`. A shell variable is not p
 
 Set them with `npx firebase functions:secrets:set <NAME> --project <project-id>` and redeploy.
 
+## Seed script (`firebase/functions/scripts/mock_data.mjs`)
+
+Set these in the shell when running `npm run seed`. All are optional; `npm run dev` in the frontend runs the seed with the defaults.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MOCK_TARGET` | `emulator` | `emulator` seeds the local emulators. Anything else seeds the live project |
+| `MOCK_PROJECT_ID` | `qcdao-a0c7a` | Project to seed |
+| `MOCK_STORAGE_BUCKET` | `<project>.firebasestorage.app` | Bucket for the sample PDFs |
+| `MOCK_OWNER_ADDRESS` | `0xdddd…dddd` | Wallet that owns the sample postings. Set it to your own wallet to see them under My Problems |
+| `MOCK_OWNER_EMAIL`, `MOCK_OWNER_PRIVY_ID` | `sample.owner@qcdao.example`, `did:privy:seed-sample-owner` | Email and Privy id written on that owner's `users` record |
+
 ## Contracts (`contracts/<package>/.env`)
 
 | Variable | Packages | Purpose |

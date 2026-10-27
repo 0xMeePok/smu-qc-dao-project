@@ -13,7 +13,14 @@ gcloud auth login
 gcloud config set project qcdao-a0c7a
 ```
 
-Admin scripts such as `reset-dev-data.mjs` use Application Default Credentials. Set them up once with `gcloud auth application-default login`.
+Admin scripts such as `reset-dev-data.mjs` use Application Default Credentials. Set them up once, and give them a quota project:
+
+```bash
+gcloud auth application-default login
+gcloud auth application-default set-quota-project qcdao-a0c7a
+```
+
+Skip the second command and Firestore and Storage still work, but every Firebase Auth call fails with a message that ends in `adc-troubleshooting/user-creds`. The Auth API refuses user credentials that have no quota project. The credentials file grants your full access to any local script, so remove it with `gcloud auth application-default revoke` when you no longer need it.
 
 ## Billing and budget
 
