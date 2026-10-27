@@ -434,4 +434,28 @@ describe("QCDAO-96 and QCDAO-97 consolidated audit trail", () => {
     assert.equal(second.nextCursor, null);
     assert.equal(first.items.some((item) => item.id === second.items[0].id), false);
   });
+
+  it("shows a selected-proposal export to administrators and hides it from members", async () => {
+    const db = fixture();
+    db.records.set("audits/export-1", {
+      type: "proposal_comment_export",
+      actor: admin,
+      actorName: "Ada Admin",
+      scope: "posting",
+      postingId: "problem-1",
+      problemId: "problem-1",
+      targetId: "problem-1",
+      title: "Route medicines",
+      timestamp: at("2026-10-27T00:00:00Z"),
+    });
+    const memberView = await problemTrail(db, member, 0);
+    assert.equal(memberView.items.some((item) => item.label === "Selected proposals exported"), false);
+    const adminView = await problemTrail(db, admin, 1);
+    const event = adminView.items.find((item) => item.id === "audit_export-1");
+    assert.equal(event.eventType, "governance");
+    assert.equal(event.verification, "off_chain");
+    assert.equal(event.problemId, "problem-1");
+    assert.match(event.description, /Ada Admin exported accepted postings/);
+    assert.match(event.description, /outside the platform/);
+  });
 });

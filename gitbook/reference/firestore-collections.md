@@ -48,7 +48,7 @@
 | Collection | Holds | Client access |
 | --- | --- | --- |
 | `contentReports`, `moderationQueue`, `moderationEvents`, `moderationNotifications`, `moderationReportLimits`, `moderationStats` | Reports, queue, decisions, notices, rate limits and counters | Callable only |
-| `audits/{auditId}` | Administrator decisions, role changes, suspensions, session revocations, expiry actions | Administrators read. No writes |
+| `audits/{auditId}` | Administrator decisions, role changes, suspensions, session revocations, expiry actions, and selected-proposal exports | Administrators read. No writes |
 
 ## Server bookkeeping
 

@@ -48,6 +48,9 @@ vi.mock("../../src/components/AdminActivityPanel.jsx", () => ({
 vi.mock("../../src/components/AdminEscrowCancellation.jsx", () => ({
   EscrowAdministration: () => <div data-testid="escrows-panel">Escrow inspection and cancellation</div>,
 }));
+vi.mock("../../src/components/ProposalExportPanel.jsx", () => ({
+  ProposalExportPanel: () => <div data-testid="exports-panel">Proposal export</div>,
+}));
 
 import AdminPage from "../../src/pages/AdminPage.jsx";
 
@@ -57,6 +60,7 @@ const sections = [
   ["escrows", "Escrows & refunds"],
   ["moderation", "Content reports"],
   ["users", "Users & access"],
+  ["exports", "Proposal export"],
   ["proposals", "Proposal verification"],
   ["postings", "Problem statements"],
   ["funding", "Funding calls"],
@@ -92,13 +96,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Admin workspace navigation", () => {
-  it("opens the overview with the same nine grouped sections available on desktop and mobile", async () => {
+  it("opens the overview with the same ten grouped sections available on desktop and mobile", async () => {
     render(<AdminPage onNavigate={vi.fn()} />);
     await waitFor(() => expect(mocks.fetchAdminUsers).toHaveBeenCalled());
 
     expect(screen.getByRole("heading", { level: 1, name: "Admin workspace" })).toBeTruthy();
     expectSection("overview", "Overview");
-    expect(nav().getAllByRole("button")).toHaveLength(9);
+    expect(nav().getAllByRole("button")).toHaveLength(10);
     expect(sectionPicker().tagName).toBe("BUTTON");
     expect(sectionPicker().getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("listbox")).toBeNull();
@@ -107,7 +111,7 @@ describe("Admin workspace navigation", () => {
     for (const name of ["Workspace", "Manage", "Audit records"]) {
       expect(within(listbox).getByRole("group", { name })).toBeTruthy();
     }
-    expect(within(listbox).getAllByRole("option")).toHaveLength(9);
+    expect(within(listbox).getAllByRole("option")).toHaveLength(10);
     for (const [, name] of sections) expect(within(listbox).getByRole("option", { name })).toBeTruthy();
     expect(within(listbox).getByRole("option", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
   });
@@ -218,6 +222,7 @@ describe("Admin workspace navigation", () => {
     ["Review reports", "moderation", "Content reports"],
     ["Manage users", "users", "Users & access"],
     ["Manage escrow", "escrows", "Escrows & refunds"],
+    ["Export proposals", "exports", "Proposal export"],
   ])("takes the overview action '%s' directly to its task", async (action, key, label) => {
     const onNavigate = vi.fn();
     render(<AdminPage onNavigate={onNavigate} />);

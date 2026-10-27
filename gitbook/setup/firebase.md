@@ -131,7 +131,7 @@ npx firebase deploy --only firestore:rules,firestore:indexes,storage,functions -
 npx firebase functions:list --project <project-id>
 ```
 
-All 93 functions should be listed in `asia-southeast1`. To check that sign-in is reachable:
+All 94 functions should be listed in `asia-southeast1`. To check that sign-in is reachable:
 
 ```bash
 curl -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" \

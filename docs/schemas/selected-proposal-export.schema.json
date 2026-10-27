@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qc-dao.local/schemas/selected-proposal-export.schema.json",
+  "title": "QC DAO selected proposal export",
+  "description": "JSON file returned when an administrator exports accepted postings and the comments on their selected proposals. Grading and token distribution are not in this file. The CSV form uses x-csv-columns, one row per comment. A leading spreadsheet formula character in a CSV cell is prefixed with an apostrophe; the JSON comment body is the exact text.",
+  "x-schema-version": 1,
+  "x-csv-columns": [
+    "schemaVersion",
+    "exportedAt",
+    "postingId",
+    "postingTitle",
+    "postingSummary",
+    "postingStatus",
+    "postingWorkflowStatus",
+    "opportunityType",
+    "ownerId",
+    "organisation",
+    "postingAmount",
+    "postingCurrency",
+    "acceptedAt",
+    "proposalId",
+    "proposalTitle",
+    "proposalSummary",
+    "proposalStatus",
+    "proposalWorkflowStatus",
+    "researcherId",
+    "proposalAmount",
+    "proposalCurrency",
+    "proposalCategory",
+    "commentId",
+    "authorId",
+    "authorRole",
+    "badge",
+    "recommendation",
+    "recommendationLabel",
+    "commentBody",
+    "parentId",
+    "commentCreatedAt",
+    "commentUpdatedAt",
+    "editedAt",
+    "deletedAt",
+    "qualifying",
+    "moderationStatus"
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "exportedAt",
+    "scope",
+    "notice",
+    "postingCount",
+    "proposalCount",
+    "commentCount",
+    "postings"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "exportedAt": { "type": "string" },
+    "scope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "postingId", "startDate", "endDate"],
+          "properties": {
+            "mode": { "const": "posting" },
+            "postingId": { "type": "string", "minLength": 1 },
+            "startDate": { "type": "null" },
+            "endDate": { "type": "null" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "postingId", "startDate", "endDate"],
+          "properties": {
+            "mode": { "const": "range" },
+            "postingId": { "type": "null" },
+            "startDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+            "endDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+          }
+        }
+      ]
+    },
+    "notice": { "type": "string", "minLength": 1 },
+    "postingCount": { "type": "integer", "minimum": 0 },
+    "proposalCount": { "type": "integer", "minimum": 0 },
+    "commentCount": { "type": "integer", "minimum": 0 },
+    "postings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/posting" }
+    }
+  },
+  "$defs": {
+    "posting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "summary", "status", "workflowStatus", "opportunityType",
+        "ownerId", "organisation", "categories", "amount", "currency",
+        "createdAt", "updatedAt", "expiresAt", "acceptedAt", "proposals"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "status": { "type": "string" },
+        "workflowStatus": { "type": "string" },
+        "opportunityType": { "type": ["string", "null"] },
+        "ownerId": { "type": "string" },
+        "organisation": { "type": "string" },
+        "categories": { "type": "array", "items": { "type": "string" } },
+        "amount": { "type": ["number", "null"] },
+        "currency": { "type": ["string", "null"] },
+        "createdAt": { "type": ["string", "null"] },
+        "updatedAt": { "type": ["string", "null"] },
+        "expiresAt": { "type": ["string", "null"] },
+        "acceptedAt": { "type": ["string", "null"] },
+        "proposals": { "type": "array", "items": { "$ref": "#/$defs/proposal" } }
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "summary", "status", "workflowStatus", "researcherId",
+        "amount", "currency", "category", "createdAt", "updatedAt", "comments"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "status": { "type": "string" },
+        "workflowStatus": { "type": "string" },
+        "researcherId": { "type": "string" },
+        "amount": { "type": ["number", "null"] },
+        "currency": { "type": ["string", "null"] },
+        "category": { "type": ["string", "null"] },
+        "createdAt": { "type": ["string", "null"] },
+        "updatedAt": { "type": ["string", "null"] },
+        "comments": { "type": "array", "items": { "$ref": "#/$defs/comment" } }
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "authorId", "authorRole", "badge", "recommendation", "recommendationLabel",
+        "body", "parentId", "createdAt", "updatedAt", "editedAt", "deletedAt",
+        "qualifying", "moderationStatus"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "badge": { "anyOf": [{ "type": "null" }, { "const": "evaluator" }] },
+        "recommendation": {
+          "anyOf": [
+            { "type": "null" },
+            { "enum": ["recommend", "recommend_with_revisions", "do_not_recommend"] }
+          ]
+        },
+        "recommendationLabel": {
+          "anyOf": [
+            { "type": "null" },
+            { "enum": ["Recommend", "Recommend with revisions", "Do not recommend"] }
+          ]
+        },
+        "body": { "type": "string" },
+        "parentId": { "type": ["string", "null"] },
+        "createdAt": { "type": ["string", "null"] },
+        "updatedAt": { "type": ["string", "null"] },
+        "editedAt": { "type": ["string", "null"] },
+        "deletedAt": { "type": ["string", "null"] },
+        "qualifying": { "type": "boolean" },
+        "moderationStatus": { "type": "string" }
+      }
+    }
+  }
+}

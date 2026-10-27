@@ -25,7 +25,7 @@ flowchart TB
     storage[("Cloud Storage<br/>PDF attachments")]
     scheduler["Cloud Scheduler<br/>7 timed jobs"]
     secrets["Secret Manager<br/>PRIVY_SECRET,<br/>ESCROW_PLATFORM_PRIVATE_KEY"]
-    functions["Cloud Functions v2, Node 22<br/>69 callable, 17 triggers,<br/>7 scheduled"]
+    functions["Cloud Functions v2, Node 22<br/>70 callable, 17 triggers,<br/>7 scheduled"]
     firestore[("Cloud Firestore<br/>application records")]
   end
 
@@ -80,7 +80,7 @@ PNG and SVG exports of this page's diagrams are in `docs/architecture/` for slid
 | Firebase Hosting | Serves the build from `firebase/public` with a strict Content-Security-Policy | `firebase/firebase.json` |
 | Firebase Auth | Holds sessions minted from custom tokens. The uid is the lowercase wallet address | `firebase/functions/privySession.js` |
 | App Check | Attests the web app with reCAPTCHA Enterprise. Callable functions refuse calls without it outside the emulator | `frontend/src/lib/firebase.js` |
-| Cloud Functions | 93 functions: sign-in, privileged reads, publication checks, audit confirmation, escrow settlement, moderation, scheduled jobs | `firebase/functions/` |
+| Cloud Functions | 94 functions: sign-in, privileged reads, publication checks, audit confirmation, escrow settlement, moderation, the selected-proposal export, scheduled jobs | `firebase/functions/` |
 | Cloud Firestore | Application records, guarded by security rules | `firebase/firestore.rules` |
 | Cloud Storage | PDF attachments for postings and proposals, guarded by storage rules | `firebase/storage.rules` |
 | Secret Manager | `PRIVY_SECRET` and `ESCROW_PLATFORM_PRIVATE_KEY`, bound to the functions that need them | Google Cloud |

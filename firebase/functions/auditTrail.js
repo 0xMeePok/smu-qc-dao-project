@@ -426,6 +426,27 @@ function auditEvent(row, { isAdmin, proposal, problem }) {
       funding,
     });
   }
+  if (row.type === "proposal_comment_export") {
+    if (!isAdmin) return null;
+    const range = row.scope === "range" && row.startDate && row.endDate
+      ? `${row.startDate} to ${row.endDate}`
+      : row.title || row.postingId || "one posting";
+    return publish({
+      id: `audit_${row.id}`,
+      eventType: "governance",
+      types: ["governance"],
+      label: "Selected proposals exported",
+      description: `${row.actorName || "An administrator"} exported accepted postings and their comments (${range}). Grading and distribution stay outside the platform. This record is off-chain.`,
+      at,
+      actorRole: "admin",
+      actorLabel: shortActor(row.actor, "admin"),
+      entityType: "problem",
+      entityId: row.problemId || row.postingId || row.id,
+      entityLabel: row.title || "Proposal export",
+      problemId: row.problemId || null,
+      verification: "off_chain",
+    });
+  }
   if (!isAdmin || !["role_change", "suspension_change"].includes(row.type)) return null;
   const label = row.type === "suspension_change"
     ? (row.newState ? "Account suspended" : "Account reinstated")

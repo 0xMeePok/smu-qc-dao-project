@@ -96,7 +96,7 @@ describe("[QCDAO-56] admin audit trail", () => {
     expect(mocks.calls[0].constraints.map((constraint) => constraint.kind)).toEqual(["where", "orderBy", "limit"]);
     expect(mocks.calls[0].constraints[0]).toEqual({
       kind: "where", field: "type", op: "in",
-      value: ["role_change", "suspension_change", "opportunity_expired", "escrow"],
+      value: ["role_change", "suspension_change", "opportunity_expired", "escrow", "proposal_comment_export"],
     });
     fireEvent.click(more);
 
@@ -118,5 +118,20 @@ describe("[QCDAO-56] admin audit trail", () => {
     expect(filtered[0]).toEqual({ kind: "where", field: "type", op: "in", value: ["opportunity_expired"] });
     expect(filtered.find((constraint) => constraint.kind === "orderBy"))
       .toEqual({ kind: "orderBy", field: "timestamp", direction: "desc" });
+  });
+
+  it("shows who exported proposals and how much left the platform", async () => {
+    mocks.pages = [[record("export-1", {
+      type: "proposal_comment_export",
+      action: "PROPOSAL_COMMENT_EXPORT",
+      actor: "0xadmin",
+      actorName: "Ada Admin",
+      postingCount: 1,
+      commentCount: 4,
+      timestamp: at("2026-10-27T00:00:00Z"),
+    })]];
+    render(<AdminAudit />);
+    expect(await screen.findByText("PROPOSAL EXPORT")).toBeTruthy();
+    expect(screen.getByText("Ada Admin exported 1 posting and 4 comments.")).toBeTruthy();
   });
 });

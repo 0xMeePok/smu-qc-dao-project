@@ -24,6 +24,12 @@ These were checked against the code and corrected in the same change that added 
 | `firebase/MOCK_MATCHING.md` | The legacy off-chain mock matching flow | Status note: escrow has replaced it for new proposals |
 | `docs/architecture/README.md` | PNG and SVG exports of the architecture diagrams | New. The Mermaid source lives in [Architecture](../overview/architecture.md) |
 
+## Added with the selected-proposal export
+
+| Document | What it covers |
+| --- | --- |
+| `docs/schemas/selected-proposal-export.schema.json` | JSON Schema for the administrator export, including the CSV column order. See [Export selected proposals](../operations/proposal-export.md) |
+
 ## Not reviewed in this handover
 
 These were not changed. A scan for retired addresses and the old SIWE sign-in found nothing out of date, but they were not checked line by line.

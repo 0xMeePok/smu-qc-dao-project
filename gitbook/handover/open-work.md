@@ -2,11 +2,12 @@
 
 ## Sprint 6 stories
 
-All seven are **To Do** in Jira and unestimated. Two are partly built on `main` already, and one is built and only needs checking.
+[QCDAO-107](https://qc-dao-fyp.atlassian.net/browse/QCDAO-107) is built. An administrator exports an accepted posting, or every accepted posting in a date range, from **Proposal export**. See [Export selected proposals](../operations/proposal-export.md).
+
+Six stories are still open.
 
 | Story | What is asked | State of the code | Suggested next step |
 | --- | --- | --- | --- |
-| [QCDAO-107](https://qc-dao-fyp.atlassian.net/browse/QCDAO-107) Export the selected proposal and its commenters | Per-posting and date-range export of the selected proposal and every comment, as CSV and JSON with a published schema, recorded in the audit trail | Not started | Remove the "rule-based QFT comment grade" from the scope first: comment grading was dropped. Build it as an admin callable that reads the selected proposal and its comments, so no new client read access is needed |
 | [QCDAO-118](https://qc-dao-fyp.atlassian.net/browse/QCDAO-118) Local currency through a Chainlink price feed | Show an indicative local-currency value beside token amounts, with a profile preference and graceful fallback | Not started | Confirm which Chainlink feeds exist on Arbitrum Sepolia before committing. Read the feed through the existing RPC client. Marked nice-to-have |
 | [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147) Get test stablecoins inside QC DAO | A faucet action on the escrow funding panel and in the account menu | Partly built. The account menu has **Faucet**, backed by `claimWalletTokens` (pull request #120). The funding panel has no entry point yet | Add the action to `EscrowFundingPanel`, then run the acceptance criteria and close the story |
 | [QCDAO-151](https://qc-dao-fyp.atlassian.net/browse/QCDAO-151) Add funds through Privy's on-ramp, mocked on testnet | An **Add funds** button that hands off to the faucet on testnet and opens Privy's funding window on mainnet | Partly built. The account menu's **Add funds** opens an informational on-ramp preview | Add the funding panel entry point, the testnet hand-off to the faucet, and the mainnet setting |
