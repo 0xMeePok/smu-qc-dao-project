@@ -12,6 +12,7 @@ export const ADMIN_SECTION_GROUPS = [
       { key: "escrows", label: "Escrows & refunds", description: "Inspect proposal funding and cancel eligible unpaid escrows with a recorded reason." },
       { key: "moderation", label: "Content reports", description: "Review flagged content and record moderation decisions." },
       { key: "users", label: "Users & access", description: "Find accounts, assign roles, and manage account suspensions." },
+      { key: "exports", label: "Proposal export", description: "Download an accepted posting and its commenters for grading outside the platform." },
     ],
   },
   {

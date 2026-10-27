@@ -35,6 +35,7 @@ import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
 import { bindRpcScopeStore, createArbitrumRpcTransport, enableRpcStats, getRpcUrls, withRpcScope } from "./rpcPolicy.js";
 import { collectAdminActivity } from "./adminActivity.js";
+import { exportSelectedProposals } from "./proposalExport.js";
 import auditRegistryBaseConfig from "./auditRegistry.contract.json" with { type: "json" };
 import independentFundingConfig from "./independentFunding.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
@@ -915,6 +916,22 @@ export const adminGetPlatformStatus = onCall({ region: REGION, maxInstances: 3, 
     toTimestamp: (millis) => Timestamp.fromMillis(millis),
     registry: auditRegistryConfig,
     resolveRegistryAddress: registryAddress,
+  });
+});
+
+/**
+ * QCDAO-107. JSON and CSV for one accepted posting, or every accepted posting
+ * in a UTC date range. Grading stays outside the platform. The audit names
+ * the administrator because the file leaves with participant data.
+ */
+export const adminExportSelectedProposals = onCall({ region: REGION, maxInstances: 3, timeoutSeconds: 60 }, async (request) => {
+  const { uid, adminUser } = await requireAdmin(request);
+  return exportSelectedProposals({
+    db,
+    actorUid: uid,
+    actorName: adminUser.fullName || uid,
+    input: request.data,
+    now: Timestamp.now(),
   });
 });
 

@@ -1,6 +1,6 @@
 # Project status
 
-As of 25 October 2026, Sprints 1 to 5 are complete and Sprint 6 (26 October to 8 November 2026) is about to start. The core workflow, the on-chain audit layer, the escrow lifecycle and Privy email sign-in are live on testnet. The remaining scope is the selected-proposal export, local-currency display, the funding entry points for email wallets, and final stabilisation and UAT.
+As of 27 October 2026, Sprints 1 to 5 are complete and Sprint 6 (26 October to 8 November 2026) is underway. The core workflow, the on-chain audit layer, the escrow lifecycle and Privy email sign-in are live on testnet. The selected-proposal export is in the admin workspace. The remaining scope is local-currency display, the funding entry points for email wallets, and final stabilisation and UAT.
 
 The backlog is the Jira project [`QCDAO`](https://qc-dao-fyp.atlassian.net/browse/QCDAO).
 
@@ -96,7 +96,7 @@ The interaction is recorded in Firestore and selected events are verified on-cha
 
 Deliver the token half of Function 6. An ERC-20 QFT token is created and deployed on Arbitrum Sepolia so it can be used to incentivise participation. Distribution is performed by the sponsor based on user activity and is explicitly out of the team's scope; the platform's job is to create the token, expose balances and transfers, and produce the data the sponsor needs.
 
-That data comes from the selected-proposal export: a structured file containing the selected proposal together with its commenters, so quality metrics analysis and grading can be performed externally. The token does not represent funding rights, securities, revenue share, or ownership of solution outputs.
+That data comes from the selected-proposal export: a JSON file and a CSV file containing each accepted posting, its selected proposal and every comment, including an evaluator's badge and overall recommendation. Quality metrics analysis and grading are performed by the sponsor outside QC DAO. See [Export selected proposals](../operations/proposal-export.md). The token does not represent funding rights, securities, revenue share, or ownership of solution outputs.
 
 ### QCDAO-37 Testnet Funding Escrow Simulation
 
@@ -125,7 +125,7 @@ Done Jira items per sprint, including bugs and tasks:
 | 3 | to 27 Sep 2026 | Proposals, evaluator recommendations, commenting, owner selection and dual approval | 20 |
 | 4 | to 11 Oct 2026 | Moderation, dashboards, audit trail, researcher-led proposals, escrow payments | 23 |
 | 5 | to 25 Oct 2026 | Privy email sign-in and gas sponsorship, the full escrow lifecycle | 14 |
-| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, funding entry points, stabilisation and UAT | 7 open |
+| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, funding entry points, stabilisation and UAT | 1 built, 6 open |
 
 The final demo and handover is planned for 15 November 2026 (Week 13).
 

@@ -572,11 +572,12 @@ const AUDIT_PAGE_SIZE = 50;
 
 const AUDIT_FILTERS = {
   // Sign-out receipts are written for every session revocation and drown the log.
-  all: { label: "All Events", types: ["role_change", "suspension_change", "opportunity_expired", "escrow"] },
+  all: { label: "All Events", types: ["role_change", "suspension_change", "opportunity_expired", "escrow", "proposal_comment_export"] },
   role_change: { label: "Role Changes", types: ["role_change"] },
   suspension: { label: "Suspensions & Reinstatements", types: ["suspension_change"] },
   opportunity_expired: { label: "Opportunity Expiries", types: ["opportunity_expired"] },
   escrow: { label: "Escrow & Funding", types: ["escrow"] },
+  proposal_comment_export: { label: "Proposal exports", types: ["proposal_comment_export"] },
 };
 
 function auditBadge(item) {
@@ -587,6 +588,9 @@ function auditBadge(item) {
   }
   if (item.type === "opportunity_expired") {
     return ["badge-system", item.action === "OPPORTUNITY_FORCE_EXPIRED" ? "OPPORTUNITY FORCE-EXPIRED" : "OPPORTUNITY LAPSED"];
+  }
+  if (item.type === "proposal_comment_export" || item.action === "PROPOSAL_COMMENT_EXPORT") {
+    return ["badge-system", "PROPOSAL EXPORT"];
   }
   return ["badge-system", item.action || "SYSTEM EVENT"];
 }
@@ -672,7 +676,7 @@ export function AdminAudit() {
       <div className="table-header">
         <div>
           <h3>System Audit Trail & Governance Events</h3>
-          <p className="table-subtitle">Role transitions, account suspensions, opportunity expiries, and confirmed escrow funding events.</p>
+          <p className="table-subtitle">Role transitions, account suspensions, opportunity expiries, proposal exports, and confirmed escrow funding events.</p>
         </div>
         <div className="audit-header-actions">
           <select
@@ -719,6 +723,7 @@ export function AdminAudit() {
                   const isSuspension = badgeClass === "badge-suspension";
                   const isExpiry = item.type === "opportunity_expired";
                   const isEscrow = item.type === "escrow";
+                  const isExport = item.type === "proposal_comment_export";
                   const dateStr = item.timestamp?.toDate
                     ? formatInstant(item.timestamp)
                     : item.createdAt?.toDate
@@ -730,7 +735,9 @@ export function AdminAudit() {
                       ? `${item.actorName || item.actor} → ${item.targetName || item.targetAddress}`
                       : isSuspension
                         ? `${item.actorName || item.actor} ${item.newState ? "suspended" : "reinstated"} ${item.targetName || item.targetAddress}`
-                        : (item.title || item.action || "Audit Record");
+                        : isExport
+                          ? `${item.actorName || item.actor} exported ${item.postingCount ?? 0} ${item.postingCount === 1 ? "posting" : "postings"} and ${item.commentCount ?? 0} ${item.commentCount === 1 ? "comment" : "comments"}.`
+                          : (item.title || item.action || "Audit Record");
 
                   return (
                     <tr className="audit-nav-row" key={item.id}>

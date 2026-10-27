@@ -30,6 +30,7 @@
 ## Run and operate
 
 * [Testing](operations/testing.md)
+* [Export selected proposals](operations/proposal-export.md)
 * [Deployment](operations/deployment.md)
 * [Runbook](operations/runbook.md)
 * [Troubleshooting](operations/troubleshooting.md)
