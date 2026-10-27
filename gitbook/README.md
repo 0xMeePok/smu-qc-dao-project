@@ -45,4 +45,4 @@ QC DAO is a blockchain-enabled open innovation platform. Problem owners post fun
 
 ## Keeping this book current
 
-This book lives in the `gitbook/` folder of the repository and syncs to GitBook through Git Sync. Edit it in GitBook or in a pull request, never both at once on the same page. Pushes that only touch `gitbook/` do not trigger the deploy workflow. When the code changes, update the page that describes it in the same pull request.
+This book lives in the `gitbook/` folder of the repository and syncs to GitBook through Git Sync. Edit it in GitBook or in a pull request, never both at once on the same page. Pushes that only touch `gitbook/` do not deploy. When the code changes, update the page that describes it in the same pull request.

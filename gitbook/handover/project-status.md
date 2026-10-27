@@ -125,7 +125,7 @@ Done Jira items per sprint, including bugs and tasks:
 | 3 | to 27 Sep 2026 | Proposals, evaluator recommendations, commenting, owner selection and dual approval | 20 |
 | 4 | to 11 Oct 2026 | Moderation, dashboards, audit trail, researcher-led proposals, escrow payments | 23 |
 | 5 | to 25 Oct 2026 | Privy email sign-in and gas sponsorship, the full escrow lifecycle | 14 |
-| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, funding entry points, stabilisation and UAT | 1 built, 6 open |
+| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, funding entry points, stabilisation and UAT | 2 built, 5 open |
 
 The final demo and handover is planned for 15 November 2026 (Week 13).
 

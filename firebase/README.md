@@ -246,23 +246,12 @@ you pass `--export-on-exit`.
 
 ### Continuous deployment
 
-Pushing to `main` runs [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml):
-
-```
-test-backend  (Cloud Functions) ──┐
-                                  ├──→ deploy-backend ──→ deploy-hosting
-test-rules    (Firestore rules) ──┘                            ↑
-test-frontend ─────────────────────────────────────────────────┘
-```
-
-Backend deploys first and hosting waits for it, because `createProfile()` writes to
+Pushing to `main` runs [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+The checks for the areas that changed run first. **CI** then has to pass before
+rules, functions and hosting deploy. Backend deploys first and hosting waits for it, because `createProfile()` writes to
 `publicProfiles/{address}` and the catch-all rule denies that collection until
 `firestore.rules` declares it. A frontend released ahead of its rules breaks
 onboarding for every new user.
-
-The rules suite runs here **and** in `ci.yml`. That duplication is deliberate:
-`ci.yml` is a separate workflow and cannot stop `deploy-backend`, so only the copy in
-this workflow actually gates the deploy.
 
 The service account needs `Firebase Hosting Admin`, `Firebase Rules Admin`,
 `Cloud Functions Developer`, `Service Account User`, `Cloud Run Admin`,

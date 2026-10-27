@@ -168,7 +168,7 @@ describe("security deployment configuration", () => {
     // deployed from a laptop died on a gate CI never sees. Keeping the two in
     // step here is cheaper than rediscovering it mid-deploy.
     const workflow = fs.readFileSync(
-      new URL("../../.github/workflows/deploy.yml", import.meta.url), "utf8",
+      new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8",
     );
     const previewDeploy = fs.readFileSync(
       new URL("../scripts/preview-deploy.mjs", import.meta.url), "utf8",
@@ -177,6 +177,12 @@ describe("security deployment configuration", () => {
       .map(([, name]) => name);
     assert.ok(retried.length > 0, "no retried trigger found; this guard is watching the wrong thing");
     assert.match(workflow, /--non-interactive --force/);
+    for (const area of ["Frontend", "Firestore rules", "Cloud Functions", "Audit registry", "Funding escrow", "Faucet", "Semgrep", "Gitleaks"]) {
+      assert.match(workflow, new RegExp(`name: ${area}`));
+    }
+    assert.match(workflow, /npm run coverage/);
+    assert.match(workflow, /semgrep ci --metrics=off/);
+    assert.match(workflow, /gitleaks:v8\.30\.1/);
     assert.match(previewDeploy, /"--non-interactive", "--force"/);
   });
 

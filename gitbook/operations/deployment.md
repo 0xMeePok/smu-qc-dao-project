@@ -6,26 +6,26 @@ Merging to `main` deploys the backend and the web app to `qcdao-a0c7a`. The live
 
 ```mermaid
 flowchart LR
-  push["Push to main<br/>or manual run"] --> tb["Test backend<br/>Cloud Functions suite"]
-  push --> tr["Test rules<br/>Firestore and Storage"]
-  push --> tf["Test frontend<br/>unit, component, a11y"]
-  tb --> db["Deploy backend<br/>rules, indexes, Storage rules,<br/>then functions (3 attempts)"]
-  tr --> db
-  db --> dh["Build and deploy Hosting<br/>config checks, then CSP check"]
-  tf --> dh
+  push["Pull request, push,<br/>or manual run"] --> detect["Detect changed areas"]
+  detect --> selected["Selected area jobs"]
+  selected --> gate["CI<br/>the required check"]
+  gate --> db["Deploy rules and functions"]
+  db --> dh["Deploy hosting"]
   classDef step fill:#eef4ff,stroke:#3b6fd8,color:#0f1f3d
   classDef deploy fill:#fff8e1,stroke:#e0a800,color:#3d2e00
-  class push,tb,tr,tf step
+  class push,detect,selected,gate step
   class db,dh deploy
 ```
 
-1. **Tests.** Backend, rules and frontend suites run in parallel.
-2. **Deploy backend.** Writes `firebase/functions/.env` from repository variables (`ARBITRUM_SEPOLIA_RPC_URL`, backups, `PRIVY_APP_ID`), deploys Firestore rules, indexes and Storage rules, then deploys all functions. The functions deploy retries up to three times, because Cloud Run can report a timeout while still finishing.
-3. **Deploy Hosting.** Checks that the App Check key and Privy app id are set, adds the RPC origins to the CSP, builds with `VITE_FIREBASE_USE_EMULATORS=false`, checks the bundle contains the project id, deploys to the `live` channel and reads the live CSP header back.
+1. **Detect.** Path filters choose the areas. A manual run selects all of them.
+2. **Checks.** Only the selected areas run: frontend, rules, functions, audit registry, funding escrow, faucet and Semgrep. Gitleaks runs on every push.
+3. **CI.** One check passes when none of those jobs failed. A skipped area does not fail it.
+4. **Deploy backend.** On `main`, when the push is not only the handover book, writes `firebase/functions/.env` from repository variables (`ARBITRUM_SEPOLIA_RPC_URL`, backups, `PRIVY_APP_ID`), deploys Firestore rules, indexes and Storage rules, then deploys all functions. The functions deploy retries up to three times, because Cloud Run can report a timeout while still finishing.
+5. **Deploy Hosting.** Checks that the App Check key and Privy app id are set, adds the RPC origins to the CSP, builds with `VITE_FIREBASE_USE_EMULATORS=false`, checks the bundle contains the project id, deploys to the `live` channel and reads the live CSP header back.
 
 The backend always deploys before Hosting. A new frontend against old rules breaks onboarding, publishing and anything that writes a new field or collection.
 
-Pushes that only change `gitbook/**` skip this workflow. Run it by hand from **Actions**, **Deploy**, **Run workflow** to redeploy the current `main`.
+Pushes that only change `gitbook/**` do not deploy. Run **CI** by hand from **Actions**, **Run workflow**, on `main`, to redeploy the current `main`.
 
 ## Deploying by hand
 
