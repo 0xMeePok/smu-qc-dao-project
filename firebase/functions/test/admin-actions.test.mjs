@@ -60,6 +60,50 @@ describe("QCDAO-128 admin audit atomicity", () => {
     assert.equal(db.store.get("users/0xabc").role, 0);
     assert.equal(db.store.has("audits/a1"), false);
   });
+
+  it("[BUT-OPD-187] writes the evaluator role and the audit together", async () => {
+    const db = memoryStore([
+      ["users/0xabc", { role: 0, fullName: "Alice" }],
+    ]);
+    const targetRef = db.ref("users/0xabc");
+    const auditRef = db.ref("audits/a1");
+    const timestamp = { seconds: 1 };
+    const tx = {
+      get: async (ref) => db.snapshot(ref.path),
+      update: (ref, data) => {
+        db.store.set(ref.path, { ...db.store.get(ref.path), ...data });
+      },
+      set: (ref, data) => {
+        db.store.set(ref.path, data);
+      },
+    };
+
+    const previousRole = await applyRoleChangeTransaction(tx, {
+      targetRef,
+      auditRef,
+      actorUid: "0xadmin",
+      adminUser: { fullName: "Admin" },
+      targetAddress: "0xabc",
+      newRole: 2,
+      reason: "Assigning evaluator for the review queue",
+      timestamp,
+    });
+
+    assert.equal(previousRole, 0);
+    assert.equal(db.store.get("users/0xabc").role, 2);
+    assert.equal(db.store.get("users/0xabc").updatedAt, timestamp);
+    const audit = db.store.get("audits/a1");
+    assert.equal(audit.type, "role_change");
+    assert.equal(audit.action, "ROLE_CHANGE");
+    assert.equal(audit.actor, "0xadmin");
+    assert.equal(audit.actorName, "Admin");
+    assert.equal(audit.targetAddress, "0xabc");
+    assert.equal(audit.targetName, "Alice");
+    assert.equal(audit.previousRole, 0);
+    assert.equal(audit.newRole, 2);
+    assert.equal(audit.reason, "Assigning evaluator for the review queue");
+    assert.equal(audit.timestamp, timestamp);
+  });
 });
 
 describe("QCDAO-129 credential revocation failures", () => {
