@@ -1881,10 +1881,10 @@ footer > p { margin: 0 auto 0 0; }
 .admin-table-container {
   position: relative;
   overflow-x: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .table-loading-bar {
   position: absolute;
@@ -1921,19 +1921,25 @@ footer > p { margin: 0 auto 0 0; }
   transition: opacity 150ms ease;
 }
 .admin-users-table th {
-  background: var(--surface-muted);
+  background: transparent;
   color: var(--muted);
-  font-size: 11.5px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 700;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--line-strong);
+  padding: 0 20px 12px 0;
+  border-bottom: 1px solid var(--line);
 }
 .admin-users-table td {
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--line-strong);
+  padding: 18px 20px 18px 0;
+  border-bottom: 1px solid var(--line);
   vertical-align: middle;
+}
+.admin-users-table th:last-child,
+.admin-users-table td.actions-col {
+  padding-right: 0;
+  text-align: right;
 }
 .admin-users-table tr:last-child td {
   border-bottom: none;
@@ -1961,7 +1967,7 @@ footer > p { margin: 0 auto 0 0; }
   overflow-wrap: break-word;
 }
 .wallet-code {
-  font-family: ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
   color: var(--muted);
 }
@@ -2055,35 +2061,41 @@ footer > p { margin: 0 auto 0 0; }
   padding-right: 12px;
 }
 .table-action-btn {
-  font-size: 12.5px !important;
-  padding: 0 12px !important;
-  min-height: 32px !important;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 0 12px;
+  min-height: 32px;
+}
+.table-action-btn:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: transparent;
+  color: var(--ink);
 }
 .suspend-btn {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #f87171;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  transition: all 160ms ease;
+  border-color: var(--danger-line);
+  background: transparent;
+  color: var(--danger);
 }
 .suspend-btn:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.3);
-  color: #ffffff;
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 .reinstate-btn {
-  background: rgba(34, 197, 94, 0.15);
-  border: 1px solid rgba(34, 197, 94, 0.4);
-  color: #4ade80;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  transition: all 160ms ease;
+  border-color: var(--success-line);
+  background: transparent;
+  color: var(--success);
 }
 .reinstate-btn:hover:not(:disabled) {
-  background: rgba(34, 197, 94, 0.3);
-  color: #ffffff;
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 /* Pagination */
@@ -2306,25 +2318,36 @@ footer > p { margin: 0 auto 0 0; }
   justify-content: space-between;
 }
 .audit-type-badge {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  display: inline-block;
   padding: 3px 8px;
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 0;
+  background: var(--surface-muted);
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .badge-role-change {
-  background: rgba(168, 85, 247, 0.2);
-  color: #d8b4fe;
-  border: 1px solid rgba(168, 85, 247, 0.4);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  border-color: var(--brand-line);
+  border-left-color: var(--brand);
 }
 .badge-suspension {
-  background: rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-line);
+  border-left-color: var(--danger);
 }
 .badge-system {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--muted);
+  background: var(--surface-muted);
+  color: var(--ink-soft);
+  border-color: var(--line);
+  border-left-color: var(--muted);
 }
 .audit-timestamp {
   font-size: 11.5px;
@@ -5465,36 +5488,36 @@ h1, h2, h3 { font-weight: 500; }
 
 /* Admin tools are grouped by task; mobile uses the same section list. */
 .admin-governance-page .admin-workspace-heading { max-width: none; margin-bottom: 32px; }
-.admin-governance-page .admin-workspace-heading h1 { margin-top: 12px; font-size: clamp(30px, 3.2vw, 38px); line-height: 1.15; }
-.admin-governance-page .admin-workspace-heading > p { max-width: 65ch; margin-top: 10px; font-size: 16px; line-height: 1.6; }
+.admin-governance-page .admin-workspace-heading h1 { margin-top: 12px; font-family: Newsreader, "Iowan Old Style", Palatino, serif; font-size: clamp(32px, 3.8vw, 42px); font-weight: 500; letter-spacing: -0.02em; line-height: 1.12; }
+.admin-governance-page .admin-workspace-heading > p { max-width: 65ch; margin-top: 10px; font-size: 18px; line-height: 1.5; }
 .admin-workspace-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 32px; }
-.admin-workspace-sidebar { position: sticky; top: calc(var(--header-height) + 24px); max-height: calc(100dvh - var(--header-height) - 48px); overflow-y: auto; padding: 20px 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.admin-workspace-sidebar { position: sticky; top: calc(var(--header-height) + 24px); max-height: calc(100dvh - var(--header-height) - 48px); overflow-y: auto; padding: 0 24px 0 0; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: transparent; }
 .admin-nav-group + .admin-nav-group { margin-top: 24px; }
 .admin-nav-group h2 { margin: 0 12px 8px; color: var(--muted); font: 600 11px/1.5 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
 .admin-nav-group ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.admin-section-link { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 11px 12px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ink-soft); font: 500 13px/1.45 "IBM Plex Mono", ui-monospace, monospace; text-align: left; }
+.admin-section-link { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-left: 3px solid transparent; border-radius: 0; background: transparent; color: var(--ink-soft); font: 500 16px/1.4 Newsreader, "Iowan Old Style", Palatino, serif; text-align: left; }
 .admin-section-link > span:first-child { flex: 1; min-width: 0; }
 .admin-section-link:hover { background: var(--surface-muted); }
-.admin-section-link[aria-current="page"] { border-color: var(--brand-line); background: var(--brand-soft); color: var(--brand-strong); font-weight: 600; }
+.admin-section-link[aria-current="page"] { border-left-color: var(--brand); background: transparent; color: var(--ink); font-weight: 500; }
 .admin-section-arrow { flex: none; color: var(--muted); opacity: 0; }
 .admin-section-link[aria-current="page"] .admin-section-arrow { opacity: 1; color: currentColor; }
-.admin-nav-count { display: inline-grid; place-items: center; min-width: 24px; min-height: 24px; padding: 2px 6px; border-radius: 6px; background: var(--surface-muted); font-size: 11px; }
+.admin-nav-count { display: inline-grid; place-items: center; min-width: 24px; min-height: 24px; padding: 2px 6px; border-radius: 0; background: var(--surface-muted); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em; }
 .admin-nav-count-alert { color: var(--warning); background: var(--warning-soft); }
 .admin-workspace-main, .admin-tab-content, .admin-tab-content > div { min-width: 0; }
 .admin-section-heading { padding-bottom: 22px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
 .admin-section-heading .admin-section-group { margin: 0 0 8px; color: var(--muted); font: 500 11px/1.5 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
-.admin-section-heading h2 { margin: 0; color: var(--ink); font-size: 28px; line-height: 1.25; }
+.admin-section-heading h2 { margin: 0; color: var(--ink); font-family: Newsreader, "Iowan Old Style", Palatino, serif; font-size: clamp(28px, 3vw, 36px); font-weight: 500; letter-spacing: -0.02em; line-height: 1.15; }
 .admin-section-heading > p:last-child { max-width: 64ch; margin: 10px 0 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
 .admin-mobile-section { display: none; }
 .admin-section-picker { min-width: 0; }
-.admin-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 52px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font: 500 14px/1.5 "IBM Plex Mono", ui-monospace, monospace; text-align: left; }
+.admin-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 52px; padding: 14px 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); font: 500 18px/1.4 Newsreader, "Iowan Old Style", Palatino, serif; text-align: left; }
 .admin-picker-trigger > span { min-width: 0; }
 .admin-picker-trigger > svg { flex: none; color: var(--muted); transition: transform 160ms ease; }
 .admin-picker-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
 .admin-picker-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
-.admin-picker-options { display: grid; gap: 12px; max-height: min(420px, 55dvh); margin-top: 10px; padding: 10px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.admin-picker-options { display: grid; gap: 4px; max-height: min(420px, 55dvh); margin-top: 10px; padding: 8px 0; overflow-y: auto; overscroll-behavior: contain; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
 .admin-picker-group-label { padding: 8px 10px; color: var(--muted); font: 600 10px/1.5 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
-.admin-picker-option { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 11px 10px; border-radius: 8px; color: var(--ink-soft); font: 400 13px/1.5 "IBM Plex Mono", ui-monospace, monospace; cursor: pointer; }
+.admin-picker-option { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 10px 8px; border-radius: 0; color: var(--ink-soft); font: 500 16px/1.4 Newsreader, "Iowan Old Style", Palatino, serif; cursor: pointer; }
 .admin-picker-option > span:first-child { flex: 1; min-width: 0; }
 .admin-picker-option.is-active { background: var(--brand-soft); color: var(--brand-strong); }
 .admin-picker-option[aria-selected="true"] { font-weight: 600; }
@@ -5502,10 +5525,10 @@ h1, h2, h3 { font-weight: 500; }
 .admin-quick-actions { margin-bottom: 28px; }
 .admin-quick-actions h3 { margin: 0 0 14px; font-size: 18px; font-weight: 500; }
 .admin-quick-actions > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.admin-quick-actions button { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; min-height: 104px; padding: 18px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); text-align: left; }
-.admin-quick-actions button:hover { border-color: var(--brand-line); background: var(--brand-soft); }
+.admin-quick-actions button { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; min-height: 104px; padding: 18px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); text-align: left; }
+.admin-quick-actions button:hover { border-color: var(--line); background: transparent; color: var(--brand-strong); }
 .admin-quick-actions button > span:first-child { display: grid; gap: 8px; min-width: 0; }
-.admin-quick-actions strong { font: 600 13px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
+.admin-quick-actions strong { font: 500 20px/1.3 Newsreader, "Iowan Old Style", Palatino, serif; letter-spacing: -0.02em; }
 .admin-quick-actions small { color: var(--muted); font: 400 14px/1.5 Newsreader, "Iowan Old Style", Palatino, serif; }
 .admin-quick-actions button > span:last-child { color: var(--brand-strong); }
 .admin-activity-group-actions { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -5537,3 +5560,92 @@ h1, h2, h3 { font-weight: 500; }
   .admin-activity-group-actions { width: 100%; }
   .admin-activity-group-actions > button { min-height: 44px; }
 }
+
+/* Admin workspace uses the same newsprint type as the rest of the site.
+   The sidebar and section stack stay put. */
+.admin-governance-page .card-table,
+.admin-governance-page .audit-table-scroll,
+.admin-governance-page .audit-trail-panel,
+.admin-governance-page .success-banner,
+.admin-governance-page .escrow-admin-summary,
+.admin-governance-page .escrow-admin-status,
+.admin-governance-page .escrow-admin-recorded-reason {
+  border-radius: 0;
+  box-shadow: none;
+}
+.admin-governance-page .card-table,
+.admin-governance-page .audit-trail-panel {
+  border: 0;
+  background: transparent;
+  padding-inline: 0;
+}
+.admin-governance-page .card-table .table-header {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+.admin-governance-page .table-header h3,
+.admin-governance-page .audit-trail-heading h2,
+.admin-governance-page .audit-trail-event h3 {
+  font-family: Newsreader, "Iowan Old Style", Palatino, serif;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.admin-governance-page .table-header h3 { font-size: 28px; }
+.admin-governance-page .audit-trail-event {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  padding: 16px 0 8px;
+}
+.admin-governance-page .audit-trail-empty { border-radius: 0; background: transparent; }
+.admin-governance-page .admin-users-table th,
+.admin-governance-page .audit-nav-table th {
+  background: transparent;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.admin-governance-page .admin-users-table td,
+.admin-governance-page .audit-nav-table td,
+.admin-governance-page .table-row-meta {
+  font-family: Newsreader, "Iowan Old Style", Palatino, serif;
+}
+.admin-governance-page .admin-users-table strong { font-size: 18px; font-weight: 500; }
+.admin-governance-page :is(.role-chip, .role-chip-admin, .role-chip-user, .role-chip-evaluator, .self-tag, .status-badge) {
+  border: 0;
+  border-radius: 0;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.admin-governance-page .role-chip-admin,
+.admin-governance-page .self-tag { background: var(--brand-soft); color: var(--brand-strong); }
+.admin-governance-page .role-chip-evaluator { background: var(--warning-soft); color: var(--warning); }
+.admin-governance-page .role-chip-user { background: var(--surface-muted); color: var(--ink-soft); }
+.admin-governance-page .status-badge-active { background: var(--success-soft); color: var(--success); }
+.admin-governance-page .status-badge-active .status-indicator-dot { background: var(--success); box-shadow: none; }
+.admin-governance-page .status-badge-suspended { background: var(--danger-soft); color: var(--danger); }
+.admin-governance-page .status-badge-suspended .status-indicator-dot { background: var(--danger); box-shadow: none; }
+.admin-governance-page .admin-table-container {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.admin-governance-page .table-action-btn,
+.admin-governance-page .table-action-btn:hover:not(:disabled) {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+.admin-governance-page .table-action-btn:hover:not(:disabled) { border-color: var(--ink); }
+.admin-governance-page .suspend-btn { border-color: var(--danger-line); color: var(--danger); }
+.admin-governance-page .suspend-btn:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.admin-governance-page .reinstate-btn { border-color: var(--success-line); color: var(--success); }
+.admin-governance-page .reinstate-btn:hover:not(:disabled) { border-color: var(--success); background: var(--success-soft); color: var(--success); }
