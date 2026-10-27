@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { ProposalList } from "./ProposalList.jsx";
 import { ProposalTracker } from "./ProposalTracker.jsx";
 import { ACTION_ITEMS_KEY, QUEUE_FILTERS, listEvaluatorQueue, proposalQueueDeadline, proposalQueueWorkflowStatus, queueError, sortProposalRows } from "../lib/proposalQueues.js";
@@ -376,7 +377,7 @@ export function ActionNeeded({ onNavigate }) {
         <ActionGroup title="Ready to select" items={owner.readyToSelect}
           hint="Fully funded proposals on your problems. Selecting records your acceptance and starts the creator's acceptance window."
           render={(item) => <ActionRow key={`select-${item.id}`} item={item} onNavigate={onNavigate}
-            meta={`Submitted ${formatInstant(item.submittedAt)} · Funded ${money(item.currency, item.fundedAmount)} of ${money(item.currency, item.amount)}`}>
+            meta={<>Submitted {formatInstant(item.submittedAt)} · Funded <ConvertedAmount text={money(item.currency, item.fundedAmount)} /> of <ConvertedAmount text={money(item.currency, item.amount)} /></>}>
             {Object.hasOwn(item, "fundingTerms")
               ? <button className="primary" type="button" onClick={() => onNavigate(`proposal/${item.id}?tab=funding`)}>Select proposal</button>
               : <button className="primary" type="button" disabled={isFetching} onClick={() => open("select", item)}>Select…</button>}
@@ -740,7 +741,7 @@ export function AdminAudit() {
                       <td>
                         {summary}
                         {isEscrow ? <>
-                          <div className="table-row-meta">{escrowFundingAmount(item.amountBaseUnits, item.tokenDecimals, item.tokenSymbol)} · Actor: {item.actor || "—"} · Counterparty: {item.counterparty || "—"}</div>
+                          <div className="table-row-meta"><ConvertedAmount text={escrowFundingAmount(item.amountBaseUnits, item.tokenDecimals, item.tokenSymbol)} /> · Actor: {item.actor || "—"} · Counterparty: {item.counterparty || "—"}</div>
                           <div className="table-row-meta">{item.proposalId && `Proposal: ${item.proposalId}`} {item.problemId && `· Posting: ${item.problemId}`}</div>
                           {item.transactionHash && <a href={escrowExplorer("tx", item.transactionHash)} target="_blank" rel="noreferrer">View verified transaction</a>}
                         </> : null}

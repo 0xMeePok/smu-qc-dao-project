@@ -129,6 +129,7 @@ service cloud.firestore {
       function hasProfileSchema(data) {
         return data.keys().hasOnly([
           'address', 'fullName', 'organisation', 'biography', 'expertise',
+          'localCurrency', 'showLocalCurrency',
           'role', 'chainId', 'stats',
           'walletVerified', 'termsAcceptedAt', 'termsVersion', 'createdAt', 'updatedAt',
           'suspended', 'sessionsValidAfterEpoch', 'tokenRevocationStatus', 'tokenRevokedAt',
@@ -136,6 +137,15 @@ service cloud.firestore {
           // a profile after the first sign-in binding; clients may not introduce them.
           'email', 'privyUserId'
         ]);
+      }
+
+      function hasCurrencyPreferences(data) {
+        return (!data.keys().hasAny(['localCurrency'])
+          || (data.localCurrency is string && data.localCurrency in [
+            'USD', 'SGD', 'EUR', 'GBP', 'AUD', 'CAD', 'CHF', 'CNY', 'HKD',
+            'JPY', 'MYR', 'INR', 'IDR', 'THB', 'PHP', 'KRW', 'TWD', 'NZD'
+          ]))
+          && (!data.keys().hasAny(['showLocalCurrency']) || data.showLocalCurrency is bool);
       }
 
       function publicFieldsMatch(data) {
@@ -158,6 +168,7 @@ service cloud.firestore {
       allow create: if isUnrevokedWallet(address)
         && isWalletAddress(address)
         && hasProfileSchema(request.resource.data)
+        && hasCurrencyPreferences(request.resource.data)
         && hasOptionalProfileFields(request.resource.data)
         && request.resource.data.address == address
         && isNonEmptyString(request.resource.data.fullName, 80)
@@ -193,6 +204,7 @@ service cloud.firestore {
         && !resource.data.get('suspended', false)
         && resource != null
         && hasProfileSchema(request.resource.data)
+        && hasCurrencyPreferences(request.resource.data)
         && hasOptionalProfileFields(request.resource.data)
         && request.resource.data.address == resource.data.address
         && request.resource.data.role == resource.data.role

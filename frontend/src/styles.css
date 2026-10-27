@@ -5537,3 +5537,33 @@ h1, h2, h3 { font-weight: 500; }
   .admin-activity-group-actions { width: 100%; }
   .admin-activity-group-actions > button { min-height: 44px; }
 }
+
+/* QCDAO-118: display estimates preserve the original settlement token. */
+.currency-amount { display: inline-flex; flex-direction: column; vertical-align: middle; gap: 2px; max-width: 100%; font-variant-numeric: tabular-nums; }
+.currency-amount-local { font-size: inherit; font-weight: inherit; overflow-wrap: anywhere; }
+.currency-amount .currency-amount-token { display: block; color: var(--muted); font-size: 0.72rem; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
+.currency-amount-note { white-space: nowrap; }
+.currency-toggle { position: relative; flex-shrink: 0; }
+.currency-toggle-globe { position: absolute; top: 50%; left: 10px; transform: translateY(-50%); pointer-events: none; z-index: 1; color: var(--muted); }
+.currency-toggle .token-select-trigger { width: auto; min-width: 106px; min-height: 34px; padding: 7px 9px 7px 34px; gap: 10px; border: 1px solid transparent; border-radius: 6px; background: transparent; font-size: 12px; box-shadow: none; }
+.currency-toggle .token-select-trigger:hover, .currency-toggle .token-select-trigger[aria-expanded="true"] { border-color: var(--line); background: var(--surface); }
+.currency-toggle .token-select-trigger:focus-visible { box-shadow: var(--ring); }
+.currency-toggle .token-select-trigger > svg { width: 14px; height: 14px; flex-basis: 14px; }
+.currency-toggle .token-select-trigger .token-select-copy > span { font-weight: 500; }
+.currency-toggle .token-select-options { position: absolute; top: calc(100% + 9px); right: 0; left: auto; width: 264px; max-width: calc(100vw - 32px); max-height: 352px; margin: 0; padding: 6px; border-radius: 10px; border-color: var(--line-strong); background: var(--surface-solid); box-shadow: 0 12px 36px rgba(28, 20, 12, 0.14); }
+.currency-toggle .token-select-options::before { content: "Display currency"; display: block; padding: 9px 10px 10px; color: var(--muted); font: 400 11px/1.4 "IBM Plex Mono", ui-monospace, monospace; }
+.currency-toggle .token-select-options [role="option"] { padding: 9px 10px; min-height: 48px; border-radius: 5px; }
+.currency-toggle .token-select-options [role="option"]:first-of-type { margin-bottom: 5px; padding-bottom: 13px; border-bottom: 1px solid var(--line); border-radius: 5px 5px 0 0; }
+.currency-toggle .token-select-copy { gap: 3px; }
+.currency-toggle .token-select-copy > span { font-size: 12px; }
+.currency-toggle .token-select-copy small { font-size: 11px; }
+.currency-toggle-status { position: absolute; top: calc(100% + 3px); right: 0; z-index: 3; padding: 4px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; font-size: 0.68rem; white-space: nowrap; color: var(--muted); }
+.profile-form .checkbox-label { display: flex; align-items: center; gap: 8px; }
+.profile-form .checkbox-label input { width: auto; }
+@media (max-width: 900px) {
+  .currency-toggle:has(.token-select-options) { flex-basis: 100%; }
+  .currency-toggle-globe { top: 20px; }
+  .currency-toggle .token-select-options { position: relative; top: auto; left: auto; right: auto; width: 100%; max-width: none; max-height: min(320px, 40dvh); margin-top: 8px; }
+  .currency-toggle .token-select-trigger { min-height: 40px; }
+  .currency-toggle-status { max-width: calc(100vw - 32px); white-space: normal; }
+}

@@ -1,3 +1,4 @@
+import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { fundingAmount } from "../lib/fundingDisplay.js";
 import { formatInstant } from "../lib/datetime.js";
 
@@ -18,7 +19,7 @@ export function PostingFundingProgress({ projection }) {
   if (!projection.groups?.length) return <small className="field-hint">{closed ? `No active proposal escrow funding. ${closedLabel(closed)}` : "No proposal escrow deposits yet."}</small>;
   return <div className="escrow-card-progress">
     {projection.groups.slice(0, 3).map(row => <div key={row.tokenAddress}>
-      <span className="posting-funding-total">{fundingAmount(row.totalDeposited, row)} deposited</span>
+      <span className="posting-funding-total"><ConvertedAmount text={fundingAmount(row.totalDeposited, row)} /> deposited</span>
       <small>Across {row.count} proposal {row.count === 1 ? "escrow" : "escrows"}</small>
       <small className="posting-funding-verified">Verified {formatInstant(new Date(row.timestamp * 1000))}</small>
     </div>)}
