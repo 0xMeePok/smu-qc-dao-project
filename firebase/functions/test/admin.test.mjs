@@ -231,6 +231,78 @@ describe("adminChangeRole", () => {
     assert.equal(matchingAudits.docs[0].data().newRole, 1);
     await db.collection("users").doc(user2Address).update({ role: 0 });
   });
+
+  it("[BIT-OPD-258] promotes another member to evaluator and records the reason", async () => {
+    await db.collection("users").doc(user2Address).update({ role: 0 });
+    const reason = "Assigning evaluator for the pilot review queue";
+    const res = await call(
+      "adminChangeRole",
+      { targetAddress: user2Address, newRole: 2, reason },
+      { token: adminToken },
+    );
+    assert.equal(res.result?.success, true);
+    assert.equal(res.result?.previousRole, 0);
+    assert.equal(res.result?.newRole, 2);
+
+    const updated = await db.collection("users").doc(user2Address).get();
+    assert.equal(updated.data()?.role, 2);
+    const audits = await db.collection("audits").where("reason", "==", reason).get();
+    assert.equal(audits.size, 1);
+    const audit = audits.docs[0].data();
+    assert.equal(audit.type, "role_change");
+    assert.equal(audit.targetAddress, user2Address);
+    assert.equal(audit.previousRole, 0);
+    assert.equal(audit.newRole, 2);
+    assert.equal(audit.reason, reason);
+  });
+
+  it("[BIT-OPD-259] removes an evaluator grant by setting role 0", async () => {
+    await db.collection("users").doc(user2Address).update({ role: 2 });
+    const reason = "Removing evaluator access after the pilot";
+    const res = await call(
+      "adminChangeRole",
+      { targetAddress: user2Address, newRole: 0, reason },
+      { token: adminToken },
+    );
+    assert.equal(res.result?.success, true);
+    assert.equal(res.result?.previousRole, 2);
+    assert.equal(res.result?.newRole, 0);
+
+    const updated = await db.collection("users").doc(user2Address).get();
+    assert.equal(updated.data()?.role, 0);
+    const audits = await db.collection("audits").where("reason", "==", reason).get();
+    assert.equal(audits.size, 1);
+    const audit = audits.docs[0].data();
+    assert.equal(audit.type, "role_change");
+    assert.equal(audit.targetAddress, user2Address);
+    assert.equal(audit.previousRole, 2);
+    assert.equal(audit.newRole, 0);
+    assert.equal(audit.reason, reason);
+  });
+
+  it("[BIT-OPD-260] removes an administrator grant by setting role 0", async () => {
+    await db.collection("users").doc(user1Address).update({ role: 1 });
+    const reason = "Removing administrator access after the pilot";
+    const res = await call(
+      "adminChangeRole",
+      { targetAddress: user1Address, newRole: 0, reason },
+      { token: adminToken },
+    );
+    assert.equal(res.result?.success, true);
+    assert.equal(res.result?.previousRole, 1);
+    assert.equal(res.result?.newRole, 0);
+
+    const updated = await db.collection("users").doc(user1Address).get();
+    assert.equal(updated.data()?.role, 0);
+    const audits = await db.collection("audits").where("reason", "==", reason).get();
+    assert.equal(audits.size, 1);
+    const audit = audits.docs[0].data();
+    assert.equal(audit.type, "role_change");
+    assert.equal(audit.targetAddress, user1Address);
+    assert.equal(audit.previousRole, 1);
+    assert.equal(audit.newRole, 0);
+    assert.equal(audit.reason, reason);
+  });
 });
 
 describe("adminSetSuspended", () => {

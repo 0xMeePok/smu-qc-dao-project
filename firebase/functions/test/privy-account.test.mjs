@@ -168,6 +168,56 @@ describe("one email per account", () => {
     );
   });
 
+  it("[BUT-OPD-185] keeps a hand-granted administrator role across the next Privy sign-in", async () => {
+    const adminEmails = new Set();
+    const profile = { address: ADDRESS, role: 1, fullName: "Ada" };
+
+    const boundDb = memoryDb({ [`users/${ADDRESS}`]: { ...profile } });
+    const bound = await bindPrivyAccount({
+      db: boundDb, Timestamp, address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID, adminEmails,
+    });
+    assert.equal(bound.role, 1);
+    assert.equal(boundDb.records.get(`users/${ADDRESS}`).role, 1);
+    assert.equal(boundDb.records.get(`users/${ADDRESS}`).email, EMAIL);
+
+    const stampDb = memoryDb({
+      [`users/${ADDRESS}`]: { ...profile },
+      [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
+    });
+    const stamped = await stampUserFromIdentity({
+      db: stampDb, Timestamp, address: ADDRESS, adminEmails,
+    });
+    assert.equal(stamped.stamped, true);
+    assert.equal(stamped.role, undefined);
+    assert.equal(stampDb.records.get(`users/${ADDRESS}`).role, 1);
+    assert.equal(stampDb.records.get(`users/${ADDRESS}`).email, EMAIL);
+  });
+
+  it("[BUT-OPD-186] keeps a hand-granted evaluator role when the email is on the bootstrap list", async () => {
+    const adminEmails = new Set([EMAIL]);
+    const profile = { address: ADDRESS, role: 2, fullName: "Ada" };
+
+    const boundDb = memoryDb({ [`users/${ADDRESS}`]: { ...profile } });
+    const bound = await bindPrivyAccount({
+      db: boundDb, Timestamp, address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID, adminEmails,
+    });
+    assert.equal(bound.role, 2);
+    assert.equal(boundDb.records.get(`users/${ADDRESS}`).role, 2);
+    assert.equal(boundDb.records.get(`users/${ADDRESS}`).email, EMAIL);
+
+    const stampDb = memoryDb({
+      [`users/${ADDRESS}`]: { ...profile },
+      [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
+    });
+    const stamped = await stampUserFromIdentity({
+      db: stampDb, Timestamp, address: ADDRESS, adminEmails,
+    });
+    assert.equal(stamped.stamped, true);
+    assert.equal(stamped.role, undefined);
+    assert.equal(stampDb.records.get(`users/${ADDRESS}`).role, 2);
+    assert.equal(stampDb.records.get(`users/${ADDRESS}`).email, EMAIL);
+  });
+
   it("copies the binding onto a client-created profile and grants the bootstrap role", async () => {
     const db = memoryDb({
       [`${PRIVY_IDENTITIES}/${ADDRESS}`]: { address: ADDRESS, email: EMAIL, privyUserId: PRIVY_ID },
