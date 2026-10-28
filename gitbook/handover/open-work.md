@@ -4,7 +4,9 @@
 
 [QCDAO-107](https://qc-dao-fyp.atlassian.net/browse/QCDAO-107) is built. An administrator exports an accepted posting, or every accepted posting in a date range, from **Proposal export**. See [Export selected proposals](../operations/proposal-export.md).
 
-Six stories are still open.
+[QCDAO-158](https://qc-dao-fyp.atlassian.net/browse/QCDAO-158) is built. `deploy.yml`, `funding-escrow.yml`, `gitleaks.yml` and `semgrep.yml` are jobs in `.github/workflows/ci.yml`, with shared setup in `.github/actions/setup-workspace`. Each area runs only when its files change, and **CI** is the required check. See [CI/CD and quality checks](../repository/ci-cd.md).
+
+Five stories are still open.
 
 | Story | What is asked | State of the code | Suggested next step |
 | --- | --- | --- | --- |
@@ -13,7 +15,6 @@ Six stories are still open.
 | [QCDAO-151](https://qc-dao-fyp.atlassian.net/browse/QCDAO-151) Add funds through Privy's on-ramp, mocked on testnet | An **Add funds** button that hands off to the faucet on testnet and opens Privy's funding window on mainnet | Partly built. The account menu's **Add funds** opens an informational on-ramp preview | Add the funding panel entry point, the testnet hand-off to the faucet, and the mainnet setting |
 | [QCDAO-155](https://qc-dao-fyp.atlassian.net/browse/QCDAO-155) Administrator and evaluator promotion | Promote members to administrator or evaluator from the user directory | Built. **Users & access**, **Change role** calls `adminChangeRole` with a reason | Run the acceptance criteria with Privy accounts and close the story |
 | [QCDAO-157](https://qc-dao-fyp.atlassian.net/browse/QCDAO-157) Draft a posting or proposal from its title with AI | Generate editable drafts for every text field, never amounts or dates, with rate limits | Not started | Needs a model provider key in Secret Manager and a new callable. Keep it server-side so no key reaches the browser |
-| [QCDAO-158](https://qc-dao-fyp.atlassian.net/browse/QCDAO-158) Refactor CI/CD runners | No description in Jira | Not started | Agree the goal first, for example faster jobs or fewer duplicate test runs |
 
 The proposal's Sprint 6 milestone also includes final documentation, UAT evidence and the demo, which have no tickets.
 

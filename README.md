@@ -333,14 +333,11 @@ starts its own.
 ## Deployment
 
 Pushing to `main` deploys automatically via
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Pushes that only
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Pushes that only
 change the handover guide in `gitbook/` skip the deploy.
 
 ```
-test-backend  (Cloud Functions) ──┐
-                                  ├──→ deploy-backend ──→ deploy-hosting
-test-rules    (Firestore rules) ──┘                            ↑
-test-frontend ─────────────────────────────────────────────────────┘
+selected checks ──→ CI ──→ deploy rules and functions ──→ deploy hosting
 ```
 
 The backend deploys **before** hosting, and hosting waits for it. That order is

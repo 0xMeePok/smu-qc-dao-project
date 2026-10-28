@@ -82,7 +82,7 @@ GitHub Actions deploys with a service account key stored as the secret `FIREBASE
 3. A full deploy also creates Firestore indexes, Cloud Scheduler jobs and secret bindings. If a fresh account fails on those, the error names the missing permission. Typical additions are Cloud Datastore Index Admin, Cloud Scheduler Admin and Secret Manager Viewer. Add the role and re-run the job.
 4. Create a JSON key for the account, paste the whole file into the GitHub secret, then delete the file from your laptop.
 
-If your organisation blocks service account keys, switch the workflow to Workload Identity Federation. That needs a change to `deploy.yml`.
+If your organisation blocks service account keys, switch the workflow to Workload Identity Federation. That needs a change to `ci.yml`.
 
 ### Runtime service account
 

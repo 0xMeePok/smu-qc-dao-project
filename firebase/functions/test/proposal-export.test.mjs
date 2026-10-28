@@ -157,7 +157,7 @@ describe("QCDAO-107 selected proposal export", () => {
         body: "=SUM(A1)\nHe said \"revise\".",
       }),
     });
-    const { document, csv } = await exportOf(db, { postingId: "posting-a" });
+    const { document, csv } = await exportOf(db, { proposalId: "proposal-posting-a" });
     assertConforms(schema, document, "document.");
     assert.equal(csv.split("\r\n")[0], CSV_COLUMNS.join(","));
     assert.match(csv, /"'=SUM\(A1\)/);
@@ -203,9 +203,11 @@ describe("QCDAO-107 selected proposal export", () => {
       }),
       "comments/sibling": comment({ proposalId: "other", body: "This comment is on another proposal." }),
     });
-    const result = await exportOf(db, { postingId: "posting-a" });
+    const result = await exportOf(db, { proposalId: "proposal-posting-a" });
     assert.equal(result.document.notice, EXPORT_NOTICE);
-    assert.equal(result.document.scope.mode, "posting");
+    assert.equal(result.document.scope.mode, "proposal");
+    assert.equal(result.document.scope.proposalId, "proposal-posting-a");
+    assert.equal(result.document.postings[0].proposals[0].accepted, true);
     assert.equal(result.postingCount, 1);
     assert.equal(result.proposalCount, 1);
     assert.equal(result.commentCount, 4);
@@ -234,11 +236,11 @@ describe("QCDAO-107 selected proposal export", () => {
     assert.equal(audit.action, "PROPOSAL_COMMENT_EXPORT");
     assert.equal(audit.actor, "0xadmin");
     assert.equal(audit.actorName, "Ada Admin");
-    assert.equal(audit.scope, "posting");
+    assert.equal(audit.scope, "proposal");
     assert.equal(audit.postingId, "posting-a");
     assert.equal(audit.problemId, "posting-a");
     assert.equal(audit.commentCount, 4);
-    assert.equal(audit.schemaVersion, 1);
+    assert.equal(audit.schemaVersion, EXPORT_SCHEMA_VERSION);
     assert.equal(audit.timestamp.toDate().toISOString(), "2026-10-27T08:00:00.000Z");
     assert.equal(result.auditId, auditPath.split("/")[1]);
   });
@@ -246,14 +248,17 @@ describe("QCDAO-107 selected proposal export", () => {
   it("returns every accepted posting in a date range and leaves the others out", async () => {
     const db = store({
       "problems/early": posting("early", { acceptedProposalId: "early-proposal", updatedAt: at("2026-10-02T00:00:00.000Z") }),
-      "proposals/early-proposal": proposal("early-proposal", { problemId: "early", updatedAt: at("2026-10-02T00:00:00.000Z") }),
+      "proposals/early-proposal": proposal("early-proposal", { problemId: "early", createdAt: at("2026-10-02T00:00:00.000Z"), updatedAt: at("2026-10-02T00:00:00.000Z") }),
       "comments/early-note": comment({ proposalId: "early-proposal", authorId: "0xearly" }),
       "problems/late": posting("late", { acceptedProposalId: "late-proposal", updatedAt: at("2026-11-02T00:00:00.000Z") }),
-      "proposals/late-proposal": proposal("late-proposal", { problemId: "late", updatedAt: at("2026-11-02T00:00:00.000Z") }),
+      "proposals/late-proposal": proposal("late-proposal", { problemId: "late", createdAt: at("2026-11-02T00:00:00.000Z"), updatedAt: at("2026-11-02T00:00:00.000Z") }),
       "comments/late-note": comment({ proposalId: "late-proposal", authorId: "0xlate" }),
       "problems/open": { ...posting("open", { hasAcceptedSolution: false, acceptedProposalId: null, opportunityType: "open-funding" }), title: "Grant call" },
-      "proposals/grant-in": proposal("grant-in", { problemId: "open", updatedAt: at("2026-10-20T00:00:00.000Z"), title: "In range grant" }),
-      "proposals/grant-out": proposal("grant-out", { problemId: "open", updatedAt: at("2026-11-20T00:00:00.000Z"), title: "Later grant" }),
+      "proposals/grant-in": proposal("grant-in", { problemId: "open", createdAt: at("2026-10-20T00:00:00.000Z"), updatedAt: at("2026-10-20T00:00:00.000Z"), title: "In range grant" }),
+      "proposals/grant-out": proposal("grant-out", { problemId: "open", createdAt: at("2026-11-20T00:00:00.000Z"), updatedAt: at("2026-11-20T00:00:00.000Z"), title: "Later grant" }),
+      "problems/live": posting("live", { hasAcceptedSolution: false, acceptedProposalId: "", title: "Still open" }),
+      "proposals/not-accepted": proposal("not-accepted", { problemId: "live", status: "submitted", createdAt: at("2026-10-15T00:00:00.000Z"), title: "Not accepted yet" }),
+      "comments/live-note": comment({ proposalId: "not-accepted", authorId: "0xmember", body: "A comment before acceptance." }),
       "comments/grant-note": comment({
         proposalId: "grant-in",
         authorId: "0xevaluator",
@@ -264,10 +269,15 @@ describe("QCDAO-107 selected proposal export", () => {
         body: "Recommend with the stated caveat.",
       }),
     });
-    const { document, csv } = await exportOf(db, { startDate: "2026-10-01", endDate: "2026-10-31" });
-    assert.deepEqual(document.postings.map((row) => row.id), ["early", "open"]);
-    assert.deepEqual(document.postings[1].proposals.map((row) => row.id), ["grant-in"]);
-    const grantComment = document.postings[1].proposals[0].comments[0];
+    const { document, csv } = await exportOf(db, { startDate: "2026-10-01", endDate: "2026-10-27" });
+    assert.deepEqual(document.postings.map((row) => row.id), ["live", "early", "open"]);
+    const live = document.postings.find((row) => row.id === "live");
+    assert.equal(live.proposals[0].accepted, false);
+    assert.equal(live.proposals[0].comments[0].body, "A comment before acceptance.");
+    const grant = document.postings.find((row) => row.id === "open");
+    assert.deepEqual(grant.proposals.map((row) => row.id), ["grant-in"]);
+    assert.equal(grant.proposals[0].accepted, true);
+    const grantComment = grant.proposals[0].comments[0];
     assert.equal(grantComment.badge, "evaluator");
     assert.equal(grantComment.recommendation, "recommend_with_revisions");
     assert.equal(grantComment.recommendationLabel, "Recommend with revisions");
@@ -276,12 +286,15 @@ describe("QCDAO-107 selected proposal export", () => {
     const audit = audits(db)[0][1];
     assert.equal(audit.scope, "range");
     assert.equal(audit.startDate, "2026-10-01");
-    assert.equal(audit.endDate, "2026-10-31");
+    assert.equal(audit.endDate, "2026-10-27");
     assert.equal(audit.postingId, null);
     assert.equal(audit.problemId, null);
-    assert.deepEqual(audit.postingIds, ["early", "open"]);
+    assert.deepEqual(audit.postingIds, ["live", "early", "open"]);
     assert.equal(audit.actor, "0xadmin");
     assert.ok(audit.timestamp);
+    const acceptedOnly = await exportOf(db, { startDate: "2026-10-01", endDate: "2026-10-27", acceptance: "accepted" });
+    assert.deepEqual(acceptedOnly.document.postings.map((row) => row.id), ["early", "open"]);
+    assert.equal(acceptedOnly.document.scope.acceptance, "accepted");
   });
 
   it("includes a mock confirmation whose proposal status is still submitted", async () => {
@@ -297,7 +310,7 @@ describe("QCDAO-107 selected proposal export", () => {
       }),
       "comments/mock-note": comment({ proposalId: "mock-proposal", body: "Noted." }),
     });
-    const { document } = await exportOf(db, { postingId: "mock" });
+    const { document } = await exportOf(db, { proposalId: "mock-proposal" });
     assert.equal(document.postings[0].acceptedAt, "2026-10-11T00:00:00.000Z");
     assert.equal(document.postings[0].proposals[0].workflowStatus, "accepted");
     assert.equal(document.commentCount, 1);
@@ -308,7 +321,7 @@ describe("QCDAO-107 selected proposal export", () => {
       "problems/quiet": posting("quiet"),
       "proposals/proposal-quiet": proposal("proposal-quiet", { problemId: "quiet" }),
     });
-    const single = await exportOf(db, { postingId: "quiet" });
+    const single = await exportOf(db, { proposalId: "proposal-quiet" });
     assert.equal(single.commentCount, 0);
     const lines = single.csv.trim().split("\r\n");
     assert.equal(lines.length, 2);
@@ -321,18 +334,22 @@ describe("QCDAO-107 selected proposal export", () => {
     assert.equal(audits(empty)[0][1].postingCount, 0);
   });
 
-  it("refuses a posting that is not accepted, a missing posting, and a malformed request", async () => {
+  it("refuses a draft, a missing proposal, a future end date, and a malformed request", async () => {
     const db = store({
       "problems/open": posting("open", { hasAcceptedSolution: false, acceptedProposalId: "" }),
       "proposals/still-open": proposal("still-open", { problemId: "open", status: "submitted" }),
+      "proposals/draft": proposal("draft", { problemId: "open", status: "draft" }),
     });
-    await assert.rejects(() => exportOf(db, { postingId: "open" }), (error) => error instanceof HttpsError && error.code === "failed-precondition");
-    await assert.rejects(() => exportOf(db, { postingId: "missing" }), (error) => error instanceof HttpsError && error.code === "not-found");
+    const drafted = await exportOf(db, { proposalId: "still-open" });
+    assert.equal(drafted.document.postings[0].proposals[0].accepted, false);
+    await assert.rejects(() => exportOf(db, { proposalId: "draft" }), (error) => error instanceof HttpsError && error.code === "failed-precondition");
+    await assert.rejects(() => exportOf(db, { proposalId: "missing" }), (error) => error instanceof HttpsError && error.code === "not-found");
     await assert.rejects(() => exportOf(db, {}), (error) => error instanceof HttpsError && error.code === "invalid-argument");
-    await assert.rejects(() => exportOf(db, { postingId: "open", startDate: "2026-10-01", endDate: "2026-10-02" }), (error) => error instanceof HttpsError && error.code === "invalid-argument");
+    await assert.rejects(() => exportOf(db, { proposalId: "still-open", startDate: "2026-10-01", endDate: "2026-10-02" }), (error) => error instanceof HttpsError && error.code === "invalid-argument");
     await assert.rejects(() => exportOf(db, { startDate: "2026-10-02", endDate: "2026-10-01" }), (error) => error instanceof HttpsError && error.code === "invalid-argument");
+    await assert.rejects(() => exportOf(db, { startDate: "2026-10-01", endDate: "2026-10-28" }), (error) => error instanceof HttpsError && error.code === "invalid-argument");
     await assert.rejects(() => exportOf(db, { startDate: "2026-13-01", endDate: "2026-13-02" }), (error) => error instanceof HttpsError && error.code === "invalid-argument");
-    assert.equal(audits(db).length, 0);
+    assert.equal(audits(db).length, 1);
   });
 
   it("stops instead of returning a partial comment list", async () => {
@@ -344,7 +361,7 @@ describe("QCDAO-107 selected proposal export", () => {
       records[`comments/c${index}`] = comment({ proposalId: "proposal-full", body: `note ${index}` });
     }
     const db = store(records);
-    await assert.rejects(() => exportOf(db, { postingId: "full" }), (error) => error instanceof HttpsError && error.code === "resource-exhausted");
+    await assert.rejects(() => exportOf(db, { proposalId: "proposal-full" }), (error) => error instanceof HttpsError && error.code === "resource-exhausted");
     assert.equal(audits(db).length, 0);
     assert.ok(EXPORT_SCAN_CAP >= 1);
   });

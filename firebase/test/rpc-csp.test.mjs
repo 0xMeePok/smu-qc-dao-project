@@ -45,7 +45,7 @@ it("a policy without connect-src fails deployment instead of silently weakening 
 });
 
 it("GitHub Actions provides backup configuration to both the functions runtime and hosting build", () => {
-  const workflow = fs.readFileSync(new URL("../../.github/workflows/deploy.yml", import.meta.url), "utf8");
+  const workflow = fs.readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.match(workflow, /ARBITRUM_SEPOLIA_RPC_BACKUP_URLS:.*secrets\.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS/);
   assert.match(workflow, /VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS:.*vars\.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS/);
   assert.match(workflow, /node firebase\/scripts\/configure-rpc-csp\.mjs\n\s+npm run build --prefix frontend/);

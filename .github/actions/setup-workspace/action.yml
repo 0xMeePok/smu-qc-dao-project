@@ -1,0 +1,28 @@
+name: Set up workspace
+description: Set up Node, with an optional Java runtime for the Firebase emulators. The job must check out the repository first.
+
+inputs:
+  cache-dependency-path:
+    description: Lockfiles for the setup-node npm cache. One path per line.
+    required: true
+  java:
+    description: Install Temurin 17 when the job starts a Firebase emulator.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js 22
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22.x
+        cache: npm
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+    - name: Set up Java
+      if: inputs.java == 'true'
+      uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+      with:
+        distribution: temurin
+        java-version: "17"

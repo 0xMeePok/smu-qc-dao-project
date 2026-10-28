@@ -110,3 +110,6 @@ docs/contributor-security-review.md
 docs/AUDIT_REGISTRY_INTEGRATION.md
 /.claude
 skills-lock.json
+
+# Local agent skills. Do not commit.
+.agents/

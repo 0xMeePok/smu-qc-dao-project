@@ -57,7 +57,7 @@ function step(label, cmd, cmdArgs, opts = {}) {
   }
 }
 
-// Mirrors .github/workflows/deploy.yml, which passes the same two flags for the
+// Mirrors .github/workflows/ci.yml, which passes the same two flags for the
 // same reason: queueProposalAudit and recordProposalEdit both set `retry: true`,
 // and the CLI refuses to deploy a failure policy without --force. Dropping the
 // retry instead would be the wrong trade - a transient Firestore error would

@@ -1,31 +1,52 @@
-name: CI Test Suite
+name: CI
 
+# One pipeline for checks and deploy. Jobs are grouped by area and run only when
+# that area changed. The CI job is the single required status check: a skipped
+# area is success, and a failed or cancelled area fails the check.
+#
+# Deploy used to repeat the frontend, rules and functions suites because a
+# separate workflow cannot wait on this one. Those jobs now run once, above
+# the deploy, and the deploy waits for CI.
+#
+# AI security review stays in ai-security-review.yml. It uses pull_request_target
+# so it can comment with a secret, and it must keep checking out the default
+# branch rather than the pull request.
 on:
-  push:
-    branches: [ main, master ]
   pull_request:
+  push:
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: pipeline-${{ github.ref }}
+  # A second push to main must not cancel a deploy that is already publishing.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  FIREBASE_PROJECT_ID: qcdao-a0c7a
 
 jobs:
+  # ------------------------------------------------------------------- changes
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
-      frontend: ${{ steps.filter.outputs.frontend }}
-      firebase: ${{ steps.filter.outputs.firebase }}
-      functions: ${{ steps.filter.outputs.functions }}
-      audit-registry: ${{ steps.filter.outputs.audit-registry }}
-      stable-faucet: ${{ steps.filter.outputs.stable-faucet }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.frontend }}
+      rules: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.rules }}
+      functions: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.functions }}
+      audit-registry: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.audit-registry }}
+      funding-escrow: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.funding-escrow }}
+      faucet: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.faucet }}
+      semgrep: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.semgrep }}
+      deploy: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.deploy }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # Skip jobs whose trees are untouched so a docs/contracts PR is not blocked
-      # by frontend or Cloud Functions tests. Changing this workflow re-runs every
-      # job so the filters themselves stay verified.
+      # Changing this workflow or the shared setup re-runs every area so the
+      # filters themselves stay verified. A manual run selects every area.
       - name: Filter paths
         uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
         id: filter
@@ -38,39 +59,57 @@ jobs:
               - 'firebase/functions/package.json'
               - 'firebase/functions/package-lock.json'
               - '.github/workflows/ci.yml'
-            firebase:
+              - '.github/actions/**'
+            rules:
               - 'firebase/**'
               - '!firebase/functions/**'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             functions:
               - 'firebase/functions/**'
               - 'firebase/firebase.json'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
             audit-registry:
               - 'contracts/audit-registry/**'
               - '.github/workflows/ci.yml'
-            stable-faucet:
+              - '.github/actions/**'
+            funding-escrow:
+              - 'contracts/funding-escrow/**'
+              - 'contracts/audit-registry/contracts/**'
+              - 'contracts/audit-registry/package.json'
+              - 'firebase/functions/escrowRegistry.abis.json'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
+            faucet:
               - 'contracts/stable-faucet/**'
               - '.github/workflows/ci.yml'
+              - '.github/actions/**'
+            semgrep:
+              - 'frontend/**'
+              - 'firebase/**'
+              - 'contracts/**'
+              - '.github/**'
+            deploy:
+              - '**'
+              - '!gitbook/**'
 
-  test:
-    name: Run Unit & Integration Tests
+  # ---------------------------------------------------------------- application
+  frontend:
+    name: Frontend
     needs: changes
-    if: needs.changes.outputs.frontend == 'true'
+    if: needs.changes.outputs.frontend == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./frontend
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          node-version: 22.x
-          cache: 'npm'
           cache-dependency-path: |
             frontend/package-lock.json
             firebase/functions/package-lock.json
@@ -87,31 +126,23 @@ jobs:
       - name: Run build smoke test
         run: npm run build
 
-  firebase-test:
-    name: Run Firestore Rules Tests
+  rules:
+    name: Firestore rules
     needs: changes
-    if: needs.changes.outputs.firebase == 'true'
+    if: needs.changes.outputs.rules == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./firebase
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          node-version: 22.x
-          cache: 'npm'
+          java: "true"
           cache-dependency-path: firebase/package-lock.json
-
-      - name: Set up Java
-        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        with:
-          distribution: 'temurin'
-          java-version: '17'
 
       - name: Install dependencies
         run: npm ci
@@ -119,31 +150,23 @@ jobs:
       - name: Run test suite
         run: npm test
 
-  functions-test:
-    name: Run Cloud Functions Tests
+  functions:
+    name: Cloud Functions
     needs: changes
-    if: needs.changes.outputs.functions == 'true'
+    if: needs.changes.outputs.functions == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./firebase/functions
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          node-version: 22.x
-          cache: 'npm'
+          java: "true"
           cache-dependency-path: firebase/functions/package-lock.json
-
-      - name: Set up Java
-        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        with:
-          distribution: 'temurin'
-          java-version: '17'
 
       - name: Install dependencies
         run: npm ci
@@ -151,10 +174,11 @@ jobs:
       - name: Run Cloud Functions test suite
         run: npm test
 
-  audit-registry-test:
-    name: Run Audit Registry Contract Tests
+  # ------------------------------------------------------------------ contracts
+  audit-registry:
+    name: Audit registry
     needs: changes
-    if: needs.changes.outputs.audit-registry == 'true'
+    if: needs.changes.outputs.audit-registry == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -163,11 +187,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          node-version: 22.x
-          cache: 'npm'
           cache-dependency-path: contracts/audit-registry/package-lock.json
 
       - name: Install dependencies
@@ -176,10 +198,39 @@ jobs:
       - name: Compile and run contract tests
         run: npm test
 
-  stable-faucet-test:
-    name: Run Faucet & EIP-7702 Tests
+  funding-escrow:
+    name: Funding escrow
     needs: changes
-    if: needs.changes.outputs.stable-faucet == 'true'
+    if: needs.changes.outputs.funding-escrow == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/funding-escrow
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          cache-dependency-path: contracts/funding-escrow/package-lock.json
+
+      - name: Install contract and reconciler dependencies
+        run: |
+          npm ci
+          # The receipt integration tests execute the production Firebase reconciler.
+          npm ci --prefix ../../firebase/functions --ignore-scripts
+
+      - name: Run coverage, production compile and verifier
+        run: |
+          npm run coverage
+          npx hardhat compile --build-profile production
+          npm run test:verifier
+
+  faucet:
+    name: Faucet
+    needs: changes
+    if: needs.changes.outputs.faucet == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -189,11 +240,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          node-version: 22.x
-          cache: 'npm'
           cache-dependency-path: |
             contracts/stable-faucet/package-lock.json
             contracts/stable-faucet/site/package-lock.json
@@ -209,28 +258,306 @@ jobs:
       - name: Check faucet and real sponsored wallet upgrade
         run: npm test --prefix site
 
-  # Always runs so a skipped test job is not treated as a failed
-  # required check. Fail only when a selected job actually failed or was cancelled.
+  # ------------------------------------------------------------------- security
+  semgrep:
+    name: Semgrep
+    needs: changes
+    if: needs.changes.outputs.semgrep == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # semgrep/semgrep:latest (2026-09-01). Pin by digest; do not follow a moving tag.
+      image: semgrep/semgrep@sha256:b94b53d02fd4a022f9eac4e2af1380f5c3c4c21400e79d3336bdff1d1db5e796
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Community Edition rules only. Do not set SEMGREP_APP_TOKEN in this job.
+      # Solidity rules live under p/smart-contracts; p/solidity is not a registry pack.
+      # These seven gas/style suggestions are advisory. In particular, making an
+      # ERC20-only escrow constructor payable changes its native-token behavior.
+      # Prefix increment is a nonfunctional optimization; keeping it advisory
+      # preserves verified deployed source/metadata without a runtime redeploy.
+      # Keep every other rule blocking, and still fail on scanner errors.
+      - name: Run Semgrep security checks
+        env:
+          SEMGREP_RULES: p/javascript p/typescript p/react p/nodejs p/smart-contracts p/owasp-top-ten
+        run: >-
+          semgrep ci --metrics=off --no-suppress-errors
+          --exclude-rule solidity.performance.array-length-outside-loop.array-length-outside-loop
+          --exclude-rule solidity.performance.inefficient-state-variable-increment.inefficient-state-variable-increment
+          --exclude-rule solidity.performance.non-payable-constructor.non-payable-constructor
+          --exclude-rule solidity.performance.state-variable-read-in-a-loop.state-variable-read-in-a-loop
+          --exclude-rule solidity.performance.unnecessary-checked-arithmetic-in-loop.unnecessary-checked-arithmetic-in-loop
+          --exclude-rule solidity.performance.use-nested-if.use-nested-if
+          --exclude-rule solidity.performance.use-prefix-increment-not-postfix.use-prefix-increment-not-postfix
+
+      # Audit mode reports findings without failing for them. The first scan
+      # already gates Solidity security rules; this keeps gas suggestions visible.
+      # --no-suppress-errors continues to fail on scanner/configuration errors.
+      - name: Report Solidity advisory findings
+        env:
+          SEMGREP_RULES: p/smart-contracts
+        run: >-
+          semgrep ci --metrics=off --no-suppress-errors
+          --audit-on=pull_request --audit-on=push
+
+  gitleaks:
+    name: Gitleaks
+    # Any file can hold a secret, so this is not path-filtered. It scans pushes,
+    # which is where new commits exist. Pull requests are covered by the push
+    # of their branch.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Official Gitleaks Action needs a license on private repos. Run the CLI image instead.
+      # Without -v, Gitleaks only prints "leaks found: N". --redact still masks secret values.
+      - name: Scan commits for secrets
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          ZERO="0000000000000000000000000000000000000000"
+          IMAGE="zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+          LOG_OPTS=""
+          if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "${ZERO}" ]; then
+            LOG_OPTS="--log-opts=${BEFORE}..${SHA}"
+          fi
+          docker run --rm \
+            -v "${PWD}:/repo" \
+            -w /repo \
+            "${IMAGE}" \
+            detect \
+              --source=/repo \
+              --gitleaks-ignore-path=/repo/.gitleaksignore \
+              --verbose \
+              --redact \
+              --exit-code=1 \
+              --report-format=json \
+              --report-path=/repo/gitleaks-report.json \
+              ${LOG_OPTS}
+
+      - name: Upload Gitleaks report
+        if: always() && hashFiles('gitleaks-report.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          if-no-files-found: ignore
+
+  # ----------------------------------------------------------------------- gate
   ci:
     name: CI
-    needs: [changes, test, firebase-test, functions-test, audit-registry-test, stable-faucet-test]
+    needs: [changes, frontend, rules, functions, audit-registry, funding-escrow, faucet, semgrep, gitleaks]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Check selected jobs
         run: |
           changes="${{ needs.changes.result }}"
-          frontend="${{ needs.test.result }}"
-          firebase="${{ needs.firebase-test.result }}"
-          functions="${{ needs.functions-test.result }}"
-          contracts="${{ needs.audit-registry-test.result }}"
-          faucet="${{ needs.stable-faucet-test.result }}"
-          echo "changes=$changes frontend=$frontend firebase=$firebase functions=$functions contracts=$contracts faucet=$faucet"
+          frontend="${{ needs.frontend.result }}"
+          rules="${{ needs.rules.result }}"
+          functions="${{ needs.functions.result }}"
+          audit="${{ needs['audit-registry'].result }}"
+          escrow="${{ needs['funding-escrow'].result }}"
+          faucet="${{ needs.faucet.result }}"
+          semgrep="${{ needs.semgrep.result }}"
+          gitleaks="${{ needs.gitleaks.result }}"
+          echo "changes=$changes frontend=$frontend rules=$rules functions=$functions audit=$audit escrow=$escrow faucet=$faucet semgrep=$semgrep gitleaks=$gitleaks"
           if [ "$changes" != "success" ]; then
+            echo "::error::Could not tell which areas changed."
             exit 1
           fi
-          for result in "$frontend" "$firebase" "$functions" "$contracts" "$faucet"; do
+          for result in "$frontend" "$rules" "$functions" "$audit" "$escrow" "$faucet" "$semgrep" "$gitleaks"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "::error::A selected area failed. Open the failed job: its name is the area."
               exit 1
             fi
           done
+
+  # ---------------------------------------------------------------------- deploy
+  # Backend first, then hosting. createProfile() writes publicProfiles/{address},
+  # and the catch-all rule denies that collection until firestore.rules declares it.
+  deploy-backend:
+    name: Deploy rules and functions
+    needs: [changes, ci]
+    if: needs.ci.result == 'success' && needs.changes.outputs.deploy == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          cache-dependency-path: |
+            firebase/package-lock.json
+            firebase/functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefix firebase
+          npm ci --prefix firebase/functions
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_QCDAO_A0C7A }}' > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      # Rules and functions go together in one command so a rules change and the
+      # function that relies on it cannot land seconds apart. The Firebase CLI
+      # skips functions whose source is unchanged, so pushing a frontend-only
+      # commit costs little here.
+      # storage:rules rides along for the same reason: QCDAO-58 attachments are
+      # authorised by storage.rules, and hosting must never go live with an
+      # uploader whose bucket rules are still the previous revision.
+      # --force acknowledges the retry policy on queueProposalAudit in CI.
+      # Use a no-key public RPC by default. Alchemy's free plan restricts log
+      # ranges to 10 blocks, which cannot serve bounded funding-history scans.
+      # Repository variables can explicitly override the shared primary.
+      - name: Provide the functions runtime environment
+        env:
+          ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
+          ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
+          PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
+        run: |
+          if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
+            echo "::error::ARBITRUM_SEPOLIA_RPC_URL is required for on-chain publication verification."
+            exit 1
+          fi
+          printf 'ARBITRUM_SEPOLIA_RPC_URL=%s\n' "$ARBITRUM_SEPOLIA_RPC_URL" > firebase/functions/.env
+          printf 'ARBITRUM_SEPOLIA_RPC_BACKUP_URLS=%s\n' "$ARBITRUM_SEPOLIA_RPC_BACKUP_URLS" >> firebase/functions/.env
+          if [ -z "$PRIVY_APP_ID" ]; then
+            echo "::error::VITE_PRIVY_APP_ID is required so exchangePrivySession can verify Privy access tokens."
+            exit 1
+          fi
+          printf 'PRIVY_APP_ID=%s\n' "$PRIVY_APP_ID" >> firebase/functions/.env
+
+      - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
+        working-directory: firebase
+        run: |
+          npx firebase deploy \
+            --only firestore:rules,firestore:indexes,storage \
+            --project "$FIREBASE_PROJECT_ID" \
+            --non-interactive --force
+          # A full functions deploy updates every changed Cloud Run service at once.
+          # The CLI then polls those operations and can report Deadline Exceeded
+          # while Cloud Run is still finishing. A later attempt skips services that
+          # already updated and retries only the ones still outstanding.
+          attempt=1
+          while [ "$attempt" -le 3 ]; do
+            echo "Functions deploy attempt ${attempt}"
+            set +e
+            npx firebase deploy \
+              --only functions \
+              --project "$FIREBASE_PROJECT_ID" \
+              --non-interactive --force
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$code"
+            fi
+            attempt=$((attempt + 1))
+            sleep 20
+          done
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
+
+  deploy-hosting:
+    name: Deploy hosting
+    needs: [changes, ci, deploy-backend]
+    if: needs.ci.result == 'success' && needs['deploy-backend'].result == 'success' && needs.changes.outputs.deploy == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          cache-dependency-path: |
+            frontend/package-lock.json
+            firebase/functions/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix firebase/functions --omit=dev
+      - name: Verify App Check is configured
+        env:
+          APP_CHECK_SITE_KEY: ${{ secrets.VITE_FIREBASE_APP_CHECK_SITE_KEY }}
+        run: |
+          if [ -z "$APP_CHECK_SITE_KEY" ]; then
+            echo "::error::VITE_FIREBASE_APP_CHECK_SITE_KEY is required because production nonce calls enforce App Check."
+            exit 1
+          fi
+      # QCDAO-141. Email through Privy is the only sign-in method, so a bundle
+      # without the app id would deploy a site nobody can sign in to.
+      - name: Verify Privy is configured
+        env:
+          PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
+        run: |
+          if [ -z "$PRIVY_APP_ID" ]; then
+            echo "::error::VITE_PRIVY_APP_ID is required: Privy email login is the only way to sign in."
+            exit 1
+          fi
+      - name: Build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_APP_CHECK_SITE_KEY: ${{ secrets.VITE_FIREBASE_APP_CHECK_SITE_KEY }}
+          # QCDAO-58. Absent, the bundle builds fine and the attachment UI reports
+          # "Storage is not configured" at runtime instead of uploading.
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          # Public by design (it ships in every bundle); the Privy app secret is
+          # never needed by the frontend and must not be added here.
+          VITE_PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
+          VITE_ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
+          VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
+          VITE_FIREBASE_USE_EMULATORS: "false"
+        run: |
+          node firebase/scripts/configure-rpc-csp.mjs
+          npm run build --prefix frontend
+
+      # Fails the deploy rather than shipping a bundle that cannot reach Firebase.
+      # A missing secret otherwise produces a build that looks fine and only breaks
+      # when a user tries to sign in.
+      - name: Verify the build carries a Firebase config
+        run: |
+          if ! grep -rq "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" firebase/public/assets/*.js; then
+            echo "::error::Built bundle contains no Firebase project id. Check the VITE_FIREBASE_* repository secrets."
+            exit 1
+          fi
+          echo "Firebase config present in bundle."
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_QCDAO_A0C7A }}
+          projectId: ${{ env.FIREBASE_PROJECT_ID }}
+          channelId: live
+          # firebase.json lives in firebase/, and hosting.public is firebase/public -
+          # where Vite builds to (see frontend/vite.config.js). firebase-tools refuses
+          # a public path outside the directory holding firebase.json.
+          entryPoint: ./firebase
+
+      - name: Verify effective production CSP
+        run: node firebase/scripts/check-csp.mjs "https://${FIREBASE_PROJECT_ID}.web.app"

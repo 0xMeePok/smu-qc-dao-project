@@ -4,7 +4,7 @@ description: "How an administrator downloads an accepted posting and its comment
 
 # Export selected proposals
 
-An administrator can download an accepted posting together with its selected proposal and every comment on that proposal. The same action can cover every accepted posting whose proposal was accepted in a UTC date range.
+An administrator can download one proposal together with every comment on it. Choose **Accepted only** or **Accepted and not accepted**. The same choice applies to every non-draft proposal created in a UTC date range. Drafts are not included.
 
 {% hint style="info" %}
 Grading and token distribution happen outside QC DAO. The download is the record the sponsor uses. It does not calculate grades, token amounts, or evaluator scores.
@@ -19,16 +19,14 @@ The action is **Proposal export** in the admin workspace (`#/admin`). It calls `
 Open **Admin workspace**, then **Proposal export**.
 {% endstep %}
 {% step %}
-Choose **One accepted posting** and enter its id, or choose **Accepted postings in a date range**. Dates are UTC calendar days, first day and last day included.
+Choose **One proposal** and pick it from the list, or choose **Proposals in a date range**. Dates are UTC calendar days, first day and last day included. The end date cannot be later than the current date in UTC+14, the latest timezone.
 {% endstep %}
 {% step %}
 Choose **Download JSON and CSV**. Both files save together. The screen states how many postings, proposals and comments were included.
 {% endstep %}
 {% endstepper %}
 
-A posting is accepted when it has an accepted proposal. That is `acceptedProposalId` after escrow release, a confirmed mock match, or a proposal whose status is `accepted` (including an accepted grant on an open funding call). A posting that is only selected, and not yet accepted, is refused.
-
-In a date range, each accepted proposal is kept when its acceptance time falls in the range. Other proposals on the same posting stay out of that file.
+A proposal is included whether or not it has been accepted. A draft is refused. In a date range, a proposal is included when it was created on a day inside the range.
 
 ## What the file contains
 

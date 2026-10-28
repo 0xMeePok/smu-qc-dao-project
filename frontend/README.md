@@ -153,9 +153,8 @@ account were restored. No shared testnet deployment was changed.
 Published opportunities use the shared countdown. Owners choose or extend a live
 deadline by 30, 60, 90, or 180 days.
 
-The deploy pipeline in [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
-runs the same `npm test`, so a new test file in the existing folders blocks a deploy
-when it fails.
+The pipeline in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+runs the same `npm test` when `frontend/` changes, so a new test file in the existing folders fails **CI** and blocks the deploy.
 
 ## Build
 

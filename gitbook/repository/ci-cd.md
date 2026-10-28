@@ -1,23 +1,71 @@
 # CI/CD and quality checks
 
-Six GitHub Actions workflows live in `.github/workflows/`. Pull requests are tested and scanned. Pushes to `main` are tested again and deployed.
+Checks and deployment live in `.github/workflows/ci.yml`. Pull requests run the areas they touch. A push to `main` runs those same checks and then deploys. The AI security review stays in `.github/workflows/ai-security-review.yml` because it has to comment on a pull request without executing that pull request's code.
 
-## Workflows
+## Files
 
-| Workflow | Runs on | What it does |
+```
+.github/
+├── workflows/
+│   ├── ci.yml                     Checks and the Firebase deploy
+│   └── ai-security-review.yml     Advisory review, kept separate
+├── actions/setup-workspace/
+│   └── action.yml                 Node 22, and Java 17 when a job starts emulators
+└── scripts/
+    ├── security-review.mjs
+    └── security-review.test.mjs
+```
+
+`deploy.yml`, `funding-escrow.yml`, `gitleaks.yml` and `semgrep.yml` are gone. Their work is a job in `ci.yml`:
+
+| Removed file | Job in `ci.yml` |
+| --- | --- |
+| `deploy.yml` | **Deploy rules and functions** and **Deploy hosting** |
+| `funding-escrow.yml` | **Funding escrow** |
+| `gitleaks.yml` | **Gitleaks** |
+| `semgrep.yml` | **Semgrep** |
+
+The old `ci.yml` was the workflow **CI Test Suite**. Its gate job was **Run Unit & Integration Tests**. That job is now named **CI**.
+
+Jobs that use the shared action check out the repository first. GitHub loads `action.yml` from the runner's copy of the repository, so the action itself does not check the repository out.
+
+## How to read a run
+
+Open the failed **CI** run. The red job's name is the area: **Frontend**, **Firestore rules**, **Cloud Functions**, **Audit registry**, **Funding escrow**, **Faucet**, **Semgrep** or **Gitleaks**. **CI** itself only fails when a selected area failed, or when the change detection failed. **Deploy rules and functions** and **Deploy hosting** run after **CI** on `main`, and only when the push changes something outside `gitbook/`.
+
+A pull request lists each job twice. The same commit starts `ci.yml` for the branch push and again for the pull request, and GitHub shows both.
+
+* The push run scans for secrets. On a feature branch it skips the test jobs and both deploy jobs.
+* The pull request run executes the selected tests and Semgrep. It skips **Gitleaks**, which runs only on a push, and both deploy jobs, which run only on `main`.
+
+A skipped job was not selected for that event. It is not a failure. The two **GitBook** lines are statuses from the GitBook app, not jobs in this repository.
+
+## What runs
+
+| Job | Runs when | What it checks |
 | --- | --- | --- |
-| `ci.yml` (CI Test Suite) | Pull requests and pushes to `main` | Detects which areas changed, then runs only those jobs: frontend tests and build, Firestore and Storage rules tests, Cloud Functions tests, audit registry contract tests, faucet and EIP-7702 tests. A final `CI` job passes when no selected job failed, so a skipped job never blocks a merge |
-| `deploy.yml` (Deploy) | Pushes to `main`, except pushes that only change `gitbook/**`, and manual runs | Tests backend, rules and frontend, deploys rules, indexes, Storage rules and functions, then builds and deploys Hosting and checks the live CSP. See [Deployment](../operations/deployment.md) |
-| `funding-escrow.yml` | Pull requests and pushes to `main` that touch the escrow contracts or their ABI bundle | Escrow contract tests with coverage, a production compile and the deployment verifier tests |
-| `semgrep.yml` | Pull requests and pushes to `main` | Semgrep Community Edition with JavaScript, TypeScript, React, Node, smart contract and OWASP rules. Seven Solidity gas rules are advisory. Everything else blocks |
-| `gitleaks.yml` | Every push | Scans new commits for secrets with Gitleaks 8.30.1, using `.gitleaks.toml` and `.gitleaksignore` |
-| `ai-security-review.yml` | Pull requests opened or updated by the four project contributors | Sends the diff in 75,000-byte chunks (at most 20) to Fireworks AI and posts one advisory comment with security findings |
+| Detect changed areas | Every pull request, push and manual run | Path filters. A manual run selects every area |
+| Frontend | `frontend/**` or a shared functions module the app imports | Unit, integration and accessibility tests, then a production build |
+| Firestore rules | `firebase/**` outside `firebase/functions/**` | Firestore and Storage rules |
+| Cloud Functions | `firebase/functions/**` or `firebase/firebase.json` | Functions suite |
+| Audit registry | `contracts/audit-registry/**` | Registry contract tests |
+| Funding escrow | Escrow contracts, registry contracts or `escrowRegistry.abis.json` | Coverage, a production compile and the deployment verifier |
+| Faucet | `contracts/stable-faucet/**` | Faucet contracts and the sponsored-wallet site tests |
+| Semgrep | Frontend, Firebase, contracts or `.github/**`, on a pull request or on `main` | Community Edition rules for JavaScript, TypeScript, React, Node, smart contracts and OWASP. Seven Solidity gas rules are advisory. Everything else blocks |
+| Gitleaks | Every push, whatever the paths | New commits, with Gitleaks 8.30.1, `.gitleaks.toml` and `.gitleaksignore` |
+| CI | Always | Passes when no selected job failed. This is the required status check |
+| Deploy rules and functions | Push to `main` that is not only `gitbook/**`, after **CI** | Firestore rules, indexes, Storage rules, then functions. Functions retry up to three times |
+| Deploy hosting | After the backend deploy | Builds the web app and checks the live Content-Security-Policy |
 
-The deploy workflow cannot be blocked by `ci.yml`, because they are separate workflows. That is why `deploy.yml` runs the backend, rules and frontend suites again before it deploys anything.
+Changing `.github/workflows/ci.yml` or `.github/actions/**` selects every test area, so a bad filter is caught by the next run. Node and Java setup is shared through `.github/actions/setup-workspace`, and npm installs use the lockfile cache.
 
-## Required checks
+A push that only changes `gitbook/**` still scans for secrets, and it does not deploy. Run **CI** by hand from **Actions**, **Run workflow**, on `main`, to redeploy the current `main`.
 
-On 26 October 2026, `main` required only the **Run Unit & Integration Tests** check, through a classic branch protection rule. That rule is to move into a ruleset with the GitBook app on its bypass list, as described in [Branch protection](../setup/github-actions.md#branch-protection). `docs/contributing.md` also asks maintainers to require **CI**, **Semgrep** and **Gitleaks**. Check the protection settings in GitHub when you take over the repository.
+## Required check
+
+Require **CI** on `main`, and remove **Run Unit & Integration Tests**, **Semgrep** and **Gitleaks** if they are still required. Those checks are jobs inside this workflow now. **CI** fails when Semgrep or Gitleaks fails. A skipped job does not fail **CI**, so a documentation change can merge.
+
+GitBook commits straight to `main` and cannot carry a required check. Keep the GitBook app on the ruleset bypass list, as described in [Branch protection](../setup/github-actions.md#branch-protection).
 
 ## AI security review
 
@@ -42,7 +90,7 @@ The team rules are in `docs/contributing.md`:
 * Branch from `main` and name the branch `qcdao-<story number>-<story title in kebab case>`.
 * Use Conventional Commits style subjects, imperative and at most 50 characters.
 * Open one pull request per story, get at least one approval and use **Squash and merge**.
-* Never commit directly to `main`, because every push to `main` deploys.
+* Never commit directly to `main`, because every push to `main` that changes the product deploys.
 
 ## Adding a test
 

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { HttpsError } from "firebase-functions/v2/https";
 import { opportunityWorkflowStatus, proposalWorkflowStatus, workflowStatusLabel } from "./workflowStatus.js";
-import { EXPORT_NOTICE, EXPORT_SCHEMA_VERSION } from "./proposalExportNotice.js";
+import { EXPORT_NOTICE, EXPORT_SCHEMA_VERSION, latestCurrentDate } from "./proposalExportNotice.js";
 
 export { EXPORT_NOTICE, EXPORT_SCHEMA_VERSION };
 
@@ -11,6 +11,7 @@ export const EXPORT_SCAN_CAP = 500;
 export const EXPORT_COMMENT_CAP = 1000;
 
 const RECOMMENDATIONS = new Set(["recommend", "recommend_with_revisions", "do_not_recommend"]);
+const EXPORTABLE_STATUSES = ["submitted", "under_review", "accepted", "rejected", "withdrawn"];
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -33,6 +34,7 @@ export const CSV_COLUMNS = Object.freeze([
   "proposalSummary",
   "proposalStatus",
   "proposalWorkflowStatus",
+  "accepted",
   "researcherId",
   "proposalAmount",
   "proposalCurrency",
@@ -91,33 +93,49 @@ function dayBound(value, end) {
   return utc;
 }
 
-/** A posting id, or an inclusive UTC date range. Not both. */
-export function parseExportRequest(input) {
+/** One proposal, or an inclusive UTC date range. Not both. */
+export function parseExportRequest(input, now = new Date()) {
   const data = input && typeof input === "object" && !Array.isArray(input) ? input : {};
-  for (const key of ["postingId", "startDate", "endDate"]) {
+  for (const key of ["proposalId", "startDate", "endDate"]) {
     if (data[key] != null && data[key] !== "" && typeof data[key] !== "string") {
-      fail("invalid-argument", "Posting and date fields must be text.");
+      fail("invalid-argument", "Proposal and date fields must be text.");
     }
   }
-  const postingId = text(data.postingId).trim();
+  const proposalId = text(data.proposalId).trim();
   const startDate = text(data.startDate).trim();
   const endDate = text(data.endDate).trim();
-  const hasPosting = postingId !== "";
+  const hasProposal = proposalId !== "";
   const hasRange = startDate !== "" || endDate !== "";
-  if (hasPosting === hasRange) {
-    fail("invalid-argument", hasPosting
-      ? "Export one posting or a date range, not both."
-      : "Choose a posting or a start and end date.");
+  if (hasProposal === hasRange) {
+    fail("invalid-argument", hasProposal
+      ? "Export one proposal or a date range, not both."
+      : "Choose a proposal or a start and end date.");
   }
-  if (hasPosting) {
-    if (!ID.test(postingId)) fail("invalid-argument", "That posting reference is not valid.");
-    return { mode: "posting", postingId, startDate: null, endDate: null, start: null, end: null };
+  const acceptance = data.acceptance == null || data.acceptance === "" ? "all" : String(data.acceptance);
+  if (acceptance !== "accepted" && acceptance !== "all") {
+    fail("invalid-argument", "Choose accepted proposals only, or accepted and not accepted.");
+  }
+  if (hasProposal) {
+    if (!ID.test(proposalId)) fail("invalid-argument", "That proposal reference is not valid.");
+    return { mode: "proposal", acceptance, proposalId, startDate: null, endDate: null, start: null, end: null };
   }
   if (!startDate || !endDate) fail("invalid-argument", "Choose both a start date and an end date.");
   const start = dayBound(startDate, false);
   const end = dayBound(endDate, true);
   if (start > end) fail("invalid-argument", "The start date is after the end date.");
-  return { mode: "range", postingId: null, startDate, endDate, start, end };
+  const latest = latestCurrentDate(now);
+  if (endDate > latest) {
+    fail("invalid-argument", `The end date cannot be after ${latest}, the latest current date (UTC+14).`);
+  }
+  return { mode: "range", acceptance, proposalId: null, startDate, endDate, start, end };
+}
+
+export function isAcceptedProposal(problem, proposal) {
+  if (!proposal || proposal.status === "draft") return false;
+  if (proposal.status === "accepted" || proposal.matching?.status === "confirmed") return true;
+  if (!problem) return false;
+  if (text(problem.acceptedProposalId).trim() === proposal.id) return true;
+  return problem.matching?.status === "confirmed" && problem.matching.proposalId === proposal.id;
 }
 
 function wantedIds(problem, proposals) {
@@ -249,6 +267,7 @@ function proposalView(proposal) {
     summary: text(proposal.summary),
     status: text(proposal.status),
     workflowStatus: proposalWorkflowStatus(proposal),
+    accepted: proposal.accepted === true,
     researcherId: text(proposal.researcherId),
     amount: amount(proposal.amount),
     currency: text(proposal.currency) || null,
@@ -271,42 +290,55 @@ async function withComments(db, problem, proposals) {
   return postingView(problem, selected);
 }
 
-async function loadOne(db, postingId) {
-  const problem = await loadProblem(db, postingId, new Map());
-  if (!problem) fail("not-found", "That posting was not found.");
-  const known = await readCapped(db.collection("proposals").where("problemId", "==", postingId), "proposals on this posting");
-  const selected = await hydrate(db, problem, known);
-  if (!selected.length) {
-    fail("failed-precondition", "Only an accepted posting can be exported. This posting has no accepted proposal.");
+async function loadOne(db, scope) {
+  const snap = await db.collection("proposals").doc(scope.proposalId).get();
+  if (!snap.exists) fail("not-found", "That proposal was not found.");
+  const proposal = { id: snap.id, ...(snap.data() ?? {}) };
+  if (proposal.status === "draft" || !EXPORTABLE_STATUSES.includes(proposal.status)) {
+    fail("failed-precondition", "Draft proposals are not exported.");
   }
-  return [await withComments(db, problem, selected)];
+  const problem = proposal.problemId ? await loadProblem(db, proposal.problemId, new Map()) : null;
+  proposal.accepted = isAcceptedProposal(problem, proposal);
+  if (scope.acceptance === "accepted" && !proposal.accepted) {
+    fail("failed-precondition", "This proposal has not been accepted. Choose accepted and not accepted to include it.");
+  }
+  return [await withComments(db, problem || emptyPosting(), [proposal])];
+}
+
+function emptyPosting() {
+  return {
+    id: "", title: "", summary: "", status: "", ownerId: "", organisation: "",
+    categories: [], amount: null, currency: null,
+  };
+}
+
+function proposalMoment(proposal) {
+  return millis(proposal.createdAt) || millis(proposal.updatedAt);
 }
 
 async function loadRange(db, scope) {
-  const [accepted, flagged, confirmed] = await Promise.all([
-    readCapped(db.collection("proposals").where("status", "==", "accepted"), "accepted proposals"),
-    readCapped(db.collection("problems").where("hasAcceptedSolution", "==", true), "accepted postings"),
-    readCapped(db.collection("problems").where("matching.status", "==", "confirmed"), "confirmed postings"),
-  ]);
+  const proposals = await readCapped(
+    db.collection("proposals").where("status", "in", EXPORTABLE_STATUSES),
+    "proposals",
+  );
+  const matched = proposals.filter((proposal) => proposal.status !== "draft" && inRange(proposalMoment(proposal), scope));
   const cached = new Map();
-  for (const problem of [...flagged, ...confirmed]) cached.set(problem.id, problem);
-  const problemIds = new Set();
-  for (const proposal of accepted) if (proposal.problemId) problemIds.add(proposal.problemId);
-  for (const id of cached.keys()) problemIds.add(id);
-  if (problemIds.size > EXPORT_SCAN_CAP) {
-    fail("resource-exhausted", "Too many accepted postings to export in one pass. Export a single posting instead.");
+  const groups = new Map();
+  for (const proposal of matched) {
+    const key = proposal.problemId || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(proposal);
   }
   const postings = [];
-  for (const id of problemIds) {
-    const problem = await loadProblem(db, id, cached);
-    if (!problem) continue;
-    const known = accepted.filter((proposal) => proposal.problemId === id);
-    const selected = (await hydrate(db, problem, known))
-      .filter((proposal) => inRange(acceptanceMs(problem, proposal), scope));
-    if (!selected.length) continue;
-    postings.push(await withComments(db, problem, selected));
+  for (const [problemId, rows] of groups) {
+    const problem = problemId ? await loadProblem(db, problemId, cached) : null;
+    const marked = rows
+      .map((proposal) => ({ ...proposal, accepted: isAcceptedProposal(problem, proposal) }))
+      .filter((proposal) => scope.acceptance === "all" || proposal.accepted);
+    if (!marked.length) continue;
+    postings.push(await withComments(db, problem || emptyPosting(), marked));
   }
-  postings.sort((left, right) => (left.acceptedAt || "").localeCompare(right.acceptedAt || "") || left.id.localeCompare(right.id));
+  postings.sort((left, right) => (left.acceptedAt || left.createdAt || "").localeCompare(right.acceptedAt || right.createdAt || "") || left.id.localeCompare(right.id));
   return postings;
 }
 
@@ -319,7 +351,8 @@ function buildDocument(postings, scope, exportedAt) {
     exportedAt,
     scope: {
       mode: scope.mode,
-      postingId: scope.postingId,
+      acceptance: scope.acceptance,
+      proposalId: scope.proposalId,
       startDate: scope.startDate,
       endDate: scope.endDate,
     },
@@ -367,6 +400,7 @@ export function exportToCsv(document) {
           proposalSummary: proposal?.summary ?? null,
           proposalStatus: proposal?.status ?? null,
           proposalWorkflowStatus: proposal?.workflowStatus ?? null,
+          accepted: proposal ? proposal.accepted === true : null,
           researcherId: proposal?.researcherId ?? null,
           proposalAmount: proposal?.amount ?? null,
           proposalCurrency: proposal?.currency ?? null,
@@ -394,37 +428,65 @@ export function exportToCsv(document) {
 }
 
 /**
- * QCDAO-107. Reads accepted postings through the Admin SDK, so the browser
- * gains no new access to comments. The caller must already be an administrator.
+ * QCDAO-107. Reads proposals through the Admin SDK, accepted or not, so the
+ * browser gains no new access to comments. The caller must already be an administrator.
  */
+export async function listExportableProposals({ db }) {
+  const proposals = await readCapped(
+    db.collection("proposals").where("status", "in", EXPORTABLE_STATUSES),
+    "proposals",
+  );
+  const cached = new Map();
+  const rows = [];
+  for (const proposal of proposals) {
+    if (proposal.status === "draft") continue;
+    const problem = proposal.problemId ? await loadProblem(db, proposal.problemId, cached) : null;
+    const workflowStatus = proposalWorkflowStatus(proposal);
+    rows.push({
+      id: proposal.id,
+      title: text(proposal.title) || "Untitled proposal",
+      status: text(proposal.status),
+      workflowStatus,
+      workflowLabel: workflowStatusLabel(workflowStatus) || text(proposal.status),
+      accepted: isAcceptedProposal(problem, proposal),
+      problemId: proposal.problemId || null,
+      problemTitle: text(problem?.title) || null,
+      createdAt: iso(proposal.createdAt),
+    });
+  }
+  rows.sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
+  return { proposals: rows };
+}
+
 export async function exportSelectedProposals({ db, actorUid, actorName, input, now }) {
   if (typeof actorUid !== "string" || !actorUid) fail("unauthenticated", "Authentication required.");
-  const scope = parseExportRequest(input);
-  const postings = scope.mode === "posting" ? await loadOne(db, scope.postingId) : await loadRange(db, scope);
+  const scope = parseExportRequest(input, now);
+  const postings = scope.mode === "proposal" ? await loadOne(db, scope) : await loadRange(db, scope);
   const document = buildDocument(postings, scope, iso(now) || new Date().toISOString());
   const csv = exportToCsv(document);
   const auditId = randomBytes(12).toString("hex");
-  const title = document.postings.length === 1
-    ? document.postings[0].title || document.postings[0].id
-    : scope.mode === "range"
-      ? `Selected proposals ${scope.startDate} to ${scope.endDate}`
-      : "Selected proposal export";
+  const parentId = document.postings.find((posting) => posting.id)?.id || null;
+  const title = scope.mode === "proposal"
+    ? (document.postings[0]?.proposals[0]?.title || scope.proposalId)
+    : `Proposals ${scope.startDate} to ${scope.endDate}`;
   await db.collection("audits").doc(auditId).set({
     type: "proposal_comment_export",
     action: "PROPOSAL_COMMENT_EXPORT",
     actor: actorUid,
     actorName: actorName || actorUid,
     scope: scope.mode,
-    postingId: scope.postingId,
+    acceptance: scope.acceptance,
+    proposalId: scope.proposalId,
+    postingId: scope.mode === "proposal" ? parentId : null,
     startDate: scope.startDate,
     endDate: scope.endDate,
-    postingIds: document.postings.map((posting) => posting.id),
+    postingIds: document.postings.map((posting) => posting.id).filter(Boolean),
     postingCount: document.postingCount,
     proposalCount: document.proposalCount,
     commentCount: document.commentCount,
     schemaVersion: EXPORT_SCHEMA_VERSION,
-    problemId: scope.mode === "posting" ? scope.postingId : null,
-    targetId: scope.mode === "posting" ? scope.postingId : null,
+    problemId: scope.mode === "proposal" ? parentId : null,
+    targetId: scope.mode === "proposal" ? parentId : null,
     title,
     timestamp: now,
     createdAt: now,

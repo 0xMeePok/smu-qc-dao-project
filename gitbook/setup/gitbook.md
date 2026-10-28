@@ -29,7 +29,7 @@ GitBook's labels change from time to time. If a step looks different, GitBook's 
 
 ## Editing the book
 
-* **In GitBook:** merging a change request commits it to `main` through the GitBook app. Pushes that only touch `gitbook/` do not start the deploy workflow, because `deploy.yml` ignores that folder.
+* **In GitBook:** merging a change request commits it to `main` through the GitBook app. Pushes that only touch `gitbook/` do not deploy, because the deploy jobs ignore a change that is only in that folder.
 * **The landing page:** edit `gitbook/README.md` in the repository only. GitBook warns that editing README files in GitBook can cause conflicts or duplicate pages.
 * **In a pull request:** edit the Markdown, add any new page to `SUMMARY.md`, and merge. GitBook picks up the change after the merge.
 * Do not edit the same page in both places at the same time. The two edits can conflict, and one of them may need redoing.

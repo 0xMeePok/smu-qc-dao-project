@@ -87,10 +87,10 @@ Put one empty line between each part.
 
 1. Make one pull request upon completion of the feature.
 2. Make sure that all the tests pass before you ask for a review.
-3. Make sure **Semgrep** (rule-based SAST on the PR) and **Gitleaks** (secret scan on each push) have passed. Maintainers should mark both as required status checks on `main`.
+3. Make sure **CI** has passed. It is the required check, and it fails when Semgrep or Gitleaks fails. Maintainers should require **CI** on `main` and should not also require the old **Semgrep** or **Gitleaks** check names.
 
 Semgrep blocks security findings and scanner errors. The seven Solidity
-performance rules listed explicitly in `.github/workflows/semgrep.yml`
+performance rules listed explicitly in `.github/workflows/ci.yml`
 are advisory: they suggest gas or style changes, including accepting native
 currency in constructors. A second Solidity scan keeps those findings visible
 in the job logs. All other rules remain blocking. Review gas optimizations

@@ -1,6 +1,6 @@
 # GitHub Actions
 
-Pushes to `main` deploy to Firebase through `.github/workflows/deploy.yml`. The workflow needs the secrets and variables below, set under **Settings**, **Secrets and variables**, **Actions** in the repository.
+Pushes to `main` deploy to Firebase through `.github/workflows/ci.yml`. That file also holds the checks that used to live in `deploy.yml`, `funding-escrow.yml`, `gitleaks.yml` and `semgrep.yml`. Shared Node setup is `.github/actions/setup-workspace`. The AI review stays in `.github/workflows/ai-security-review.yml`. The workflow needs the secrets and variables below, set under **Settings**, **Secrets and variables**, **Actions** in the repository.
 
 ## Joining the existing project
 
@@ -44,13 +44,13 @@ gh variable set VITE_PRIVY_APP_ID --body "<privy app id>"
 
 ## For a fresh project
 
-1. Rename the service account secret, or keep the name and only change its value. If you rename it, update both places in `deploy.yml` that read it.
-2. Change `FIREBASE_PROJECT_ID` at the top of `deploy.yml`.
+1. Rename the service account secret, or keep the name and only change its value. If you rename it, update both places in `ci.yml` that read it.
+2. Change `FIREBASE_PROJECT_ID` at the top of `ci.yml`.
 3. Make the other project-specific changes listed in [Firebase](firebase.md), step 7.
 
 ## Branch protection
 
-On 26 October 2026, `main` was protected by a classic branch protection rule requiring the **Run Unit & Integration Tests** check. GitBook commits book edits straight to `main`, and those commits can never carry that check, so the rule refuses them. A classic rule cannot exempt an app from required checks. A ruleset can, so move the protection into a ruleset with the GitBook app on its bypass list.
+On 26 October 2026, `main` was protected by a classic branch protection rule requiring the **Run Unit & Integration Tests** check. GitBook commits book edits straight to `main`, and those commits can never carry that check, so the rule refuses them. A classic rule cannot exempt an app from required checks. A ruleset can, so move the protection into a ruleset with the GitBook app on its bypass list. The required check is now **CI**. Remove **Run Unit & Integration Tests**, **Semgrep** and **Gitleaks** from the ruleset: they are jobs inside `.github/workflows/ci.yml`, and **CI** fails when one of them fails.
 
 1. Install the GitBook GitHub app on the repository first, as part of the [GitBook](gitbook.md) setup. The app only appears in the bypass list once it is installed.
 2. Open **Settings**, **Branches** and note every setting of the classic rule for `main`.
@@ -58,14 +58,12 @@ On 26 October 2026, `main` was protected by a classic branch protection rule req
 4. Name the ruleset `main` and set **Enforcement status** to **Active**.
 5. Under **Bypass list**, select **Add bypass**, choose **GitBook** and select **Add Selected**. Leave its mode on **Always allow**.
 6. Under **Target branches**, select **Add a target** and include the default branch.
-7. Under the rules, keep **Restrict deletions** and **Block force pushes**. Turn on **Require status checks to pass before merging** and add **Run Unit & Integration Tests**. Recreate any other setting the classic rule had.
+7. Under the rules, keep **Restrict deletions** and **Block force pushes**. Turn on **Require status checks to pass before merging** and add **CI**. Do not also require **Run Unit & Integration Tests**, **Semgrep** or **Gitleaks**. Recreate any other setting the classic rule had.
 8. Select **Create**.
 9. Go back to **Settings**, **Branches** and delete the classic rule for `main`. Classic rules and rulesets both apply, so the classic rule would keep refusing GitBook's commits.
 
-To check it, edit a page in GitBook and merge the change request. The commit should appear on `main` from the GitBook app. Pushes that only change `gitbook/` skip the deploy workflow.
-
-`docs/contributing.md` also asks maintainers to require **CI**, **Semgrep** and **Gitleaks**. Add any extra required checks to the same ruleset, so the GitBook bypass covers them too.
+To check it, edit a page in GitBook and merge the change request. The commit should appear on `main` from the GitBook app. Pushes that only change `gitbook/` do not deploy.
 
 ## Check that it works
 
-Open **Actions**, run **Deploy** by hand with **Run workflow** on `main`, and confirm all five jobs pass. The last step, **Verify effective production CSP**, reads the live header.
+Open **Actions**, run **CI** by hand with **Run workflow** on `main`, and confirm the selected jobs pass. The last step, **Verify effective production CSP**, reads the live header.

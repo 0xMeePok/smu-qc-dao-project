@@ -69,7 +69,7 @@ These files name `qcdao-a0c7a` directly. Change them for a new project in the sa
 | `firebase/storage.cors.json` | The two Hosting origins |
 | `firebase/scripts/check-csp.mjs` | The expected functions endpoint |
 | `firebase/scripts/preview-deploy.mjs` | `PROJECT` |
-| `.github/workflows/deploy.yml` | `FIREBASE_PROJECT_ID` and the service account secret name |
+| `.github/workflows/ci.yml` | `FIREBASE_PROJECT_ID` and the service account secret name |
 | `firebase/functions/scripts/reset-dev-data.mjs` | `LIVE_PROJECT`, the only project a production reset may target |
 | `firebase/functions/scripts/mock_data.mjs` | Default `PROJECT_ID`, or set `MOCK_PROJECT_ID` |
 | `firebase/test/security-config.test.mjs` and other tests that assert the old id | Expected values |

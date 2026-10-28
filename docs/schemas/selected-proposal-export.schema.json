@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qc-dao.local/schemas/selected-proposal-export.schema.json",
   "title": "QC DAO selected proposal export",
-  "description": "JSON file returned when an administrator exports accepted postings and the comments on their selected proposals. Grading and token distribution are not in this file. The CSV form uses x-csv-columns, one row per comment. A leading spreadsheet formula character in a CSV cell is prefixed with an apostrophe; the JSON comment body is the exact text.",
-  "x-schema-version": 1,
+  "description": "JSON file returned when an administrator exports proposals and their comments, accepted or not. Grading and token distribution are not in this file. The CSV form uses x-csv-columns, one row per comment. A leading spreadsheet formula character in a CSV cell is prefixed with an apostrophe; the JSON comment body is the exact text.",
+  "x-schema-version": 2,
   "x-csv-columns": [
     "schemaVersion",
     "exportedAt",
@@ -23,6 +23,7 @@
     "proposalSummary",
     "proposalStatus",
     "proposalWorkflowStatus",
+    "accepted",
     "researcherId",
     "proposalAmount",
     "proposalCurrency",
@@ -55,17 +56,18 @@
     "postings"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "exportedAt": { "type": "string" },
     "scope": {
       "oneOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "postingId", "startDate", "endDate"],
+          "required": ["mode", "acceptance", "proposalId", "startDate", "endDate"],
           "properties": {
-            "mode": { "const": "posting" },
-            "postingId": { "type": "string", "minLength": 1 },
+            "mode": { "const": "proposal" },
+            "acceptance": { "enum": ["accepted", "all"] },
+            "proposalId": { "type": "string", "minLength": 1 },
             "startDate": { "type": "null" },
             "endDate": { "type": "null" }
           }
@@ -73,10 +75,11 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "postingId", "startDate", "endDate"],
+          "required": ["mode", "acceptance", "proposalId", "startDate", "endDate"],
           "properties": {
             "mode": { "const": "range" },
-            "postingId": { "type": "null" },
+            "acceptance": { "enum": ["accepted", "all"] },
+            "proposalId": { "type": "null" },
             "startDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
             "endDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
           }
@@ -124,7 +127,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "id", "title", "summary", "status", "workflowStatus", "researcherId",
+        "id", "title", "summary", "status", "workflowStatus", "accepted", "researcherId",
         "amount", "currency", "category", "createdAt", "updatedAt", "comments"
       ],
       "properties": {
@@ -133,6 +136,7 @@
         "summary": { "type": "string" },
         "status": { "type": "string" },
         "workflowStatus": { "type": "string" },
+        "accepted": { "type": "boolean" },
         "researcherId": { "type": "string" },
         "amount": { "type": ["number", "null"] },
         "currency": { "type": ["string", "null"] },
