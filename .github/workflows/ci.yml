@@ -104,6 +104,9 @@ jobs:
       run:
         working-directory: ./frontend
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -132,6 +135,9 @@ jobs:
       run:
         working-directory: ./firebase
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -153,6 +159,9 @@ jobs:
       run:
         working-directory: ./firebase/functions
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -175,6 +184,9 @@ jobs:
       run:
         working-directory: ./contracts/audit-registry
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -195,6 +207,9 @@ jobs:
       run:
         working-directory: contracts/funding-escrow
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -222,6 +237,9 @@ jobs:
       run:
         working-directory: ./contracts/stable-faucet
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -377,6 +395,9 @@ jobs:
     if: needs.ci.result == 'success' && needs.changes.outputs.deploy == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
@@ -464,6 +485,9 @@ jobs:
     if: needs.ci.result == 'success' && needs['deploy-backend'].result == 'success' && needs.changes.outputs.deploy == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Set up workspace
         uses: ./.github/actions/setup-workspace
         with:
