@@ -30,7 +30,10 @@ smu-qc-dao-project/
 ├── docs/                     Deep-dive design notes, setup notes and test evidence
 ├── gitbook/                  This handover book, synced to GitBook
 ├── scripts/                  End-to-end funding tests and the shared test reporter
-├── .github/                  CI, deploy, security workflows and the AI review script
+├── .github/
+│   ├── workflows/            ci.yml (checks and deploy) and ai-security-review.yml
+│   ├── actions/setup-workspace/  Shared Node and Java setup for ci.yml
+│   └── scripts/              AI security review and its test
 ├── .superdesign/             Design exploration files and the brand mark
 ├── package.json              Root dev dependency (axe-core) only
 ├── .gitleaks.toml            Secret-scan configuration
@@ -64,7 +67,7 @@ smu-qc-dao-project/
 | A contract | `contracts/<package>/contracts/` | Contract tests, a new deployment and a manifest sync |
 | Active contract addresses | `contracts/audit-registry/manifests/arbitrumSepolia.json`, then `npm run sync:audit-registry` in `frontend/` | Deploy functions and Hosting together |
 | Security headers | `firebase/firebase.json` | `node firebase/scripts/check-csp.mjs` after release |
-| CI or deploy | `.github/workflows/` | [CI/CD and quality checks](ci-cd.md) |
+| CI or deploy | `.github/workflows/ci.yml` and `.github/actions/setup-workspace/` | [CI/CD and quality checks](ci-cd.md) |
 | This book | `gitbook/` | Nothing else. Book-only pushes skip the deploy |
 
 ## Files you should not commit

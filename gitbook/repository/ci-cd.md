@@ -1,10 +1,44 @@
 # CI/CD and quality checks
 
-Checks and deployment live in `.github/workflows/ci.yml`. Pull requests run the areas they touch. A push to `main` runs those same checks and then deploys. The AI security review stays in its own workflow because it has to comment on a pull request without executing that pull request's code.
+Checks and deployment live in `.github/workflows/ci.yml`. Pull requests run the areas they touch. A push to `main` runs those same checks and then deploys. The AI security review stays in `.github/workflows/ai-security-review.yml` because it has to comment on a pull request without executing that pull request's code.
+
+## Files
+
+```
+.github/
+├── workflows/
+│   ├── ci.yml                     Checks and the Firebase deploy
+│   └── ai-security-review.yml     Advisory review, kept separate
+├── actions/setup-workspace/
+│   └── action.yml                 Node 22, and Java 17 when a job starts emulators
+└── scripts/
+    ├── security-review.mjs
+    └── security-review.test.mjs
+```
+
+`deploy.yml`, `funding-escrow.yml`, `gitleaks.yml` and `semgrep.yml` are gone. Their work is a job in `ci.yml`:
+
+| Removed file | Job in `ci.yml` |
+| --- | --- |
+| `deploy.yml` | **Deploy rules and functions** and **Deploy hosting** |
+| `funding-escrow.yml` | **Funding escrow** |
+| `gitleaks.yml` | **Gitleaks** |
+| `semgrep.yml` | **Semgrep** |
+
+The old `ci.yml` was the workflow **CI Test Suite**. Its gate job was **Run Unit & Integration Tests**. That job is now named **CI**.
+
+Jobs that use the shared action check out the repository first. GitHub loads `action.yml` from the runner's copy of the repository, so the action itself does not check the repository out.
 
 ## How to read a run
 
-Open the failed **CI** run. The red job's name is the area: **Frontend**, **Firestore rules**, **Cloud Functions**, **Audit registry**, **Funding escrow**, **Faucet**, **Semgrep** or **Gitleaks**. A skipped job was not selected. **CI** itself only fails when a selected area failed, or when the change detection failed. **Deploy rules and functions** and **Deploy hosting** run after **CI** on `main`, and only when the push changes something outside `gitbook/`.
+Open the failed **CI** run. The red job's name is the area: **Frontend**, **Firestore rules**, **Cloud Functions**, **Audit registry**, **Funding escrow**, **Faucet**, **Semgrep** or **Gitleaks**. **CI** itself only fails when a selected area failed, or when the change detection failed. **Deploy rules and functions** and **Deploy hosting** run after **CI** on `main`, and only when the push changes something outside `gitbook/`.
+
+A pull request lists each job twice. The same commit starts `ci.yml` for the branch push and again for the pull request, and GitHub shows both.
+
+* The push run scans for secrets. On a feature branch it skips the test jobs and both deploy jobs.
+* The pull request run executes the selected tests and Semgrep. It skips **Gitleaks**, which runs only on a push, and both deploy jobs, which run only on `main`.
+
+A skipped job was not selected for that event. It is not a failure. The two **GitBook** lines are statuses from the GitBook app, not jobs in this repository.
 
 ## What runs
 

@@ -88,7 +88,7 @@ PNG and SVG exports of this page's diagrams are in `docs/architecture/` for slid
 | Privy | Email one-time-code login, embedded EVM wallets in a trusted execution environment, gas sponsorship | Privy dashboard |
 | Smart contracts | Record hashes, audit events, per-proposal escrows, grant pools and independent listing escrows | `contracts/` |
 | Test-token faucet | Mints mock XSGD, USDT and USDC. Holds the faucet key so Firebase never does | `contracts/stable-faucet/site`, on Vercel |
-| GitHub Actions | Tests every change and deploys `main` to Firebase | `.github/workflows/` |
+| GitHub Actions | Tests every change and deploys `main` to Firebase | `.github/workflows/ci.yml`. The AI review is `ai-security-review.yml` |
 
 ## Design decisions to keep
 

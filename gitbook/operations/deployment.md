@@ -4,6 +4,8 @@ Merging to `main` deploys the backend and the web app to `qcdao-a0c7a`. The live
 
 ## The pipeline
 
+The pipeline is `.github/workflows/ci.yml`. The old `deploy.yml` is the two deploy jobs at the end of that file.
+
 ```mermaid
 flowchart LR
   push["Pull request, push,<br/>or manual run"] --> detect["Detect changed areas"]

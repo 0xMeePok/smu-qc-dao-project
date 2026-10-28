@@ -1,6 +1,6 @@
 # GitHub Actions
 
-Pushes to `main` deploy to Firebase through `.github/workflows/ci.yml`. The workflow needs the secrets and variables below, set under **Settings**, **Secrets and variables**, **Actions** in the repository.
+Pushes to `main` deploy to Firebase through `.github/workflows/ci.yml`. That file also holds the checks that used to live in `deploy.yml`, `funding-escrow.yml`, `gitleaks.yml` and `semgrep.yml`. Shared Node setup is `.github/actions/setup-workspace`. The AI review stays in `.github/workflows/ai-security-review.yml`. The workflow needs the secrets and variables below, set under **Settings**, **Secrets and variables**, **Actions** in the repository.
 
 ## Joining the existing project
 
