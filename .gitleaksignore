@@ -56,3 +56,7 @@ d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbi
 # word "key". It is not a secret, and the next commit rewords the row.
 # Ignore only this exact historical finding.
 72820f8adbfca73a0946662ed3a47cf418c56b03:gitbook/handover/open-work.md:generic-api-key:24
+
+# Local Privy agent skill. Sample curl auth in a file that is no longer in the
+# tree. .agents/ stays gitignored. Ignore only this historical finding.
+aa7a96941cdf99cb393ecaae7ace516b88754637:.agents/skills/privy/SKILL.md:curl-auth-user:47

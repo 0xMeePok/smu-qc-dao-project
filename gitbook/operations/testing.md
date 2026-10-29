@@ -6,9 +6,9 @@ Each package has its own test suite. Suites that need emulators start and stop t
 
 | Suite | Command, from the repository root | Test files | Needs |
 | --- | --- | --- | --- |
-| Frontend unit, integration and accessibility | `npm test --prefix frontend` | 123 | `firebase/functions` installed (shared modules) |
+| Frontend unit, integration and accessibility | `npm test --prefix frontend` | 126 | `firebase/functions` installed (shared modules) |
 | Firestore and Storage rules | `npm test --prefix firebase` | 20 | Java |
-| Cloud Functions | `npm test --prefix firebase/functions` | 70 | Java |
+| Cloud Functions | `npm test --prefix firebase/functions` | 69 | Java |
 | Audit registry contracts | `npm test --prefix contracts/audit-registry` | 3 | Nothing else |
 | Funding escrow contracts | `npm test --prefix contracts/funding-escrow` | 19, plus script and verifier tests | `contracts/audit-registry` installed, Node 22.13 or newer |
 | Faucet contracts and site | `npm test --prefix contracts/stable-faucet`, then `npm test --prefix contracts/stable-faucet/site` | 1 and 7 | Both packages installed |
