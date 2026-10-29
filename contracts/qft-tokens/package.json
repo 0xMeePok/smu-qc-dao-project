@@ -3,12 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Mock token faucet contracts for Arbitrum Sepolia",
+  "description": "Fixed-supply QFT ERC-20 for Arbitrum Sepolia",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test mocha",
-    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
-    "deploy:faucet": "hardhat run scripts/deploy-faucet.js --build-profile production --network arbitrumSepolia"
+    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "4.0.15",

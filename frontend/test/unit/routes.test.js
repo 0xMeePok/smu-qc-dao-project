@@ -119,6 +119,30 @@ describe("Unit Tests: Route Configurations & Navigation Filtering", () => {
     assert.equal(emptyConfig, undefined);
   });
 
+  it("keeps the solutions catalog and independent proposal form role-gated", () => {
+    const solutions = getRouteConfig("solutions");
+    assert.equal(solutions.authRequired, true);
+    assert.deepEqual(solutions.allowedRoles, [
+      ROLES.OWNER,
+      ROLES.RESEARCHER,
+      ROLES.EVALUATOR,
+      ROLES.FUNDER,
+    ]);
+
+    const createProposal = getRouteConfig("create-proposal");
+    assert.equal(createProposal.authRequired, true);
+    assert.equal(createProposal.showInNav, false);
+    assert.deepEqual(createProposal.allowedRoles, [ROLES.RESEARCHER]);
+
+    const guest = getPermittedNavRoutes([]).map((route) => route.key);
+    const admin = getPermittedNavRoutes([ROLES.ADMIN]).map((route) => route.key);
+    const researcher = getPermittedNavRoutes([ROLES.RESEARCHER]).map((route) => route.key);
+    assert.equal(guest.includes("solutions"), false);
+    assert.equal(admin.includes("solutions"), false);
+    assert.equal(researcher.includes("solutions"), true);
+    assert.equal(researcher.includes("create-proposal"), false);
+  });
+
   it("[FUT-BAV-140] should expose architecture help as a public route outside header navigation", () => {
     const config = getRouteConfig("architecture");
     assert.ok(config);
