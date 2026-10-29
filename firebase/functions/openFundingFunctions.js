@@ -3,7 +3,9 @@ import { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding } from
 import { getFunderDashboard } from "./funderDashboard.js";
 
 // prepareOpenFundingAction runs immediately before an owner's grant signature,
-// so one instance is kept warm (billed while idle; see the deployment notes).
+// so the grant panel pings it awake through `warmable` once the wallet is
+// ready. That costs one short request; a minimum instance costs a full day of
+// idle time whether or not anyone opens the panel.
 export function registerOpenFundingFunctions({ db, client, config, requireMember, options }) {
   const callable = (service, { warmable = false, ...extra } = {}) => onCall({ ...options, timeoutSeconds: 180, ...extra }, async request => {
     // A signed-in panel may wake this instance before the owner clicks. The
@@ -23,6 +25,6 @@ export function registerOpenFundingFunctions({ db, client, config, requireMember
       throw new HttpsError("unavailable", "Confirmed funding information is temporarily unavailable. Try again shortly.");
     }
   });
-  return { getOpenFundingSummary: callable(getOpenFundingSummary), prepareOpenFundingAction: callable(prepareOpenFundingAction, { warmable: true, minInstances: 1 }),
+  return { getOpenFundingSummary: callable(getOpenFundingSummary), prepareOpenFundingAction: callable(prepareOpenFundingAction, { warmable: true }),
     syncOpenFunding: callable(syncOpenFunding), getFunderDashboard: callable(getFunderDashboard) };
 }
