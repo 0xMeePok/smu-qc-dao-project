@@ -36,3 +36,14 @@ it("the real Vite config rejects a credential loaded from a production environme
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it("rejects public OpenAI credentials without printing them while allowing the server secret", () => {
+  assert.doesNotThrow(() => assertPublicPrivyEnvironment({ OPENAI_API_KEY: "server-only" }));
+  for (const name of ["VITE_OPENAI_API_KEY", "VITE_OPENAI_SECRET", "VITE_OPENAI_ACCESS_TOKEN"]) {
+    assert.throws(() => assertPublicPrivyEnvironment({ [name]: "private-openai-sentinel" }), error => {
+      assert.ok(error.message.includes(name));
+      assert.equal(error.message.includes("private-openai-sentinel"), false);
+      return true;
+    });
+  }
+});

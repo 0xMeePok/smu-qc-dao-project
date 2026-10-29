@@ -56,6 +56,7 @@ jobs:
               - 'frontend/**'
               - 'firebase/functions/auditCanonical.js'
               - 'firebase/functions/proposalAuditPayload.js'
+              - 'firebase/functions/aiDraftSchema.js'
               - 'firebase/functions/package.json'
               - 'firebase/functions/package-lock.json'
               - '.github/workflows/ci.yml'
@@ -415,6 +416,28 @@ jobs:
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_QCDAO_A0C7A }}' > "$RUNNER_TEMP/sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
+      # The app key is a runtime secret, never a frontend build variable. Do not
+      # read a secret value back through the CLI (which logs returned values).
+      - name: Provision the AI drafting secret
+        working-directory: firebase
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          umask 077
+          key_file="$RUNNER_TEMP/qcdao-openai-key"
+          # Firebase's debug HTTP log can contain an encoded secret payload.
+          # Remove it along with the temporary key, including on a failed step.
+          trap 'rm -f "$key_file" firebase-debug.log firebase-debug.*.log' EXIT
+          if [ -n "$OPENAI_API_KEY" ]; then
+            printf '%s' "$OPENAI_API_KEY" > "$key_file"
+            npx firebase functions:secrets:set OPENAI_API_KEY \
+              --data-file "$key_file" --project "$FIREBASE_PROJECT_ID" --non-interactive --force
+          elif ! npx firebase functions:secrets:get OPENAI_API_KEY \
+            --project "$FIREBASE_PROJECT_ID" --non-interactive > /dev/null 2>&1; then
+            echo "::error::Add the OPENAI_API_KEY repository secret before the first AI deployment, or provision OPENAI_API_KEY in Google Secret Manager."
+            exit 1
+          fi
+
       # Rules and functions go together in one command so a rules change and the
       # function that relies on it cannot land seconds apart. The Firebase CLI
       # skips functions whose source is unchanged, so pushing a frontend-only
@@ -431,6 +454,9 @@ jobs:
           ARBITRUM_SEPOLIA_RPC_URL: ${{ vars.ARBITRUM_SEPOLIA_RPC_URL || vars.VITE_ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc' }}
           ARBITRUM_SEPOLIA_RPC_BACKUP_URLS: ${{ secrets.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || secrets.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS || vars.VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }}
           PRIVY_APP_ID: ${{ vars.VITE_PRIVY_APP_ID || secrets.VITE_PRIVY_APP_ID }}
+          AI_DRAFT_ENABLED: ${{ vars.AI_DRAFT_ENABLED || 'true' }}
+          AI_SIMILARITY_ENABLED: ${{ vars.AI_SIMILARITY_ENABLED || 'true' }}
+          AI_DRAFT_MODEL: ${{ vars.AI_DRAFT_MODEL || 'gpt-5-mini' }}
         run: |
           if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
             echo "::error::ARBITRUM_SEPOLIA_RPC_URL is required for on-chain publication verification."
@@ -443,6 +469,9 @@ jobs:
             exit 1
           fi
           printf 'PRIVY_APP_ID=%s\n' "$PRIVY_APP_ID" >> firebase/functions/.env
+          printf 'AI_DRAFT_ENABLED=%s\n' "$AI_DRAFT_ENABLED" >> firebase/functions/.env
+          printf 'AI_SIMILARITY_ENABLED=%s\n' "$AI_SIMILARITY_ENABLED" >> firebase/functions/.env
+          printf 'AI_DRAFT_MODEL=%s\n' "$AI_DRAFT_MODEL" >> firebase/functions/.env
 
       - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase

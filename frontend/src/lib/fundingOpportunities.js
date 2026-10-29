@@ -49,6 +49,7 @@ export function buildFundingOpportunityDocument({
   const storedExpiry = toDate(expiresAt) ?? expiryDateFrom(form.expiryDays, now);
   return {
     opportunityType: OPEN_FUNDING_TYPE,
+    ...(form.aiAssisted === true ? { aiAssisted: true } : {}),
     ownerId: trimmed(ownerId).toLowerCase(),
     organisation: trimmed(organisation),
     title: trimmed(form.title),

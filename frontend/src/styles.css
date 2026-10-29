@@ -5705,6 +5705,79 @@ span.currency-amount { display: inline-flex; font-size: inherit; color: inherit;
   .leave-draft-modal .modal-actions { grid-template-columns: minmax(0, 1fr); padding: 20px; }
 }
 
+/* QCDAO-157: a writing workspace beside the form, with review before applying. */
+.ai-draft-launch { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 34px; padding: 6px 10px; margin-top: 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font: 400 11px/1.4 "IBM Plex Mono", ui-monospace, monospace; }
+.ai-draft-launch:hover, .ai-draft-launch[aria-expanded="true"] { background: var(--brand-soft); border-color: var(--brand-line); color: var(--brand-strong); }
+.form-layout:has(> .ai-draft-panel) { grid-template-columns: minmax(0, 1fr) 360px; }
+.ai-draft-panel { position: sticky; top: calc(var(--header-height, 80px) + 20px); align-self: start; min-width: 0; max-height: calc(100dvh - var(--header-height, 80px) - 48px); display: flex; flex-direction: column; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface-solid); overflow: hidden; box-shadow: 0 8px 26px rgba(28, 20, 12, 0.05); }
+.ai-panel-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 19px 20px 17px; border-bottom: 1px solid var(--line); }
+.ai-panel-header .eyebrow { font-size: 10px; color: var(--muted); }
+.ai-panel-header h2 { display: flex; align-items: center; gap: 8px; margin: 5px 0 0; font-size: 22px; line-height: 1.2; font-weight: 500; }
+.ai-panel-close { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font: 400 24px/1 system-ui, sans-serif; }
+.ai-panel-close:hover { color: var(--ink); background: var(--surface-hover); }
+.ai-panel-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 20px 20px; }
+.ai-panel-intro { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.5; }
+.ai-data-note { margin: 9px 0 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.ai-generate { width: 100%; min-height: 40px; font-size: 12px; }
+.ai-chat { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; margin: 18px 0 12px; }
+.ai-chat-empty { margin: 0; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.ai-message { padding: 11px 12px; margin: 0 0 10px; border-radius: 8px; background: var(--surface-muted); }
+.ai-message-user { margin-left: 22px; }
+.ai-message-assistant { margin-right: 12px; border-left: 2px solid var(--brand); }
+.ai-message > strong { color: var(--muted); font: 400 10px/1.4 "IBM Plex Mono", ui-monospace, monospace; }
+.ai-message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 5px 0 0; color: var(--ink); font-size: 14px; line-height: 1.55; }
+.ai-chat-wait { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ai-chat-composer { display: grid; gap: 7px; }
+.ai-chat-composer label, .ai-suggestion > label { color: var(--ink); font-size: 12px; font-weight: 600; }
+.ai-chat-composer textarea, .ai-suggestion textarea, .ai-suggestion select { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 13px; line-height: 1.55; resize: vertical; }
+.ai-chat-composer > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ai-chat-composer .text-button { font-size: 11px; color: var(--muted); }
+.ai-chat-composer .secondary { min-height: 34px; font-size: 11px; }
+.ai-panel-error, .ai-panel-notice, .ai-preview-note { margin: 14px 0 0; padding: 10px 12px; border-radius: 7px; background: var(--surface-muted); color: var(--ink); font-size: 12px; line-height: 1.55; }
+.ai-panel-error { border-left: 2px solid var(--danger); }
+.ai-preview-note { margin: 0 0 14px; border: 1px dashed var(--brand-line); }
+.ai-suggestions { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.ai-suggestions-heading { display: grid; gap: 10px; margin-bottom: 14px; }
+.ai-suggestions h3, .ai-similar h3, .ai-tag-suggestions h3 { margin: 0; font-size: 17px; font-weight: 500; line-height: 1.3; }
+.ai-suggestions-heading > div { display: flex; gap: 16px; }
+.ai-suggestions-heading button, .ai-suggestion-actions > button:not(.secondary), .ai-field-tools button { padding: 0; min-height: 28px; border: 0; background: transparent; color: var(--brand-strong); font: 400 11px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
+.ai-suggestion { display: grid; gap: 9px; min-width: 0; padding: 14px 0; border-top: 1px solid var(--line); }
+.ai-suggestion-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 13px; }
+.ai-suggestion-actions > .secondary { min-height: 32px; padding: 5px 10px; font-size: 11px; }
+.ai-suggestion small, .ai-tag-suggestions > small, .ai-similar > small { color: var(--muted); font-size: 11px; line-height: 1.55; }
+.ai-field-tools { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 8px; }
+.ai-field-tools > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
+.field:has(> .ai-field-tools) > textarea, .field:has(> .ai-field-tools) > input { border-left-color: var(--brand); }
+.ai-category-choices { display: grid; gap: 7px; }
+.ai-category-choices label { display: flex; gap: 8px; align-items: center; color: var(--ink); font-size: 12px; }
+.ai-category-choices input { width: 14px; height: 14px; margin: 0; }
+.ai-tag-suggestions { margin: 18px 0; }
+.ai-tag-suggestions .tag-list { margin: 9px 0; }
+.ai-similar { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.ai-similar > p, .ai-similar li p { margin: 7px 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.ai-similar ul { list-style: none; margin: 12px 0; padding: 0; }
+.ai-similar li { padding: 12px 0; border-top: 1px solid var(--line); }
+.ai-similar li a { color: var(--ink); font-size: 14px; line-height: 1.4; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.ai-similar .ai-similar-excerpt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ai-similar-compact { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); margin-top: 12px; }
+.ai-panel-usage { margin: 20px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+@media (max-width: 900px) {
+  .form-layout:has(> .ai-draft-panel) { grid-template-columns: minmax(0, 1fr); }
+  .modal.ai-draft-mobile { width: 100%; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; }
+  .ai-draft-mobile .ai-panel-header { padding-top: max(20px, env(safe-area-inset-top)); }
+  .ai-draft-mobile .ai-panel-content { flex: 1; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  .ai-panel-close { width: 40px; height: 40px; }
+}
+.ai-draft-launch { justify-self: start; width: fit-content; }
+.ai-panel-tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+.ai-panel-tabs button { flex: 1; min-width: 0; min-height: 42px; padding: 8px 4px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: 400 11px/1.4 "IBM Plex Mono", ui-monospace, monospace; }
+.ai-panel-tabs [aria-selected="true"] { border-bottom-color: var(--brand); color: var(--ink); }
+.ai-panel-tabs button:hover { background: var(--surface-muted); }
+.ai-panel-content [role="tabpanel"][hidden] { display: none; }
+.ai-panel-content [role="tabpanel"] > .ai-suggestions, .ai-panel-content [role="tabpanel"] > .ai-similar { margin-top: 0; padding-top: 0; border-top: 0; }
+.ai-data-note summary { cursor: pointer; color: var(--muted); font-size: 11px; }
+.ai-data-note p { margin: 8px 0 0; }
+
 .proposal-export { display: grid; gap: 18px; max-width: 720px; }
 .proposal-export .notice { margin: 0; }
 .proposal-export-modes { display: grid; gap: 8px; }

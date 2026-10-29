@@ -175,3 +175,13 @@ describe("isPublishableProblem - open funding", () => {
     assert.equal(isPublishableProblem(funding({ attachments: [pdf(0, { contentType: "text/plain" })] }), ctx), false);
   });
 });
+
+describe("QCDAO-157 optional AI assistance metadata", () => {
+  it("accepts boolean attribution on problem and funding publications, but rejects malformed metadata and conversations", () => {
+    for (const make of [problem, funding]) {
+      for (const aiAssisted of [true, false]) assert.equal(isPublishableProblem(make({ aiAssisted }), ctx), true);
+      for (const aiAssisted of ["true", 1, null, {}, []]) assert.equal(isPublishableProblem(make({ aiAssisted }), ctx), false);
+      assert.equal(isPublishableProblem(make({ messages: [{ role: "user", content: "private chat" }] }), ctx), false);
+    }
+  });
+});

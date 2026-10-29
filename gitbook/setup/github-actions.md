@@ -4,7 +4,7 @@ Pushes to `main` deploy to Firebase through `.github/workflows/ci.yml`. That fil
 
 ## Joining the existing project
 
-The secrets are already set. Ask for maintain or admin access to the repository, then check that the list under **Actions secrets** matches the table below. GitHub never shows a secret's value again, so a missing or wrong value has to be replaced, not read.
+Ask for maintain or admin access to the repository, then check that the list under **Actions secrets** matches the table below. Existing Firebase credentials can be reused; add `OPENAI_API_KEY` before the first AI drafting deployment. GitHub never shows a secret's value again, so a missing or wrong value has to be replaced, not read.
 
 ## Secrets
 
@@ -17,9 +17,11 @@ The secrets are already set. Ask for maintain or admin access to the repository,
 | `VITE_FIREBASE_APP_CHECK_SITE_KEY` | reCAPTCHA Enterprise site key | Frontend build. The deploy stops if it is missing |
 | `VITE_FIREBASE_STORAGE_BUCKET` | Bucket name | Frontend build. Without it, attachments report that Storage is not configured |
 | `FIREWORKS_API_KEY` | Fireworks AI API key | AI security review |
-| `OPENAI_API_KEY` | OpenAI API key | AI security review, only after switching provider |
+| `OPENAI_API_KEY` | Restricted OpenAI project key | App drafting: backend deploy copies it to Google Secret Manager. Also used by AI security review if that provider is selected |
 
 The `VITE_FIREBASE_*` values are public identifiers. They are kept as secrets so each fork supplies its own.
+
+The `deploy-backend` job in `ci.yml` provisions `OPENAI_API_KEY` in Google Secret Manager after the required **CI** checks pass on `main`. The job uses repository secrets; it does not select a GitHub Environment. A supplied key creates a new secret version, and the temporary key file and Firebase debug logs are removed afterwards. If the repository secret is absent, an existing provisioned Secret Manager key is required. The key never enters the frontend build or the functions `.env` file. See [AI assistance deployment](https://github.com/0xMeePok/smu-qc-dao-project/blob/main/docs/ai-assistance.md#keys-and-deployment) for permissions and limits.
 
 ## Variables
 
@@ -28,6 +30,9 @@ The `VITE_FIREBASE_*` values are public identifiers. They are kept as secrets so
 | `VITE_PRIVY_APP_ID` | Privy App ID | Required. Used for the build and written to the functions environment as `PRIVY_APP_ID`. A secret of the same name also works, and the variable wins |
 | `ARBITRUM_SEPOLIA_RPC_URL` | Primary RPC URL | Optional. Defaults to `https://sepolia-rollup.arbitrum.io/rpc`. `VITE_ARBITRUM_SEPOLIA_RPC_URL` is also accepted |
 | `ARBITRUM_SEPOLIA_RPC_BACKUP_URLS` | Comma-separated RPC URLs | Optional. Secret or variable. Cloud Functions read it with or without the `VITE_` prefix. The browser build and its CSP read only `VITE_ARBITRUM_SEPOLIA_RPC_BACKUP_URLS`, so use that name if browsers should fail over too |
+| `AI_DRAFT_ENABLED` | `true` (default) or `false` | Backend drafting kill switch; manual form entry and similar-proposal retrieval still work |
+| `AI_SIMILARITY_ENABLED` | `true` (default) or `false` | Shared backend kill switch for standalone similar-proposal search and generation reference retrieval |
+| `AI_DRAFT_MODEL` | `gpt-5-mini` (default) | Backend-only model setting; never a browser parameter |
 | `SECURITY_REVIEW_*` | See [CI/CD and quality checks](../repository/ci-cd.md#ai-security-review) | Optional |
 
 Never add a Privy secret, a private key or any server credential to the frontend build environment. Vite publishes every `VITE_` value in the bundle, and the build refuses Privy names that look like secrets.

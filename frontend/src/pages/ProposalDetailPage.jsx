@@ -262,6 +262,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
         <div>
           <span className="eyebrow">{independent ? "Independent listing" : isOpenFunding ? "Problem + solution proposal" : "Solution proposal"}</span>
           <h1>{proposal.title}</h1>
+              {proposal.aiAssisted === true && <span className="draft-badge" title="The author used AI to help draft this content and is responsible for the published text.">AI-assisted draft</span>}
         </div>
         <div className="trust-status-row">
           {independent || proposal.fundingTerms ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}

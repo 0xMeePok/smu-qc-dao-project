@@ -107,6 +107,7 @@ function RemovedProblemView({ posting, onNavigate, viewerId }) {
           <div>
             <span className="eyebrow">{posting.opportunityType === OPEN_FUNDING_TYPE ? "Open funding opportunity" : "Problem statement"}</span>
             <h1>{posting.title}</h1>
+              {posting.aiAssisted === true && <span className="draft-badge" title="The author used AI to help draft this content and is responsible for the published text.">AI-assisted draft</span>}
             <p className="removed-reason">Removed due to: {label}{posting.details ? ` — ${posting.details}` : ""}</p>
           </div>
         </div>
@@ -441,6 +442,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
                 {isOpenFunding ? "Open funding opportunity" : "Problem statement"}
               </span>
               <h1>{posting.title}</h1>
+              {posting.aiAssisted === true && <span className="draft-badge" title="The author used AI to help draft this content and is responsible for the published text.">AI-assisted draft</span>}
             </div>
             <div className="trust-status-row">
               <StatusBadge status={opportunityWorkflowStatus(posting)} />

@@ -329,19 +329,21 @@ service cloud.firestore {
         // QCDAO-51 - open funding without a fixed problem statement.
         'opportunityType', 'fundingThesis', 'eligibilityNotes', 'tags',
         'categories', 'currency', 'expiresAt',
-        'attachments', 'audit', 'createdAt', 'updatedAt', 'withdrawalReason'
-      ]);
+        'attachments', 'audit', 'createdAt', 'updatedAt', 'withdrawalReason', 'aiAssisted'
+      ]) && data.get('aiAssisted', false) is bool;
     }
 
     function hasProposalSchema(data) {
-      return data.keys().hasOnly([
+      // Validate the one new optional key separately, preserving the original
+      // explicit allowlist and keeping large atomic publications under the cap.
+      return data.keys().removeAll(['aiAssisted']).hasOnly([
         'researcherId', 'problemId', 'title', 'summary', 'amount',
         'status', 'audit', 'createdAt', 'updatedAt',
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
         'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
         'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit',
         'withdrawalReason', 'fundingPlan', 'fundingTerms'
-      ]); // Required fields are checked by value below and in the write rules.
+      ]) && data.get('aiAssisted', false) is bool; // Required fields are checked by value below and in the write rules.
     }
 
     function hasIndependentProposalSchema(data) {
@@ -350,8 +352,8 @@ service cloud.firestore {
         'status', 'audit', 'createdAt', 'updatedAt',
         'category', 'currency', 'attachments', 'methodology', 'team',
         'withdrawalReason', 'fundingPlan', 'fundingTerms',
-        'proposalKind', 'expiresAt', 'addressedProblems', 'maturity'
-      ]);
+        'proposalKind', 'expiresAt', 'addressedProblems', 'maturity', 'aiAssisted'
+      ]) && data.get('aiAssisted', false) is bool;
     }
 
     function hasEvaluationSchema(data) {
@@ -441,7 +443,7 @@ service cloud.firestore {
           // researcher or sponsor who could set it would mint a forged receipt.
           // queued/submitted/pending/failed stay writable so a known hash is
           // never rebroadcast. The Admin SDK may still store `confirmed`.
-          && audit.status in ['queued', 'submitted', 'pending', 'failed']
+          && audit.status.matches('^(queued|submitted|pending|failed)$')
           // matches also rejects nonstrings; one check covers empty or bytes32
           // without re-reading the hash for the heaviest draft publication.
           && audit.transactionHash.matches('^(0x[0-9a-f]{64})?$')
@@ -451,7 +453,7 @@ service cloud.firestore {
           && audit.lastError is string && audit.lastError.size() <= 500
           && (audit.status != 'queued'
             || (audit.transactionHash == '' && audit.blockNumber == 0))
-          && (!(audit.status in ['submitted', 'pending'])
+          && (!(audit.status.matches('^(submitted|pending)$'))
             || audit.transactionHash != ''));
     }
 
@@ -705,8 +707,9 @@ service cloud.firestore {
           'opportunityType', 'ownerId', 'organisation', 'title',
           'fundingThesis', 'eligibilityNotes', 'categories', 'tags',
           'amount', 'currency', 'expiresAt', 'status', 'audit',
-          'attachments', 'createdAt', 'updatedAt', 'withdrawalReason'
+          'attachments', 'createdAt', 'updatedAt', 'withdrawalReason', 'aiAssisted'
         ])
+        && data.get('aiAssisted', false) is bool
         // Only what identifies the record. Everything else is required by
         // completeOpenFunding on the paths that leave `draft`.
         && data.keys().hasAll(['opportunityType', 'ownerId', 'status', 'createdAt', 'updatedAt'])
@@ -1138,8 +1141,9 @@ service cloud.firestore {
     function preservesProposalReceipt(before, after) {
       let storedAudit = before.get('audit', {});
       let storedHash = storedAudit.get('transactionHash', '');
-      return (storedHash == '' || after.get('audit', {}).get('transactionHash', '') == storedHash)
-        && (storedAudit.get('status', '') != 'confirmed' || after.get('audit', {}) == storedAudit);
+      // Empty stored receipts have no hash or confirmation to preserve.
+      return storedAudit == {} || ((storedHash == '' || after.get('audit', {}).get('transactionHash', '') == storedHash)
+        && (storedAudit.get('status', '') != 'confirmed' || after.get('audit', {}) == storedAudit));
     }
 
     // The fields a correction may touch. Deliberately checked as a DIFF rather

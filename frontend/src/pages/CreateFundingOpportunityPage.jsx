@@ -1,3 +1,5 @@
+import { useAIDrafting } from "../hooks/useAIDrafting.js";
+import { AIDraftFieldTools, AIDraftPanel, AIDraftScope } from "../components/AIDraftPanel.jsx";
 import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "../context/WalletContext.jsx";
@@ -94,6 +96,7 @@ function TextField({ id, label, hint, error, rows, value, onChange, ...rest }) {
         aria-describedby={describedBy}
         {...rest}
       />
+      <AIDraftFieldTools field={id} />
       {error ? <p className="field-error" id={`${id}-error`} role="alert">{error}</p> : null}
     </div>
   );
@@ -117,6 +120,7 @@ function snapshotOf(form, attachments) {
 function formFromOpportunity(opportunity) {
   return {
     ...EMPTY_FORM,
+    ...(opportunity.aiAssisted === true ? { aiAssisted: true } : {}),
     title: opportunity.title ?? "",
     fundingThesis: opportunity.fundingThesis ?? "",
     eligibilityNotes: opportunity.eligibilityNotes ?? "",
@@ -175,6 +179,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
   const organisation = profile?.organisation ?? "";
   const editing = Boolean(editOpportunityId);
   const materialLocked = editing && materialFieldsLocked(existing);
+  const assistant = useAIDrafting({ kind: "open-funding", form, setForm, recordId: opportunityId, disabled: editing || loadingDraft || submitting || savingDraft || Boolean(auditProgress?.transactionHash) || Boolean(published) });
   const ownHash = editOpportunityId
     ? `#/edit-posting/${editOpportunityId}`
     : resumeId ? `#/create-funding/${resumeId}` : "#/create/open-funding";
@@ -542,7 +547,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         completeSteps={wizard.completeSteps(validateFundingOpportunity(form))} visitedSteps={wizard.visited} lockForward={pendingCount > 0} />
 
       <div className="form-layout">
-        <form className="brief-form" onSubmit={submit} noValidate>
+        <AIDraftScope assistant={assistant}><form className="brief-form" onSubmit={submit} noValidate>
           <div className="wizard-card">
           <WizardPanel index={0} current={wizard.current}>
           <Section step="1" legend="Funding direction" hint="Describe the outcomes and themes you are prepared to back." disabled={materialLocked}>
@@ -586,6 +591,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             hint={`Select up to ${MAX_CATEGORIES} areas. Your selections become the discovery tags automatically. Quantum includes gate-based, annealing and quantum-inspired work.`}
             disabled={materialLocked}
           >
+            <AIDraftFieldTools field="categories" />
             <div className={`category-grid ${errors.categories ? "field-invalid" : ""}`} role="group" aria-label="Technology areas">
               {POSTING_CATEGORIES.map((category) => {
                 const selected = form.categories.includes(category.value);
@@ -769,8 +775,9 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           {Object.values(errors).filter(Boolean).length > 0 ? (
             <p className="field-hint" role="status">{Object.values(errors).filter(Boolean).length} field(s) need attention. Steps marked ! have the details.</p>
           ) : null}
-        </form>
+        </form></AIDraftScope>
 
+        {assistant.open ? <AIDraftPanel assistant={assistant} /> : (
         <BriefPreview
           kind="Open funding"
           organisation={organisation}
@@ -783,6 +790,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           until={expiryPreview}
           tags={form.categories.map(categoryLabel)}
         />
+        )}
       </div>
     </section>
   );

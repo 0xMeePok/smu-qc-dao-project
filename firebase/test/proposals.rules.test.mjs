@@ -1,5 +1,6 @@
 import { seedPublicationFixture } from "./publication-fixture.mjs";
 import fs from "node:fs";
+import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc as rawSetDoc, updateDoc as rawUpdateDoc, where, writeBatch } from "firebase/firestore";
@@ -93,11 +94,12 @@ describe("QCDAO-59/60 submitted proposals", () => {
     const fundingTerms = { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: true,
       trancheBps: [5000, 5000], reviewWindows: [604800, 2592000],
       milestoneHashes: [1, 2].map(value => `0x${String(value).repeat(64)}`) };
-    const data = record(id, { fundingTerms, attachments: ["escrow01", "escrow02"].map(fid => ({ id: fid,
+    const data = record(id, { aiAssisted: true, fundingTerms, attachments: ["escrow01", "escrow02"].map(fid => ({ id: fid,
       name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })),
       audit: { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
         status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 0, attemptCount: 1, lastError: "" } });
     await assertSucceeds(submit(db, "proposal-escrow-terms", data));
+    assert.equal((await getDoc(doc(db, "proposals", "proposal-escrow-terms"))).data().aiAssisted, true);
     await assertSucceeds(updateDoc(doc(db, "proposals", "proposal-escrow-terms"), {
       title: "Escrow proposal, clarified", updatedAt: serverTimestamp(),
     }));
@@ -474,7 +476,7 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
           ? { proposedProblem: "Improve emergency routing", relevance: "Faster response", thesisFit: "Resilient public systems" }
           : {};
         const data = record(problemId, {
-          opportunityType, ...framing,
+          aiAssisted: true, opportunityType, ...framing,
           ...(escrowLinked ? { fundingTerms: { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: true,
             trancheBps: [5000, 5000], reviewWindows: [604800, 2592000],
             milestoneHashes: [1, 2].map(value => `0x${String(value).repeat(64)}`) } } : {}),
