@@ -6,6 +6,8 @@ funders post problem statements, researchers submit proposals, and evaluators re
 submissions through a shared web application. Sign-in is an email code through
 Privy. The account id is the embedded wallet that Privy creates for that email.
 
+Handover guide is detailed [here](https://scis-smu-edu.gitbook.io/qcdao)
+
 ## Overview
 
 The solution uses a hybrid architecture:
@@ -419,6 +421,5 @@ Professor Paul Griffin.
 
 ## License
 
-The repository's [LICENSE](LICENSE) file is the GNU General Public License v3.0. The
-Solidity files declare `SPDX-License-Identifier: MIT`. Confirm the intended licence
-with the sponsor before release.
+The repository's [LICENSE](LICENSE) file is the GNU General Public License v3.0. While the
+Solidity files declare `SPDX-License-Identifier: MIT`.
