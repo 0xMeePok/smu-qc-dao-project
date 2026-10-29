@@ -48,8 +48,18 @@ it('regenerates and clears a single untouched AI field without touching other fi
   await waitFor(() => expect(services.generate).toHaveBeenCalledTimes(2));
   expect(services.generate.mock.calls[1][0].requestedFields).toEqual(['summary']);
   const suggested = await screen.findByRole('region', { name: 'Suggested fields' });
-  fireEvent.click(within(suggested).getByRole('button', { name: 'Accept' }));
+  expect(screen.getByLabelText('Summary').value).toBe(output.suggestions.summary);
+  expect(screen.getByText(/Replacement ready for Problem description.*current text is unchanged.*Accept replacement/)).toBeTruthy();
+  expect(within(suggested).getByText(/Replacement suggestion · not applied/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Close AI drafting panel' }));
+  expect(screen.getByText(/Replacement ready · not applied/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Review replacement' }));
+  await waitFor(() => expect(screen.getByRole('tab', { name: 'Fields (1)' }).getAttribute('aria-selected')).toBe('true'));
+  expect(services.generate).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Accept replacement' }));
   expect(screen.getByLabelText('Summary').value).toBe('A revised suggestion.');
+  expect(screen.queryByRole('button', { name: 'Review replacement' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
   const state=JSON.parse(screen.getByTestId('form').textContent);
   expect(state.summary).toBe(''); expect(state.categories).toEqual(['optimisation']);
@@ -60,6 +70,36 @@ it('preserves the typed prompt and form when generation fails', async () => {
   fireEvent.change(screen.getByLabelText('Tell the assistant more'),{target:{value:'Keep this prompt for retry'}});
   fireEvent.click(screen.getByRole('button',{name:'Send'}));
   await screen.findByRole('alert'); expect(screen.getByLabelText('Tell the assistant more').value).toBe('Keep this prompt for retry'); expect(screen.getByLabelText('Summary').value).toBe('My original');
+});
+it('keeps the original field and removes a stale alternative when regeneration yields no suggestion', async () => {
+  const services = { generate: vi.fn().mockResolvedValueOnce(output)
+    .mockResolvedValueOnce({ ...output, suggestions: { summary: 'An earlier alternative.' } })
+    .mockResolvedValueOnce({ ...output, message: 'Quantity-bearing text was withheld. Enter quantities yourself.', suggestions: {} }), similar: vi.fn() };
+  render(<Workspace services={services}/>); launch(); generate();
+  await screen.findByRole('region', { name: 'Suggested fields' });
+  fireEvent.click(screen.getByRole('button', { name: 'Accept all' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+  await screen.findByText(/Replacement ready for Problem description/);
+  fireEvent.click(within(screen.getByRole('region', { name: 'Suggested fields' })).getByRole('button', { name: 'Regenerate' }));
+  await screen.findByText(/No replacement was generated for Problem description/);
+  expect(screen.queryByRole('region', { name: 'Suggested fields' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Review replacement' })).toBeNull();
+  expect(screen.getByLabelText('Summary').value).toBe(output.suggestions.summary);
+  expect(services.generate).toHaveBeenCalledTimes(3);
+});
+it('explains the pending replacement and preserves the field if regeneration fails', async () => {
+  let reject;
+  const services = { generate: vi.fn().mockResolvedValueOnce(output).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; })), similar: vi.fn() };
+  render(<Workspace services={services}/>); launch(); generate();
+  await screen.findByRole('region', { name: 'Suggested fields' });
+  fireEvent.click(screen.getByRole('button', { name: 'Accept all' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+  expect(screen.getByText(/Generating a new suggestion for Problem description.*until you accept it/)).toBeTruthy();
+  expect(screen.getByLabelText('Summary').value).toBe(output.suggestions.summary);
+  await act(async () => reject({ code: 'functions/unavailable' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByText(/Generating a new suggestion for Problem description/)).toBeNull();
+  expect(screen.getByLabelText('Summary').value).toBe(output.suggestions.summary);
 });
 it('does not accept a stale result after the title changes and hides AI on published edits', async () => {
   let resolve; const services={generate:()=>new Promise(done=>{resolve=done;}),similar:vi.fn()};

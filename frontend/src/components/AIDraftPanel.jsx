@@ -16,7 +16,8 @@ export function AIDraftFieldTools({ field }) {
   if (!assistant || assistant.disabled) return null;
   if (key === 'title') return <><AIDraftLaunch />{!assistant.open && <SimilarProposals compact result={assistant.similar} />}</>;
   if (!Object.hasOwn(assistant.accepted, key)) return null;
-  return <div className="ai-field-tools"><span><SparkIcon />AI draft · review before publishing</span><button type="button" disabled={assistant.busy} onClick={() => assistant.request({ field: key })}>Regenerate</button><button type="button" disabled={assistant.busy} onClick={() => assistant.clear(key)}>Clear</button></div>;
+  const replacementReady = Object.hasOwn(assistant.suggestions, key);
+  return <div className="ai-field-tools"><span><SparkIcon />{replacementReady ? 'Replacement ready · not applied' : 'AI draft · review before publishing'}</span>{replacementReady && <button type="button" disabled={assistant.busy} onClick={assistant.reviewSuggestions}>Review replacement</button>}<button type="button" title="Generate another suggestion to review. Your field changes only after you accept the replacement." disabled={assistant.busy} onClick={() => assistant.request({ field: key })}>Regenerate</button><button type="button" disabled={assistant.busy} onClick={() => assistant.clear(key)}>Clear</button></div>;
 }
 
 export function SimilarProposals({ result, compact = false }) {
@@ -34,13 +35,15 @@ export function SimilarProposals({ result, compact = false }) {
 }
 function Suggestion({ field, assistant }) {
   const id = useId(), value = assistant.suggestions[field.key];
+  const replacing = Object.hasOwn(assistant.accepted, field.key);
   const choices = field.type === 'categories' ? AI_POSTING_CATEGORIES : AI_PROPOSAL_CATEGORIES;
   return <article className="ai-suggestion">
     <label htmlFor={id}>{field.label}</label>
+    {replacing && <small id={`${id}-review`}>Replacement suggestion · not applied</small>}
     {field.type === 'text' ? <textarea disabled={assistant.busy} id={id} rows={4} maxLength={field.maxLength} value={value} onChange={event => assistant.editSuggestion(field.key, event.target.value)} />
       : field.type === 'categories' ? <div id={id} className="ai-category-choices" role="group" aria-label={field.label}>{choices.map(choice => <label key={choice.value}><input type="checkbox" disabled={assistant.busy} checked={value.includes(choice.value)} onChange={event => assistant.editSuggestion(field.key, event.target.checked ? [...value, choice.value].slice(0,6) : value.filter(item => item !== choice.value))} />{choice.label}</label>)}</div>
         : <select disabled={assistant.busy} id={id} value={value} onChange={event => assistant.editSuggestion(field.key, event.target.value)}>{choices.map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select>}
-    <div className="ai-suggestion-actions"><button className="secondary small" type="button" disabled={assistant.busy || !assistant.canAccept(field.key) || (typeof value === 'string' ? !value.trim() : !value.length)} onClick={() => assistant.accept([field.key])}>Accept</button><button type="button" disabled={assistant.busy} onClick={() => assistant.request({ field: field.key })}>Regenerate</button><button type="button" disabled={assistant.busy} onClick={() => assistant.clear(field.key)}>Clear</button></div>
+    <div className="ai-suggestion-actions"><button className="secondary small" type="button" aria-describedby={replacing ? `${id}-review` : undefined} disabled={assistant.busy || !assistant.canAccept(field.key) || (typeof value === 'string' ? !value.trim() : !value.length)} onClick={() => assistant.accept([field.key])}>{replacing ? 'Accept replacement' : 'Accept'}</button><button type="button" title="Generate another suggestion to review before accepting it." disabled={assistant.busy} onClick={() => assistant.request({ field: field.key })}>Regenerate</button><button type="button" disabled={assistant.busy} onClick={() => assistant.clear(field.key)}>Clear</button></div>
     {!assistant.canAccept(field.key) && <small>Your text is protected. Clear the form field yourself to use this suggestion.</small>}
   </article>;
 }
@@ -56,8 +59,9 @@ export function AIDraftPanel({ assistant }) {
   }, []);
   useEffect(() => { if (chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [assistant.messages, assistant.busy]);
   const pendingFields = assistant.config.filter(field => Object.hasOwn(assistant.suggestions, field.key));
+  const hasReplacements = pendingFields.some(field => Object.hasOwn(assistant.accepted, field.key));
   const pendingKey = pendingFields.map(field => field.key).join(',');
-  useEffect(() => { if (pendingKey && !assistant.busy) setTab('fields'); }, [pendingKey, assistant.busy]);
+  useEffect(() => { if (pendingKey && !assistant.busy && assistant.open) setTab('fields'); }, [pendingKey, assistant.busy, assistant.open, assistant.reviewVersion]);
   if (!assistant.open || assistant.disabled) return null;
   const submit = async event => { event.preventDefault(); if (!input.trim() || assistant.busy) return; const sent = input; const success = await assistant.request({ prompt: sent }); if (success) setInput(current => current === sent ? '' : current); };
   const navigateTabs = event => {
@@ -91,6 +95,7 @@ export function AIDraftPanel({ assistant }) {
       {assistant.error && <p className="ai-panel-error" role="alert">{assistant.error}</p>}
       {assistant.notice && <p className="ai-panel-notice" role="status">{assistant.notice}</p>}
       <section role="tabpanel" id={`${titleId}-fields-panel`} aria-labelledby={`${titleId}-fields`} hidden={tab !== "fields"}>
+      {pendingFields.length > 0 && !hasReplacements && <p className="ai-panel-intro">These suggestions are not in your form yet. Choose Accept for a field, or Accept all to add them together.</p>}
       {!pendingFields.length && <p className="ai-panel-intro">{Object.keys(assistant.accepted).length ? "Suggestions added. Review them in the form, or use Chat to refine your draft." : "Generate a first draft in Chat, then review and accept the fields here."}</p>}
       {pendingFields.length > 0 && <section className="ai-suggestions" aria-label="Suggested fields"><div className="ai-suggestions-heading"><h3>{pendingFields.length} suggested {pendingFields.length === 1 ? 'field' : 'fields'}</h3><div><button type="button" disabled={assistant.busy} onClick={() => assistant.accept(pendingFields.map(field => field.key))}>Accept all</button><button type="button" disabled={assistant.busy} onClick={assistant.discard}>Discard all</button></div></div>{pendingFields.map(field => <Suggestion key={field.key} field={field} assistant={assistant} />)}</section>}
       {assistant.tags.length > 0 && <div className="ai-tag-suggestions"><h3>Suggested discovery tags</h3><div className="tag-list">{assistant.tags.map(tag => <span className="tag-chip static" key={tag}>{tag}</span>)}</div><small>Tags follow the platform taxonomy. Posting tags come from your selected technology areas.</small></div>}
