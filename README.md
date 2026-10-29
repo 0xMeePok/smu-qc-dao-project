@@ -395,16 +395,6 @@ can run. Add new contributors' GitHub logins to the workflow's `if:` condition.
 See [`docs/AI_SECURITY_REVIEW.md`](docs/AI_SECURITY_REVIEW.md) for setup, security
 boundaries, cost controls, and the later switch from Fireworks AI to OpenAI.
 
-## Current implementation status
-
-Sprints 1 to 5 are complete: Privy email sign-in with gas-sponsored embedded wallets,
-multi-role access, posting and discovery, proposals with optional evaluator
-recommendations, threaded comments, owner selection with dual approval, moderation,
-role dashboards, the consolidated audit trail, researcher-led proposals and funding
-approaches, and the on-chain escrow lifecycle with refunds and administrator
-cancellation. The open Sprint 6 work and known gaps are in the handover guide's
-[open work](gitbook/handover/open-work.md) page.
-
 ## Team
 
 | Name | Role |
