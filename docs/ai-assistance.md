@@ -14,6 +14,8 @@ unless the author explicitly regenerates that AI suggestion. The client checks
 again when applying a response, so text entered while a request is pending wins.
 The panel supports accept, regenerate, and clear per field, plus accept all and
 discard all. Editing a generated field removes its untouched-AI marking.
+Regenerate keeps current form text; **Replacement ready** and **Review replacement**
+surface the pending alternate, and **Accept replacement** applies it.
 
 The author must supply funding amounts, currency, expiry, payment terms, and team
 credentials. AI can suggest qualitative delivery phases but cannot invent committed
@@ -29,6 +31,48 @@ was correct or that an evaluator endorsed it. It is intentionally excluded from
 existing canonical audit payloads; no contract, historical hash, or payment changes.
 Conversation and unaccepted suggestions are not written into posting/proposal
 records. Existing records without the flag work unchanged.
+
+## Quantitative claims in generated text
+
+The versioned prompt requires qualitative drafts. It explicitly forbids examples,
+ranges, estimated counts, percentages, dates, or commitments such as
+“Select 2–3 representative workloads”, “evaluate two workloads”, or “finish within
+three weeks”. It asks for alternatives such as “Select representative workloads
+agreed with the author” and “agree measurable success criteria with the author”.
+Structural headings and genuine technical identifiers are distinct from targets.
+
+Prompt wording is not the enforcement boundary. After strict schema validation,
+`firebase/functions/aiDraftQuantityPolicy.js` applies a deterministic lexical gate
+to narrative suggestions. A field containing a detected quantity, numerical target,
+or explicit date is omitted from the returned suggestions, so it cannot reach an
+**Accept** action. Other useful fields and taxonomy suggestions remain available.
+The returned explanation names the omitted fields without repeating their unsafe
+claims. Quantitative claims in the assistant's conversational message are also
+replaced with a safe explanation. This does not make another model call or retry;
+it is part of the original bounded request and consumes only that request's quota.
+
+The policy deliberately does **not** ground generated quantities by matching the
+author's input. An unrelated “3 loading bays”, an exact repeated “3 workloads”,
+“do not suggest 2–3 workloads”, assistant history, a parent posting, or retrieved
+reference text cannot authorize a new generated quantitative claim. Even an
+otherwise accurate repeated quantity is withheld from generated suggestions. The
+original author-entered text and numbers are preserved, and the author can enter
+quantities directly into the form themselves.
+
+The gate normalizes Unicode compatibility forms and common hyphens/dashes. It
+recognizes numeric forms (including ranges, units, percentages, and numeric dates),
+English cardinal counts and multipliers, and common explicit English calendar or
+implicit-duration expressions. It preserves bounded line-start numbered lists,
+phase/step/stage/milestone labels, and a narrow identifier allowlist covering names
+such as `2-opt`, `GPT-5`, `AES-256`, `SHA-256`, `TLS 1.3`, and `Web3`. A nearby quantity
+still fails: “Apply 2-opt to 3 workloads” is withheld. Arbitrary alphanumeric text
+is not treated as a safe identifier.
+
+This is intentionally conservative, not a semantic fact checker. It may withhold
+useful text that contains an accurate count or an unrecognized technical name.
+Spelled-out numbers in other languages, oblique quantitative claims, and factual
+claims without detectable quantities are not comprehensively classified. Author
+review remains necessary; this gate does not certify correctness or evidence.
 
 ## Similar proposals and retrieval-augmented drafting
 
@@ -98,7 +142,7 @@ are server-authored, not accepted from the model. No OpenAI response id, token,
 key, headers, or raw upstream failure body is returned to the browser.
 
 The prompt is `AI_DRAFT_INSTRUCTIONS` in `firebase/functions/aiDrafting.js`, version
-`qcdao-draft-v1`. The default model is `gpt-5-mini`; the server allows the documented
+`qcdao-draft-v2`. The default model is `gpt-5-mini`; the server allows the documented
 `gpt-5-mini` model and its pinned `gpt-5-mini-2025-08-07` snapshot. Model choice is
 server configuration, never a request parameter. Review prompt/schema and test
 fixtures together when changing either. Prompt context treats all form, chat,

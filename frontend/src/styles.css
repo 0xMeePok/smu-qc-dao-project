@@ -5775,6 +5775,7 @@ span.currency-amount { display: inline-flex; font-size: inherit; color: inherit;
 .ai-panel-tabs button:hover { background: var(--surface-muted); }
 .ai-panel-content [role="tabpanel"][hidden] { display: none; }
 .ai-panel-content [role="tabpanel"] > .ai-suggestions, .ai-panel-content [role="tabpanel"] > .ai-similar { margin-top: 0; padding-top: 0; border-top: 0; }
+.ai-panel-content [role="tabpanel"] > .ai-panel-intro + .ai-suggestions { margin-top: 16px; }
 .ai-data-note summary { cursor: pointer; color: var(--muted); font-size: 11px; }
 .ai-data-note p { margin: 8px 0 0; }
 

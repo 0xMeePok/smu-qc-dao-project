@@ -240,3 +240,58 @@ test("disabled similarity also suppresses generation RAG and produces an explici
     else process.env.AI_SIMILARITY_ENABLED = original;
   }
 });
+
+
+test("observed workload-range hallucination is withheld without losing useful suggestions, author text, or rebilling", async () => {
+  const db = initialDb(); let calls = 0, body;
+  const draft = service(db, { fetchImpl: async (_url, options) => {
+    calls++; body = JSON.parse(options.body);
+    return response({ message: "Review the draft before applying it.", suggestions: {
+      summary: "Compare the proposed approach against an agreed baseline.",
+      methodology: "Select 2–3 representative workloads and compare suitable baseline approaches.",
+      category: "hybrid",
+    }, suggestedTags: ["Optimisation"] });
+  } });
+  const data = request({ kind: "independent", requestedFields: ["summary", "methodology", "category"],
+    fields: { addressedProblems: "The existing warehouse has 3 loading bays and 12 delivery vehicles." },
+    messages: [{ role: "user", content: "Do not suggest 2–3 workloads; avoid two workloads. Keep the methodology qualitative." }] });
+  const before = JSON.stringify(data);
+  const result = await draft({ uid, data });
+  assert.equal(result.suggestions.methodology, undefined);
+  assert.equal(result.suggestions.summary, "Compare the proposed approach against an agreed baseline.");
+  assert.equal(result.suggestions.category, "hybrid");
+  assert.match(result.message, /Technical approach/);
+  assert.equal(result.message.includes("2–3"), false);
+  assert.equal(JSON.stringify(data), before);
+  assert.equal(calls, 1); assert.equal(result.usage.remainingToday, 19);
+  assert.equal(body.model, "gpt-5-mini"); assert.equal(body.max_output_tokens, 3000);
+  assert.equal(JSON.parse(body.input.at(-1).content).promptVersion, "qcdao-draft-v2");
+  await assert.rejects(draft({ uid, data }), code("already-exists"));
+  assert.equal(calls, 1);
+  assert.equal([...db.records].find(([key]) => key.startsWith("aiUsage/draft_"))[1].used, 1);
+});
+
+test("neither unrelated, explicit, nor negated input quantities authorize generated quantitative claims", async () => {
+  const cases = [
+    { source: "There are 3 loading bays.", generated: "Evaluate 3 representative workloads." },
+    { source: "Do not suggest two workloads.", generated: "Evaluate two workloads." },
+    { source: "Avoid 2–3 representative workloads.", generated: "Select 2–3 representative workloads." },
+    { source: "We have 3 workloads.", generated: "Evaluate 3 workloads." },
+  ];
+  for (const { source, generated } of cases) {
+    const data = request({ fields: { businessContext: source }, requestedFields: ["summary"], messages: [{ role: "user", content: source }] });
+    const result = await service(initialDb(), { fetchImpl: async () => response(output({ summary: generated })) })({ uid, data });
+    assert.deepEqual(result.suggestions, {});
+    assert.equal(data.fields.businessContext, source);
+    assert.match(result.message, /need to enter yourself/);
+  }
+});
+
+test("structural phase labels and technical identifiers remain useful without permitting nearby quantities", async () => {
+  const methodology = "Phase 1: Apply 2-opt to representative routing workloads.\nPhase 2: Compare the approach with GPT-5 assistance.";
+  const data = request({ kind: "independent", fields: {}, requestedFields: ["methodology"] });
+  const result = await service(initialDb(), { fetchImpl: async () => response(output({ methodology })) })({ uid, data });
+  assert.equal(result.suggestions.methodology, methodology);
+  const blocked = await service(initialDb(), { fetchImpl: async () => response(output({ methodology: methodology + " Select three workloads." })) })({ uid, data });
+  assert.deepEqual(blocked.suggestions, {});
+});

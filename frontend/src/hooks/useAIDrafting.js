@@ -15,6 +15,7 @@ export function useAIDrafting({ kind, form, setForm, problemId, recordId, disabl
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [reviewVersion, setReviewVersion] = useState(0);
   const [tags, setTags] = useState([]);
   const [usage, setUsage] = useState(null);
   const sampleSource = import.meta.env.DEV && import.meta.env.VITE_AI_PREVIEW === 'true' ? 'sample' : '';
@@ -24,7 +25,7 @@ export function useAIDrafting({ kind, form, setForm, problemId, recordId, disabl
   const alive = useRef(true), generation = useRef(0), lock = useRef(false), bases = useRef({});
   useEffect(() => { alive.current = true; return () => { alive.current = false; ++generation.current; }; }, []);
   useEffect(() => {
-    ++generation.current; lock.current = false; setBusy(false); setMessages([]); setSuggestions({}); setAccepted({}); setError(''); setOpen(false); setUsage(null); setNotice(''); setSource(sampleSource); setTags([]); bases.current = {}; setSimilar({ items: [], status: 'idle', truncated: false });
+    ++generation.current; lock.current = false; setBusy(false); setMessages([]); setSuggestions({}); setAccepted({}); setError(''); setOpen(false); setUsage(null); setNotice(''); setReviewVersion(0); setSource(sampleSource); setTags([]); bases.current = {}; setSimilar({ items: [], status: 'idle', truncated: false });
   }, [kind, recordId, problemId]);
   useEffect(() => {
     setAccepted(previous => {
@@ -54,12 +55,14 @@ export function useAIDrafting({ kind, form, setForm, problemId, recordId, disabl
     if (lock.current || current.current.disabled) return;
     if (title.length < 2) { setError('Enter a title first, then describe what you want to draft.'); setOpen(true); return; }
     const input = current.current.form;
+    const fieldLabel = config.find(item => item.key === field)?.label;
+    const replacing = field && Object.hasOwn(accepted, field) && same(accepted[field], input[field]);
     const requested = field ? [field] : config.filter(item => isEmptyAIField(input[item.key])).map(item => item.key);
     const userMessage = String(prompt || (field ? `Suggest a fresh draft for ${config.find(item => item.key === field)?.label}.` : 'Draft the empty fields from my title and the context I have provided.')).trim();
     if (!userMessage || userMessage.length > 3000) { setError('Keep each message under 3,000 characters.'); return; }
     const history = [...messages, { role: 'user', content: userMessage }];
     if (history.length > 8) { setError('This conversation has reached eight messages. Start a new conversation to continue; your form stays intact.'); return; }
-    lock.current = true; setBusy(true); setError(''); setNotice(''); setOpen(true);
+    lock.current = true; setBusy(true); setError(''); setNotice(field ? `Generating a new suggestion for ${fieldLabel}. Your form will not change until you accept it.` : ''); setOpen(true);
     const epoch = ++generation.current;
     const basedOn = Object.fromEntries(requested.map(key => [key, input[key]]));
     setMessages(history);
@@ -69,13 +72,23 @@ export function useAIDrafting({ kind, form, setForm, problemId, recordId, disabl
       if (!alive.current || epoch !== generation.current || current.current.disabled) return;
       if (String(current.current.form.title || '').trim() !== title) { setNotice('The title changed while AI was drafting. Generate again to use the updated title.'); return false; }
       for (const key of Object.keys(result.suggestions || {})) bases.current[key] = basedOn[key];
-      setSuggestions(previous => ({ ...previous, ...result.suggestions }));
+      setSuggestions(previous => {
+        const next = { ...previous };
+        // A withheld/null regeneration must not leave an older alternative
+        // looking like the replacement returned by this request.
+        if (field) delete next[field];
+        return { ...next, ...result.suggestions };
+      });
       setMessages([...history, { role: 'assistant', content: result.message }]);
       setTags(result.suggestedTags || []); setUsage(result.usage); setSource(result.source || '');
       if (result.similarProposals && ['proposal', 'independent'].includes(kind)) setSimilar({ ...result.similarProposals, status: result.similarProposals.unavailable ? 'unavailable' : 'ready' });
-      if (!Object.keys(result.suggestions || {}).length) setNotice('No fields were filled. Add more context in the conversation or review your existing text.');
+      if (field) {
+        setNotice(Object.hasOwn(result.suggestions || {}, field)
+          ? replacing ? `Replacement ready for ${fieldLabel}. Your current text is unchanged. Choose Accept replacement to use it.` : `New suggestion ready for ${fieldLabel}. Choose Accept to add it to your form.`
+          : `No replacement was generated for ${fieldLabel}. Your current text is unchanged. Check Chat for the assistant's explanation.`);
+      } else if (!Object.keys(result.suggestions || {}).length) setNotice('No fields were filled. Add more context in the conversation or review your existing text.');
       return true;
-    } catch (cause) { if (alive.current && epoch === generation.current) setError(aiErrorMessage(cause)); return false; }
+    } catch (cause) { if (alive.current && epoch === generation.current) { setError(aiErrorMessage(cause)); setNotice(''); } return false; }
     finally { if (epoch === generation.current) { lock.current = false; setBusy(false); } }
   };
   const canAccept = key => !current.current.disabled && (isEmptyAIField(form[key]) || (Object.hasOwn(accepted, key) && same(accepted[key], form[key]) && same(bases.current[key], form[key])));
@@ -91,7 +104,7 @@ export function useAIDrafting({ kind, form, setForm, problemId, recordId, disabl
     });
     setAccepted(previous => ({ ...previous, ...patch }));
     setSuggestions(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !chosen.includes(key))));
-    setNotice(`${chosen.length} ${chosen.length === 1 ? 'field added' : 'fields added'}. Review the draft before saving or publishing.`);
+    setNotice(`${chosen.length} ${chosen.length === 1 ? 'suggestion applied' : 'suggestions applied'}. Review the draft before saving or publishing.`);
   };
   const clear = key => {
     if (current.current.disabled) return;
@@ -104,7 +117,8 @@ export function useAIDrafting({ kind, form, setForm, problemId, recordId, disabl
     for (const key of Object.keys(accepted)) clear(key);
     setSuggestions({}); setTags([]); setNotice('AI suggestions discarded. Text you edited has been kept.');
   };
-  return { kind, config, form, open, setOpen, disabled, messages, suggestions, accepted, busy, error, notice, tags, usage, source, similar,
+  return { kind, config, form, open, setOpen, disabled, messages, suggestions, accepted, busy, error, notice, tags, usage, source, similar, reviewVersion,
+    reviewSuggestions: () => { setOpen(true); setReviewVersion(previous => previous + 1); },
     request, accept, clear, discard, canAccept,
     editSuggestion: (key, value) => setSuggestions(previous => ({ ...previous, [key]: value })),
     resetChat: () => { if (!busy) { setMessages([]); setError(''); setNotice('Conversation cleared. Your form has been kept.'); } },
