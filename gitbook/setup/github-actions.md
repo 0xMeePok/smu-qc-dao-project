@@ -33,6 +33,7 @@ The `deploy-backend` job in `ci.yml` provisions `OPENAI_API_KEY` in Google Secre
 | `AI_DRAFT_ENABLED` | `true` (default) or `false` | Backend drafting kill switch; manual form entry and similar-proposal retrieval still work |
 | `AI_SIMILARITY_ENABLED` | `true` (default) or `false` | Shared backend kill switch for standalone similar-proposal search and generation reference retrieval |
 | `AI_DRAFT_MODEL` | `gpt-5-mini` (default) | Backend-only model setting; never a browser parameter |
+| `WARM_INSTANCES` | Blank (default) or a small number | Optional. Pins that many always-on instances on the six callables a member waits on. **Billed per idle second**, about USD 1.13 per 12 hours — set it for a graded demo and clear it afterwards. A deploy with it set logs a warning. See [Warm instances for a graded demo](../operations/deployment.md#warm-instances-for-a-graded-demo) |
 | `SECURITY_REVIEW_*` | See [CI/CD and quality checks](../repository/ci-cd.md#ai-security-review) | Optional |
 
 Never add a Privy secret, a private key or any server credential to the frontend build environment. Vite publishes every `VITE_` value in the bundle, and the build refuses Privy names that look like secrets.

@@ -34,8 +34,11 @@ Every `VITE_` value is bundled into the public JavaScript. None of them may be a
 | `AI_SIMILARITY_ENABLED` | No | Defaults to `true`; `false` disables standalone search and retrieval within AI generation |
 | `AI_DRAFT_MODEL` | No | Supported drafting model; defaults to `gpt-5-mini` |
 | `AUDIT_REGISTRY_ADDRESS` | No | Overrides the registry address. Must match the frontend |
+| `WARM_INSTANCES` | No | Pins that many always-on instances on the six callables a member waits on. Blank or `0` disables it, which is the normal state. Billed per idle second — see [Warm instances for a graded demo](../operations/deployment.md#warm-instances-for-a-graded-demo) |
 
 Firebase loads `.env` first, then `.env.<project-id>`. A shell variable is not part of the deployed runtime.
+
+`firebase/functions/.env.example` lists all of these with the same notes.
 
 ## Cloud Functions secrets (Secret Manager)
 

@@ -67,6 +67,71 @@ Three gates must allow the preview's URL, and each fails closed:
 
 List and delete channels with `npx firebase hosting:channel:list` and `npx firebase hosting:channel:delete <channel>`, both with `--project qcdao-a0c7a`.
 
+## Warm instances for a graded demo
+
+Cloud Run reclaims an idle instance after about fifteen minutes. The next
+caller then waits through a cold start, which on the six callables a member
+actually waits on is most of the delay they feel:
+
+| Callable | Warm | Cold | Cold-start cost |
+| --- | --- | --- | --- |
+| `listActionItems` | 0.36s | 5.99s | +5.6s |
+| `listMyProposalQueue` | 0.10s | 4.11s | +4.0s |
+| `prepareOpenFundingAction` | 0.13s | 3.62s | +3.5s |
+| `prepareEscrowDeposit` | 0.11s | 2.93s | +2.8s |
+| `getOpenFundingSummary` | 1.95s | 4.03s | +2.1s |
+| `exchangePrivySession` | 0.13s | 1.70s | +1.6s |
+
+Measured p50 against p95 over a week. Everything else on the platform warms in
+under a second and is not worth paying for.
+
+### Normally: the browser ping, and nothing to configure
+
+All six accept `{ warmup: true }`, which starts the instance and returns
+without reading anything. `frontend/src/lib/prewarm.js` pings all six every two
+minutes while a signed-in tab is open and visible, which is roughly a seven
+times margin on the fifteen-minute window. A hidden tab is skipped, so windows
+left open in the background cost nothing.
+
+This costs about **USD 0.01 per twelve hours** per open tab, and is on by
+default. Nothing needs setting.
+
+### For a graded day: `WARM_INSTANCES`
+
+The ping is best-effort. `minInstances` is a guarantee, and the only reason to
+pay for it. Set the flag, deploy, demo, then clear it and deploy again:
+
+```bash
+cd firebase
+WARM_INSTANCES=1 npx firebase deploy --only functions --project qcdao-a0c7a --non-interactive --force
+# after the demo
+npx firebase deploy --only functions --project qcdao-a0c7a --non-interactive --force
+```
+
+| | Pinned (`WARM_INSTANCES=1`) | Browser ping | Saved |
+| --- | --- | --- | --- |
+| 12 hours | USD 1.13 | USD 0.010 | 99% |
+| 24 hours | USD 2.27 | USD 0.020 | 99% |
+| 30 days | USD 68.04 | USD 1.18 | 98% |
+
+A pinned instance is billed for all 3,600 seconds of every hour. The ping bills
+about 22 seconds of compute an hour for all six together. Pinging stays cheaper
+until roughly 116 tabs are open at once.
+
+{% hint style="warning" %}
+Leave `WARM_INSTANCES` blank. Two functions pinned on 17 October cost about USD
+0.76 a day and were 95% of this project's Cloud Run spend that month, which is
+why the flag exists instead of the setting being permanent.
+{% endhint %}
+
+Neither approach helps when several people act at once: these callables serve
+one request per instance, so a second simultaneous caller cold-starts anyway.
+`WARM_INSTANCES=2` covers that for the hours it matters.
+
+A CI deploy writes `firebase/functions/.env` from the repository variables, so
+merging to `main` clears a flag that was set by hand. Set the `WARM_INSTANCES`
+repository variable instead when the demo has to survive a merge.
+
 ## Contracts
 
 Contracts are not deployed by CI. Deploying a contract does not change the app until the manifests are synced and the backend and Hosting are redeployed. Follow [Switching the app to a new deployment](../repository/smart-contracts.md#switching-the-app-to-a-new-deployment).

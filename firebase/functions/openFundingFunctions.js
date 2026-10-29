@@ -6,7 +6,7 @@ import { getFunderDashboard } from "./funderDashboard.js";
 // so the grant panel pings it awake through `warmable` once the wallet is
 // ready. That costs one short request; a minimum instance costs a full day of
 // idle time whether or not anyone opens the panel.
-export function registerOpenFundingFunctions({ db, client, config, requireMember, options }) {
+export function registerOpenFundingFunctions({ db, client, config, requireMember, options, hot = {} }) {
   const callable = (service, { warmable = false, ...extra } = {}) => onCall({ ...options, timeoutSeconds: 180, ...extra }, async request => {
     // A signed-in panel may wake this instance before the owner clicks. The
     // ping reads no member data and returns nothing; App Check still applies.
@@ -25,6 +25,10 @@ export function registerOpenFundingFunctions({ db, client, config, requireMember
       throw new HttpsError("unavailable", "Confirmed funding information is temporarily unavailable. Try again shortly.");
     }
   });
-  return { getOpenFundingSummary: callable(getOpenFundingSummary), prepareOpenFundingAction: callable(prepareOpenFundingAction, { warmable: true }),
+  // `hot` is the WARM_INSTANCES flag in index.js, off by default; the `warmup`
+  // ping covers these while it is off. The summary is warmed too because half
+  // its cold latency is a genuine chain read it cannot start until it is awake.
+  return { getOpenFundingSummary: callable(getOpenFundingSummary, { warmable: true, ...hot }),
+    prepareOpenFundingAction: callable(prepareOpenFundingAction, { warmable: true, ...hot }),
     syncOpenFunding: callable(syncOpenFunding), getFunderDashboard: callable(getFunderDashboard) };
 }

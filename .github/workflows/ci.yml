@@ -457,6 +457,10 @@ jobs:
           AI_DRAFT_ENABLED: ${{ vars.AI_DRAFT_ENABLED || 'true' }}
           AI_SIMILARITY_ENABLED: ${{ vars.AI_SIMILARITY_ENABLED || 'true' }}
           AI_DRAFT_MODEL: ${{ vars.AI_DRAFT_MODEL || 'gpt-5-mini' }}
+          # Off unless the repository variable is set. A pinned instance is
+          # billed for every idle second, so this must not acquire a default.
+          # See gitbook/operations/deployment.md.
+          WARM_INSTANCES: ${{ vars.WARM_INSTANCES }}
         run: |
           if [ -z "$ARBITRUM_SEPOLIA_RPC_URL" ]; then
             echo "::error::ARBITRUM_SEPOLIA_RPC_URL is required for on-chain publication verification."
@@ -472,6 +476,10 @@ jobs:
           printf 'AI_DRAFT_ENABLED=%s\n' "$AI_DRAFT_ENABLED" >> firebase/functions/.env
           printf 'AI_SIMILARITY_ENABLED=%s\n' "$AI_SIMILARITY_ENABLED" >> firebase/functions/.env
           printf 'AI_DRAFT_MODEL=%s\n' "$AI_DRAFT_MODEL" >> firebase/functions/.env
+          printf 'WARM_INSTANCES=%s\n' "$WARM_INSTANCES" >> firebase/functions/.env
+          if [ -n "$WARM_INSTANCES" ] && [ "$WARM_INSTANCES" != "0" ]; then
+            echo "::warning::WARM_INSTANCES=$WARM_INSTANCES - six callables are pinned and billed while idle (~USD 1.13 per 12 h). Clear the repository variable after the demo."
+          fi
 
       - name: Deploy Firestore rules, indexes, Storage rules and Cloud Functions
         working-directory: firebase
