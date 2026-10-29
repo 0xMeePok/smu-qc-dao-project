@@ -18,6 +18,10 @@ import { registerOpenFundingFunctions } from "./openFundingFunctions.js";
 import { registerIndependentFundingFunctions } from "./independentFundingFunctions.js";
 import { registerWalletFaucetFunctions } from "./walletFaucetFunctions.js";
 import { registerFxRateFunctions } from "./fxRates.js";
+import { createAIDraftingService } from "./aiDrafting.js";
+import { assertSimilarityEnabled, retrieveAvailableSimilarProposals } from "./aiRetrieval.js";
+import { reserveRetrievalQuota, releaseAIQuota } from "./aiDraftQuota.js";
+import { AI_PROPOSAL_CATEGORIES } from "./aiDraftSchema.js";
 import { assertIndependentPublicationUnlocked } from "./independentFunding.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
@@ -73,6 +77,7 @@ const auditRegistryConfig = { ...auditRegistryBaseConfig, independentFunding: in
 
 const db = getFirestore();
 const privySecret = defineSecret("PRIVY_SECRET");
+const openaiSecret = defineSecret("OPENAI_API_KEY");
 
 function isoTimestamp(value) {
   if (value == null || value === "") return null;
@@ -243,6 +248,33 @@ async function requireMember(request) {
 
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
+
+// QCDAO-157: authoring suggestions only. The provider cannot save or publish.
+const aiDraftingService = createAIDraftingService({ db, getApiKey: () => openaiSecret.value(),
+  model: process.env.AI_DRAFT_MODEL || "gpt-5-mini", enabled: () => process.env.AI_DRAFT_ENABLED === "true",
+  retrieve: retrieveAvailableSimilarProposals });
+export const draftWithAI = onCall({ ...MEMBER_CALL_OPTIONS, maxInstances: 2, concurrency: 4,
+  timeoutSeconds: 40, secrets: [openaiSecret] }, async request => {
+  const uid = await requireMember(request);
+  return aiDraftingService({ uid, data: request.data });
+});
+export const findSimilarProposals = onCall({ ...MEMBER_CALL_OPTIONS, maxInstances: 2, concurrency: 8,
+  timeoutSeconds: 40 }, async request => {
+  const uid = await requireMember(request);
+  assertSimilarityEnabled();
+  const data = request.data;
+  const allowed = ["title", "summary", "category", "excludeId", "problemId", "requestId"];
+  if (!data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).some(key => !allowed.includes(key))
+    || typeof data.title !== "string" || data.title.trim().length < 2 || data.title.length > 160
+    || (data.summary !== undefined && (typeof data.summary !== "string" || data.summary.length > 2000))
+    || (data.category !== undefined && (typeof data.category !== "string" || (data.category !== "" && !AI_PROPOSAL_CATEGORIES.some(category => category.value === data.category))))
+    || [data.excludeId, data.problemId].some(id => id !== undefined && (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)))
+    || JSON.stringify(data).length > 6000) throw new HttpsError("invalid-argument", "Enter a short proposal title and supported category.");
+  const reservation = await reserveRetrievalQuota({ db, uid, requestId: data.requestId });
+  try { return await retrieveAvailableSimilarProposals({ db, uid, title: data.title, summary: data.summary, category: data.category,
+    excludeId: data.excludeId, problemId: data.problemId }); }
+  finally { await releaseAIQuota({ db, reservation }); }
+});
 
 export const { claimWalletTokens } = registerWalletFaucetFunctions({ db, region: REGION });
 

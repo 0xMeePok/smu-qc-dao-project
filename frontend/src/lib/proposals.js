@@ -87,6 +87,7 @@ export function buildProposalDocument({ researcherId, posting, form, attachments
   const record = {
     ...Object.fromEntries(fields.map(([key]) => [key, String(form[key] ?? "").trim()])),
     researcherId: researcherId.toLowerCase(),
+    ...(form.aiAssisted === true ? { aiAssisted: true } : {}),
     problemId: posting.id,
     opportunityType: posting.opportunityType || "business-problem",
     category: String(form.category ?? ""),
@@ -116,6 +117,7 @@ export function buildIndependentProposalDocument({
   const record = {
     ...Object.fromEntries(INDEPENDENT_PROPOSAL_FIELDS.map(([key]) => [key, String(form[key] ?? "").trim()])),
     researcherId: researcherId.toLowerCase(),
+    ...(form.aiAssisted === true ? { aiAssisted: true } : {}),
     proposalKind: INDEPENDENT_PROPOSAL_KIND,
     category: String(form.category ?? ""),
     maturity: String(form.maturity ?? ""),

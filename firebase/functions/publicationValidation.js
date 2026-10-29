@@ -29,7 +29,7 @@ export const PUBLISH_VALIDATION = "problem-publish-v1";
 export const INDEPENDENT_PUBLISH_VALIDATION = "independent-proposal-publish-v1";
 
 const PROBLEM_KEYS = new Set([
-  "ownerId", "organisation", "title", "summary", "amount", "status",
+  "ownerId", "organisation", "title", "summary", "amount", "status", "aiAssisted",
   "businessContext", "currentApproach", "currentLimitations",
   "expectedOutcome", "successCriteria", "dataAvailability",
   "opportunityType", "fundingThesis", "eligibilityNotes", "tags",
@@ -37,7 +37,7 @@ const PROBLEM_KEYS = new Set([
 ]);
 
 const OPEN_FUNDING_KEYS = new Set([
-  "opportunityType", "ownerId", "organisation", "title",
+  "opportunityType", "ownerId", "organisation", "title", "aiAssisted",
   "fundingThesis", "eligibilityNotes", "categories", "tags",
   "amount", "currency", "expiresAt", "status", "attachments", "withdrawalReason",
 ]);
@@ -53,7 +53,7 @@ const PROPOSAL_CATEGORIES = new Set([
   "gate-model", "quantum-inspired", "quantum-annealing", "hybrid", "quantum-adjacent",
 ]);
 const INDEPENDENT_KEYS = new Set([
-  "researcherId", "title", "summary", "amount", "status", "category", "currency",
+  "researcherId", "title", "summary", "amount", "status", "category", "currency", "aiAssisted",
   "attachments", "methodology", "team", "withdrawalReason", "fundingTerms",
   "proposalKind", "expiresAt", "addressedProblems", "maturity",
 ]);
@@ -150,6 +150,7 @@ function validOpenFunding(record, profileOrganisation) {
  */
 export function isPublishableProblem(record, { uid, profileOrganisation }) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  if (has(record, "aiAssisted") && typeof record.aiAssisted !== "boolean") return false;
   if (!isString(uid) || !/^0x[0-9a-f]{40}$/.test(uid) || record.ownerId !== uid) return false;
   if (!(record.status === "submitted" || record.status === "open")) return false;
   if (!isTimestamp(record.expiresAt)) return false;
@@ -169,6 +170,7 @@ export function isPublishableProblem(record, { uid, profileOrganisation }) {
  */
 export function isPublishableIndependentProposal(record, { uid }) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  if (has(record, "aiAssisted") && typeof record.aiAssisted !== "boolean") return false;
   if (!isIndependentProposal(record) || record.proposalKind !== INDEPENDENT_PROPOSAL_KIND) return false;
   if (!isString(uid) || !/^0x[0-9a-f]{40}$/.test(uid) || record.researcherId !== uid) return false;
   if (record.status !== "submitted") return false;

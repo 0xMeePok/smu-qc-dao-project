@@ -1,3 +1,5 @@
+import { useAIDrafting } from "../hooks/useAIDrafting.js";
+import { AIDraftFieldTools, AIDraftPanel, AIDraftScope } from "../components/AIDraftPanel.jsx";
 import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatFundingAmount } from "../lib/fundingDisplay.js";
@@ -135,6 +137,7 @@ function TextField({ id, label, hint, error, rows, value, onChange, ...rest }) {
         aria-describedby={error ? `${id}-error` : undefined}
         {...rest}
       />
+      <AIDraftFieldTools field={id} />
       {error && <p className="field-error" id={`${id}-error`} role="alert">{error}</p>}
     </div>
   );
@@ -166,6 +169,7 @@ function snapshotOf(form, attachments) {
 
 function formFromPosting(posting) {
   return {
+    ...(posting.aiAssisted === true ? { aiAssisted: true } : {}),
     title: posting.title ?? "",
     businessContext: posting.businessContext ?? "",
     summary: posting.summary ?? "",
@@ -231,6 +235,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
     prewarmTransaction({ records: existing ? [existing] : [] });
   }, [existing, wizard.isLast]);
   const materialLocked = editing && materialFieldsLocked(existing);
+  const assistant = useAIDrafting({ kind: "problem", form, setForm, recordId: postingId, disabled: editing || loadingDraft || submitting || savingDraft || Boolean(auditProgress?.transactionHash) || Boolean(published) });
   // The one hash that means "still this posting". Matches parseHash in App.jsx.
   const createHash = editPostingId
     ? `#/edit-posting/${editPostingId}`
@@ -645,7 +650,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
         completeSteps={wizard.completeSteps(validatePosting(form))} visitedSteps={wizard.visited} lockForward={pendingCount > 0} />
 
       <div className="form-layout">
-        <form className="brief-form" onSubmit={submit} noValidate>
+        <AIDraftScope assistant={assistant}><form className="brief-form" onSubmit={submit} noValidate>
           {/* Inert until the draft has loaded. Typing into the empty template was
               silently overwritten by the load, and saving during it ran with
               draftExists still false, so setDoc was rejected for moving createdAt. */}
@@ -710,6 +715,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
             hint={`Which fields could help? Pick up to ${MAX_CATEGORIES}. Describe the problem, not the technique - proposers choose the approach.`}
             disabled={materialLocked}
           >
+            <AIDraftFieldTools field="categories" />
             <div className={`category-grid ${errors.categories ? "field-invalid" : ""}`} role="group">
               {POSTING_CATEGORIES.map((category) => {
                 const selected = form.categories.includes(category.value);
@@ -898,8 +904,9 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
               {Object.values(errors).filter(Boolean).length} field(s) need attention. Steps marked ! have the details.
             </p>
           )}
-        </form>
+        </form></AIDraftScope>
 
+        {assistant.open ? <AIDraftPanel assistant={assistant} /> : (
         <BriefPreview
           kind="Business problem"
           organisation={organisation}
@@ -912,6 +919,7 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
           until={expiryPreview}
           tags={form.categories.map(categoryLabel)}
         />
+        )}
       </div>
     </section>
   );

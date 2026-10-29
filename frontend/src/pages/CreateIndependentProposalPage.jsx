@@ -1,3 +1,5 @@
+import { useAIDrafting } from "../hooks/useAIDrafting.js";
+import { AIDraftFieldTools, AIDraftPanel, AIDraftScope } from "../components/AIDraftPanel.jsx";
 import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -135,6 +137,7 @@ export function formFromIndependentProposal(record) {
   return {
     ...EMPTY_FORM,
     ...Object.fromEntries(INDEPENDENT_PROPOSAL_FIELDS.map(([key]) => [key, record?.[key] ?? ""])),
+    ...(record?.aiAssisted === true ? { aiAssisted: true } : {}),
     category: record?.category ?? "",
     maturity: record?.maturity ?? "",
     amount: record?.amount ? (ESCROW_LINKED ? fundingAmountText(record.amount) : String(record.amount)) : "",
@@ -190,6 +193,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   const stepIndex = (key) => STEPS.findIndex((step) => step.key === key);
 
   const editing = record?.status === PROPOSAL_STATUS_SUBMITTED;
+  const assistant = useAIDrafting({ kind: "independent", form, setForm, recordId: proposalId || undefined, disabled: editing || loading || busy || savingDraft || submitted || Boolean(auditProgress?.transactionHash) });
   const listingExpiry = editing
     ? (toDate(record?.expiresAt) ?? expiryDateFrom(Number(form.expiryDays) || DEFAULT_EXPIRY_DAYS, toDate(record?.createdAt) ?? openedAt.current))
     : expiryDateFrom(
@@ -458,7 +462,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
     <WizardSteps steps={STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
       completeSteps={wizard.completeSteps(validateIndependentProposal(form, { requireFundingPlan: !editing }))} visitedSteps={wizard.visited} lockForward={pending} />
     <div className="form-layout">
-      <form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
+      <AIDraftScope assistant={assistant}><form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
         <SubmissionError message={error} />
         {editing && <p className="field-hint" role="status">Crowdfunding has not started. Your wallet anchors content corrections while the target, token, expiry and completion terms stay fixed.</p>}
         <div className="wizard-card">
@@ -568,15 +572,15 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
             onSave={saveThenLeave}
           />
         )}
-      </form>
-      <aside className="context-panel">
+      </form></AIDraftScope>
+      {assistant.open ? <AIDraftPanel assistant={assistant} /> : (<aside className="context-panel">
         <span className="eyebrow">Independent listing</span>
         <h2>{text("title") || "Untitled proposal"}</h2>
         <p>This is not a response to a posted problem. Funders browse independent listings separately from open opportunities.</p>
         {form.amount ? <strong><ConvertedAmount text={formatFundingAmount(form.currency, text("amount"))} /></strong> : null}
         <ExpiryCountdown expiresAt={listingExpiry} status="submitted" />
         <p className="field-hint">{EXPIRY_WINDOWS.find((item) => item.value === Number(form.expiryDays))?.label ?? `${form.expiryDays} days`}</p>
-      </aside>
+      </aside>)}
     </div>
   </section>;
 }

@@ -37,9 +37,9 @@ before(async () => {
 });
 after(async () => { await env?.cleanup(); });
 
-async function scenario(id, n, withAudit) {
+async function scenario(id, n, withAudit, extra = {}) {
   const db = env.authenticatedContext(A).firestore();
-  const record = { ...content(n), status: "submitted" };
+  const record = { ...content(n), ...extra, status: "submitted" };
   await env.withSecurityRulesDisabled(async (ctx) => {
     const d = ctx.firestore();
     await setDoc(doc(d, "problems", id), { ...content(n), status: "draft", createdAt: new Date(), updatedAt: new Date() });
@@ -71,9 +71,9 @@ const fundingContent = (n) => ({ ownerId: A, organisation: "SMU", opportunityTyp
   fundingThesis: "Fund resilient supply chain research.", eligibilityNotes: "Singapore institutions.",
   categories: ["ai"], tags: ["AI & machine learning"], amount: 10000, currency: "USDT", expiresAt: EXP,
   attachments: Array.from({ length: n }, (_, i) => att(i)) });
-async function fundingDraftPublish(id, n) {
+async function fundingDraftPublish(id, n, extra = {}) {
   const db = env.authenticatedContext(A).firestore();
-  const record = { ...fundingContent(n), status: "submitted" };
+  const record = { ...fundingContent(n), ...extra, status: "submitted" };
   await env.withSecurityRulesDisabled(async (ctx) => {
     const d = ctx.firestore();
     await setDoc(doc(d, "problems", id), { ...fundingContent(n), status: "draft", createdAt: new Date(), updatedAt: new Date() });
@@ -125,3 +125,6 @@ it("refuses a receipt for a different transaction", async () => {
   });
   await assertFails(setDoc(doc(db, "problems", "tx1"), { ...record, audit: { ...audit, transactionHash: `0x${"9".repeat(64)}` }, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
 });
+
+it("QCDAO-157 publishes an AI-assisted problem with two PDFs and its receipt", () => scenario("ai-problem-two-files", 2, true, { aiAssisted: true }));
+it("QCDAO-157 publishes AI-assisted open funding with two PDFs and its receipt", () => fundingDraftPublish("ai-funding-two-files", 2, { aiAssisted: true }));

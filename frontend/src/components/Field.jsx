@@ -1,3 +1,4 @@
+import { AIDraftFieldTools } from "./AIDraftPanel.jsx";
 export function Field({ label, htmlFor, error, hint, children }) {
   const errorId = error ? `${htmlFor}-error` : undefined;
   const hintId = hint ? `${htmlFor}-hint` : undefined;
@@ -10,6 +11,7 @@ export function Field({ label, htmlFor, error, hint, children }) {
         describedBy: [hintId, errorId].filter(Boolean).join(" ") || undefined,
         invalid: Boolean(error),
       })}
+      <AIDraftFieldTools field={htmlFor} />
       {hint ? <p className="field-hint" id={hintId}>{hint}</p> : null}
       {error ? <p className="field-error" id={errorId} role="alert">{error}</p> : null}
     </div>

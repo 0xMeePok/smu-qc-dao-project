@@ -2672,3 +2672,42 @@ describe("opportunityMetrics/{problemId}", () => {
     await assertFails(deleteDoc(doc(db, "opportunityMetrics", PROBLEM)));
   });
 });
+
+describe("QCDAO-157 AI assistance attribution", () => {
+  // Keep attribution fixtures separate from the revoked/suspended wallets
+  // exercised earlier in this shared emulator database.
+  const user = `0x${"1570".repeat(10)}`;
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await rawSetDoc(doc(ctx.firestore(), "users", user), baseProfile(null, user));
+      await rawSetDoc(doc(ctx.firestore(), "problems", "ai-metadata-parent"), baseProblem({ ownerId: user }));
+    });
+  });
+  const shapes = [
+    ["problem", "problems", () => baseProblem({ ownerId: user })],
+    ["open funding", "problems", () => ({
+      ownerId: user, opportunityType: "open-funding", title: "Research call", status: "draft",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    })],
+    ["proposal", "proposals", () => baseProposal({ researcherId: user, problemId: "ai-metadata-parent" })],
+    ["independent proposal", "proposals", () => ({
+      researcherId: user, proposalKind: "independent", title: "Independent listing", summary: "Research concept", amount: 0,
+      status: "draft", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    })],
+  ];
+  for (const [name, scope, build] of shapes) {
+    it(`allows boolean attribution on an editable ${name} draft`, async () => {
+      const db = env.authenticatedContext(user).firestore();
+      const reference = doc(db, scope, `ai-metadata-${name.replaceAll(" ", "-")}`);
+      await assertSucceeds(setDoc(reference, { ...build(), aiAssisted: true }));
+      await assertSucceeds(updateDoc(reference, { title: "Author reviewed title", updatedAt: serverTimestamp() }));
+      assert.equal((await getDoc(reference)).data().aiAssisted, true);
+    });
+    it(`rejects malformed attribution and conversation storage on a ${name}`, async () => {
+      const db = env.authenticatedContext(user).firestore();
+      const suffix = name.replaceAll(" ", "-");
+      await assertFails(setDoc(doc(db, scope, `ai-malformed-${suffix}`), { ...build(), aiAssisted: "true" }));
+      await assertFails(setDoc(doc(db, scope, `ai-chat-${suffix}`), { ...build(), messages: [{ role: "user", content: "Private draft chat" }] }));
+    });
+  }
+});

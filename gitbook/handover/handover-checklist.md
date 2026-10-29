@@ -40,3 +40,11 @@ Use this list in the handover meeting. Fill in the owner columns together, then 
 | UAT evidence and the final demo recording stored where the sponsor can reach them | [ ] |
 | Departing members removed from Firebase, Privy, Vercel, GitHub and Atlassian after the new owner confirms access | [ ] |
 | Personal `ADMIN_BOOTSTRAP_EMAILS` entries replaced with the new owner's email | [ ] |
+
+## AI drafting handover (QCDAO-157)
+
+- Transfer the OpenAI project and replace `OPENAI_API_KEY` in repository Actions secrets. The deployment copies it into Google Secret Manager; never put it into a `VITE_` variable.
+- Demonstrate the form side panel, per-field review, similar-proposal links, and the AI-assisted detail indicator. The author still enters payment terms and publishes.
+- Review generation limits (3/minute and 20/day per member; 200/day platform-wide), the separate retrieval quota, App Check, and the `AI_DRAFT_ENABLED` / `AI_SIMILARITY_ENABLED` kill switches.
+- Confirm Firestore TTL for `aiUsage.expiresAt` and `aiRequests.expiresAt`, provider spend alerts, Secret Manager permissions, and the sample-preview versus live-provider distinction.
+- Read the versioned prompt, supported model, response schema, and retrieval limitations in [the repository AI assistance guide](https://github.com/0xMeePok/smu-qc-dao-project/blob/main/docs/ai-assistance.md).

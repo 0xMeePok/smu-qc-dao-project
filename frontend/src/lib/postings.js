@@ -123,6 +123,7 @@ export function buildPostingDocument({
   const storedExpiry = toDate(expiresAt) ?? expiryDateFrom(form.expiryDays, now);
   const document = {
     ownerId: String(ownerId).toLowerCase(),
+    ...(form.aiAssisted === true ? { aiAssisted: true } : {}),
     organisation: trimmed(organisation),
     title: trimmed(form.title),
     businessContext: trimmed(form.businessContext),

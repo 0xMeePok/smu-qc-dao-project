@@ -30,6 +30,9 @@ Every `VITE_` value is bundled into the public JavaScript. None of them may be a
 | `ARBITRUM_SEPOLIA_RPC_BACKUP_URLS` | No | Comma-separated fallback RPCs |
 | `ADMIN_BOOTSTRAP_EMAILS` | No | Comma-separated emails granted administrator on sign-in |
 | `ATTACHMENT_SWEEP_ENABLED` | No | `true` lets `sweepAttachments` delete files. Dry run otherwise |
+| `AI_DRAFT_ENABLED` | No | `true` enables AI drafting; `false` disables paid generation |
+| `AI_SIMILARITY_ENABLED` | No | Defaults to `true`; `false` disables standalone search and retrieval within AI generation |
+| `AI_DRAFT_MODEL` | No | Supported drafting model; defaults to `gpt-5-mini` |
 | `AUDIT_REGISTRY_ADDRESS` | No | Overrides the registry address. Must match the frontend |
 
 Firebase loads `.env` first, then `.env.<project-id>`. A shell variable is not part of the deployed runtime.
@@ -38,6 +41,7 @@ Firebase loads `.env` first, then `.env.<project-id>`. A shell variable is not p
 
 | Secret | Purpose | Local equivalent |
 | --- | --- | --- |
+| `OPENAI_API_KEY` | OpenAI key for AI-assisted form drafting, provisioned from the repository Actions secret | `firebase/functions/.secret.local` |
 | `PRIVY_SECRET` | Privy app secret for verifying access tokens | `firebase/functions/.secret.local` |
 | `ESCROW_PLATFORM_PRIVATE_KEY` | Platform signer for escrow settlement and cancellation | None. Do not use it locally |
 

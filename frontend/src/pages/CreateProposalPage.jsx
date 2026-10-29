@@ -1,3 +1,5 @@
+import { useAIDrafting } from "../hooks/useAIDrafting.js";
+import { AIDraftFieldTools, AIDraftPanel, AIDraftScope } from "../components/AIDraftPanel.jsx";
 import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatFundingAmount } from "../lib/fundingDisplay.js";
@@ -67,6 +69,7 @@ function abandonDraftAttachments(items, ownerId, proposalId) {
 function snapshotOf(form, attachments) {
   return JSON.stringify({
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, String(form[key] ?? "")])),
+    aiAssisted: form.aiAssisted === true,
     category: form.category ?? "",
     amount: String(form.amount ?? ""),
     tranchePercentages: form.tranchePercentages ?? HALF_UPFRONT_PERCENTAGES,
@@ -81,6 +84,7 @@ export function formFromProposal(record) {
   const terms = record?.status !== "draft" ? record?.fundingTerms : null;
   return {
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, record?.[key] ?? ""])),
+    ...(record?.aiAssisted === true ? { aiAssisted: true } : {}),
     category: record?.category ?? "",
     amount: record?.amount ? (ESCROW_LINKED ? fundingAmountText(record.amount) : String(record.amount)) : "",
     ...(ESCROW_LINKED ? {
@@ -157,6 +161,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   });
 
   const openFunding = posting?.opportunityType === OPEN_FUNDING_TYPE;
+  const assistant = useAIDrafting({ kind: "proposal", form, setForm, problemId: postingId, recordId: proposalId || undefined, includeFraming: openFunding, disabled: editing || loading || busy || savingDraft || submitted || Boolean(auditProgress?.transactionHash) || Boolean(posting && proposalBlockReason(posting, now, { researcherId: user?.id })) });
   const steps = useMemo(() => proposalSteps(openFunding), [openFunding]);
   const wizard = useWizard(steps);
   const stepIndex = (key) => steps.findIndex((step) => step.key === key);
@@ -381,7 +386,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
     {showForm && <WizardSteps steps={steps} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
       completeSteps={wizard.completeSteps(validateProposal(form, posting, { requireNewTarget: !editing }))} visitedSteps={wizard.visited} lockForward={pending} />}
     <div className="form-layout">
-      <form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
+      <AIDraftScope assistant={assistant}><form className="brief-form proposal-form" ref={formRef} onSubmit={submit} noValidate>
         <SubmissionError message={error} />
         {!showForm ? <div className="empty"><h2>You already have an active proposal</h2><p>Withdraw it before submitting a replacement.</p><button className="primary" type="button" onClick={() => onNavigate(`proposal/${active.id}`)}>View my proposal</button></div> : <>
           {blocked && <p className="error-banner" role="alert">{blocked}</p>}
@@ -459,8 +464,8 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
             onSave={saveThenLeave}
           />
         )}
-      </form>
-      <aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong><ConvertedAmount text={formatFundingAmount(posting.currency, posting.amount)} /></strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>
+      </form></AIDraftScope>
+      {assistant.open ? <AIDraftPanel assistant={assistant} /> : (<aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong><ConvertedAmount text={formatFundingAmount(posting.currency, posting.amount)} /></strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>)}
     </div>
   </section>;
 }
