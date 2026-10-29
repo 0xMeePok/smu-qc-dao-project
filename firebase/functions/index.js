@@ -249,6 +249,33 @@ async function requireMember(request) {
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
 
+/**
+ * Warm-instance feature flag. OFF unless WARM_INSTANCES is set to a positive
+ * number at deploy time.
+ *
+ * A minimum instance is billed for every idle second whether or not anyone
+ * calls it. Two of them pinned in October were 95% of this project's Cloud Run
+ * spend, so warming is opt-in per deploy rather than a standing cost:
+ *
+ *   WARM_INSTANCES=1 npx firebase deploy --only functions   # before a demo
+ *   npx firebase deploy --only functions                    # back to zero
+ *
+ * Roughly $0.19 per function per 12 hours at 1 vCPU / 256 MiB in
+ * asia-southeast1. While the flag is off these same functions stay warm from
+ * the browser's `warmup` ping (frontend/src/lib/prewarm.js), which costs about
+ * $0.0000045 a time and is why they all accept `{ warmup: true }`.
+ */
+const WARM_INSTANCES = Math.max(0, Math.trunc(Number(process.env.WARM_INSTANCES) || 0));
+const HOT_CALL_OPTIONS = WARM_INSTANCES > 0 ? { minInstances: WARM_INSTANCES } : {};
+
+/**
+ * A `warmup` ping starts the instance and returns. It reads no member data and
+ * answers nothing, so a cold start is paid before the click rather than during
+ * it. App Check still applies; `requireMember` deliberately does not, because
+ * the ping is worthless if it costs a profile read.
+ */
+const isWarmup = (request) => request?.data?.warmup === true;
+
 // QCDAO-157: authoring suggestions only. The provider cannot save or publish.
 const aiDraftingService = createAIDraftingService({ db, getApiKey: () => openaiSecret.value(),
   model: process.env.AI_DRAFT_MODEL || "gpt-5-mini", enabled: () => process.env.AI_DRAFT_ENABLED === "true",
@@ -282,10 +309,12 @@ export const { prepareEscrowDeposit, prepareRemovedProposalClaim, syncEscrowFund
   startEscrowSettlement, getEscrowAdminCancellation, startEscrowAdminCancellation,
   queueEscrowFunding, queueEscrowPostingPause, reconcileEscrowFunding } = registerEscrowFundingFunctions({
   db, client: publicClient, batchedReadClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+  hot: HOT_CALL_OPTIONS,
 });
 
 export const { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding, getFunderDashboard } = registerOpenFundingFunctions({
   db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS,
+  hot: HOT_CALL_OPTIONS,
 });
 
 export const { getIndependentFundingState, prepareIndependentFundingAction, syncIndependentFunding } = registerIndependentFundingFunctions({
@@ -324,7 +353,8 @@ export const getProposalComparison = onCall(MEMBER_CALL_OPTIONS, async (request)
 });
 
 // QCDAO-62 and QCDAO-63 read existing proposal, problem and comment records.
-export const listMyProposalQueue = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180 }, async (request) => {
+export const listMyProposalQueue = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180, ...HOT_CALL_OPTIONS }, async (request) => {
+  if (isWarmup(request)) return { warm: true };
   const uid = await requireMember(request);
   return listMyProposals({ db, uid, client: publicClient, config: auditRegistryConfig });
 });
@@ -335,7 +365,8 @@ export const listEvaluatorQueue = onCall(MEMBER_CALL_OPTIONS, async (request) =>
 });
 
 // QCDAO-91 shared "Action Needed" workspace tab.
-export const listActionItems = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180 }, async (request) => {
+export const listActionItems = onCall({ ...MEMBER_CALL_OPTIONS, timeoutSeconds: 180, ...HOT_CALL_OPTIONS }, async (request) => {
+  if (isWarmup(request)) return { warm: true };
   const uid = await requireMember(request);
   return withRpcScope("listActionItems", () => actionItems({ db, uid, client: publicClient, config: auditRegistryConfig }));
 });
@@ -618,7 +649,11 @@ export const exchangePrivySession = onCall({
   maxInstances: SIGN_IN_MAX_INSTANCES,
   secrets: [privySecret],
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true",
+  ...HOT_CALL_OPTIONS,
 }, async (request) => {
+  // Sign-in has no caller to authenticate yet, so this ping touches neither the
+  // secret nor Firestore. App Check is the gate.
+  if (isWarmup(request)) return { warm: true };
   try {
     return await mintPrivySession(request, { db, getAuth, Timestamp });
   } catch (error) {

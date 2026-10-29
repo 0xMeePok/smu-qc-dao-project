@@ -22,6 +22,7 @@ import { SuspensionBanner } from "./components/SuspensionBanner.jsx";
 import { WalletTransactionRecovery } from "./components/WalletTransactionRecovery.jsx";
 import { AccountWallet } from "./components/AccountWallet.jsx";
 import { useActionItems } from "./lib/actionItems.js";
+import { startKeepWarm } from "./lib/prewarm.js";
 import HomePage from "./pages/HomePage.jsx";
 import { usePublishedPostings } from "./lib/usePublishedPostings.js";
 import { OPEN_FUNDING_TYPE } from "./config/fundingOpportunity.js";
@@ -699,6 +700,12 @@ function AppContent() {
   const { user } = useAuth();
   const { section, id, fullPath, params } = useRoute();
   const routeConfig = getRouteConfig(section);
+
+  // Keeps the six callables a member waits on awake while this tab is open, so
+  // the first click of a session does not pay a cold start. Signed-in only:
+  // five of the six refuse an anonymous caller anyway, and pinging for every
+  // passing visitor would pay for instances nobody is about to use.
+  useEffect(() => (user?.id ? startKeepWarm() : undefined), [user?.id]);
 
   let pageComponent = <NotFound />;
 

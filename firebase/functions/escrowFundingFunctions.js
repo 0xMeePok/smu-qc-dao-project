@@ -13,11 +13,7 @@ import { getEscrowAdminCancellation, startEscrowAdminCancellation, sweepEscrowAd
 
 export const escrowPlatformKey = defineSecret("ESCROW_PLATFORM_PRIVATE_KEY");
 
-// Pre-signature callables kept warm: a cold start here delays the wallet prompt.
-// Each minimum instance is billed while idle; see the deployment notes.
-const HOT_PRE_SIGNATURE_OPTIONS = { minInstances: 1 };
-
-export function registerEscrowFundingFunctions({ db, client, batchedReadClient, config, requireMember, options, region }) {
+export function registerEscrowFundingFunctions({ db, client, batchedReadClient, config, requireMember, options, region, hot = {} }) {
   const getWallet = () => {
     const key = escrowPlatformKey.value()?.trim();
     if (!/^0x[0-9a-fA-F]{64}$/.test(key || "")) throw new HttpsError("failed-precondition", "Configure the deployment's platform signing secret before settlement.");
@@ -53,7 +49,14 @@ export function registerEscrowFundingFunctions({ db, client, batchedReadClient, 
     }
   });
   return {
-    prepareEscrowDeposit: callable(args => prepareEscrowDeposit(batchedArgs(args)), false, { warmable: true, ...HOT_PRE_SIGNATURE_OPTIONS }),
+    // Warmed by the client's `warmup` ping, not by a minimum instance. The ping
+    // starts an instance only while a member has the deposit panel open; a
+    // minimum instance billed a full day of idle time for the same few seconds
+    // of saved latency, and was 48% of the project's Cloud Run spend.
+    // `hot` is the WARM_INSTANCES flag in index.js, off by default. With it off
+    // the client's `warmup` ping is what keeps this awake, for a fraction of a
+    // cent instead of a billed idle day.
+    prepareEscrowDeposit: callable(args => prepareEscrowDeposit(batchedArgs(args)), false, { warmable: true, ...hot }),
     prepareRemovedProposalClaim: callable(prepareRemovedProposalClaim),
     // Member-facing reconciliation reads through the batched client; the
     // scheduled sweep below keeps the shared client and its default queue.
