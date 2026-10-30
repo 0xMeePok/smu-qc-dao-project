@@ -60,7 +60,6 @@ export function ProposalTracker({ onNavigate }) {
       <div className="table-header-actions">
         <button className="secondary small" type="button" disabled={queue.isFetching} onClick={load}>Refresh proposals</button>
         <button className="secondary small" type="button" onClick={() => onNavigate("discover")}>Browse opportunities</button>
-        <button className="primary small" type="button" onClick={() => onNavigate("create-proposal")}>Publish independent proposal</button>
       </div>
     </div>
     {rows.length > 0 && <div className="table-toolbar">

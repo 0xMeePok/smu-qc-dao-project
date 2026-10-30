@@ -11,6 +11,12 @@ const TYPES = [
     note: "Invite researchers to propose the problem and solution.",
     route: "create/open-funding",
   },
+  {
+    value: "independent",
+    label: "Independent proposal",
+    note: "Publish a solution with its own crowdfunding target.",
+    route: "create-proposal",
+  },
 ];
 
 export function OpportunityTypeSwitch({ activeType, onNavigate, disabled = false }) {

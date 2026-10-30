@@ -47,27 +47,29 @@ function RoleBadge({ role }) {
 }
 
 /**
- * QCDAO-92/93 - the workspace tab strip, in the markup AdminPage already uses.
- * The overview leads, because it says which record needs looking at first; the
- * management tables that follow are how an individual record gets handled.
+ * QCDAO-92/93 - the workspace tab strip. The overview leads, because it says
+ * which record needs looking at first; the tables that follow are how an
+ * individual record gets handled.
  */
 function WorkspaceTabs({ id, label, tabs, active, onSelect }) {
   return (
-    <div className="admin-tabs-nav" role="tablist" aria-label={label}>
-      {tabs.map(([key, text]) => (
-        <button
-          key={key}
-          type="button"
-          id={`${id}-tab-${key}`}
-          role="tab"
-          aria-selected={active === key}
-          aria-controls={`${id}-panel-${key}`}
-          className={`admin-tab-btn ${active === key ? "active" : ""}`}
-          onClick={() => onSelect(key)}
-        >
-          {text}
-        </button>
-      ))}
+    <div className="posting-tabs">
+      <div className="desk-tabs" role="tablist" aria-label={label}>
+        {tabs.map(([key, text]) => (
+          <button
+            key={key}
+            type="button"
+            id={`${id}-tab-${key}`}
+            role="tab"
+            aria-selected={active === key}
+            aria-controls={`${id}-panel-${key}`}
+            className={active === key ? "selected" : ""}
+            onClick={() => onSelect(key)}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

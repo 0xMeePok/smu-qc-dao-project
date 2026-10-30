@@ -41,6 +41,9 @@ describe("QA pass: names, states and responsive markup", () => {
     const other = within(group).getByRole("button", { name: "Open funding", pressed: false });
     fireEvent.click(other);
     expect(onNavigate).toHaveBeenCalledWith("create/open-funding");
+    const independent = within(group).getByRole("button", { name: "Independent proposal", pressed: false });
+    fireEvent.click(independent);
+    expect(onNavigate).toHaveBeenCalledWith("create-proposal");
     expect(current.className).toBe("selected");
     await expectAccessible(container);
   });
