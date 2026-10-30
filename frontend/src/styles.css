@@ -877,9 +877,9 @@ input[type="radio"] { accent-color: var(--brand); }
 
 .brief-type-switch {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  max-width: 760px;
+  max-width: none;
   margin: -12px 0 28px;
   padding: 6px;
   border: 1px solid var(--line);
@@ -1581,6 +1581,7 @@ footer > p { margin: 0 auto 0 0; }
 .footer-links button:hover { color: var(--brand); }
 
 @media (max-width: 960px) {
+  .brief-type-switch { grid-template-columns: 1fr; }
   .detail-layout, .form-layout, .profile-layout { grid-template-columns: 1fr; gap: 32px; }
   .context-panel, .preview-panel { position: static; }
   .radio-group { grid-template-columns: 1fr; }
@@ -5084,6 +5085,19 @@ h1, h2, h3 { font-weight: 500; }
 .workspace-panel > .role-dashboard-panel { margin-bottom: 0; }
 .dashboard-page > .card-table + .card-table { margin-top: 28px; }
 
+.dashboard-page .posting-tabs { margin: 0 0 28px; padding-bottom: 0; }
+.dashboard-page .desk-tabs > button { position: relative; margin-bottom: -1px; padding: 10px 0 12px; font-size: 16px; }
+.dashboard-page .desk-tabs > button[aria-selected="true"] { font-weight: 600; }
+.dashboard-page .desk-tabs > button[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand);
+}
 .dashboard-page .page-heading h1 { font-size: clamp(32px, 3.8vw, 42px); line-height: 1.15; }
 .dashboard-page .page-heading p { max-width: 60ch; font-size: 18px; line-height: 1.55; margin-top: 12px; }
 .dashboard-page .eyebrow-row { flex-wrap: wrap; gap: 8px 12px; }

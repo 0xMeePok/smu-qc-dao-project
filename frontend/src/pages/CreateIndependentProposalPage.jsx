@@ -50,6 +50,7 @@ import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { fundingAmountText, HALF_UPFRONT_PERCENTAGES } from "../../../firebase/functions/escrowProposalTerms.js";
 import { IndependentFundingTerms } from "../components/IndependentFundingTerms.jsx";
 import { activateIndependentFunding, getIndependentFundingState, independentFundingConfigured, independentFundingLocked } from "../lib/independentEscrow.js";
+import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import { ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
 import { formatFundingAmount } from "../lib/fundingDisplay.js";
 
@@ -314,10 +315,10 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
     await leave(target);
   };
 
-  const back = () => {
-    const target = editing ? `proposal/${proposalId}` : "proposals";
-    if (isDirty && !editing) { setLeaveTarget(target); return; }
-    goTo(target);
+  const switchOpportunityType = (route) => {
+    if (route === "create-proposal" || busy || savingDraft) return;
+    if (isDirty) { setLeaveTarget(route); return; }
+    goTo(route);
   };
 
   const submit = async (event) => {
@@ -451,7 +452,7 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
   const text = (key) => String(form[key] ?? "").trim();
 
   return <section className="page create-page">
-    <button className="back" onClick={back}>{editing ? "Back to listing" : "Back to My Proposals"}</button>
+    {editing && <button className="back" type="button" onClick={() => goTo(`proposal/${proposalId}`)}>Back to listing</button>}
     <div className="page-heading">
       <span className="eyebrow">Independent solution proposal</span>
       <h1>{editing ? "Edit your independent listing" : draftExists ? "Resume your draft" : "Publish an independent proposal"}</h1>
@@ -459,6 +460,13 @@ export default function CreateIndependentProposalPage({ resumeId, onNavigate }) 
         ? "Update the listing before crowdfunding starts. Target, token, listing window and supporting PDFs stay as published."
         : "Publish your solution and crowdfunding target. Funders contribute to escrow; you accept or decline when the target is reached. All fields are required to submit; unfinished drafts can be saved. Supporting PDFs are optional."}</p>
     </div>
+    {!editing && (
+      <OpportunityTypeSwitch
+        activeType="independent"
+        onNavigate={switchOpportunityType}
+        disabled={disabled || publicationStarted}
+      />
+    )}
     <WizardSteps steps={STEPS} current={wizard.current} onSelect={wizard.goTo} errorSteps={wizard.errorSteps(errors)}
       completeSteps={wizard.completeSteps(validateIndependentProposal(form, { requireFundingPlan: !editing }))} visitedSteps={wizard.visited} lockForward={pending} />
     <div className="form-layout">

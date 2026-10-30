@@ -93,8 +93,9 @@ When creating a brief from **New brief** (`#/create`), users and evaluators choo
 
 - **Business problem (`business-problem`)** at `#/create`, acting as problem owner.
 - **Open funding (`open-funding`)** at `#/create/open-funding`, acting as funder.
+- **Independent proposal** at `#/create-proposal`, acting as researcher. The listing appears under **Solutions**.
 
-Researchers do not post funding requests here. They publish an **independent proposal** from `#/create-proposal` (the **Publish independent proposal** button on `#/proposals`), which appears under **Solutions**. The older `funding-request` type is still defined in `frontend/src/data.js` but is not offered and is hidden from Discover.
+The older `funding-request` type is still defined in `frontend/src/data.js` but is not offered and is hidden from Discover.
 
 Administrators get 403 on every creation route.
 
