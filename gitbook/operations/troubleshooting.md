@@ -47,6 +47,7 @@ Find the symptom, then check the likely cause before changing anything. Several 
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
+| **CI** passes on `main` but both deploy jobs are skipped | A deploy job's `if:` lost `!cancelled()`, so a skipped area job skipped the deploy | Restore it. Re-running the jobs does not help. Run **CI** by hand from **Actions**, **Run workflow**, on `main` to deploy now |
 | Deploy job fails with `PERMISSION_DENIED` | The deploy service account lacks a role | Add the role named in the error and re-run the job |
 | Functions deploy reports `Deadline Exceeded` | Cloud Run was still finishing | The workflow retries three times. Re-run the job if all fail |
 | A scheduled function fails to deploy | Cloud Scheduler API disabled | `gcloud services enable cloudscheduler.googleapis.com` |

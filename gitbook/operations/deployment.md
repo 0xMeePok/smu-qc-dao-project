@@ -21,7 +21,7 @@ flowchart LR
 
 1. **Detect.** Path filters choose the areas. A manual run selects all of them.
 2. **Checks.** Only the selected areas run: frontend, rules, functions, audit registry, funding escrow, faucet and Semgrep. Gitleaks runs on every push.
-3. **CI.** One check passes when none of those jobs failed. A skipped area does not fail it.
+3. **CI.** One check passes when none of those jobs failed. A skipped area does not fail it or stop the deploy.
 4. **Deploy backend.** On `main`, when the push is not only the handover book, writes `firebase/functions/.env` from repository variables (`ARBITRUM_SEPOLIA_RPC_URL`, backups, `PRIVY_APP_ID`), deploys Firestore rules, indexes and Storage rules, then deploys all functions. The functions deploy retries up to three times, because Cloud Run can report a timeout while still finishing.
 5. **Deploy Hosting.** Checks that the App Check key and Privy app id are set, adds the RPC origins to the CSP, builds with `VITE_FIREBASE_USE_EMULATORS=false`, checks the bundle contains the project id, deploys to the `live` channel and reads the live CSP header back.
 

@@ -38,7 +38,7 @@ A pull request lists each job twice. The same commit starts `ci.yml` for the bra
 * The push run scans for secrets. On a feature branch it skips the test jobs and both deploy jobs.
 * The pull request run executes the selected tests and Semgrep. It skips **Gitleaks**, which runs only on a push, and both deploy jobs, which run only on `main`.
 
-A skipped job was not selected for that event. It is not a failure. The two **GitBook** lines are statuses from the GitBook app, not jobs in this repository.
+A skipped job was not selected for that event. It is not a failure, and on `main` it does not stop the deploy. Both deploy jobs need `!cancelled()` in their `if:`, because GitHub otherwise skips a job when any earlier job in its `needs` chain was skipped. The two **GitBook** lines are statuses from the GitBook app, not jobs in this repository.
 
 ## What runs
 
