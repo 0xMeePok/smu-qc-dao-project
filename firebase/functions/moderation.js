@@ -38,7 +38,7 @@ const serialise = (value) => {
   return value;
 };
 const RECORD_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const RECORD_TARGET = /^(posting|proposal)\/[A-Za-z0-9_-]{1,128}$/;
+const RECORD_TARGET = /^(posting|proposal)\/[A-Za-z0-9_-]{1,128}(\?tab=funding)?$/;
 export function notificationNavigationTarget(data = {}) {
   if (RECORD_TARGET.test(data.navigationTarget || "")) return data.navigationTarget;
   const proposalId = data.proposalId || (data.contentType === "proposal" ? data.contentId : "");

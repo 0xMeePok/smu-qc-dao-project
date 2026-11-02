@@ -373,7 +373,8 @@ async function persistSnapshot({ db, config, verified, events = [], now = Timest
     tx.update(proposalRef, { independentFunding: { activated: true, locked: true, ...summary }, updatedAt: now });
     if (positionRef && (position.data()?.blockNumber ?? 0) <= response.summary.blockNumber) tx.set(positionRef, {
       walletId: uid, proposalId: record.id, summaryKey: key, registryAddress: summary.registryAddress,
-      factoryAddress: summary.factoryAddress, chainId: config.chainId, ...response.wallet, updatedAt: now,
+      factoryAddress: summary.factoryAddress, chainId: config.chainId, ...response.wallet,
+      evidenceVersion: summary.evidenceVersion ?? null, evidenceHash: summary.evidenceHash ?? null, updatedAt: now,
     });
     const terminal = ["Released", "Declined", "Expired", "Cancelled", "Refunded"].includes(summary.state);
     const deadline = summary.state === "Accepted" ? summary.completionDeadline : summary.expiresAt;
