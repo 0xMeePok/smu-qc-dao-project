@@ -134,8 +134,10 @@ describe("[QCDAO-70] reply to comments in a threaded discussion", () => {
     assert.match(ui, /Write a reply/);
     assert.match(ui, /Post reply/);
     const posting = source("../../src/pages/PostingDetailPage.jsx");
-    assert.match(posting, /<ReportableComments problemId=\{posting\.id\} \/>/);
-    assert.doesNotMatch(posting, /proposalId=\{/);
+    const proposal = source("../../src/pages/ProposalDetailPage.jsx");
+    assert.doesNotMatch(posting, /ReportableComments/);
+    assert.match(proposal, /<ReportableComments/);
+    assert.match(proposal, /proposalId=\{proposal\.id\}/);
   });
 
   it("[FUT-SCR-146] pages a long thread instead of loading every reply in one response", () => {

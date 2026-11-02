@@ -49,12 +49,13 @@ function MarkAllReadButton({ unread, busy, onMarkAllRead }) {
   return <button type="button" className="secondary" disabled={Boolean(busy)} onClick={onMarkAllRead}>Mark all read</button>;
 }
 
-const RECORD_TARGET = /^(posting|proposal)\/[A-Za-z0-9_-]{1,128}$/;
+const RECORD_TARGET = /^(posting|proposal)\/[A-Za-z0-9_-]{1,128}(\?tab=funding)?$/;
 function recordTarget(item) {
   return RECORD_TARGET.test(item?.navigationTarget || "") ? item.navigationTarget : null;
 }
 function recordLabel(item, target) {
   if (item.kind === "escrow") return "View escrow payment";
+  if (item.kind === "independent_funding") return "Review completion evidence";
   if (item.kind === "matching" || item.kind === "approval_nearing_expiry") return "View matching status";
   return target.startsWith("proposal/") ? "View proposal" : "View posting";
 }

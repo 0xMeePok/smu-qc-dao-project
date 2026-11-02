@@ -362,5 +362,5 @@ export async function listActionItems({ db, uid, client, config, now = Timestamp
     escrowActions: escrowState.actions, unavailableEscrows: escrowState.unavailable.size, unavailableGrantOffers: grantState.unavailable.size,
     independentActions: independentState.actions,
     truncated: owned.size === OWNED_CAP || mine.size === MINE_CAP || receivedEscrows.size === MINE_CAP
-      || pages.some(page => page.size === QUEUE_CAP) || reviewable.length > REVIEW_CAP };
+      || pages.some(page => page.size === QUEUE_CAP) || reviewable.length > REVIEW_CAP || independentState.truncated === true };
 }

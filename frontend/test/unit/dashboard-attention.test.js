@@ -112,7 +112,7 @@ describe("dashboard deep links reach the tab they name", () => {
   const app = readFileSync(new URL("../../src/App.jsx", import.meta.url), "utf8");
 
   it("accepts every proposal tab the dashboards link to", () => {
-    assert.match(app, /ProposalDetailPage[\s\S]*?initialTab=\{initialTab\(params, \["funding", "feedback", "record"\]\)\}/);
+    assert.match(app, /ProposalDetailPage[\s\S]*?initialTab=\{initialTab\(params, \["funding", "feedback", "comments", "record"\]\)\}/);
   });
 
   it("accepts every posting tab the owner dashboard links to", () => {

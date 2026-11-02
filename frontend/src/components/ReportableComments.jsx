@@ -32,20 +32,20 @@ function roleText(authorRole) {
 
 export function ReportableComments({
   problemId, proposalId, authorId, recommenders = [], onRecommendationChange,
-  discussionOpen = true, allowRecommendations = true,
+  discussionOpen = true, allowRecommendations = true, showEmpty = false,
 }) {
   const { user } = useAuth();
   return <CommentsPage key={`${user?.id || "guest"}:${problemId || ""}:${proposalId || ""}`}
     problemId={problemId} proposalId={proposalId} authorId={authorId}
     recommenders={recommenders} onRecommendationChange={onRecommendationChange}
-    discussionOpen={discussionOpen} allowRecommendations={allowRecommendations} />;
+    discussionOpen={discussionOpen} allowRecommendations={allowRecommendations} showEmpty={showEmpty} />;
 }
 
 function replyCount(item) {
   return item?.replyCount ?? item?.replies?.length ?? 0;
 }
 
-function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecommendationChange, discussionOpen, allowRecommendations }) {
+function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecommendationChange, discussionOpen, allowRecommendations, showEmpty }) {
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
@@ -169,7 +169,8 @@ function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecomme
     loadedPages.current = 1; loadedReplyPages.current.clear();
     setEditingId(null); setExpandedIds(new Set()); setItems([]); setCursor(null); setSort(next);
   }
-  if (!items.length && !error && !cursor && !loading && !canCompose) return null;
+  const empty = !items.length && !error && !cursor && !loading && !canCompose;
+  if (empty && !showEmpty) return null;
   return <section className="detail-section comment-thread">
     <div className="comment-thread-heading">
       <h2>Comments</h2>
@@ -184,6 +185,7 @@ function CommentsPage({ problemId, proposalId, authorId, recommenders, onRecomme
       ownSolution={ownSolution} recommended={recommended} allowRecommendations={allowRecommendations}
       onPosted={changed} onRefresh={refresh} onBusyChange={mutationBusy} />}
     {!discussionOpen && items.length > 0 && <p className="field-hint">The listing window has closed. Existing comments remain visible.</p>}
+    {empty && <p className="field-hint">No comments yet.</p>}
     {error && <p role="alert" className="field-hint">{error}</p>}
     {items.map((item) => <CommentItem key={item.id} item={item} user={user} editing={editingId === item.id}
       editingId={editingId} canReply={canCompose} expanded={expandedIds.has(item.id)}

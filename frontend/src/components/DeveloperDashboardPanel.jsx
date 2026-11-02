@@ -141,7 +141,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
     ...developerAttention(actions.data, proposalIds),
     ...(actions.data?.independentActions ?? []).filter(item => proposalIds.has(item.id)).map(item => ({
       key: `independent:${item.id}:${item.action}`, kind: "independent-funding", title: item.title,
-      heading: item.action === "accept_funding" ? "Crowdfunding target reached" : item.action === "release_completion" ? "Final payment ready" : "Delivery evidence needed",
+      heading: item.action === "accept_funding" ? "Crowdfunding target reached" : item.action === "release_completion" ? "Final payment ready" : item.action === "review_evidence" ? "Completion evidence to review" : "Delivery evidence needed",
       note: item.action === "accept_funding" ? "Accept or decline funding before the listing closes. Acceptance immediately pays 50%." : "Open the independent crowdfunding panel for delivery, voting and the final payment.",
       deadlineAt: item.deadlineAt, route: `proposal/${item.id}?tab=funding`, cta: "Open crowdfunding",
     })),

@@ -83,6 +83,30 @@ describe("independent funding dashboard cache", () => {
     assert.equal((await readIndependentFundingQueueMetadata(f)).actions[0].action, "release_completion");
     assert.equal((await readIndependentFundingQueueMetadata({ ...f, now: 3000_000 })).actions.length, 0);
   });
+  it("asks each funder to review completion evidence until they vote on that version", async () => {
+    const f = fixture();
+    const funder = `0x${"d".repeat(40)}`;
+    const summaryKey = `${f.config.chainId}_${f.config.address}_${independent.id}`;
+    Object.assign(f.summary, { state: "Accepted", evidenceHash: `0x${"1".repeat(64)}`, evidenceVersion: 1,
+      completionDeadline: "3000", yesWeight: "0", blockNumber: 4 });
+    f.db.records.set(`proposals/${independent.id}`, { ...f.record, title: "Crowdfunded library", status: "accepted" });
+    const position = { walletId: funder, proposalId: independent.id, summaryKey,
+      chainId: f.config.chainId, registryAddress: f.config.address, factoryAddress: f.config.independentFunding.factoryAddress,
+      deposited: "100", hasVoted: false, evidenceVersion: 1, blockNumber: 4 };
+    f.db.records.set(`independentFundingPositions/${summaryKey}_${funder}`, position);
+    const pending = await readIndependentFundingQueueMetadata({ ...f, uid: funder, docs: [] });
+    assert.equal(pending.actions.length, 1);
+    assert.equal(pending.actions[0].action, "review_evidence");
+    assert.equal(pending.actions[0].title, "Crowdfunded library");
+    position.hasVoted = true;
+    assert.equal((await readIndependentFundingQueueMetadata({ ...f, uid: funder, docs: [] })).actions.length, 0);
+    f.summary.evidenceVersion = 2;
+    f.summary.evidenceHash = `0x${"2".repeat(64)}`;
+    assert.equal((await readIndependentFundingQueueMetadata({ ...f, uid: funder, docs: [] })).actions[0].action, "review_evidence");
+    assert.equal((await readIndependentFundingQueueMetadata({ ...f, uid: funder, docs: [], now: 3000_000 })).actions.length, 0);
+    assert.equal((await readIndependentFundingQueueMetadata({ ...f, uid: researcher, docs: f.docs })).actions
+      .some(item => item.action === "review_evidence"), false);
+  });
   it("does not offer actions from another deployment or moderated listing", async () => {
     const f = fixture();
     f.record.moderationStatus = "removed";

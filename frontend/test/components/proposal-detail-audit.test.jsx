@@ -123,7 +123,7 @@ it("groups the proposal into tabs instead of one long page", async () => {
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} justSubmitted />);
   const overview = await screen.findByRole("tab", { name: "Overview" });
   expect(overview.getAttribute("aria-selected")).toBe("true");
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Record"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Comments", "Record"]);
   const approach = screen.getByRole("heading", { name: "The approach" }).closest("section");
   expect(approach.textContent).toContain("Hybrid annealing");
   expect(approach.textContent).toContain("Fits the constraints");
@@ -139,7 +139,7 @@ it("gives only the sponsor a Feedback tab, where the review form always is", asy
   mocks.find.mockResolvedValue({ ...record, researcherId: `0x${"b".repeat(40)}`, postingOwnerId: account });
   render(<ProposalDetailPage proposalId="proposal1" onNavigate={vi.fn()} />);
   await screen.findByRole("tab", { name: "Overview" });
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Feedback", "Record"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Overview", "Match & funding", "Feedback", "Comments", "Record"]);
 });
 
 it("shows a content mismatch on the overview without opening the audit tab", async () => {

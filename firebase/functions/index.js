@@ -35,6 +35,7 @@ import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
 import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 import { postingProgressChanged, refreshPostingEscrowProgress } from "./postingEscrowProgress.js";
 import { notifyEscrowWorkflowEvent } from "./escrowWorkflowNotifications.js";
+import { notifyIndependentEvidenceSubmitted } from "./independentFundingNotifications.js";
 import { AUDIT_JOBS, enqueueProposalAudit, recoverProposalAudit, registryAddress, verifyMinedProposal } from "./proposalAuditRecovery.js";
 import { THRESHOLDS as STATUS_THRESHOLDS, collectPlatformStatus } from "./platformStatus.js";
 import { bindRpcScopeStore, createArbitrumRpcTransport, enableRpcStats, getRpcUrls, withRpcScope } from "./rpcPolicy.js";
@@ -203,6 +204,10 @@ export const syncEscrowMarketplacePosting = onDocumentWritten(
 export const notifyEscrowWorkflow = onDocumentCreated(
   { document: "escrowFundingEvents/{eventId}", region: REGION, maxInstances: 3, retry: true },
   event => notifyEscrowWorkflowEvent({ db, eventId: event.params.eventId, event: event.data?.data() }),
+);
+export const notifyIndependentEvidence = onDocumentCreated(
+  { document: "independentFundingEvents/{eventId}", region: REGION, maxInstances: 3, retry: true },
+  event => notifyIndependentEvidenceSubmitted({ db, config: auditRegistryConfig, eventId: event.params.eventId, event: event.data?.data() }),
 );
 
 const rpcCallableScope = new AsyncLocalStorage();
