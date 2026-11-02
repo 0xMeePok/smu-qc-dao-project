@@ -29,7 +29,6 @@ import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { isModerated, moderationReasonLabel, readRemovedProblem } from "../lib/moderation.js";
 import { ContentModerationNotice, ReportContentButton } from "../components/ReportContentButton.jsx";
-import { ReportableComments } from "../components/ReportableComments.jsx";
 import { Modal } from "../components/Modal.jsx";
 import { Field } from "../components/Field.jsx";
 import { formatInstant } from "../lib/datetime.js";
@@ -543,13 +542,9 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
               </div>
             )}
 
-            {/* Comments are occasional, so they sit under the brief (and render
-                nothing when there are none) rather than behind a tab that is
-                usually empty. */}
-            {showCollaboration && <>
-              <ReportableComments problemId={posting.id} />
+            {showCollaboration && (
               <div className="detail-report"><ReportContentButton contentType="problem" contentId={posting.id} /></div>
-            </>}
+            )}
           </div>
 
           <div className={panel("proposals")} role="tabpanel" id="posting-panel-proposals" aria-labelledby="posting-tab-proposals">

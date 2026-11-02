@@ -118,7 +118,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
     if (!proposal?.id) return undefined;
     const commentId = new URLSearchParams(window.location.hash.split("?")[1] || "").get("comment");
     if (!commentId) return undefined;
-    setTab("overview");
+    setTab("comments");
     highlightWhenPresent(`comment-${commentId}`);
     return undefined;
   }, [proposal?.id]);
@@ -227,9 +227,10 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
   const tabs = [
     ["overview", "Overview"],
     ...(showFunding ? [["funding", independent ? "Crowdfunding" : showEscrow ? "Escrow & funding" : "Match & funding"]] : []),
-    // Only the sponsor always has something here (the review form); everyone
-    // else sees feedback and comments under the proposal, when there are any.
+    // Only the sponsor always has something here (the review form). Comments
+    // are their own section, beside Record.
     ...(canReview ? [["feedback", "Feedback"]] : []),
+    ...(showDiscussion ? [["comments", "Comments"]] : []),
     ["record", "Record"],
   ];
   const activeTab = tabs.some(([value]) => value === tab) ? tab : "overview";
@@ -334,23 +335,22 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
           <EscrowPaymentPlanSummary trancheBps={proposal.fundingTerms.trancheBps} funderVoting={proposal.fundingTerms.funderVoting} />
         </DetailGroup>}
         {proposal.attachments?.length > 0 && <section className="detail-section detail-group"><h2>Supporting attachments</h2>{proposal.attachments.map((item) => <p key={item.id}><button className="text-button" onClick={() => download(item)}>Download {item.name}</button></p>)}</section>}
-        {/* The sponsor's feedback (for the author) and comments render nothing
-            when there are none, so they follow the proposal instead of an
-            usually empty tab. */}
         {owns && !independent && <OwnerReviewPanel proposalId={proposal.id} revisionPathOpen={proposal.status === "submitted" && !locked} />}
-        {showDiscussion && <>
-          <ReportableComments
-            problemId={independent ? undefined : proposal.problemId}
-            proposalId={proposal.id}
-            authorId={proposal.researcherId}
-            recommenders={independent ? [] : Object.keys(recommendationEntries(proposal))}
-            onRecommendationChange={reloadProposal}
-            discussionOpen={independent ? listingOpen : true}
-            allowRecommendations={!independent}
-          />
-          <div className="detail-report"><ReportContentButton contentType="proposal" contentId={proposal.id} /></div>
-        </>}
+        {showDiscussion && <div className="detail-report"><ReportContentButton contentType="proposal" contentId={proposal.id} /></div>}
       </div>
+
+      {showDiscussion && <div className={panel("comments")} role="tabpanel" id="proposal-panel-comments" aria-labelledby="proposal-tab-comments">
+        {openedTabs.has("comments") && <ReportableComments
+          showEmpty
+          problemId={independent ? undefined : proposal.problemId}
+          proposalId={proposal.id}
+          authorId={proposal.researcherId}
+          recommenders={independent ? [] : Object.keys(recommendationEntries(proposal))}
+          onRecommendationChange={reloadProposal}
+          discussionOpen={independent ? listingOpen : true}
+          allowRecommendations={!independent}
+        />}
+      </div>}
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
         {!independent && proposal.fundingTerms && openedTabs.has("funding") && <AdminEscrowCancellation key={`${proposal.id}:${user?.id}`} proposalId={proposal.id} onConfirmed={() => { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); }} />}
@@ -372,7 +372,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
         <AuditReceipt onVerificationChange={setAuditVerification} anchorId="entity-audit-receipt" entityLabel="Proposal" audit={proposalAuditReceipt(proposal)} eventLabel="Proposal submitted" actorRole="Researcher / solution developer" firebaseReference={`proposals/${proposal.id}`} recordTimestamp={proposal.updatedAt ?? proposal.createdAt} onVerify={() => fetchAuditVerification(queryClient, proposal, readProposalAudit)} onRetry={owns && !auditBusy ? () => anchor() : undefined} />
         {auditBusy && <p role="status">Verifying your saved proposal… You can continue using the app.</p>}
         {reviewers && openedTabs.has("record") && <ProposalRevisionTrail proposalId={proposal.id} field={owns ? "researcherId" : "postingOwnerId"} uid={user.id} />}
-        {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("overview")); highlightWhenPresent(`comment-${item.commentId}`); }} />}
+        {activeTab === "record" && <ConsolidatedAuditTrail scope="proposal" entityId={proposal.id} onNavigate={onNavigate} onOpenComment={(item) => { flushSync(() => setTab("comments")); highlightWhenPresent(`comment-${item.commentId}`); }} />}
       </div>
     </article><aside className="context-panel"><span className="eyebrow">{independent ? "Crowdfunding target" : "Requested"}</span><strong><ConvertedAmount text={formatFundingAmount(proposal.currency, proposal.amount)} /></strong><dl>
       {independent && <PosterIdentity ownerId={proposal.researcherId} poster={author} onNavigate={onNavigate} label="Proposed by" />}

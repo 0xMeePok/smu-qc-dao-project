@@ -750,7 +750,7 @@ function AppContent() {
           Both render the same form; see CreateProposalPage. */}
       {section === "submit-proposal" ? <CreateProposalPage key={`${id}-${user?.id}`} postingId={id} onNavigate={go} />
         : section === "edit-proposal" ? <CreateProposalPage key={`edit-${id}-${user?.id}`} proposalId={id} onNavigate={go} />
-        : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} initialTab={initialTab(params, ["funding", "feedback", "record"])} onNavigate={go} />}
+        : <ProposalDetailPage key={`${id}-${user?.id}`} proposalId={id} initialTab={initialTab(params, ["funding", "feedback", "comments", "record"])} onNavigate={go} />}
     </RouteGuard>;
   } else if (section === "edit-posting") {
     pageComponent = (
