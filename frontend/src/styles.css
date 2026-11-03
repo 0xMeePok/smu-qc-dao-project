@@ -5441,6 +5441,33 @@ h1, h2, h3 { font-weight: 500; }
 @media (prefers-reduced-motion: reduce) {
   .token-select-trigger, .token-select-trigger > svg { transition: none; }
 }
+.due-preview-page { max-width: 40rem; margin: 48px auto; padding: 0 24px; }
+.due-preview-page p { color: var(--muted); }
+.due-ramp-modal { max-width: 560px; }
+.due-ramp-modal .modal-head h2 { margin: 0; }
+.due-ramp-banner { margin: 0; padding: 10px 12px; border: 1px solid var(--line); background: var(--brand-soft); line-height: 1.5; }
+.due-ramp-grid { display: grid; gap: 12px; min-width: 0; }
+.due-ramp-directions { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.due-ramp-directions legend { margin-bottom: 2px; font-weight: 600; }
+.due-ramp-choice {
+  display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px;
+  border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface);
+  cursor: pointer; font-weight: 400;
+}
+.due-ramp-choice:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.due-ramp-choice input { width: 16px; height: 16px; flex: 0 0 16px; margin: 2px 0 0; accent-color: var(--brand); }
+.due-ramp-choice strong, .due-ramp-choice small { display: block; }
+.due-ramp-choice small { margin-top: 2px; color: var(--muted); font-size: 12.5px; font-weight: 400; line-height: 1.4; }
+.due-ramp-grid label:not(.due-ramp-choice) { display: grid; gap: 6px; font-weight: 600; }
+.due-ramp-grid input:not([type="radio"]), .due-ramp-grid select, .due-ramp-account { min-width: 0; }
+.due-ramp-summary { display: grid; gap: 6px; margin: 0; }
+.due-ramp-summary div { display: flex; justify-content: space-between; gap: 12px; }
+.due-ramp-summary dt { color: var(--muted); }
+.due-ramp-summary dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.due-ramp-summary code, .due-ramp-grid code { overflow-wrap: anywhere; }
+.due-ramp-status { margin: 0; padding-left: 18px; }
+.due-ramp-modal .modal-body p { overflow-wrap: anywhere; }
+.due-ramp-modal .modal-actions { flex-wrap: wrap; }
 .wallet-action-modal .modal-body p { overflow-wrap: anywhere; }
 .wallet-action-modal .modal-actions { flex-wrap: wrap; }
 @media (max-width: 900px) {

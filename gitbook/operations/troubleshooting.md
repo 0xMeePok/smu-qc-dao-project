@@ -42,6 +42,7 @@ Find the symptom, then check the likely cause before changing anything. Several 
 | Audit receipt shows **Mismatch detected** | The stored record no longer matches its anchor | Investigate the record's revision trail and who changed it. Do not "fix" the hash |
 | "This record belongs to an earlier AuditRegistry deployment and is read-only" | The record was anchored on a previous registry | It stays verifiable but cannot enter the current funding workflow. Create a new posting |
 | Funding or selection buttons are disabled | Escrow not fully funded, a pending transaction, a moderation pause or an expired window | Read the escrow panel's status. Each state names its reason |
+| **Add funds** says the Due key is missing | `DUE_API_KEY` is not in the functions environment | Locally, add the sandbox key to `firebase/functions/.env` and restart the emulators. On the deployed site, set the GitHub secret `DUE_API_KEY` and redeploy functions. Do not use `functions:secrets:set` |
 
 ## Deploys
 

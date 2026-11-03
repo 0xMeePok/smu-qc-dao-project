@@ -17,6 +17,7 @@ import { registerEscrowFundingFunctions } from "./escrowFundingFunctions.js";
 import { registerOpenFundingFunctions } from "./openFundingFunctions.js";
 import { registerIndependentFundingFunctions } from "./independentFundingFunctions.js";
 import { registerWalletFaucetFunctions } from "./walletFaucetFunctions.js";
+import { registerDueSandboxFunctions } from "./dueSandboxFunctions.js";
 import { registerFxRateFunctions } from "./fxRates.js";
 import { createAIDraftingService } from "./aiDrafting.js";
 import { assertSimilarityEnabled, retrieveAvailableSimilarProposals } from "./aiRetrieval.js";
@@ -309,6 +310,7 @@ export const findSimilarProposals = onCall({ ...MEMBER_CALL_OPTIONS, maxInstance
 });
 
 export const { claimWalletTokens } = registerWalletFaucetFunctions({ db, region: REGION });
+export const { dueSandbox } = registerDueSandboxFunctions({ db, region: REGION });
 
 export const { prepareEscrowDeposit, prepareRemovedProposalClaim, syncEscrowFunding, getEscrowFundingHistory, getEscrowFundingSummary,
   startEscrowSettlement, getEscrowAdminCancellation, startEscrowAdminCancellation,

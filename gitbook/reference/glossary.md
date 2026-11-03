@@ -14,6 +14,7 @@
 | Capability | What the frontend lets an account do: owner, researcher, funder, evaluator or admin. Derived from the access level |
 | Custody lock | The rule that escrowed deposits stay in place until the posting expires or a refund opens |
 | Dual approval | The problem owner and the researcher both approving a selection before the first payment |
+| Due simulation | The local **Add funds** flow (QCDAO-151). It imitates a Due on-ramp and off-ramp and does not call Due |
 | Embedded wallet | The EVM wallet Privy creates for each email. Its address is the account |
 | Entity id | The hashed id a record has on the registry. Scheme 2 includes the actor's address |
 | EIP-7702 | An Ethereum upgrade that lets an ordinary wallet run delegated code. Privy uses it for gas sponsorship without changing the address |

@@ -45,5 +45,6 @@ Automated tests do not drive the real Privy modal or its paymaster. Before a dem
 6. Submit delivery evidence, approve it from both owners and check the final payment.
 7. As an administrator, report and remove a comment, then find the action in the audit trail.
 8. Check **Admin Audit**, **Service health** shows no failing dependency.
+9. Open **Add funds** from the account menu and from an escrow panel. Finish an on-ramp and an off-ramp. Confirm each one says **Testnet simulation**, no wallet prompt appears, and the USDC balance is unchanged.
 
 `docs/testing/workflow-repeat-validation-2026-10-02.md` records an earlier run of these flows. Its MetaMask steps predate the move to Privy.

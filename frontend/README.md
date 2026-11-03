@@ -175,7 +175,7 @@ src/
 │                  #   profile.js (writes users/ + publicProfiles/ in one batch)
 ├── context/         # WalletContext (Privy + embedded wallet), SessionContext — the
 │                    #   Privy login -> verified -> onboarding/signed-in state machine
-├── components/      # 81 components: sign-in and onboarding, wallet, forms, escrow, dashboards, audit, moderation, admin
+├── components/      # 86 components: sign-in and onboarding, wallet, forms, escrow, dashboards, audit, moderation, admin
 ├── pages/            # 14 route-level pages, lazily loaded (AdminPage needs role == 1)
 ├── App.jsx            # Hash router, marketplace pages, top bar
 └── main.jsx             # PrivyProvider -> QueryClientProvider -> WalletProvider -> SessionProvider -> App
