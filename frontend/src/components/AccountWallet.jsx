@@ -248,7 +248,7 @@ export function AccountWallet({ address, email, visible = true, services = defau
       {pending && <div className="account-wallet-pending"><p>A transfer may already have been sent. Check its status before sending again.</p>{pending.unreadable ? <p>The saved transfer could not be read. Contact an administrator before sending again.</p> : <button type="button" disabled={busy} onClick={recover}>{busy ? "Checking transfer…" : "Check transfer status"}</button>}</div>}
       {notice && <p role="status">{notice}</p>}
       {!action && error && <p role="alert">{error}</p>}
-      <div className="account-wallet-actions"><button type="button" onClick={() => open("send")} disabled={Boolean(pending)}>Send</button><button type="button" onClick={() => open("faucet")} disabled={Boolean(pending)}>Faucet</button><DueOnOffRamp address={address} email={email || wallet.email || ""} /></div>
+      <div className="account-wallet-actions"><button type="button" onClick={() => open("send")} disabled={Boolean(pending)}>Send</button><button type="button" onClick={() => open("faucet")} disabled={Boolean(pending)}>Faucet</button><DueOnOffRamp address={address} /></div>
     </section>}
     {action && <Modal labelledBy={titleId} onDismiss={dismiss} className="wallet-action-modal">
       <header className="modal-head"><h2 id={titleId}>{action === "send" ? review ? "Confirm token transfer" : "Send test tokens" : "Claim test tokens"}</h2></header>

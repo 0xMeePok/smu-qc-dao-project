@@ -516,10 +516,12 @@ npm test --prefix firebase/functions
 
 The signed-in account menu shows the member's email, embedded wallet address and
 XSGD, USDT and USDC balances on Arbitrum Sepolia. Transfers use Privy's sponsored
-wallet adapter and require an explicit review. **Add funds** opens the local
-Due on/off-ramp simulation (QCDAO-151). It is labelled as a testnet simulation
-and does not start a card payment, bank transfer or token transfer. See
-`gitbook/setup/due-on-off-ramp.md`.
+wallet adapter and require an explicit review. **Add funds** calls the
+`dueSandbox` function. That function reads `DUE_API_KEY` from
+`firebase/functions/.env` and calls only `https://api.sandbox.due.network`.
+It does not use Firebase Secret Manager or `.secret.local`. A GitHub deploy
+writes the repository secret `DUE_API_KEY` into the generated functions `.env`.
+See `gitbook/setup/due-on-off-ramp.md`.
 
 Deploy `claimWalletTokens` in `asia-southeast1` with the other Cloud Functions
 before releasing the account-menu faucet action. It requires the existing

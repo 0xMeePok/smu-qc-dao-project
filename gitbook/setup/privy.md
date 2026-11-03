@@ -78,4 +78,4 @@ If sign-in fails, check the allowed origins, the App Check registration and the 
 
 ## On-ramp and off-ramp
 
-**Add funds** does not open Privy's card window. On Arbitrum Sepolia that window cannot complete a purchase. The button opens the local Due-shaped simulation described in [Due on/off-ramp simulation](due-on-off-ramp.md). Privy's gas sponsorship is unchanged: the simulation never asks the embedded wallet to sign.
+**Add funds** does not open Privy's card window. It calls the `dueSandbox` function, which uses the Due sandbox key in `firebase/functions/.env`. See [Due sandbox on/off-ramp](due-on-off-ramp.md). Privy's gas sponsorship is unchanged.

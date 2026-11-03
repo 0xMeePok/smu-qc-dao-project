@@ -25,7 +25,7 @@
 * [Privy](setup/privy.md)
 * [GitHub Actions](setup/github-actions.md)
 * [Test-token faucet](setup/test-token-faucet.md)
-* [Due on/off-ramp simulation](setup/due-on-off-ramp.md)
+* [Due sandbox on/off-ramp](setup/due-on-off-ramp.md)
 * [GitBook](setup/gitbook.md)
 
 ## Run and operate

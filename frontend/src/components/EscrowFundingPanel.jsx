@@ -116,7 +116,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
   return <section className="card escrow-funding escrow-detail" aria-labelledby="escrow-funding-title">
     <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
       <div className="table-header-actions">
-        <DueOnOffRamp address={rampAddress} email={rampEmail} className="secondary small" />
+        <DueOnOffRamp address={rampAddress} className="secondary small" />
         <button type="button" className="secondary small" disabled={busy || loading} aria-busy={loading} onClick={onRefresh}>Refresh escrow</button>
       </div></div>
     {/* Background refreshes keep the verified escrow in place; only the first read shows a line here. */}

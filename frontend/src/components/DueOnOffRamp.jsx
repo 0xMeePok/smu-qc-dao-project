@@ -1,225 +1,202 @@
 import { useId, useState } from "react";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../lib/firebase.js";
 import { formatInstant } from "../lib/datetime.js";
-import {
-  DueSandboxError,
-  LOCAL_DUE_SANDBOX_KEY,
-  createDueSandboxTransfer,
-  dueSandboxMethods,
-  quoteDueSandbox,
-  simulateDueSandboxFunding,
-  startDueSandbox,
-} from "../lib/dueSandbox.js";
 import { Modal } from "./Modal.jsx";
 
-const METHODS = dueSandboxMethods();
-const STATUS_LABEL = {
-  awaiting_funds: "Awaiting funds",
-  approved: "Approved",
-  payment_submitted: "Payment submitted",
-  payment_processed: "Payment processed",
-  expired: "Expired",
-};
+const CURRENCIES = [
+  { id: "USD", label: "US dollar (USD)", method: "US bank transfer (ACH)" },
+  { id: "SGD", label: "Singapore dollar (SGD)", method: "Singapore bank transfer, if the sandbox offers it" },
+  { id: "EUR", label: "Euro (EUR)", method: "Euro bank transfer (SEPA)" },
+];
 const BANK_LABEL = {
   bankName: "Bank",
   accountName: "Account name",
   accountNumber: "Account number",
   routingNumber: "Routing number",
   iban: "IBAN",
+  IBAN: "IBAN",
   bankCode: "Bank code",
+  address: "Funding address",
+  reference: "Reference",
+  memo: "Reference",
+  amount: "Amount",
+  network: "Network",
+  token: "Token",
 };
 
 function failure(error) {
-  return error instanceof DueSandboxError ? error.message : "The simulation could not continue. Close it and try again.";
+  const text = String(error?.message ?? "").replace(/^Firebase:\s*/, "").replace(/\s*\(functions\/[^)]+\)\.?$/, "");
+  return text && text.length <= 500 && !/[\r\n]/.test(text) ? text : "Due sandbox could not complete this request.";
 }
 
-function fiatCurrency(quote) {
-  return quote.direction === "onramp" ? quote.source.currency : quote.destination.currency;
+async function callDue(data) {
+  if (!functions) throw new Error("Due sandbox is not configured. Add DUE_API_KEY in firebase/functions/.env and restart the emulators.");
+  const response = await httpsCallable(functions, "dueSandbox", { timeout: 60_000 })(data);
+  return response.data;
 }
 
 function QuoteSummary({ quote }) {
+  const fiat = quote.source.currency === "USDC" ? quote.destination.currency : quote.source.currency;
   return <dl className="due-ramp-summary">
     <div><dt>You send</dt><dd>{quote.source.amount} {quote.source.currency}</dd></div>
-    <div><dt>Fee</dt><dd>{quote.source.fee} {quote.source.currency}</dd></div>
+    <div><dt>Fee</dt><dd>{quote.source.fee ? `${quote.source.fee} ${quote.source.currency}` : "Shown by Due"}</dd></div>
     <div><dt>You receive</dt><dd>{quote.destination.amount} {quote.destination.currency}</dd></div>
-    <div><dt>Rate</dt><dd>1 USDC = {quote.fxRate} {fiatCurrency(quote)}</dd></div>
-    <div><dt>Network</dt><dd>Arbitrum Sepolia</dd></div>
+    <div><dt>Rate</dt><dd>{quote.fxRate ? `1 USDC = ${quote.fxRate} ${fiat}` : "Set by Due"}</dd></div>
+    <div><dt>Network</dt><dd>{quote.destination.currency === "USDC" ? quote.destination.rail : quote.source.rail}</dd></div>
     <div><dt>Quote expires</dt><dd>{formatInstant(quote.expiresAt)}</dd></div>
   </dl>;
 }
 
-function DueRampDialog({ address, email, onDismiss }) {
+function DueRampDialog({ address, onDismiss }) {
   const titleId = `due-ramp-${useId().replace(/:/g, "")}`;
   const bannerId = `${titleId}-banner`;
   const amountId = `${titleId}-amount`;
   const [step, setStep] = useState("details");
   const [direction, setDirection] = useState("onramp");
-  const [methodId, setMethodId] = useState("ach");
+  const [currency, setCurrency] = useState("USD");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState("");
-  const [session, setSession] = useState(() => {
-    try {
-      return startDueSandbox({ address, email, apiKey: LOCAL_DUE_SANDBOX_KEY });
-    } catch {
-      return null;
-    }
-  });
+  const [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState(null);
   const [transfer, setTransfer] = useState(null);
-  const method = METHODS.find((item) => item.id === methodId) ?? METHODS[0];
-  const amountLabel = direction === "onramp" ? `Amount (${method.currency})` : "Amount (USDC)";
+  const amountLabel = direction === "onramp" ? `Amount (${currency})` : "Amount (USDC)";
 
-  const review = (event) => {
+  const review = async (event) => {
     event.preventDefault();
+    if (busy) return;
+    setBusy(true);
     setError("");
-    if (!session) {
-      setError("Sign in with your email before starting this simulation.");
-      return;
-    }
     try {
-      const result = quoteDueSandbox({ session, direction, asset: "USDC", methodId, amount });
-      setSession(result.session);
+      const result = await callDue({ action: "quote", direction, currency, amount });
       setQuote(result.quote);
       setStep("review");
     } catch (cause) {
       setError(failure(cause));
+    } finally {
+      setBusy(false);
     }
   };
-  const confirm = () => {
+  const create = async () => {
+    if (busy || !quote?.token) return;
+    setBusy(true);
     setError("");
-    if (!session || !quote) return;
     try {
-      const result = createDueSandboxTransfer({ session, quoteId: quote.id });
-      setSession(result.session);
+      const result = await callDue({ action: "create", direction, currency, quoteToken: quote.token });
       setTransfer(result.transfer);
       setStep("instructions");
     } catch (cause) {
       setError(failure(cause));
+    } finally {
+      setBusy(false);
     }
   };
-  const simulate = () => {
+  const payIn = async () => {
+    if (busy || !transfer?.id) return;
+    setBusy(true);
     setError("");
-    if (!session || !transfer) return;
     try {
-      const result = simulateDueSandboxFunding({ session, transferId: transfer.id });
-      setSession(result.session);
+      const result = await callDue({ action: "payin", transferId: transfer.id });
       setTransfer(result.transfer);
       setStep("result");
-      if (result.transfer.status === "expired") setError("This simulated transfer expired before funds arrived. Start again.");
     } catch (cause) {
       setError(failure(cause));
+    } finally {
+      setBusy(false);
     }
   };
-  const restart = () => {
-    try {
-      setSession(startDueSandbox({ address, email, apiKey: LOCAL_DUE_SANDBOX_KEY }));
-    } catch {
-      setSession(null);
-    }
-    setStep("details");
-    setQuote(null);
-    setTransfer(null);
-    setAmount("");
+  const refresh = async () => {
+    if (busy || !transfer?.id) return;
+    setBusy(true);
     setError("");
+    try {
+      const result = await callDue({ action: "status", transferId: transfer.id });
+      setTransfer(result.transfer);
+      setStep("result");
+    } catch (cause) {
+      setError(failure(cause));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const instructions = transfer?.transferInstructions;
+  const detailEntries = Object.entries(transfer?.details || {}).filter(([, value]) => value && value !== transfer?.fundingAddress);
   return <Modal labelledBy={titleId} describedBy={bannerId} onDismiss={onDismiss} className="due-ramp-modal">
     <header className="modal-head"><div>
       <h2 id={titleId}>Add funds</h2>
       <p>Testnet simulation</p>
     </div></header>
     <div className="modal-body">
-      <p className="due-ramp-banner" id={bannerId}>Testnet simulation on Arbitrum Sepolia. This does not charge a card, send a bank transfer, sign with your wallet, or move tokens. No request is sent to Due.</p>
-      {!session && <p role="alert">Sign in with your email to link this simulation to your embedded wallet. It still cannot move funds.</p>}
-      {session && step === "details" && <form id={`${titleId}-details`} className="due-ramp-grid" onSubmit={review}>
-        <section className="due-ramp-account" aria-label="Sandbox account">
-          <dl className="due-ramp-summary">
-            <div><dt>Account</dt><dd><code>{session.accountId}</code></dd></div>
-            <div><dt>KYC</dt><dd>Approved by the local stub</dd></div>
-            <div><dt>Linked wallet</dt><dd><code>{session.address}</code></dd></div>
-          </dl>
-          <p className="field-hint">The local stub stands in for Due&apos;s sandbox KYC approval. The wallet link is your embedded wallet. Neither step leaves this browser.</p>
-        </section>
+      <p className="due-ramp-banner" id={bannerId}>Due sandbox, not Due production. Every request goes to api.sandbox.due.network. Due accepts the sandbox API key on the functions server, not in this page.</p>
+      {step === "details" && <form id={`${titleId}-details`} className="due-ramp-grid" onSubmit={review}>
+        {address && <p className="field-hint">Linked wallet <code>{address}</code></p>}
         <fieldset className="due-ramp-directions">
-          <legend>Direction</legend>
-          <label className="due-ramp-choice"><input type="radio" name={`${titleId}-direction`} checked={direction === "onramp"} onChange={() => setDirection("onramp")} /> On-ramp: fiat to USDC</label>
-          <label className="due-ramp-choice"><input type="radio" name={`${titleId}-direction`} checked={direction === "offramp"} onChange={() => setDirection("offramp")} /> Off-ramp: USDC to fiat</label>
+          <legend>What do you want to do?</legend>
+          <label className="due-ramp-choice">
+            <input type="radio" name={`${titleId}-direction`} checked={direction === "onramp"} onChange={() => setDirection("onramp")} />
+            <span><strong>Buy USDC</strong><small>You pay from a bank. Due&apos;s sandbox quotes how much USDC that payment would buy.</small></span>
+          </label>
+          <label className="due-ramp-choice">
+            <input type="radio" name={`${titleId}-direction`} checked={direction === "offramp"} onChange={() => setDirection("offramp")} />
+            <span><strong>Sell USDC</strong><small>You start with USDC. Due&apos;s sandbox quotes how much you would receive, then gives a funding address.</small></span>
+          </label>
         </fieldset>
-        <label>Asset
-          <select value="USDC" onChange={() => setError("")}>
-            <option value="USDC">USDC</option>
-            <option value="USDT" disabled>USDT (not available in this simulation)</option>
-            <option value="XSGD" disabled>XSGD (not available in this simulation)</option>
-          </select>
-        </label>
         <label>Currency
-          <select value={method.currency} onChange={(event) => setMethodId(METHODS.find((item) => item.currency === event.target.value).id)}>
-            {METHODS.map((item) => <option key={item.currency} value={item.currency}>{item.currencyLabel}</option>)}
+          <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+            {CURRENCIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
         </label>
-        <label>Payment method
-          <select value={methodId} onChange={(event) => setMethodId(event.target.value)}>
-            {METHODS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-        </label>
-        <p className="field-hint">Network: Arbitrum Sepolia. USDT and XSGD purchases are outside this simulation.</p>
+        <p className="field-hint">{CURRENCIES.find((item) => item.id === currency)?.method}. Due chooses the rail from the channels on this sandbox key. USDC is the only asset.</p>
         <label htmlFor={amountId}>{amountLabel}
           <input id={amountId} value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" autoComplete="off" required />
         </label>
-        <p className="field-hint">Up to 2 decimal places. Maximum 100000. The sandbox fee is 0.50%, with a minimum of 0.50.</p>
       </form>}
       {quote && (step === "review" || step === "confirmation") && <>
         <QuoteSummary quote={quote} />
-        {step === "confirmation" && <p>Confirm this testnet simulation. Continuing creates a local transfer record only.</p>}
+        {step === "confirmation" && <p>Confirming creates this transfer in the Due sandbox. It does not send crypto from your wallet.</p>}
       </>}
-      {transfer && step === "instructions" && instructions?.kind === "details" && <div className="due-ramp-grid">
-        <p>Status: Awaiting funds (awaiting_funds). A completed pay-in would deliver USDC to your embedded wallet <code>{session.address}</code>. That delivery is not made here.</p>
+      {transfer && step === "instructions" && direction === "onramp" && <div className="due-ramp-grid">
+        <p>Status: {transfer.status || "awaiting_funds"}. These are the sandbox payment details Due returned.</p>
         <dl className="due-ramp-summary">
-          {Object.entries(instructions.details).filter(([key]) => key !== "schema").map(([key, value]) => <div key={key}><dt>{BANK_LABEL[key] || key}</dt><dd><code>{value}</code></dd></div>)}
-          <div><dt>Reference</dt><dd><code>{instructions.memo}</code></dd></div>
+          {detailEntries.map(([key, value]) => <div key={key}><dt>{BANK_LABEL[key] || key}</dt><dd><code>{value}</code></dd></div>)}
+          {transfer.memo && <div><dt>Reference</dt><dd><code>{transfer.memo}</code></dd></div>}
+        </dl>
+        <p>Use the reference Due returned. Simulate sandbox pay-in asks Due&apos;s sandbox to pretend the bank payment arrived. It cannot move crypto.</p>
+      </div>}
+      {transfer && step === "instructions" && direction === "offramp" && <div className="due-ramp-grid">
+        <p>Status: {transfer.status || "awaiting_funds"}. Send the exact quoted USDC to this funding address from the same wallet, before the quote expires.</p>
+        <dl className="due-ramp-summary">
+          <div><dt>Funding address</dt><dd><code>{transfer.fundingAddress || "Due did not return an address yet."}</code></dd></div>
           <div><dt>Amount</dt><dd>{transfer.source.amount} {transfer.source.currency}</dd></div>
         </dl>
-        <p>These bank details are fictional. Sending money to them does nothing.</p>
+        <p>Due only matches its own sandbox USDC. The QC DAO faucet token is a different token and will not be credited. Mint Due&apos;s sandbox USDC to your wallet first, from Due&apos;s stub admin.</p>
       </div>}
-      {transfer && step === "instructions" && instructions?.kind === "funding_reference" && <div className="due-ramp-grid">
-        <p>Status: Awaiting funds (awaiting_funds). A real Due sandbox matches a crypto deposit by sender and exact amount. This screen has no funding address.</p>
-        <dl className="due-ramp-summary">
-          <div><dt>Funding reference</dt><dd><code>{instructions.details.reference}</code></dd></div>
-          <div><dt>Token amount</dt><dd>{instructions.details.amount} {instructions.details.token}</dd></div>
-          <div><dt>Network</dt><dd>Arbitrum Sepolia</dd></div>
-        </dl>
-        <p>This is not a wallet address. Do not send tokens from your wallet.</p>
-      </div>}
-      {transfer && step === "result" && <div className="due-ramp-grid">
-        <ol className="due-ramp-status" aria-label="Transfer status">
-          {transfer.statusLog.map((status) => <li key={status}>{STATUS_LABEL[status] || status} ({status})</li>)}
-        </ol>
-        {transfer.status === "payment_processed" && <p>No tokens moved. Your wallet balance is unchanged. Test USDC still comes from the faucet in the account menu.</p>}
-      </div>}
+      {transfer && step === "result" && <p>Due sandbox status: {transfer.status || "unknown"}.</p>}
       {error && <p role="alert">{error}</p>}
     </div>
     <footer className="modal-actions">
-      <button type="button" className="secondary" onClick={onDismiss}>Close</button>
-      {step === "details" && session && <button type="submit" form={`${titleId}-details`} className="primary">Review quote</button>}
+      <button type="button" className="secondary" disabled={busy} onClick={onDismiss}>Close</button>
+      {step === "details" && <button type="submit" form={`${titleId}-details`} className="primary" disabled={busy}>{busy ? "Asking Due…" : "Review quote"}</button>}
       {step === "review" && <>
-        <button type="button" className="secondary" onClick={() => { setError(""); setStep("details"); }}>Back</button>
-        <button type="button" className="primary" onClick={() => { setError(""); setStep("confirmation"); }}>Continue to confirmation</button>
+        <button type="button" className="secondary" disabled={busy} onClick={() => { setError(""); setStep("details"); }}>Back</button>
+        <button type="button" className="primary" disabled={busy} onClick={() => { setError(""); setStep("confirmation"); }}>Continue to confirmation</button>
       </>}
       {step === "confirmation" && <>
-        <button type="button" className="secondary" onClick={() => { setError(""); setStep("review"); }}>Back</button>
-        <button type="button" className="primary" onClick={confirm}>Continue simulation</button>
+        <button type="button" className="secondary" disabled={busy} onClick={() => { setError(""); setStep("review"); }}>Back</button>
+        <button type="button" className="primary" disabled={busy} onClick={create}>{busy ? "Creating transfer…" : "Create sandbox transfer"}</button>
       </>}
-      {step === "instructions" && <button type="button" className="primary" onClick={simulate}>{transfer?.direction === "offramp" ? "Simulate sandbox deposit" : "Simulate sandbox pay-in"}</button>}
-      {step === "result" && <button type="button" className="secondary" onClick={restart}>Start again</button>}
+      {step === "instructions" && direction === "onramp" && <button type="button" className="primary" disabled={busy} onClick={payIn}>{busy ? "Asking Due…" : "Simulate sandbox pay-in"}</button>}
+      {step === "instructions" && direction === "offramp" && <button type="button" className="secondary" disabled={busy} onClick={refresh}>{busy ? "Checking…" : "Check status"}</button>}
+      {step === "result" && <button type="button" className="secondary" disabled={busy} onClick={() => { setStep("details"); setQuote(null); setTransfer(null); setError(""); }}>Start again</button>}
     </footer>
   </Modal>;
 }
 
-/** Add funds entry point. The button opens the testnet simulation and nothing else. */
-export function DueOnOffRamp({ address = "", email = "", className = "" }) {
+/** Add funds entry point. The dialog calls the dueSandbox function, which holds the sandbox key. */
+export function DueOnOffRamp({ address = "", className = "" }) {
   const [open, setOpen] = useState(false);
   return <>
-    <button type="button" className={className} title="Testnet simulation" onClick={() => setOpen(true)}>Add funds</button>
-    {open && <DueRampDialog address={address} email={email} onDismiss={() => setOpen(false)} />}
+    <button type="button" className={className} title="Due sandbox" onClick={() => setOpen(true)}>Add funds</button>
+    {open && <DueRampDialog address={address} onDismiss={() => setOpen(false)} />}
   </>;
 }

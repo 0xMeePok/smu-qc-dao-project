@@ -39,7 +39,7 @@ it("walks an on-ramp through review, confirmation, fictional bank details and a 
 
 it("walks an off-ramp without showing a funding address or a send button", () => {
   const dialog = open();
-  fireEvent.click(within(dialog).getByRole("radio", { name: "Off-ramp: USDC to fiat" }));
+  fireEvent.click(within(dialog).getByRole("radio", { name: /Sell USDC/ }));
   fireEvent.change(within(dialog).getByLabelText("Currency"), { target: { value: "SGD" } });
   expect(within(dialog).getByLabelText("Payment method").value).toBe("fast");
   fireEvent.change(within(dialog).getByLabelText("Amount (USDC)"), { target: { value: "100" } });
