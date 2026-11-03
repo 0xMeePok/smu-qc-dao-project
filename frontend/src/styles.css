@@ -5445,7 +5445,6 @@ h1, h2, h3 { font-weight: 500; }
 .due-preview-page p { color: var(--muted); }
 .due-ramp-modal { max-width: 560px; }
 .due-ramp-modal .modal-head h2 { margin: 0; }
-.due-ramp-banner { margin: 0; padding: 10px 12px; border: 1px solid var(--line); background: var(--brand-soft); line-height: 1.5; }
 .due-ramp-grid { display: grid; gap: 12px; min-width: 0; }
 .due-ramp-directions { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .due-ramp-directions legend { margin-bottom: 2px; font-weight: 600; }

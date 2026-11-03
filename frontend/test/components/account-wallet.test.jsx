@@ -114,7 +114,7 @@ it("add funds opens the testnet simulation and never signs, sends, claims or ope
   show(); await ready(); fireEvent.click(screen.getByRole("button", { name: "Add funds" }));
   const dialog = screen.getByRole("dialog", { name: "Add funds" });
   expect(dialog.textContent).toMatch(/Testnet simulation/);
-  expect(dialog.textContent).toMatch(/api\.sandbox\.due\.network/);
+  expect(dialog.textContent).not.toMatch(/api\.sandbox\.due\.network/);
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(state.wallet.signMessage).not.toHaveBeenCalled(); expect(services.sendWalletTokens).not.toHaveBeenCalled(); expect(services.claimWalletTokens).not.toHaveBeenCalled();
   expect(open).not.toHaveBeenCalled(); expect(fetchSpy).not.toHaveBeenCalled(); open.mockRestore(); fetchSpy.mockRestore();
