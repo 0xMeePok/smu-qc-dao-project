@@ -22,7 +22,7 @@ flowchart LR
 1. **Detect.** Path filters choose the areas. A manual run selects all of them.
 2. **Checks.** Only the selected areas run: frontend, rules, functions, audit registry, funding escrow, faucet and Semgrep. Gitleaks runs on every push.
 3. **CI.** One check passes when none of those jobs failed. A skipped area does not fail it or stop the deploy.
-4. **Deploy backend.** On `main`, when the push is not only the handover book, writes `firebase/functions/.env` from repository variables (`ARBITRUM_SEPOLIA_RPC_URL`, backups, `PRIVY_APP_ID`) and from the `DUE_API_KEY` repository secret, deploys Firestore rules, indexes and Storage rules, then deploys all functions. The functions deploy retries up to three times, because Cloud Run can report a timeout while still finishing. `DUE_API_KEY` is not a Firebase secret. A missing Due key does not stop the deploy.
+4. **Deploy backend.** On `main`, when the push is not only the handover book, writes `firebase/functions/.env` from repository variables (`ARBITRUM_SEPOLIA_RPC_URL`, backups, `PRIVY_APP_ID`), deploys Firestore rules, indexes and Storage rules, then deploys all functions. The functions deploy retries up to three times, because Cloud Run can report a timeout while still finishing. Add funds does not need a Due key.
 5. **Deploy Hosting.** Checks that the App Check key and Privy app id are set, adds the RPC origins to the CSP, builds with `VITE_FIREBASE_USE_EMULATORS=false`, checks the bundle contains the project id, deploys to the `live` channel and reads the live CSP header back.
 
 The backend always deploys before Hosting. A new frontend against old rules breaks onboarding, publishing and anything that writes a new field or collection.
@@ -42,7 +42,7 @@ cd firebase && npx firebase deploy --only hosting --project qcdao-a0c7a
 node scripts/check-csp.mjs https://qcdao-a0c7a.web.app
 ```
 
-A manual backend deploy reads `firebase/functions/.env` and `.env.qcdao-a0c7a` from your laptop, not the repository variables or the `DUE_API_KEY` GitHub secret. Check that `PRIVY_APP_ID`, `ARBITRUM_SEPOLIA_RPC_URL` and, for Add funds, `DUE_API_KEY` are set there first: `node firebase/scripts/check-privy-deploy.mjs qcdao-a0c7a`.
+A manual backend deploy reads `firebase/functions/.env` and `.env.qcdao-a0c7a` from your laptop, not the repository variables. Check that `PRIVY_APP_ID` and `ARBITRUM_SEPOLIA_RPC_URL` are set there first: `node firebase/scripts/check-privy-deploy.mjs qcdao-a0c7a`. Add funds does not read a Due key.
 
 ## Preview channels
 

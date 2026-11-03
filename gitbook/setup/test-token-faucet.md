@@ -53,4 +53,4 @@ Keep the token addresses identical in the faucet, `frontend/src/config/auditRegi
 
 The same Vercel site also has a page for browser-wallet users. It connects through `window.ethereum`, so email members cannot use it. They use the account menu instead.
 
-**Add funds** is not a second faucet. It opens the [Due sandbox on/off-ramp](due-on-off-ramp.md). Due credits only its own sandbox USDC, so a member who needs the QC DAO test tokens still uses **Faucet** here.
+**Add funds** is not a second faucet. It opens the simulated [Due sandbox on/off-ramp](due-on-off-ramp.md) and does not mint or move tokens. A member who needs a balance still uses **Faucet**.

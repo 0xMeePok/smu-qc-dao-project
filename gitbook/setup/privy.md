@@ -78,4 +78,4 @@ If sign-in fails, check the allowed origins, the App Check registration and the 
 
 ## On-ramp and off-ramp
 
-**Add funds** does not open Privy's card window. It calls the `dueSandbox` function, which uses the Due sandbox key in `firebase/functions/.env`. See [Due sandbox on/off-ramp](due-on-off-ramp.md). Privy's gas sponsorship is unchanged.
+**Add funds** does not open Privy's card window and does not call Due. It is the simulated on-ramp and off-ramp in [Due sandbox on/off-ramp](due-on-off-ramp.md). Privy's gas sponsorship is unchanged.

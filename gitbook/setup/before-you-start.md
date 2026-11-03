@@ -48,6 +48,6 @@ For path B, follow the pages in this order. Each one ends with a check.
 6. [Test-token faucet](test-token-faucet.md), if you need your own faucet.
 7. [GitBook](gitbook.md), to keep this book in sync.
 
-**Add funds** needs a Due sandbox key in `firebase/functions/.env` as `DUE_API_KEY`. See [Due sandbox on/off-ramp](due-on-off-ramp.md). It does not use Firebase Secret Manager.
+**Add funds** needs no Due account and no API key. See [Due sandbox on/off-ramp](due-on-off-ramp.md).
 
 For path A, read each page's **Joining the existing project** section and skip the rest.

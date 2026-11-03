@@ -21,7 +21,7 @@ Every `VITE_` value is bundled into the public JavaScript. None of them may be a
 
 `VITE_FIREBASE_AUTH_DOMAIN` and `VITE_FIREBASE_MESSAGING_SENDER_ID` are not used. `VITE_WALLETCONNECT_PROJECT_ID` is obsolete.
 
-Do not put the Due sandbox key in a `VITE_` variable or in Firebase Secret Manager. Locally it belongs in `firebase/functions/.env` as `DUE_API_KEY`. A GitHub deploy writes the repository secret of the same name into that file. See [Due sandbox on/off-ramp](../setup/due-on-off-ramp.md).
+Add funds does not read a Due API key. Do not add `DUE_API_KEY` to a `VITE_` variable, Firebase Secret Manager, or `firebase/functions/.env`. See [Due sandbox on/off-ramp](../setup/due-on-off-ramp.md).
 
 ## Cloud Functions (`firebase/functions/.env`, `.env.<project-id>`)
 
@@ -36,7 +36,6 @@ Do not put the Due sandbox key in a `VITE_` variable or in Firebase Secret Manag
 | `AI_SIMILARITY_ENABLED` | No | Defaults to `true`; `false` disables standalone search and retrieval within AI generation |
 | `AI_DRAFT_MODEL` | No | Supported drafting model; defaults to `gpt-5-mini` |
 | `AUDIT_REGISTRY_ADDRESS` | No | Overrides the registry address. Must match the frontend |
-| `DUE_API_KEY` | For Add funds | Due sandbox key. Calls `https://api.sandbox.due.network` only. Local file: `firebase/functions/.env`. GitHub deploy: repository secret `DUE_API_KEY`. Not `.secret.local`, not Secret Manager, not the frontend env |
 | `WARM_INSTANCES` | No | Pins that many always-on instances on the six callables a member waits on. Blank or `0` disables it, which is the normal state. Billed per idle second — see [Warm instances for a graded demo](../operations/deployment.md#warm-instances-for-a-graded-demo) |
 
 Firebase loads `.env` first, then `.env.<project-id>`. A shell variable is not part of the deployed runtime.
