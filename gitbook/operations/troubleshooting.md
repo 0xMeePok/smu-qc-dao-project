@@ -42,6 +42,7 @@ Find the symptom, then check the likely cause before changing anything. Several 
 | Audit receipt shows **Mismatch detected** | The stored record no longer matches its anchor | Investigate the record's revision trail and who changed it. Do not "fix" the hash |
 | "This record belongs to an earlier AuditRegistry deployment and is read-only" | The record was anchored on a previous registry | It stays verifiable but cannot enter the current funding workflow. Create a new posting |
 | Funding or selection buttons are disabled | Escrow not fully funded, a pending transaction, a moderation pause or an expired window | Read the escrow panel's status. Each state names its reason |
+| **Add funds** did not increase the USDC balance | The dialog is the QCDAO-151 simulation. It cannot mint or buy tokens | Use **Faucet** in the account menu. The simulation is described in [Due on/off-ramp simulation](../setup/due-on-off-ramp.md) |
 
 ## Deploys
 

@@ -52,3 +52,5 @@ Keep the token addresses identical in the faucet, `frontend/src/config/auditRegi
 ## Older standalone faucet site
 
 The same Vercel site also has a page for browser-wallet users. It connects through `window.ethereum`, so email members cannot use it. They use the account menu instead.
+
+**Add funds** is not a second faucet. It opens the [Due on/off-ramp simulation](due-on-off-ramp.md), which does not mint tokens. A member who needs a balance still uses **Faucet** here.

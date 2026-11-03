@@ -516,8 +516,10 @@ npm test --prefix firebase/functions
 
 The signed-in account menu shows the member's email, embedded wallet address and
 XSGD, USDT and USDC balances on Arbitrum Sepolia. Transfers use Privy's sponsored
-wallet adapter and require an explicit review. The Add funds action is an
-informational **Privy on-ramp preview**; card funding is unavailable on testnet.
+wallet adapter and require an explicit review. **Add funds** opens the local
+Due on/off-ramp simulation (QCDAO-151). It is labelled as a testnet simulation
+and does not start a card payment, bank transfer or token transfer. See
+`gitbook/setup/due-on-off-ramp.md`.
 
 Deploy `claimWalletTokens` in `asia-southeast1` with the other Cloud Functions
 before releasing the account-menu faucet action. It requires the existing

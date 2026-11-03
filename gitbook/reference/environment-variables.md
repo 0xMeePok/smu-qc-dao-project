@@ -21,6 +21,8 @@ Every `VITE_` value is bundled into the public JavaScript. None of them may be a
 
 `VITE_FIREBASE_AUTH_DOMAIN` and `VITE_FIREBASE_MESSAGING_SENDER_ID` are not used. `VITE_WALLETCONNECT_PROJECT_ID` is obsolete.
 
+**Add funds** has no variable. Its simulator credential, `local-due-sandbox-qcdao-151`, is a public constant in `frontend/src/lib/dueSandbox.js`. Do not add a Due API key under a `VITE_` name. A real key, when Due issues one, belongs in Secret Manager as `DUE_API_KEY` and is unused until the swap described in [Due on/off-ramp simulation](../setup/due-on-off-ramp.md).
+
 ## Cloud Functions (`firebase/functions/.env`, `.env.<project-id>`)
 
 | Variable | Required | Purpose |

@@ -13,6 +13,7 @@ import { isModerated } from "../lib/moderation.js";
 import { confirmEscrowTransaction, escrowErrorMessage, hashEscrowEvidence, readEscrow, writeEscrowAction } from "../lib/escrow.js";
 import { fetchEscrowSnapshot, useEscrowSnapshot } from "../lib/escrowReads.js";
 import { loadEscrowEvidence, saveEscrowEvidence } from "../lib/escrowEvidence.js";
+import { DueOnOffRamp } from "./DueOnOffRamp.jsx";
 import { Field } from "./Field.jsx";
 import { fundingActivityCovered, getEscrowFundingHistory, prepareEscrowDeposit, startEscrowSettlement, syncEscrowFunding } from "../lib/escrowFunding.js";
 import { EscrowFundingHistory } from "./EscrowFundingHistory.jsx";
@@ -80,7 +81,7 @@ function saveTransaction(key, hash) {
 
 export function EscrowFundingView({ state, evidence, loading, error, busy, progress, walletReady, walletMessage,
   amount, setAmount, delivery, setDelivery, onAction, onRefresh, onConnect, unresolvedTransaction, onConfirm, moderated,
-  fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason, canDeposit = true, integrityBlocked = false, settling = false }) {
+  fundingBlockReason, notice, settlement, onSettle, onSync, rejectionReason = "", setRejectionReason, canDeposit = true, integrityBlocked = false, settling = false, rampAddress = "", rampEmail = "" }) {
   const money = units => `${formatUnits(units ?? 0n, state?.decimals ?? 6)} ${state?.symbol ?? ""}`;
   // A passive background read never disables actions or inputs: each action
   // re-reads the chain before any wallet request, and disabling (or remounting)
@@ -114,7 +115,10 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
     disabled={disabled || !allowed || (name === "claimRefund" && refundLocked) || (name === "deposit" && (Boolean(fundingBlockReason) || !String(amount ?? "").trim() || Boolean(amountError))) || ((moderated || integrityBlocked) && !refundActions.has(name))} onClick={() => { if (name !== "claimRefund" || !refundLocked) onAction(name, extra); }}>{label}</button>;
   return <section className="card escrow-funding escrow-detail" aria-labelledby="escrow-funding-title">
     <div className="table-header"><div><h3 id="escrow-funding-title">On-chain escrow</h3><p>Arbitrum Sepolia · 50% upfront / 50% on completion</p></div>
-      <button type="button" className="secondary small" disabled={busy || loading} aria-busy={loading} onClick={onRefresh}>Refresh escrow</button></div>
+      <div className="table-header-actions">
+        <DueOnOffRamp address={rampAddress} email={rampEmail} className="secondary small" />
+        <button type="button" className="secondary small" disabled={busy || loading} aria-busy={loading} onClick={onRefresh}>Refresh escrow</button>
+      </div></div>
     {/* Background refreshes keep the verified escrow in place; only the first read shows a line here. */}
     {loading && !state && <p role="status">Reading the verified escrow…</p>}
     {!state && feedback}
@@ -240,7 +244,7 @@ export function EscrowFundingPanel(props) {
 function EscrowFundingPanelBody({ proposal, onStateChange, onConfirmed, refreshVersion = 0, integrityBlocked = false }) {
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
-  const { address, isConnected } = useWallet();
+  const { address, isConnected, email } = useWallet();
   const snapshotQuery = useEscrowSnapshot(proposal, address);
   const storageKey = pendingKey(proposal.id, address);
   const moderated = isModerated(proposal);
@@ -562,7 +566,7 @@ function EscrowFundingPanelBody({ proposal, onStateChange, onConfirmed, refreshV
   };
   useLiveActivity({ proposalId: proposal.id, channel: "funding", identity: user?.id, onRefresh: refresh,
     enabled: Boolean(proposal.id), blocked: busy || loading, triggers: "activity" });
-  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit, integrityBlocked, settling }}
+  return <><EscrowFundingView {...{ state, evidence, loading, error, busy, progress, walletReady, walletMessage, amount, setAmount, delivery, setDelivery, rejectionReason, setRejectionReason, unresolvedTransaction, moderated, fundingBlockReason, notice, canDeposit, integrityBlocked, settling, rampAddress: walletReady ? address : "", rampEmail: walletReady ? email || "" : "" }}
     settlement={settlement ?? history?.settlement} onSettle={() => synchronize({ select: true })} onSync={() => synchronize()}
     onAction={act} onRefresh={refresh} onConnect={() => { void signIn(); }} onConfirm={confirmPending} />
     {user?.id && !state?.isHistorical && <EscrowFundingHistory data={history} error={syncError || historyError} busy={busy} onSync={() => synchronize()} />}</>;

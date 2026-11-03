@@ -108,13 +108,16 @@ it("signs a token-specific faucet message and presents the faucet's cooldown mes
   fireEvent.click(screen.getByRole("button", { name: "Claim USDT" }));
   await screen.findByText("10000 test USDT claimed."); expect(services.readWalletBalances).toHaveBeenCalledTimes(2);
 });
-it("the on-ramp preview never signs, sends, claims or opens a payment window", async () => {
+it("add funds opens the testnet simulation and never signs, sends, claims or opens a payment window", async () => {
   const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
   show(); await ready(); fireEvent.click(screen.getByRole("button", { name: "Add funds" }));
-  expect(screen.getByRole("dialog", { name: "Privy on-ramp preview" })).toBeTruthy();
-  expect(screen.getByText(/Card funding is unavailable on testnet/)).toBeTruthy();
+  const dialog = screen.getByRole("dialog", { name: "Add funds" });
+  expect(dialog.textContent).toMatch(/Testnet simulation/);
+  expect(dialog.textContent).toMatch(/No request is sent to Due/);
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(state.wallet.signMessage).not.toHaveBeenCalled(); expect(services.sendWalletTokens).not.toHaveBeenCalled(); expect(services.claimWalletTokens).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); open.mockRestore();
+  expect(state.wallet.signMessage).not.toHaveBeenCalled(); expect(services.sendWalletTokens).not.toHaveBeenCalled(); expect(services.claimWalletTokens).not.toHaveBeenCalled();
+  expect(open).not.toHaveBeenCalled(); expect(fetchSpy).not.toHaveBeenCalled(); open.mockRestore(); fetchSpy.mockRestore();
 });
 it("discards balance results across an A to B to A session change", async () => {
   const old = deferred(); services.readWalletBalances.mockReturnValueOnce(old.promise);

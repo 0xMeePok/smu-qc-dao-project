@@ -45,6 +45,16 @@ function ActionCount({ read }) {
 }
 
 describe("wallet escrow funding panel", () => {
+  it("opens the testnet add-funds simulation from the escrow panel", () => {
+    render(<EscrowFundingView state={model()} walletReady amount="" delivery={{ summary: "", url: "" }} rampAddress={account} rampEmail="funder@example.com" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add funds" }));
+    const dialog = screen.getByRole("dialog", { name: "Add funds" });
+    expect(dialog.textContent).toMatch(/Testnet simulation/);
+    expect(dialog.textContent).toMatch(account);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mocks.wallet).not.toHaveBeenCalled();
+  });
   it("groups a fully refunded escrow without stale funding instructions or an empty approval deadline", () => {
     render(<EscrowFundingView state={model({ state: 3, symbol: "USDT", timestamp: 1900000000n, blockNumber: 1n,
       totalDeposited: 1000000000n, totalRefunded: 1000000000n, outstandingBalance: 0n, approvalDeadline: 0n,

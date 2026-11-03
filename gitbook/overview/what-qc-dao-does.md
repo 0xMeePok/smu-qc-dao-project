@@ -48,7 +48,7 @@ Each member has an **Action Needed** tab listing what waits on them, plus role v
 
 ### Account wallet
 
-The account menu shows the member's email, wallet address and test-token balances. It can send test tokens, claim tokens from the test-token faucet, and open an informational preview of Privy's card on-ramp, which does not work on testnets.
+The account menu shows the member's email, wallet address and test-token balances. It can send test tokens, claim tokens from the test-token faucet, and open **Add funds**. Add funds is a labelled testnet simulation of a fiat on-ramp and an off-ramp. It does not move money. The same button is on the escrow funding panel.
 
 ## What lives where
 
@@ -66,5 +66,5 @@ Evaluator comments and scores are never written on-chain.
 
 * All tokens are six-decimal mock XSGD, USDT and USDC on Arbitrum Sepolia, minted by a test faucet.
 * Gas is sponsored by Privy on testnet, so members never hold ETH.
-* The fiat on-ramp is a preview only.
+* **Add funds** is a local on-ramp and off-ramp simulation. It does not call a card provider or Due, and it does not change token balances.
 * An older off-chain mock matching flow (QCDAO-81 to 86, see `firebase/MOCK_MATCHING.md`) is still in the code. Every proposal published under the current registry uses on-chain escrow instead, and Cloud Functions refuse mock actions on escrow proposals.

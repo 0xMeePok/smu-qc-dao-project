@@ -75,3 +75,7 @@ The frontend build refuses any `VITE_PRIVY_*` variable whose name looks like a s
 5. Run `node firebase/scripts/check-csp.mjs https://<project-id>.web.app`.
 
 If sign-in fails, check the allowed origins, the App Check registration and the `PRIVY_SECRET` permissions separately. They fail in different ways, so find which one is failing before changing anything. See [Troubleshooting](../operations/troubleshooting.md).
+
+## On-ramp and off-ramp
+
+**Add funds** does not open Privy's card window. On Arbitrum Sepolia that window cannot complete a purchase. The button opens the local Due-shaped simulation described in [Due on/off-ramp simulation](due-on-off-ramp.md). Privy's gas sponsorship is unchanged: the simulation never asks the embedded wallet to sign.
