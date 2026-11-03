@@ -42,8 +42,9 @@ it('keeps author text written during a request and when suggestions are discarde
 });
 it('regenerates and clears a single untouched AI field without touching other fields', async () => {
   const services = { generate: vi.fn().mockResolvedValueOnce(output).mockResolvedValueOnce({ ...output, suggestions: { summary: 'A revised suggestion.' } }), similar: vi.fn() };
-  render(<Workspace services={services}/>); launch(); generate(); await screen.findByText('Here is an editable first draft.');
-  fireEvent.click(screen.getByRole('button', { name: 'Accept all' }));
+  render(<Workspace services={services}/>); launch(); generate();
+  await screen.findByText('Here is an editable first draft.');
+  fireEvent.click(await screen.findByRole('button', { name: 'Accept all' }));
   fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
   await waitFor(() => expect(services.generate).toHaveBeenCalledTimes(2));
   expect(services.generate.mock.calls[1][0].requestedFields).toEqual(['summary']);
