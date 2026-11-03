@@ -1,7 +1,6 @@
 import { useId, useState } from "react";
-import { httpsCallable } from "firebase/functions";
-import { functions } from "../lib/firebase.js";
 import { formatInstant } from "../lib/datetime.js";
+import { runDueRampMock } from "../lib/dueRampMock.js";
 import { Modal } from "./Modal.jsx";
 
 const CURRENCIES = [
@@ -30,10 +29,8 @@ function failure(error) {
   return text && text.length <= 500 && !/[\r\n]/.test(text) ? text : "Due sandbox could not complete this request.";
 }
 
-async function callDue(data) {
-  if (!functions) throw new Error("Due sandbox is not configured. Add DUE_API_KEY in firebase/functions/.env and restart the emulators.");
-  const response = await httpsCallable(functions, "dueSandbox", { timeout: 60_000 })(data);
-  return response.data;
+async function callDue(data, address) {
+  return runDueRampMock(data, address);
 }
 
 function QuoteSummary({ quote }) {
@@ -67,7 +64,7 @@ function DueRampDialog({ address, onDismiss }) {
     setBusy(true);
     setError("");
     try {
-      const result = await callDue({ action: "quote", direction, currency, amount });
+      const result = await callDue({ action: "quote", direction, currency, amount }, address);
       setQuote(result.quote);
       setStep("review");
     } catch (cause) {
@@ -81,7 +78,7 @@ function DueRampDialog({ address, onDismiss }) {
     setBusy(true);
     setError("");
     try {
-      const result = await callDue({ action: "create", direction, currency, quoteToken: quote.token });
+      const result = await callDue({ action: "create", direction, currency, quoteToken: quote.token }, address);
       setTransfer(result.transfer);
       setStep("instructions");
     } catch (cause) {
@@ -95,7 +92,7 @@ function DueRampDialog({ address, onDismiss }) {
     setBusy(true);
     setError("");
     try {
-      const result = await callDue({ action: "payin", transferId: transfer.id });
+      const result = await callDue({ action: "payin", transferId: transfer.id }, address);
       setTransfer(result.transfer);
       setStep("result");
     } catch (cause) {
@@ -109,7 +106,7 @@ function DueRampDialog({ address, onDismiss }) {
     setBusy(true);
     setError("");
     try {
-      const result = await callDue({ action: "status", transferId: transfer.id });
+      const result = await callDue({ action: "status", transferId: transfer.id }, address);
       setTransfer(result.transfer);
       setStep("result");
     } catch (cause) {
@@ -190,7 +187,7 @@ function DueRampDialog({ address, onDismiss }) {
   </Modal>;
 }
 
-/** Add funds entry point. The dialog calls the dueSandbox function, which holds the sandbox key. */
+/** Add funds entry point. The dialog walks the mocked Due sandbox flow and does not create a Due account. */
 export function DueOnOffRamp({ address = "", className = "" }) {
   const [open, setOpen] = useState(false);
   return <>

@@ -1,29 +1,14 @@
 # Due sandbox on/off-ramp
 
-**Add funds** on the account menu and on the escrow panel calls Due's sandbox. The browser never sees the API key and never calls Due itself. The `dueSandbox` Cloud Function does.
+**Add funds** on the account menu and on the escrow panel keeps the Due sandbox screens. No Due account is created and no request is sent to Due. A platform key is not available, so the quote, bank details, funding reference, and pay-in result are simulated. The dialog is labelled **Testnet simulation**. Nothing is charged and no token moves.
 
-Every Due request is locked to `https://api.sandbox.due.network`. There is no setting that points it at `https://api.due.network`. A key whose value contains `live` is a production key. Do not use it. A sandbox key comes from [app.sandbox.due.network](https://app.sandbox.due.network), or from [demo@due.network](mailto:demo@due.network) if that workspace has no API key section.
+The page does not read `DUE_API_KEY`. A signed-in member can finish both a buy and a sale without a Due account. The simulated account id is `acct_mock_` plus part of the wallet address. **Simulate sandbox pay-in** only changes the simulated status to `payment_processed`. The sale shows `mock-funding-tf_1`, which is not a wallet address.
 
-## Where the key goes
+`dueSandbox` returns the same simulation for a deployed callable and does not call `api.sandbox.due.network`. Replace `handleDueSandbox` in `firebase/functions/dueSandboxFunctions.js` and `runDueRampMock` in `frontend/src/lib/dueRampMock.js` when a sandbox platform key exists.
 
-`dueSandbox` reads `process.env.DUE_API_KEY`. It does not read Firebase Secret Manager, so `firebase functions:secrets:set DUE_API_KEY` has no effect on this function. Versions already stored there can be left in place. They are not mounted.
+## What to click
 
-| Place | Put the sandbox key here? |
-| --- | --- |
-| `firebase/functions/.env` | Yes, for the emulator and for a deploy from your laptop. Restart the emulators after saving |
-| GitHub repository secret `DUE_API_KEY` | Yes, for a deploy from GitHub Actions. The backend job writes it into the generated `firebase/functions/.env` |
-| `firebase/functions/.secret.local` | No. That file is for `PRIVY_SECRET` and the other Secret Manager values |
-| `frontend/.env.local` or any `VITE_` name | No. Those values are shipped in the public site |
-| Firebase Secret Manager | No. This function does not bind a secret |
-
-`.env` is git-ignored. A laptop deploy uploads that file with the functions. A GitHub deploy replaces the file from the workflow, so the repository secret is what production receives. If the secret is missing, the rest of the deploy still runs and **Add funds** reports that the key is missing.
-
-## What the screen does
-
-The dialog offers **Buy USDC** and **Sell USDC**, then a currency and an amount. **Review quote** asks Due's sandbox for a quote. **Create sandbox transfer** creates the transfer there.
-
-A buy shows the sandbox bank details Due returns. **Simulate sandbox pay-in** calls Due's sandbox-only `POST /dev/payin`. A sale shows the funding address Due returns. Due matches only its own sandbox USDC, sent from the linked wallet for the exact quoted amount. The QC DAO faucet token is a different token and is not credited.
-
-The function creates a sandbox account for the signed-in email and links the embedded wallet. It stores the Due account id in `dueSandboxLinks/{wallet}`, which clients cannot read.
-
-The deployed function uses the same two Due sandbox commands as the emulator. One approves sandbox KYC (`POST /dev/sumsub/applicants/{accountId}/approve`). The other marks a bank payment as received (`POST /dev/payin`) when a member chooses **Simulate sandbox pay-in**. Both are sent only to `https://api.sandbox.due.network`. They do not exist on Due's production host, and this function cannot call that host.
+1. Sign in and open **Add funds** from the account menu, or from an escrow panel.
+2. Leave **Buy USDC** and USD. Enter `100`. Choose **Review quote**, **Continue to confirmation**, and **Create sandbox transfer**.
+3. The bank is "QC DAO testnet bank" and the account number is all zeroes. Choose **Simulate sandbox pay-in**. The status becomes `payment_processed`. The wallet balance does not change.
+4. Open **Add funds** again. Choose **Sell USDC**, enter `100`, and create the transfer. The funding reference starts with `mock-funding-`. There is no **Send** button. **Check status** leaves it at `awaiting_funds`.

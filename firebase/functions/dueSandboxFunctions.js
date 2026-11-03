@@ -1,21 +1,15 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { isAuthTimeRevoked, SESSION_REVOCATIONS_COLLECTION } from "./adminActions.js";
-import {
-  DueSandboxError,
-  assertAmount,
-  dueSandboxRequest,
-  presentQuote,
-  presentTransfer,
-  sandboxRecipient,
-  selectChannels,
-} from "./dueSandboxClient.js";
+import { DueSandboxError, assertAmount } from "./dueSandboxClient.js";
 
 const CURRENCIES = new Set(["USD", "EUR", "SGD"]);
+const RATES = { USD: 1, EUR: 0.92, SGD: 1.35 };
+const RAILS = { USD: "ach", EUR: "sepa", SGD: "fast" };
 
 function reject(error) {
   if (error instanceof DueSandboxError) throw new HttpsError(error.code, error.message);
   if (error instanceof HttpsError) throw error;
-  throw new HttpsError("unavailable", "Due sandbox could not be reached. Try again in a moment.");
+  throw new HttpsError("unavailable", "The testnet ramp could not be completed. Try again in a moment.");
 }
 
 async function requireMember(request, db) {
@@ -32,144 +26,83 @@ async function requireMember(request, db) {
   return { uid, profile: profile.data() };
 }
 
-async function ensureLink({ db, apiKey, fetchImpl, uid, profile }) {
-  const ref = db.collection("dueSandboxLinks").doc(uid);
-  const saved = (await ref.get()).data() || {};
-  const email = typeof profile.email === "string" ? profile.email.trim().toLowerCase() : "";
-  if (!email) throw new DueSandboxError("This account has no email for Due sandbox.");
-  const parts = String(profile.fullName || "QC DAO Member").trim().split(/\s+/).filter(Boolean);
-  const firstName = (parts[0] || "QC").slice(0, 40);
-  const lastName = (parts.slice(1).join(" ") || "Member").slice(0, 40);
-  let accountId = saved.accountId;
-  if (!accountId) {
-    const created = await dueSandboxRequest({
-      apiKey, fetchImpl, method: "POST", path: "/v1/accounts",
-      body: { type: "individual", email, details: { firstName, lastName } },
-    });
-    accountId = created.id || created.accountId;
-    if (!accountId) throw new DueSandboxError("Due sandbox did not return an account id.");
-  }
-  let walletId = saved.walletId && saved.address === uid ? saved.walletId : "";
-  if (!walletId) {
-    const wallet = await dueSandboxRequest({
-      apiKey, fetchImpl, method: "POST", path: "/v1/wallets", accountId,
-      body: { address: uid },
-    });
-    walletId = wallet.id || wallet.walletId;
-    if (!walletId) throw new DueSandboxError("Due sandbox did not link this wallet.");
-  }
-  // Sandbox-only route. dueSandboxRequest refuses any host other than api.sandbox.due.network.
-  await dueSandboxRequest({
-    apiKey, fetchImpl, method: "POST", path: `/dev/sumsub/applicants/${encodeURIComponent(accountId)}/approve`, accountId,
-  }).catch(() => {});
-  const link = { accountId, walletId, address: uid, email };
-  await ref.set(link, { merge: true });
-  return link;
+function money(value) {
+  return (Math.round(value * 100) / 100).toFixed(2);
 }
 
-async function railsFor(apiKey, fetchImpl, accountId, currency) {
-  const channels = await dueSandboxRequest({ apiKey, fetchImpl, path: "/v1/channels", accountId });
-  return selectChannels(channels, currency);
+function accountFor(uid) {
+  return { accountId: `acct_mock_${uid.slice(2, 10).toLowerCase()}`, walletId: `wlt_mock_${uid.slice(2, 10).toLowerCase()}`, address: uid };
 }
 
-async function quote({ apiKey, fetchImpl, link, direction, currency, amount }) {
-  const rails = await railsFor(apiKey, fetchImpl, link.accountId, currency);
-  const source = direction === "onramp"
-    ? { rail: rails.fiatRail, currency, amount }
-    : { rail: rails.arbitrumRail, currency: "USDC", amount };
-  const destination = direction === "onramp"
-    ? { rail: rails.arbitrumRail, currency: "USDC" }
-    : { rail: rails.fiatRail, currency };
-  const quoted = await dueSandboxRequest({
-    apiKey, fetchImpl, method: "POST", path: "/v1/transfers/quote", accountId: link.accountId,
-    body: { source, destination },
-  });
-  const view = presentQuote(quoted);
-  if (!view.token) throw new DueSandboxError("Due sandbox did not return a quote.");
-  return { quote: view, rails };
+function buildQuote({ direction, currency, amount }) {
+  const value = Number(assertAmount(amount));
+  const rate = RATES[currency];
+  const fee = Math.max(0.5, Math.round(value * 0.5) / 100);
+  if (fee >= value) throw new DueSandboxError("Enter a larger amount. The simulated fee would use the whole payment.", "invalid-argument");
+  const net = value - fee;
+  const expiresAt = new Date(Date.now() + 120_000).toISOString();
+  const token = `mock.${direction}.${currency}.${money(value)}`;
+  if (direction === "onramp") {
+    return {
+      token,
+      source: { rail: RAILS[currency], currency, amount: money(value), fee: money(fee) },
+      destination: { rail: "arbitrum-sepolia", currency: "USDC", amount: money(net / rate), fee: "0.00" },
+      fxRate: money(rate),
+      expiresAt,
+    };
+  }
+  return {
+    token,
+    source: { rail: "arbitrum-sepolia", currency: "USDC", amount: money(value), fee: money(fee) },
+    destination: { rail: RAILS[currency], currency, amount: money(net * rate), fee: "0.00" },
+    fxRate: money(rate),
+    expiresAt,
+  };
 }
 
-async function createTransfer({ apiKey, fetchImpl, db, uid, link, profile, direction, currency, quoteToken }) {
-  const token = typeof quoteToken === "string" ? quoteToken.trim() : "";
-  if (token.length < 10 || token.length > 4000 || /[\r\n]/.test(token)) {
-    throw new DueSandboxError("Review a new quote before creating the transfer.", "invalid-argument");
-  }
-  const rails = await railsFor(apiKey, fetchImpl, link.accountId, currency);
-  let recipient = direction === "onramp" ? link.walletId : "";
-  if (direction === "offramp") {
-    const ref = db.collection("dueSandboxLinks").doc(uid);
-    const saved = (await ref.get()).data()?.recipients || {};
-    recipient = saved[currency] || "";
-    if (!recipient) {
-      const schema = rails.fiatSchema || (currency === "EUR" ? "bank_sepa" : currency === "USD" ? "bank_us" : "bank_sg");
-      const body = sandboxRecipient(schema, profile.fullName);
-      if (!body) throw new DueSandboxError(`Due sandbox has no known bank format for ${currency}.`);
-      const created = await dueSandboxRequest({
-        apiKey, fetchImpl, method: "POST", path: "/v1/recipients", accountId: link.accountId, body,
-      });
-      recipient = created.id;
-      if (!recipient) throw new DueSandboxError("Due sandbox did not create a recipient.");
-      await ref.set({ recipients: { [currency]: recipient } }, { merge: true });
-    }
-  }
-  const transfer = await dueSandboxRequest({
-    apiKey, fetchImpl, method: "POST", path: "/v1/transfers", accountId: link.accountId,
-    body: direction === "onramp"
-      ? { quote: token, recipient, memo: "QC DAO sandbox" }
-      : { quote: token, sender: link.walletId, recipient, memo: "QC DAO sandbox" },
-  });
-  let funding = null;
-  if (direction === "offramp" && transfer.id) {
-    funding = await dueSandboxRequest({
-      apiKey, fetchImpl, method: "POST", path: `/v1/transfers/${encodeURIComponent(transfer.id)}/funding_address`, accountId: link.accountId,
-    });
-  }
-  return presentTransfer({ ...transfer, fundingAddress: funding });
-}
-
-export async function handleDueSandbox(request, { db, apiKey = process.env.DUE_API_KEY, fetchImpl = fetch }) {
+/**
+ * QCDAO-151 mock. The dialog stays the same, but no Due account is created and
+ * no request is sent to Due. Swap this function for dueSandboxRequest calls
+ * when a sandbox platform key exists.
+ */
+export async function handleDueSandbox(request, { db }) {
   try {
-    const { uid, profile } = await requireMember(request, db);
+    const { uid } = await requireMember(request, db);
     const data = request.data || {};
-    const action = data.action;
-    const link = await ensureLink({ db, apiKey, fetchImpl, uid, profile });
-    if (action === "quote") {
+    const account = accountFor(uid);
+    const ref = db.collection("dueSandboxLinks").doc(uid);
+    const saved = (await ref.get()).data() || {};
+    if (data.action === "quote") {
       const direction = data.direction === "offramp" ? "offramp" : data.direction === "onramp" ? "onramp" : "";
       if (!direction) throw new DueSandboxError("Choose buy USDC or sell USDC.", "invalid-argument");
       if (!CURRENCIES.has(data.currency)) throw new DueSandboxError("Choose USD, EUR, or SGD.", "invalid-argument");
-      const amount = assertAmount(data.amount);
-      const quoted = await quote({ apiKey, fetchImpl, link, direction, currency: data.currency, amount });
-      return { accountId: link.accountId, walletId: link.walletId, address: uid, quote: quoted.quote };
+      const quote = buildQuote({ direction, currency: data.currency, amount: data.amount });
+      await ref.set({ ...account, quotes: { ...(saved.quotes || {}), [quote.token]: { direction, currency: data.currency, amount: data.amount } } }, { merge: true });
+      return { ...account, quote };
     }
-    if (action === "create") {
+    if (data.action === "create") {
       const direction = data.direction === "offramp" ? "offramp" : "onramp";
       if (!CURRENCIES.has(data.currency)) throw new DueSandboxError("Choose USD, EUR, or SGD.", "invalid-argument");
-      const transfer = await createTransfer({
-        apiKey, fetchImpl, db, uid, link, profile, direction, currency: data.currency, quoteToken: data.quoteToken,
-      });
-      return { accountId: link.accountId, address: uid, transfer };
+      const known = saved.quotes?.[data.quoteToken];
+      if (!known) throw new DueSandboxError("Review a new quote before creating the transfer.", "invalid-argument");
+      const quote = buildQuote(known);
+      const count = Object.keys(saved.transfers || {}).length + 1;
+      const id = `tf_${count}`;
+      const transfer = direction === "offramp"
+        ? { id, status: "awaiting_funds", fundingAddress: `mock-funding-${id}`, source: quote.source, destination: quote.destination }
+        : {
+          id, status: "awaiting_funds", memo: `SIM-${id}`, source: quote.source, destination: quote.destination,
+          details: { bankName: "QC DAO testnet bank", accountName: "QC DAO testnet beneficiary", accountNumber: "0000000000", routingNumber: "000000000" },
+        };
+      await ref.set({ transfers: { ...(saved.transfers || {}), [id]: transfer } }, { merge: true });
+      return { ...account, transfer };
     }
-    if (action === "payin" || action === "status") {
-      const transferId = typeof data.transferId === "string" && /^[A-Za-z0-9_-]{4,80}$/.test(data.transferId) ? data.transferId : "";
-      if (!transferId) throw new DueSandboxError("That transfer could not be found.", "invalid-argument");
-      if (action === "payin") {
-        const current = await dueSandboxRequest({
-          apiKey, fetchImpl, path: `/v1/transfers/${encodeURIComponent(transferId)}`, accountId: link.accountId,
-        });
-        await dueSandboxRequest({
-          apiKey, fetchImpl, method: "POST", path: "/dev/payin", accountId: link.accountId,
-          body: {
-            currency: current.source?.currency,
-            rail: current.source?.rail,
-            amount: current.source?.amount,
-            reference: current.transferInstructions?.memo || transferId,
-          },
-        });
-      }
-      const updated = await dueSandboxRequest({
-        apiKey, fetchImpl, path: `/v1/transfers/${encodeURIComponent(transferId)}`, accountId: link.accountId,
-      });
-      return { transfer: presentTransfer(updated) };
+    if (data.action === "payin" || data.action === "status") {
+      const transfer = saved.transfers?.[data.transferId];
+      if (!transfer) throw new DueSandboxError("That transfer could not be found.", "invalid-argument");
+      const next = data.action === "payin" ? { ...transfer, status: "payment_processed" } : transfer;
+      if (data.action === "payin") await ref.set({ transfers: { ...(saved.transfers || {}), [transfer.id]: next } }, { merge: true });
+      return { transfer: next };
     }
     throw new DueSandboxError("Choose a Due sandbox action.", "invalid-argument");
   } catch (error) {

@@ -18,13 +18,12 @@ Ask for maintain or admin access to the repository, then check that the list und
 | `VITE_FIREBASE_STORAGE_BUCKET` | Bucket name | Frontend build. Without it, attachments report that Storage is not configured |
 | `FIREWORKS_API_KEY` | Fireworks AI API key | AI security review |
 | `OPENAI_API_KEY` | Restricted OpenAI project key | App drafting: backend deploy copies it to Google Secret Manager. Also used by AI security review if that provider is selected |
-| `DUE_API_KEY` | Due sandbox API key, not a key containing `live` | Backend deploy writes it into `firebase/functions/.env` for the `dueSandbox` function. It is not stored in Secret Manager. Add funds fails closed when this secret is absent |
 
 The `VITE_FIREBASE_*` values are public identifiers. They are kept as secrets so each fork supplies its own.
 
 The `deploy-backend` job in `ci.yml` provisions `OPENAI_API_KEY` in Google Secret Manager after the required **CI** checks pass on `main`. The job uses repository secrets; it does not select a GitHub Environment. A supplied key creates a new secret version, and the temporary key file and Firebase debug logs are removed afterwards. If the repository secret is absent, an existing provisioned Secret Manager key is required. The key never enters the frontend build or the functions `.env` file. See [AI assistance deployment](https://github.com/0xMeePok/smu-qc-dao-project/blob/main/docs/ai-assistance.md#keys-and-deployment) for permissions and limits.
 
-`DUE_API_KEY` is the opposite shape. The same job writes the repository secret into `firebase/functions/.env` and does not call `functions:secrets:set` for it. The function reads that variable and sends it only to `https://api.sandbox.due.network`.
+Add funds does not use a Due API key or a GitHub secret. See [Due sandbox on/off-ramp](due-on-off-ramp.md).
 
 ## Variables
 
