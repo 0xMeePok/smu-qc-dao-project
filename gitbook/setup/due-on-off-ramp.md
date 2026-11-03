@@ -26,4 +26,4 @@ A buy shows the sandbox bank details Due returns. **Simulate sandbox pay-in** ca
 
 The function creates a sandbox account for the signed-in email and links the embedded wallet. It stores the Due account id in `dueSandboxLinks/{wallet}`, which clients cannot read.
 
-Two Due `/dev` commands stay inside the local emulator, where `FUNCTIONS_EMULATOR=true`. A deployed function does not call them. One approves sandbox KYC (`POST /dev/sumsub/applicants/{accountId}/approve`). The other marks a bank payment as received (`POST /dev/payin`). On the deployed site, KYC follows Due's normal sandbox review, and a buy waits for a real sandbox pay-in rather than a button in QC DAO.
+The deployed function uses the same two Due sandbox commands as the emulator. One approves sandbox KYC (`POST /dev/sumsub/applicants/{accountId}/approve`). The other marks a bank payment as received (`POST /dev/payin`) when a member chooses **Simulate sandbox pay-in**. Both are sent only to `https://api.sandbox.due.network`. They do not exist on Due's production host, and this function cannot call that host.
