@@ -53,7 +53,7 @@ const open = () => {
 it("asks the dueSandbox function for a buy quote and shows the bank details it returns", async () => {
   const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
   const dialog = open();
-  expect(within(dialog).getByText(/api\.sandbox\.due\.network/)).toBeTruthy();
+  expect(within(dialog).getByText("Testnet simulation")).toBeTruthy();
   expect(within(dialog).getByText(address)).toBeTruthy();
   fireEvent.change(within(dialog).getByLabelText("Amount (USD)"), { target: { value: "100.00" } });
   fireEvent.click(within(dialog).getByRole("button", { name: "Review quote" }));

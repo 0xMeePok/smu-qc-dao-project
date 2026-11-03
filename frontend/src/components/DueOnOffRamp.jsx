@@ -50,7 +50,6 @@ function QuoteSummary({ quote }) {
 
 function DueRampDialog({ address, onDismiss }) {
   const titleId = `due-ramp-${useId().replace(/:/g, "")}`;
-  const bannerId = `${titleId}-banner`;
   const amountId = `${titleId}-amount`;
   const [step, setStep] = useState("details");
   const [direction, setDirection] = useState("onramp");
@@ -121,13 +120,12 @@ function DueRampDialog({ address, onDismiss }) {
   };
 
   const detailEntries = Object.entries(transfer?.details || {}).filter(([, value]) => value && value !== transfer?.fundingAddress);
-  return <Modal labelledBy={titleId} describedBy={bannerId} onDismiss={onDismiss} className="due-ramp-modal">
+  return <Modal labelledBy={titleId} onDismiss={onDismiss} className="due-ramp-modal">
     <header className="modal-head"><div>
       <h2 id={titleId}>Add funds</h2>
       <p>Testnet simulation</p>
     </div></header>
     <div className="modal-body">
-      <p className="due-ramp-banner" id={bannerId}>Due sandbox, not Due production. Every request goes to api.sandbox.due.network. Due accepts the sandbox API key on the functions server, not in this page.</p>
       {step === "details" && <form id={`${titleId}-details`} className="due-ramp-grid" onSubmit={review}>
         {address && <p className="field-hint">Linked wallet <code>{address}</code></p>}
         <fieldset className="due-ramp-directions">
