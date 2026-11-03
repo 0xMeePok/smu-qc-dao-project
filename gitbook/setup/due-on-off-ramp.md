@@ -24,4 +24,6 @@ The dialog offers **Buy USDC** and **Sell USDC**, then a currency and an amount.
 
 A buy shows the sandbox bank details Due returns. **Simulate sandbox pay-in** calls Due's sandbox-only `POST /dev/payin`. A sale shows the funding address Due returns. Due matches only its own sandbox USDC, sent from the linked wallet for the exact quoted amount. The QC DAO faucet token is a different token and is not credited.
 
-The function also creates a sandbox account for the signed-in email, links the embedded wallet, and asks the sandbox to approve KYC. It stores the Due account id in `dueSandboxLinks/{wallet}`, which clients cannot read.
+The function creates a sandbox account for the signed-in email and links the embedded wallet. It stores the Due account id in `dueSandboxLinks/{wallet}`, which clients cannot read.
+
+Two Due `/dev` commands stay inside the local emulator, where `FUNCTIONS_EMULATOR=true`. A deployed function does not call them. One approves sandbox KYC (`POST /dev/sumsub/applicants/{accountId}/approve`). The other marks a bank payment as received (`POST /dev/payin`). On the deployed site, KYC follows Due's normal sandbox review, and a buy waits for a real sandbox pay-in rather than a button in QC DAO.

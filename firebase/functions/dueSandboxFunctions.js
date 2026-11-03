@@ -12,6 +12,11 @@ import {
 
 const CURRENCIES = new Set(["USD", "EUR", "SGD"]);
 
+/** Due's /dev commands approve identity and invent a bank payment. The emulator may use them. A deployed function must not. */
+export function sandboxDevCommandsAllowed(env = process.env) {
+  return env.FUNCTIONS_EMULATOR === "true";
+}
+
 function reject(error) {
   if (error instanceof DueSandboxError) throw new HttpsError(error.code, error.message);
   if (error instanceof HttpsError) throw error;
@@ -32,7 +37,7 @@ async function requireMember(request, db) {
   return { uid, profile: profile.data() };
 }
 
-async function ensureLink({ db, apiKey, fetchImpl, uid, profile }) {
+async function ensureLink({ db, apiKey, fetchImpl, uid, profile, allowDevCommands }) {
   const ref = db.collection("dueSandboxLinks").doc(uid);
   const saved = (await ref.get()).data() || {};
   const email = typeof profile.email === "string" ? profile.email.trim().toLowerCase() : "";
@@ -58,9 +63,11 @@ async function ensureLink({ db, apiKey, fetchImpl, uid, profile }) {
     walletId = wallet.id || wallet.walletId;
     if (!walletId) throw new DueSandboxError("Due sandbox did not link this wallet.");
   }
-  await dueSandboxRequest({
-    apiKey, fetchImpl, method: "POST", path: `/dev/sumsub/applicants/${encodeURIComponent(accountId)}/approve`, accountId,
-  }).catch(() => {});
+  if (allowDevCommands) {
+    await dueSandboxRequest({
+      apiKey, fetchImpl, method: "POST", path: `/dev/sumsub/applicants/${encodeURIComponent(accountId)}/approve`, accountId,
+    }).catch(() => {});
+  }
   const link = { accountId, walletId, address: uid, email };
   await ref.set(link, { merge: true });
   return link;
@@ -126,12 +133,12 @@ async function createTransfer({ apiKey, fetchImpl, db, uid, link, profile, direc
   return presentTransfer({ ...transfer, fundingAddress: funding });
 }
 
-export async function handleDueSandbox(request, { db, apiKey = process.env.DUE_API_KEY, fetchImpl = fetch }) {
+export async function handleDueSandbox(request, { db, apiKey = process.env.DUE_API_KEY, fetchImpl = fetch, allowDevCommands = sandboxDevCommandsAllowed() }) {
   try {
     const { uid, profile } = await requireMember(request, db);
     const data = request.data || {};
     const action = data.action;
-    const link = await ensureLink({ db, apiKey, fetchImpl, uid, profile });
+    const link = await ensureLink({ db, apiKey, fetchImpl, uid, profile, allowDevCommands });
     if (action === "quote") {
       const direction = data.direction === "offramp" ? "offramp" : data.direction === "onramp" ? "onramp" : "";
       if (!direction) throw new DueSandboxError("Choose buy USDC or sell USDC.", "invalid-argument");
@@ -152,6 +159,7 @@ export async function handleDueSandbox(request, { db, apiKey = process.env.DUE_A
       const transferId = typeof data.transferId === "string" && /^[A-Za-z0-9_-]{4,80}$/.test(data.transferId) ? data.transferId : "";
       if (!transferId) throw new DueSandboxError("That transfer could not be found.", "invalid-argument");
       if (action === "payin") {
+        if (!allowDevCommands) throw new DueSandboxError("Sandbox pay-in simulation is only available in the local emulator.", "permission-denied");
         const current = await dueSandboxRequest({
           apiKey, fetchImpl, path: `/v1/transfers/${encodeURIComponent(transferId)}`, accountId: link.accountId,
         });
