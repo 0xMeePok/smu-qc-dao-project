@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { HttpsError } from "firebase-functions/v2/https";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+import { revokeOwnSessions } from "../index.js";
+import { memoryDb } from "./memoryDb.mjs";
 import {
   applyRoleChangeTransaction,
+  applySuspensionChangeTransaction,
   finalizeSuspensionRevocation,
   isAuthTimeRevoked,
 } from "../adminActions.js";
@@ -166,5 +171,201 @@ describe("QCDAO-129 auth_time cutoff", () => {
 
   it("does not revoke when no cutoff has been written", () => {
     assert.equal(isAuthTimeRevoked(101, undefined, null), false);
+  });
+});
+
+describe("revokeOwnSessions replay protection", () => {
+  const uid = `0x${"a".repeat(40)}`;
+  const userPath = `users/${uid}`;
+  const cutoffPath = `sessionRevocations/${uid}`;
+  const request = (authTime) => ({ auth: { uid, token: { auth_time: authTime } } });
+  const audits = (db) => [...db.records].filter(([path]) => path.startsWith("audits/"));
+
+  function mockServices(t, initial, revoke = async () => {}) {
+    const db = memoryDb(initial);
+    t.mock.method(getFirestore(), "collection", db.collection.bind(db));
+    t.mock.method(getFirestore(), "runTransaction", db.runTransaction.bind(db));
+    const auth = t.mock.method(getAuth(), "revokeRefreshTokens", revoke);
+    t.mock.method(Date, "now", () => 200_000);
+    return { db, auth };
+  }
+
+  for (const source of ["profile", "marker"]) {
+    for (const authTime of [100, 101]) {
+      it(`leaves a newer session intact when a ${source}-revoked token has auth_time ${authTime}`, async (t) => {
+        const initial = { [userPath]: { fullName: "Member" } };
+        if (source === "profile") initial[userPath].sessionsValidAfterEpoch = 101;
+        else initial[cutoffPath] = { sessionsValidAfterEpoch: 101 };
+        const { db, auth } = mockServices(t, initial);
+        const before = [...db.records];
+
+        assert.deepEqual(await revokeOwnSessions.run(request(authTime)), {
+          success: true, scope: "all-devices", revokedAfterEpoch: 101,
+        });
+        assert.deepEqual([...db.records], before, "replay must not write cutoffs, profile timestamps, or audits");
+        assert.equal(auth.mock.callCount(), 0, "replay must not revoke newer Firebase refresh tokens");
+        assert.equal(isAuthTimeRevoked(102, db.records.get(userPath)?.sessionsValidAfterEpoch,
+          db.records.get(cutoffPath)?.sessionsValidAfterEpoch), false);
+      });
+    }
+  }
+
+  it("uses the higher cutoff when only the profile revokes the token", async (t) => {
+    const { db, auth } = mockServices(t, {
+      [userPath]: { sessionsValidAfterEpoch: 103 }, [cutoffPath]: { sessionsValidAfterEpoch: 101 },
+    });
+    const before = [...db.records];
+    assert.equal((await revokeOwnSessions.run(request(102))).revokedAfterEpoch, 103);
+    assert.deepEqual([...db.records], before);
+    assert.equal(auth.mock.callCount(), 0);
+  });
+
+  it("lets a newer authenticated session revoke all sessions exactly once", async (t) => {
+    const { db, auth } = mockServices(t, {
+      [userPath]: { fullName: "Member", sessionsValidAfterEpoch: 100 },
+      [cutoffPath]: { sessionsValidAfterEpoch: 101 },
+    });
+    assert.deepEqual(await revokeOwnSessions.run(request(102)), {
+      success: true, scope: "all-devices", revokedAfterEpoch: 200,
+    });
+    assert.equal(db.records.get(userPath).sessionsValidAfterEpoch, 200);
+    assert.equal(db.records.get(userPath).fullName, "Member");
+    assert.equal(db.records.get(cutoffPath).sessionsValidAfterEpoch, 200);
+    assert.equal(audits(db).length, 1);
+    assert.equal(audits(db)[0][1].action, "SESSIONS_REVOKED_BY_USER");
+    assert.equal(auth.mock.callCount(), 1);
+    assert.deepEqual(auth.mock.calls[0].arguments, [uid]);
+
+    const beforeReplay = [...db.records];
+    Date.now.mock.mockImplementation(() => 300_000);
+    assert.equal((await revokeOwnSessions.run(request(102))).revokedAfterEpoch, 200);
+    assert.deepEqual([...db.records], beforeReplay);
+    assert.equal(auth.mock.callCount(), 1);
+    assert.equal(isAuthTimeRevoked(201, db.records.get(cutoffPath).sessionsValidAfterEpoch), false);
+  });
+
+  it("supports first logout and harmless replay before a profile exists", async (t) => {
+    const { db, auth } = mockServices(t, {});
+    assert.equal((await revokeOwnSessions.run(request(100))).revokedAfterEpoch, 200);
+    assert.equal(db.records.has(userPath), false);
+    assert.equal(db.records.get(cutoffPath).sessionsValidAfterEpoch, 200);
+    assert.equal(audits(db).length, 1);
+    assert.equal(auth.mock.callCount(), 1);
+    const beforeReplay = [...db.records];
+    Date.now.mock.mockImplementation(() => 300_000);
+    assert.equal((await revokeOwnSessions.run(request(100))).revokedAfterEpoch, 200);
+    assert.deepEqual([...db.records], beforeReplay);
+    assert.equal(auth.mock.callCount(), 1);
+  });
+
+  it("does not repeat Auth revocation when concurrent requests share one token", async (t) => {
+    const { db, auth } = mockServices(t, { [userPath]: { fullName: "Member" } });
+    const results = await Promise.all([revokeOwnSessions.run(request(100)), revokeOwnSessions.run(request(100))]);
+    assert.equal(results.every((result) => result.success && result.revokedAfterEpoch === 200), true);
+    assert.equal(audits(db).length, 1);
+    assert.equal(auth.mock.callCount(), 1);
+  });
+
+  it("allows local logout retry after Auth fails without revoking a later session", async (t) => {
+    const { db, auth } = mockServices(t, { [userPath]: { fullName: "Member" } }, async () => {
+      throw new Error("Auth unavailable");
+    });
+    await assert.rejects(revokeOwnSessions.run(request(100)), { code: "unavailable" });
+    const beforeRetry = [...db.records];
+    Date.now.mock.mockImplementation(() => 300_000);
+    assert.deepEqual(await revokeOwnSessions.run(request(100)), {
+      success: true, scope: "all-devices", revokedAfterEpoch: 200,
+    });
+    assert.deepEqual([...db.records], beforeRetry);
+    assert.equal(auth.mock.callCount(), 1);
+    assert.equal(isAuthTimeRevoked(201, db.records.get(cutoffPath).sessionsValidAfterEpoch), false);
+  });
+});
+
+describe("suspension session cutoff monotonicity", () => {
+  const uid = `0x${"b".repeat(40)}`;
+  const userPath = `users/${uid}`;
+  const cutoffPath = `sessionRevocations/${uid}`;
+  const auditPath = "audits/suspension";
+  const options = (db, overrides = {}) => ({
+    targetRef: db.collection("users").doc(uid),
+    revocationRef: db.collection("sessionRevocations").doc(uid),
+    auditRef: db.collection("audits").doc("suspension"),
+    actorUid: "administrator", adminUser: { fullName: "Administrator" },
+    targetAddress: uid, suspended: true, reason: "Suspend compromised account",
+    timestamp: { seconds: 100 }, revokedAfterEpoch: 100, ...overrides,
+  });
+
+  for (const [name, profileCutoff, markerCutoff, expected] of [
+    ["profile cutoff", 103, 101, 103],
+    ["marker cutoff", 101, 103, 103],
+    ["incoming cutoff", 98, 99, 100],
+    ["first cutoff", undefined, undefined, 100],
+  ]) {
+    it(`preserves the highest ${name} in both stores`, async () => {
+      const initial = { [userPath]: { suspended: false } };
+      if (profileCutoff !== undefined) initial[userPath].sessionsValidAfterEpoch = profileCutoff;
+      if (markerCutoff !== undefined) initial[cutoffPath] = { sessionsValidAfterEpoch: markerCutoff };
+      const db = memoryDb(initial);
+      await db.runTransaction((tx) => applySuspensionChangeTransaction(tx, options(db)));
+
+      assert.equal(db.records.get(userPath).suspended, true);
+      assert.equal(db.records.get(userPath).sessionsValidAfterEpoch, expected);
+      assert.equal(db.records.get(cutoffPath).sessionsValidAfterEpoch, expected);
+      assert.equal(db.records.get(auditPath).action, "USER_SUSPENDED");
+      assert.equal(isAuthTimeRevoked(expected, expected), true, "same-second tokens remain revoked");
+      assert.equal(isAuthTimeRevoked(expected + 1, expected), false);
+      assert.equal(db.reads, 2);
+    });
+  }
+
+  it("keeps logout's newer cutoff when a suspension timestamp precedes its delayed first read", async () => {
+    const db = memoryDb({ [userPath]: { suspended: false } });
+    let releaseRead;
+    let signalRead;
+    const startedRead = new Promise((resolve) => { signalRead = resolve; });
+    const readGate = new Promise((resolve) => { releaseRead = resolve; });
+    const suspension = db.runTransaction((tx) => applySuspensionChangeTransaction({
+      ...tx,
+      get: async (ref) => {
+        if (ref.path === userPath) {
+          signalRead();
+          await readGate;
+        }
+        return tx.get(ref);
+      },
+    }, options(db)));
+
+    await startedRead;
+    // A logout commits after the admin captures epoch 100 but before its first
+    // server read. The suspension must retain the cutoff it actually reads.
+    db.records.set(userPath, { suspended: false, sessionsValidAfterEpoch: 102 });
+    db.records.set(cutoffPath, { sessionsValidAfterEpoch: 102 });
+    releaseRead();
+    await suspension;
+    await db.runTransaction((tx) => applySuspensionChangeTransaction(tx, options(db, {
+      suspended: false, reason: "Reinstate recovered account", revokedAfterEpoch: 103,
+    })));
+
+    assert.equal(db.records.get(userPath).suspended, false);
+    assert.equal(db.records.get(userPath).sessionsValidAfterEpoch, 102);
+    assert.equal(db.records.get(cutoffPath).sessionsValidAfterEpoch, 102);
+    assert.equal(isAuthTimeRevoked(101, db.records.get(userPath).sessionsValidAfterEpoch,
+      db.records.get(cutoffPath).sessionsValidAfterEpoch), true, "reinstatement must not revive the logged-out token");
+  });
+
+  it("does not read or change the revocation marker when reinstating an account", async () => {
+    const db = memoryDb({
+      [userPath]: { suspended: true, sessionsValidAfterEpoch: 103 },
+      [cutoffPath]: { sessionsValidAfterEpoch: 104 },
+    });
+    const markerBefore = db.records.get(cutoffPath);
+    await db.runTransaction((tx) => applySuspensionChangeTransaction(tx, options(db, { suspended: false })));
+
+    assert.equal(db.reads, 1, "reinstatement needs only the target profile read");
+    assert.equal(db.records.get(userPath).suspended, false);
+    assert.equal(db.records.get(userPath).sessionsValidAfterEpoch, 103);
+    assert.equal(db.records.get(cutoffPath), markerBefore);
+    assert.equal(db.records.get(auditPath).action, "USER_REINSTATED");
   });
 });

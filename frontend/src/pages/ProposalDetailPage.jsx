@@ -354,7 +354,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
         {!independent && proposal.fundingTerms && openedTabs.has("funding") && <AdminEscrowCancellation key={`${proposal.id}:${user?.id}`} proposalId={proposal.id} onConfirmed={() => { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); }} />}
-        {isOpenFunding && <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate}
+        {isOpenFunding && <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} postingOwnerId={proposal.postingOwnerId} proposalId={proposal.id} reviewedProposalRecord={proposal} onNavigate={onNavigate}
           onChange={(change) => { if (activeProposalId.current === change.proposalId) { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); } }} />}
         {independent ? <IndependentFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal}
           initialTransaction={pendingFundingTransaction} refreshVersion={fundingRefreshVersion} />

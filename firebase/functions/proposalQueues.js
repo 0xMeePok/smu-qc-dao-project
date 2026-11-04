@@ -3,12 +3,13 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { ROLE_EVALUATOR } from "./comments.js";
 import { correctionPathOpen, ownerReviewSummary, reviewStillOpen } from "./ownerReviews.js";
 import { mockSelectionState } from "./matching.js";
-import { problemIsMemberBrowsable } from "./moderation.js";
+import { canReadContent, problemIsMemberBrowsable } from "./moderation.js";
 import { WORKFLOW_STATUS, proposalWorkflowStatus, recommendationCounts, recommendationEntries } from "./workflowStatus.js";
 import { readEscrowQueueActions, readGrantQueueMetadata } from "./escrowQueueMetadata.js";
 import { readIndependentFundingQueueMetadata } from "./independentFundingQueueMetadata.js";
 import { createRequestReadClient } from "./requestReadClient.js";
 import { createRequestDocumentReader } from "./requestDocuments.js";
+import { boundedMap } from "./boundedMap.js";
 
 // QCDAO-62/63 read the queues out of the records that already exist: proposals,
 // their parent problems and the comments collection. Nothing new is stored.
@@ -23,16 +24,15 @@ const PROBLEM_PAGE = 20;
 const QUEUE_CAP = 100;
 const OWNED_CAP = 200;
 const REVIEW_CAP = 200;
-const IN_CHUNK = 30;
 // Enough recommendations to read at a glance; the proposal page holds them all.
 const LINKED_COMMENT_CAP = 8;
+export const DASHBOARD_COMMENT_CAP = 100;
+const COMMENT_FIELDS = ["proposalId", "authorId", "parentId", "deletedAt", "moderationStatus", "qualifying", "recommendation", "createdAt"];
 
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const iso = (value) => value?.toDate?.().toISOString?.() ?? null;
 const millis = (value) => value?.toMillis?.() ?? 0;
 const usesEscrow = (proposal) => Object.hasOwn(proposal || {}, "fundingTerms");
-const chunks = (values, size = IN_CHUNK) => Array.from(
-  { length: Math.ceil(values.length / size) }, (ignored, index) => values.slice(index * size, index * size + size));
 
 function visibleComment(data) {
   return !data.deletedAt && !BLOCKED.has(data.moderationStatus);
@@ -49,17 +49,22 @@ function visibleComment(data) {
  */
 export async function feedbackByProposal(db, proposalIds) {
   const summary = new Map(proposalIds.map((id) => [id,
-    { comments: 0, qualifying: 0, recommendations: [], recommendationComments: [] }]));
+    { comments: 0, qualifying: 0, recommendations: [], recommendationComments: [], feedbackTruncated: false }]));
   if (!proposalIds.length) return summary;
-  const pages = await Promise.all(chunks(proposalIds).map((ids) =>
-    db.collection("comments").where("proposalId", "in", ids).get()));
-  for (const page of pages) {
-    for (const doc of page.docs) {
+  await boundedMap([...summary.keys()], async (id) => {
+    const query = db.collection("comments").where("proposalId", "==", id);
+    // Independent limits prevent one busy discussion from hiding another's feedback.
+    // Project fields so comment bodies/revision history never enter dashboard reads.
+    const [comments, qualifying] = await Promise.all([
+      query.select(...COMMENT_FIELDS).limit(DASHBOARD_COMMENT_CAP + 1).get(),
+      query.where("qualifying", "==", true).select(...COMMENT_FIELDS).limit(DASHBOARD_COMMENT_CAP + 1).get(),
+    ]);
+    const row = summary.get(id);
+    row.feedbackTruncated = comments.size > DASHBOARD_COMMENT_CAP || qualifying.size > DASHBOARD_COMMENT_CAP;
+    row.comments = comments.docs.slice(0, DASHBOARD_COMMENT_CAP).filter((doc) => visibleComment(doc.data())).length;
+    for (const doc of qualifying.docs.slice(0, DASHBOARD_COMMENT_CAP)) {
       const data = doc.data();
-      const row = summary.get(data.proposalId);
-      if (!row || !visibleComment(data)) continue;
-      row.comments += 1;
-      if (data.qualifying !== true) continue;
+      if (!visibleComment(data)) continue;
       row.qualifying += 1;
       row.recommendations.push(data.recommendation);
       // Capped: a dashboard shows a handful and links out for the rest, and an
@@ -69,7 +74,8 @@ export async function feedbackByProposal(db, proposalIds) {
           at: iso(data.createdAt) });
       }
     }
-  }
+    row.comments = Math.max(row.comments, row.qualifying);
+  });
   return summary;
 }
 
@@ -86,10 +92,14 @@ export async function feedbackByProposal(db, proposalIds) {
 async function myRecommendationComments(db, proposalIds, uid) {
   const found = new Map();
   if (!proposalIds.length) return found;
-  const pages = await Promise.all(chunks(proposalIds).map((ids) =>
-    db.collection("comments").where("proposalId", "in", ids).where("authorId", "==", uid).get()));
-  for (const page of pages) {
-    for (const doc of page.docs) {
+  await boundedMap([...new Set(proposalIds)], async (proposalId) => {
+    const query = db.collection("comments").where("proposalId", "==", proposalId).where("authorId", "==", uid)
+      .where("recommendation", "in", ["recommend", "recommend_with_revisions", "do_not_recommend"]);
+    const [history, current] = await Promise.all([
+      query.select(...COMMENT_FIELDS).limit(DASHBOARD_COMMENT_CAP + 1).get(),
+      query.where("qualifying", "==", true).select(...COMMENT_FIELDS).limit(1).get(),
+    ]);
+    for (const doc of [...current.docs, ...history.docs.slice(0, DASHBOARD_COMMENT_CAP)]) {
       const data = doc.data();
       // Replies carry no recommendation; only a top-level filing counts.
       if ((data.parentId ?? null) != null || !data.recommendation) continue;
@@ -102,9 +112,10 @@ async function myRecommendationComments(db, proposalIds, uid) {
         qualifying: data.qualifying === true,
         deleted: Boolean(data.deletedAt),
         moderationStatus: data.moderationStatus || "visible",
+        historyTruncated: history.size > DASHBOARD_COMMENT_CAP,
       });
     }
-  }
+  });
   return found;
 }
 
@@ -117,10 +128,14 @@ function attentionReason(comment) {
   return "not_qualifying";
 }
 
-async function problemsById(db, ids) {
+async function problemsById(db, ids, uid, profile) {
   if (!ids.length) return new Map();
   const docs = await db.getAll(...ids.map((id) => db.collection("problems").doc(id)));
-  return new Map(docs.filter((doc) => doc.exists).map((doc) => [doc.id, doc.data()]));
+  // Owning a proposal does not authorize its client-chosen parent reference.
+  // Filter the parent itself before it reaches any queue projection or helper.
+  const readable = await Promise.all(docs.map(async (doc) => doc.exists
+    && await canReadContent(null, db, "problem", doc.data(), uid, profile) ? doc : null));
+  return new Map(readable.filter(Boolean).map((doc) => [doc.id, doc.data()]));
 }
 
 // Only what a researcher or evaluator needs to read the posting's state: whether
@@ -155,11 +170,11 @@ async function activeProfile(db, uid) {
 export async function listMyProposals({ db, uid, client, config }) {
   if (client) client = createRequestReadClient(client, { chainId: config?.chainId });
   const readDocument = createRequestDocumentReader();
-  await activeProfile(db, uid);
+  const profile = await activeProfile(db, uid);
   const rows = await db.collection("proposals").where("researcherId", "==", uid).limit(MINE_CAP + 1).get();
   const docs = rows.docs.slice(0, MINE_CAP);
   const [problems, feedback, latestReviews] = await Promise.all([
-    problemsById(db, [...new Set(docs.map((doc) => doc.data().problemId).filter(Boolean))]),
+    problemsById(db, [...new Set(docs.map((doc) => doc.data().problemId).filter(Boolean))], uid, profile),
     feedbackByProposal(db, docs.map((doc) => doc.id)),
     docs.length
       ? db.getAll(...docs.map((doc) => db.collection(`proposals/${doc.id}/ownerReviewLatest`).doc("current")))
@@ -200,7 +215,7 @@ export async function listMyProposals({ db, uid, client, config }) {
     };
   });
   items.sort((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
-  return { items, truncated: rows.size > MINE_CAP, unavailableGrantOffers: grantState.unavailable.size,
+  return { items, truncated: rows.size > MINE_CAP, feedbackTruncated: items.some((item) => item.feedbackTruncated), unavailableGrantOffers: grantState.unavailable.size,
     unavailableEscrows: escrowState.unavailable.size };
 }
 
@@ -259,6 +274,7 @@ export async function listEvaluatorQueue({ db, uid, cursor = null, filter = "pen
     item.myCommentId = comment?.commentId ?? null;
     item.needsAttention = Boolean(reason);
     item.attentionReason = reason;
+    item.recommendationHistoryTruncated = comment?.historyTruncated === true;
     // A filing that no longer qualifies still had an outcome; showing it is what
     // separates "your recommendation was taken down" from "you never filed one".
     if (reason) item.filedRecommendation = comment.recommendation;
@@ -267,6 +283,7 @@ export async function listEvaluatorQueue({ db, uid, cursor = null, filter = "pen
   return {
     items,
     filter: wanted,
+    recommendationHistoryTruncated: items.some((item) => item.recommendationHistoryTruncated),
     nextCursor: problems.size === PROBLEM_PAGE && last
       ? { expiresAt: millis(last.data().expiresAt), id: last.id }
       : null,
@@ -332,13 +349,13 @@ export async function listActionItems({ db, uid, client, config, now = Timestamp
   // A selection waits on its creator until they answer or the window closes.
   const selected = mine.docs.filter((doc) => !usesEscrow(doc.data()) && doc.data().matching?.status === "awaiting_confirmation"
     && !doc.data().matching?.creatorApprovedBy && millis(doc.data().matching?.deadlineAt) > now.toMillis());
-  const parents = await problemsById(db, [...new Set(selected.map((doc) => doc.data().problemId).filter(Boolean))]);
+  const parents = await problemsById(db, [...new Set(selected.map((doc) => doc.data().problemId).filter(Boolean))], uid, profile);
   const selectionToAccept = newestFirst(selected
     .filter((doc) => parents.get(doc.data().problemId)?.matching?.proposalId === doc.id)
     .map((doc) => actionView(doc, doc.data(), doc.data().problemId, parents.get(doc.data().problemId),
       { deadlineAt: iso(doc.data().matching.deadlineAt) })));
 
-  const grantParents = await problemsById(db, [...new Set(mine.docs.map(doc => doc.data().problemId).filter(Boolean))]);
+  const grantParents = await problemsById(db, [...new Set(mine.docs.map(doc => doc.data().problemId).filter(Boolean))], uid, profile);
   readDocument.prime([...mine.docs, ...receivedEscrows.docs, ...owned.docs]);
   const grantState = await readGrantQueueMetadata({ db, uid, client, config, docs: mine.docs, parents: grantParents, readDocument });
   const grantSelectionsToAccept = newestFirst(mine.docs.filter(doc => grantState.grants.get(doc.id)?.canAccept)

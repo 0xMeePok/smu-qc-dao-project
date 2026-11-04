@@ -536,6 +536,7 @@ export function EvaluatorQueue({ onNavigate }) {
             <div>
               <strong>{item.title || "Untitled proposal"}</strong>
               <small className="table-row-meta">Proposal for: {item.posting?.title || "Untitled posting"} · Submitted {formatInstant(item.submittedAt)}</small>
+              {item.recommendationHistoryTruncated && <p className="field-hint" role="status">Only part of your recommendation history is shown. Open the discussion for the full history.</p>}
               <span className="status-badges">
                 <StatusBadge status={item.workflowStatus} />
                 {item.recommendationStatus === "submitted"

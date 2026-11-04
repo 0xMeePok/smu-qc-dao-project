@@ -16,7 +16,7 @@ export function openFundingFixture() {
     "function reservedAmount() view returns(uint256)", "function availableBalance() view returns(uint256)",
     "function getOffer(bytes32) view returns(uint256 amount,uint64 acceptanceDeadline,uint8 state)",
     "function proposalCount() view returns(uint256)", "function proposalAt(uint256) view returns(bytes32)", "function deposit(uint256)",
-    "function selectProposal(bytes32)", "function acceptProposal(bytes32)", "function expireProposal(bytes32)", "function withdrawAvailable(uint256)",
+    "function selectProposal(bytes32,uint256,bytes32,bytes32)", "function acceptProposal(bytes32)", "function expireProposal(bytes32)", "function withdrawAvailable(uint256)",
     "event ProposalSelected(bytes32 indexed proposalId,uint256 amount,uint64 acceptanceDeadline)",
     "function declineProposal(bytes32,bytes32)", "function declineReasonHash(bytes32) view returns(bytes32)",
     "event ProposalDeclined(bytes32 indexed proposalId,address indexed researcher,address indexed escrow,uint256 amount,bytes32 reasonHash)",
@@ -77,6 +77,7 @@ export function openFundingFixture() {
       if (index < 0 && args?.[0]) index = expected.findIndex(row => row.entityId === args[0]);
       if (index < 0) index = 0;
       if (functionName === "proposalEscrow" || functionName === "escrowForProposal") return addresses[index];
+      if (functionName === "revisionCount") return state.revisionCounts?.[index] ?? 1n;
       if (functionName === "getProposal") return { researcher: proposals[index].researcherId, opportunityId: expected[index].opportunityId,
         proposalHash: expected[index].proposalHash, solutionHash: expected[index].solutionHash };
       if (addresses.some(row => sameAddress(address, row))) {
@@ -123,7 +124,8 @@ export function openFundingFixture() {
       logs: [{ address: poolAddress, logIndex: 0, topics: encodeEventTopics({ abi: openFundingPoolAbi, eventName: "ProposalSelected", args }),
         data: encodeAbiParameters([{ type: "uint256" }, { type: "uint64" }], [args.amount, args.acceptanceDeadline]) }] });
   }
-  return { db, client, config, uid: owner, problemId: posting.id, posting, proposals, expected, expectedPosting, state, offers, calls, simulations,
+  const reviewed = (index = 0) => ({ entityId: expected[index].entityId, revisionCount: String(state.revisionCounts?.[index] ?? 1n), proposalHash: expected[index].proposalHash, solutionHash: expected[index].solutionHash });
+  return { reviewed, reviewedProposal: reviewed(), db, client, config, uid: owner, problemId: posting.id, posting, proposals, expected, expectedPosting, state, offers, calls, simulations,
     addresses, receipts, select, receipt, declines, decline, declineReceipt };
 }
 const sameAddress = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();

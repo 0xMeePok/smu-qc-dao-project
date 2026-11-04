@@ -4564,6 +4564,21 @@
           "internalType": "bytes32",
           "name": "proposalId",
           "type": "bytes32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "expectedRevisionCount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "expectedProposalHash",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "expectedSolutionHash",
+          "type": "bytes32"
         }
       ],
       "name": "selectProposal",

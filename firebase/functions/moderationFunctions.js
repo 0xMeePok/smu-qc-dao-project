@@ -59,10 +59,12 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
           await cancelPendingFundingApproaches({ db, proposalId: contentId, now: args.now });
         }
       }
-      // The matching transaction only reaches the proposals it loaded. Stamp the
-      // rest before returning, so no child keeps serving PDFs for a hidden parent.
-      if (args.contentType === "problem") {
-        await syncProblemProposalsBrowsable({ db: args.db, problemId: args.contentId, now: args.now });
+      // The matching transaction only reaches the proposals it loaded. Refresh
+      // the remaining child projections before returning when the budget allows;
+      // PDF authorization independently checks the live parent in its proxy.
+      const problemId = moderatedProblemId(args.queueId);
+      if (problemId) {
+        await syncProblemProposalsBrowsable({ db: args.db, problemId, now: args.now });
       }
       return result;
     }),
@@ -74,4 +76,10 @@ export function registerModerationCallables({ db, requireMember, requireAdmin, o
     screenProposalContent: screening("proposal", "proposals"),
     screenCommentContent: screening("comment", "comments"),
   };
+}
+
+// The UI sends queueId, not separate contentType/contentId fields.
+export function moderatedProblemId(queueId) {
+  return typeof queueId === "string" && /^problem_[A-Za-z0-9_-]{1,128}$/.test(queueId)
+    ? queueId.slice("problem_".length) : null;
 }

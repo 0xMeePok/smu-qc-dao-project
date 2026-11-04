@@ -403,8 +403,9 @@ service cloud.firestore {
     // validAuditRecord so attached 2-PDF publishes still pay schemaVersion == 1.
     function validIndependentAuditRecord(audit) {
       return (audit is map
-          && audit.keys().size() == 9
+          && audit.keys().size() <= 10
           && audit.schemaVersion == 2
+          && (audit.keys().size() == 9 || audit.get('digestVersion', 0) == 1)
           && audit.chainId == 421614
           && audit.entityId.matches('^0x[0-9a-f]{64}$')
           && audit.contentHash.matches('^0x[0-9a-f]{64}$')
@@ -427,13 +428,16 @@ service cloud.firestore {
     }
 
     function validAuditRecord(audit) {
+      let status = audit.status;
+      let transactionHash = audit.transactionHash;
+      let blockNumber = audit.blockNumber;
+      let attemptCount = audit.attemptCount;
       return (audit is map
-          // keys().size() == 9, not hasOnly + hasAll on the same nine names. Those
-          // two list comparisons cost enough that a posting carrying both an audit
-          // receipt and two attachments exceeded Firestore's 1000-expression cap.
-          // Equivalent: every one of the nine is checked by name below, so an
-          // unknown key can only fit by displacing one, and that check then fails.
-          && audit.keys().size() == 9
+          // The original nine fields are checked below. Only digestVersion == 1
+          // may occupy a tenth field, including on attached proposals whose
+          // publication paths still accept legacy nine-field receipts. Checking
+          // the full key set exceeds the expression cap for two-PDF submissions.
+          && (audit.keys().size() == 9 || (audit.digestVersion == 1 && audit.keys().size() == 10))
           && audit.schemaVersion == 1
           && audit.chainId == 421614
           && audit.entityId.matches('^0x[0-9a-f]{64}$')
@@ -443,18 +447,18 @@ service cloud.firestore {
           // researcher or sponsor who could set it would mint a forged receipt.
           // queued/submitted/pending/failed stay writable so a known hash is
           // never rebroadcast. The Admin SDK may still store `confirmed`.
-          && audit.status.matches('^(queued|submitted|pending|failed)$')
-          // matches also rejects nonstrings; one check covers empty or bytes32
-          // without re-reading the hash for the heaviest draft publication.
-          && audit.transactionHash.matches('^(0x[0-9a-f]{64})?$')
-          && audit.blockNumber is int && audit.blockNumber >= 0
-          && audit.attemptCount is int
-          && audit.attemptCount >= 0 && audit.attemptCount <= 3
+          && status.matches('^(queued|submitted|pending|failed)$')
+          // Submitted/pending receipts require a hash; queued/failed may omit it.
+          // Match that condition once rather than validating format and then
+          // re-reading the same status/hash to reject the empty case.
+          && transactionHash.matches(status.matches('^(submitted|pending)$')
+            ? '^0x[0-9a-f]{64}$' : '^(0x[0-9a-f]{64})?$')
+          && blockNumber is int && blockNumber >= 0
+          && attemptCount is int
+          && attemptCount >= 0 && attemptCount <= 3
           && audit.lastError is string && audit.lastError.size() <= 500
-          && (audit.status != 'queued'
-            || (audit.transactionHash == '' && audit.blockNumber == 0))
-          && (!(audit.status.matches('^(submitted|pending)$'))
-            || audit.transactionHash != ''));
+          && (status != 'queued'
+            || (transactionHash == '' && blockNumber == 0)));
     }
 
     function stringListItemIsValid(items, index) {
@@ -1140,9 +1144,11 @@ service cloud.firestore {
     // PDFs stay within the expression budget without repeating these lookups.
     function preservesProposalReceipt(before, after) {
       let storedAudit = before.get('audit', {});
-      let storedHash = storedAudit.get('transactionHash', '');
       // Empty stored receipts have no hash or confirmation to preserve.
-      return storedAudit == {} || ((storedHash == '' || after.get('audit', {}).get('transactionHash', '') == storedHash)
+      // Keep the hash lookup after that short circuit: draft publication has no
+      // receipt yet and must leave room for both PDFs and strict receipt keys.
+      return storedAudit == {} || ((storedAudit.get('transactionHash', '') == ''
+          || after.get('audit', {}).get('transactionHash', '') == storedAudit.transactionHash)
         && (storedAudit.get('status', '') != 'confirmed' || after.get('audit', {}) == storedAudit));
     }
 
@@ -1176,6 +1182,7 @@ service cloud.firestore {
     function validIndependentProposalCorrection(before, after) {
       return isIndependentProposal(before)
         && isIndependentProposal(after)
+        && after.get('audit', {}).get('digestVersion', 0) == 1
         && !fundingApproachAccepted(before)
         && before.status == 'submitted'
         && after.status == 'submitted'
@@ -1364,6 +1371,7 @@ service cloud.firestore {
     function attestedPublish(problemId, data) {
       let proof = get(/databases/$(database)/documents/publicationProofs/$('problems_' + problemId)).data;
       return proof.uid == request.auth.uid
+        && data.get('audit', {}).get('digestVersion', 0) == 1
         && proof.get('validation', '') == 'problem-publish-v1'
         && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
         && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit'])
@@ -1379,6 +1387,7 @@ service cloud.firestore {
     function attestedIndependentPublish(proposalId, data) {
       let proof = get(/databases/$(database)/documents/publicationProofs/$('proposals_' + proposalId)).data;
       return isIndependentProposal(data)
+        && data.get('audit', {}).get('digestVersion', 0) == 1
         && proof.uid == request.auth.uid
         && proof.get('validation', '') == 'independent-proposal-publish-v1'
         && data.get('audit', {}).get('transactionHash', '') == proof.transactionHash
@@ -1396,7 +1405,8 @@ service cloud.firestore {
           && data.get('audit', {}).get('transactionHash', '')
             == resource.data.get('audit', {}).get('transactionHash', '')
           && data.diff(resource.data).affectedKeys().hasOnly(['status', 'withdrawalReason', 'audit', 'updatedAt']))
-        || verifiedPublication(scope, recordId, data);
+        || ((scope != 'problems' || data.get('audit', {}).get('digestVersion', 0) == 1)
+          && verifiedPublication(scope, recordId, data));
     }
 
     match /problems/{problemId} {
@@ -1586,6 +1596,12 @@ service cloud.firestore {
         && resource.data.researcherId == request.auth.uid
         && resource.data.status == 'draft'
         && resource.data.get('audit', {}).get('transactionHash', '') == '';
+      function readableDraftParent(problemId) {
+        let parent = get(/databases/$(database)/documents/problems/$(problemId)).data;
+        return parent.ownerId == request.auth.uid || isModerationAdmin(request.auth.uid)
+          || (parent.status in ['submitted', 'open', 'cancelled', 'expired']
+            && !(parent.get('moderationStatus', 'visible') in ['hidden', 'removed']));
+      }
       function proposalCreateIsAllowed() {
         let data = request.resource.data;
         let uid = request.auth.uid;
@@ -1609,7 +1625,7 @@ service cloud.firestore {
           : (data.status == 'draft'
             ? (validProposal(data)
               && validAttachments(data, false)
-              && exists(/databases/$(database)/documents/problems/$(data.problemId)))
+              && readableDraftParent(data.problemId))
             : (data.status == 'submitted'
               && validProposalSubmission(data, proposalId))));
       }

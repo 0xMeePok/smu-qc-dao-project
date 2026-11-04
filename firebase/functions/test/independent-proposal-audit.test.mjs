@@ -24,6 +24,17 @@ const listing = (patch = {}) => ({
   ...patch,
 });
 
+it("binds new independent listing PDF digests while preserving historical hashes", () => {
+  const attachment = { id: "evidence01", name: "evidence.pdf", size: 1024,
+    contentType: "application/pdf", sha256: `0x${"a".repeat(64)}` };
+  const current = listing({ audit: { ...listing().audit, digestVersion: 1 }, attachments: [attachment] });
+  const changed = { ...current, attachments: [{ ...attachment, sha256: `0x${"b".repeat(64)}` }] };
+  assert.notEqual(prepareStoredProposal(current).contentHash, prepareStoredProposal(changed).contentHash);
+  const historical = listing({ attachments: [attachment] });
+  assert.equal(prepareStoredProposal(historical).contentHash,
+    prepareStoredProposal({ ...historical, attachments: [{ ...attachment, sha256: `0x${"b".repeat(64)}` }] }).contentHash);
+});
+
 function clientFor(record, { config = registry, update = false } = {}) {
   const expected = prepareStoredProposal(record, { registryConfig: config });
   const calls = [];

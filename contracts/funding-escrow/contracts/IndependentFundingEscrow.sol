@@ -216,8 +216,11 @@ contract IndependentFundingEscrow is ReentrancyGuard {
     /// @notice The funder majority approves; an independent party releases. The platform
     /// signer (acting on an administrator review) or an escrow admin submits the payment, so a
     /// researcher who also funds the listing cannot vote the completion payment out alone.
-    function releaseCompletion() external nonReentrant {
+    /// @dev The signed call commits to the exact evidence version and hash reviewed by the releaser.
+    function releaseCompletion(uint256 expectedEvidenceVersion, bytes32 expectedEvidenceHash) external nonReentrant {
         if (!_canRelease(msg.sender)) revert AccessDenied();
+        if (expectedEvidenceVersion != evidenceVersion || expectedEvidenceHash == bytes32(0)
+            || expectedEvidenceHash != evidenceHash) revert InvalidInput();
         _releaseCompletion();
     }
 

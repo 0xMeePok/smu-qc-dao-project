@@ -568,7 +568,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
 
           {showCollaboration && (
             <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
-              {isOpenFunding ? <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} onNavigate={onNavigate} onChange={reloadPosting} /> : <>
+              {isOpenFunding ? <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} postingOwnerId={posting.ownerId} onNavigate={onNavigate} onChange={reloadPosting} /> : <>
                 <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
                 {openedTabs.has("funding") && <PostingEscrowFunding problemId={posting.id} active={activeTab === "funding"} onNavigate={onNavigate} />}
                 <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />

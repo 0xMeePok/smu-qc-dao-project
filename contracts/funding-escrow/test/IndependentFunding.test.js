@@ -130,13 +130,13 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     expect((await c.escrow.getState(c.alice.address)).canReleaseCompletion).to.equal(false);
     // Funders, the researcher and strangers cannot submit the payment themselves.
     for (const actor of [c.alice, c.solution, c.owner]) {
-      await expect(c.escrow.connect(actor).releaseCompletion()).to.be.revertedWithCustomError(c.escrow, "AccessDenied");
+      await expect(c.escrow.connect(actor).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.be.revertedWithCustomError(c.escrow, "AccessDenied");
     }
-    await expect(c.escrow.connect(c.platform).releaseCompletion()).to.emit(c.escrow, "TrancheReleased").withArgs(1, 50n, 0n, 50n);
+    await expect(c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.emit(c.escrow, "TrancheReleased").withArgs(1, 50n, 0n, 50n);
     expect(await c.escrow.state()).to.equal(S.Released);
     expect(await c.token.balanceOf(c.solution.address)).to.equal(before + 100n);
     expect(await c.escrow.totalReleased()).to.equal(100n);
-    await expect(c.escrow.connect(c.platform).releaseCompletion()).to.be.revertedWithCustomError(c.escrow, "InvalidState");
+    await expect(c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     await accounting(c);
   });
 
@@ -144,12 +144,12 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     const c = await fixture(); await accept(c, [50n, 30n, 20n]); await evidence(c);
     await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
     expect(await c.escrow.state()).to.equal(S.Accepted);
-    await expect(c.escrow.connect(c.platform).releaseCompletion()).to.be.revertedWithCustomError(c.escrow, "FunderMajorityRequired");
+    await expect(c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.be.revertedWithCustomError(c.escrow, "FunderMajorityRequired");
     await c.escrow.connect(c.bob).voteCompletion(1n, c.evidence, false);
-    await expect(c.escrow.connect(c.platform).releaseCompletion()).to.be.revertedWithCustomError(c.escrow, "FunderMajorityRequired");
+    await expect(c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.be.revertedWithCustomError(c.escrow, "FunderMajorityRequired");
     await c.escrow.connect(c.other).voteCompletion(1n, c.evidence, true);
     expect(await c.escrow.state()).to.equal(S.Accepted);
-    await c.escrow.connect(c.platform).releaseCompletion();
+    await c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
     expect(await c.escrow.state()).to.equal(S.Released);
     expect(await c.escrow.yesWeight()).to.equal(70n);
     expect(await c.escrow.noWeight()).to.equal(30n);
@@ -169,11 +169,35 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     await expect(c.escrow.connect(c.solution).submitEvidence(c.evidence)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
     await expect(c.escrow.connect(c.solution).submitEvidence(c.ethers.ZeroHash)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
     await c.escrow.connect(c.bob).voteCompletion(2n, revised, true);
-    await expect(c.escrow.connect(c.platform).releaseCompletion()).to.be.revertedWithCustomError(c.escrow, "FunderMajorityRequired");
+    await expect(c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.be.revertedWithCustomError(c.escrow, "FunderMajorityRequired");
     await c.escrow.connect(c.other).voteCompletion(2n, revised, true);
     expect(await c.escrow.state()).to.equal(S.Accepted);
-    await c.escrow.connect(c.platform).releaseCompletion();
+    await c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
     expect(await c.escrow.state()).to.equal(S.Released);
+  });
+
+  it("binds both authorized release paths to the evidence reviewed even after replacement wins a new majority", async function () {
+    for (const releaseRole of ["platform", "owner"]) {
+      const c = await fixture(); await accept(c); await evidence(c);
+      await c.factory.connect(c.admin).setEscrowAdmin(c.owner.address, true);
+      await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
+      const reviewedVersion = await c.escrow.evidenceVersion(), reviewedHash = await c.escrow.evidenceHash();
+      const replacement = c.ethers.id("new evidence approved before old release executes");
+      await c.escrow.connect(c.solution).submitEvidence(replacement);
+      await c.escrow.connect(c.alice).voteCompletion(2n, replacement, true);
+      const releaser = c.escrow.connect(c[releaseRole]);
+      expect((await c.escrow.getState(c[releaseRole].address)).canReleaseCompletion).to.equal(true);
+      for (const args of [[reviewedVersion, reviewedHash], [reviewedVersion, replacement], [2n, reviewedHash], [2n, c.ethers.ZeroHash]]) {
+        await expect(releaser.releaseCompletion(...args)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
+      }
+      await expect(c[releaseRole].sendTransaction({ to: c.escrowAddress,
+        data: c.ethers.id("releaseCompletion()").slice(0, 10) })).to.revert(c.ethers);
+      expect(await c.escrow.state()).to.equal(S.Accepted);
+      expect(await c.escrow.totalReleased()).to.equal(50n);
+      await expect(releaser.releaseCompletion(2n, replacement)).to.emit(c.escrow, "TrancheReleased").withArgs(1, 50n, 0n, 50n);
+      expect(await c.escrow.state()).to.equal(S.Released);
+      await accounting(c);
+    }
   });
 
   it("uses cumulative payout-only fees for odd amounts (first fee0, final fee1)", async function () {
@@ -183,7 +207,7 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     expect(await c.escrow.totalReleased()).to.equal(1n);
     expect(await c.escrow.feePaid()).to.equal(0n);
     await evidence(c); await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
-    await c.escrow.connect(c.platform).releaseCompletion();
+    await c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
     expect(await c.escrow.totalReleased()).to.equal(3n);
     expect(await c.escrow.feePaid()).to.equal(1n);
     expect(await c.token.balanceOf(c.solution.address)).to.equal(authorBefore + 2n);
@@ -234,7 +258,7 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     const c = await fixture(); await accept(c); await mineAt(c, c.expiresAt + 1n);
     expect((await c.escrow.getState(c.solution.address)).canSubmitEvidence).to.equal(true);
     await evidence(c); await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
-    await c.escrow.connect(c.platform).releaseCompletion();
+    await c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
     expect(await c.escrow.state()).to.equal(S.Released);
   });
 
@@ -344,13 +368,13 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     const c = await fixture(); await accept(c); await evidence(c);
     await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
     await c.token.blockRecipient(c.solution.address);
-    await expect(c.escrow.connect(c.platform).releaseCompletion()).to.be.revertedWithCustomError(c.token, "TestTransferRejected");
+    await expect(c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.be.revertedWithCustomError(c.token, "TestTransferRejected");
     expect(await c.escrow.state()).to.equal(S.Accepted);
     expect(await c.escrow.yesWeight()).to.equal(60n);
     expect(await c.escrow.hasVoted(1n, c.alice.address)).to.equal(true);
     expect(await c.escrow.totalReleased()).to.equal(50n);
     await c.token.blockRecipient(c.ethers.ZeroAddress);
-    await c.escrow.connect(c.platform).releaseCompletion();
+    await c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
     expect(await c.escrow.state()).to.equal(S.Released);
   });
 
@@ -364,14 +388,14 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     expect(await c.escrow.yesWeight()).to.equal(60n);
     expect(await c.escrow.state()).to.equal(S.Accepted);
     for (const actor of [c.other, c.solution]) {
-      await expect(c.escrow.connect(actor).releaseCompletion()).to.be.revertedWithCustomError(c.escrow, "AccessDenied");
+      await expect(c.escrow.connect(actor).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash())).to.be.revertedWithCustomError(c.escrow, "AccessDenied");
       expect((await c.escrow.getState(actor.address)).canReleaseCompletion).to.equal(false);
     }
     expect(await c.escrow.totalReleased()).to.equal(50n);
     // An escrow admin configured on the main factory may also release after review.
     await c.factory.connect(c.admin).setEscrowAdmin(c.owner.address, true);
     expect((await c.escrow.getState(c.owner.address)).canReleaseCompletion).to.equal(true);
-    await c.escrow.connect(c.owner).releaseCompletion();
+    await c.escrow.connect(c.owner).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
     expect(await c.escrow.state()).to.equal(S.Released);
     await accounting(c);
   });
@@ -380,7 +404,7 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     const c = await fixture({ tokenName: "IndependentGuardToken" });
     await c.token.setProbe(true); await accept(c); await evidence(c);
     await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
-    await c.escrow.connect(c.platform).releaseCompletion();
+    await c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
     expect(await c.token.guardedCallbacks()).to.equal(5n); // Three deposits, two payouts.
     const refund = await fixture({ tokenName: "IndependentGuardToken" });
     await refund.token.setProbe(true); await fund(refund);
@@ -424,7 +448,7 @@ describe("Independent six-decimal settlement with contribution limits", function
         if (outcome === "complete") {
           await evidence(c);
           await c.escrow.connect(c.alice).voteCompletion(1n, c.evidence, true);
-          await c.escrow.connect(c.platform).releaseCompletion();
+          await c.escrow.connect(c.platform).releaseCompletion(await c.escrow.evidenceVersion(), await c.escrow.evidenceHash());
           expect(await c.escrow.totalReleased()).to.equal(c.target);
           expect(await c.escrow.feePaid()).to.equal(25_025n);
           expect(await c.token.balanceOf(c.solution.address)).to.equal(c.target * 10n + c.target - 25_025n);

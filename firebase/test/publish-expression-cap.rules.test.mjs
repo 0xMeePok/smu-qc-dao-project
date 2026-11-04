@@ -23,7 +23,7 @@ const content = (n) => ({ ownerId: A, organisation: "SMU", title: "Testing fundi
   expectedOutcome: "publishing testa", successCriteria: "publishing testa", dataAvailability: "publishing testa",
   categories: ["ai", "quantum"], amount: 10000, currency: "USDT", expiresAt: EXP,
   attachments: Array.from({ length: n }, (_, i) => att(i)) });
-const audit = { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
+const audit = { schemaVersion: 1, digestVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
   status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 123, attemptCount: 1, lastError: "" };
 
 before(async () => {
@@ -47,7 +47,8 @@ async function scenario(id, n, withAudit, extra = {}) {
     await setDoc(doc(d, "publicationProofs", `problems_${id}`), { uid: A, record, transactionHash: withAudit ? audit.transactionHash : "", ...mark(record) });
   });
   const update = { ...record, updatedAt: serverTimestamp(), ...(withAudit ? { audit } : {}) };
-  await assertSucceeds(updateDoc(doc(db, "problems", id), update));
+  if (withAudit) await assertSucceeds(updateDoc(doc(db, "problems", id), update));
+  else await assertFails(updateDoc(doc(db, "problems", id), update));
 }
 
 for (const n of [0, 1, 2]) {
@@ -94,6 +95,21 @@ it("refuses a publish against an unmarked (old) proof", async () => {
     await setDoc(doc(d, "publicationProofs", "problems_old1"), { uid: A, record, transactionHash: audit.transactionHash });
   });
   await assertFails(updateDoc(doc(db, "problems", "old1"), { ...record, audit, updatedAt: serverTimestamp() }));
+});
+it("refuses a metadata-only audit receipt even with a current publication proof", async () => {
+  const db = env.authenticatedContext(A).firestore();
+  const id = "digestless-proof";
+  const record = { ...content(2), status: "submitted" };
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const store = ctx.firestore();
+    await setDoc(doc(store, "problems", id), { ...content(2), status: "draft", createdAt: new Date(), updatedAt: new Date() });
+    await setDoc(doc(store, "recordReservations", `problems_${id}`), { uid: A });
+    await setDoc(doc(store, "publicationProofs", `problems_${id}`), {
+      uid: A, record, transactionHash: audit.transactionHash, ...mark(record),
+    });
+  });
+  const { digestVersion, ...legacyAudit } = audit;
+  await assertFails(updateDoc(doc(db, "problems", id), { ...record, audit: legacyAudit, updatedAt: serverTimestamp() }));
 });
 it("refuses a field the proof did not attest (e.g. matching)", async () => {
   const db = env.authenticatedContext(A).firestore();

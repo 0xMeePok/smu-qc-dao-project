@@ -87,8 +87,15 @@ export async function applySuspensionChangeTransaction(tx, {
     updatedAt: timestamp,
   };
   if (suspended) {
-    userUpdate.sessionsValidAfterEpoch = revokedAfterEpoch;
-    writeSessionCutoff(tx, revocationRef, revokedAfterEpoch, timestamp);
+    const revocationSnap = await tx.get(revocationRef);
+    // The caller's timestamp may precede a logout committed before these reads.
+    // Never restore an already-revoked token when this account is reinstated.
+    const cutoff = Math.max(revokedAfterEpoch, ...[
+      targetData.sessionsValidAfterEpoch,
+      revocationSnap.data()?.sessionsValidAfterEpoch,
+    ].filter((value) => typeof value === "number"));
+    userUpdate.sessionsValidAfterEpoch = cutoff;
+    writeSessionCutoff(tx, revocationRef, cutoff, timestamp);
   }
   tx.update(targetRef, userUpdate);
   tx.set(auditRef, {

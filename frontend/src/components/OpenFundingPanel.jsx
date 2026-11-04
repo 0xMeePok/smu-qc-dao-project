@@ -1,6 +1,7 @@
 import { ConvertedAmount } from "./CurrencyAmount.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { QueryClientContext } from "@tanstack/react-query";
 import { erc20Abi } from "viem";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -67,7 +68,7 @@ const declineLength = reason => String(reason ?? "").trim().normalize("NFC").len
 
 export function OpenFundingView({ data, loading, error, notice, busy, progress, walletReady, pending, amount, setAmount,
   withdrawalAmount = "", setWithdrawalAmount, onAction, onRefresh, onConfirm, onConnect, proposalId, onNavigate, integrityBlocked = false,
-  decline = null, onDeclineChange }) {
+  decline = null, onDeclineChange, reviewedProposal = null }) {
   // A background pool read neither disables nor remounts controls; every action is
   // re-prepared and verified by the server before the wallet opens.
   const disabled = busy || !walletReady || Boolean(pending);
@@ -92,8 +93,11 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
       <div className="grant-offers">
       {selected.map(item => {
         const expired = item.status === "expired";
-        const canSelect = item.status === "none" && data.canSelect && item.canSelect !== false && BigInt(item.amountBaseUnits ?? 0) > 0n
+        const eligible = item.status === "none" && data.canSelect && item.canSelect !== false && BigInt(item.amountBaseUnits ?? 0) > 0n
           && BigInt(item.amountBaseUnits) <= BigInt(data.available ?? 0);
+        const matchesReview = reviewedProposal && item.reviewedProposal
+          && ["entityId", "proposalHash", "solutionHash"].every(key => same(reviewedProposal[key], item.reviewedProposal[key]));
+        const canSelect = eligible && matchesReview;
         const declining = Boolean(item.canDecline && decline?.proposalId === item.proposalId);
         const reasonId = `grant-decline-reason-${item.proposalId}`, reasonLength = declining ? declineLength(decline.reason) : 0;
         const reasonError = declining && reasonLength > 0 && reasonLength < DECLINE_MIN ? `Enter at least ${DECLINE_MIN} characters.` : "";
@@ -102,11 +106,12 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
         return <div className="table-row grant-offer-row" key={item.proposalId}><div><strong>{item.title || "Proposal"}</strong>
           <small className="table-row-meta">Requested <ConvertedAmount text={money(item.amountBaseUnits)} /> · {status}</small>
           {canSelect && <p className="grant-offer-explanation"><ConvertedAmount text={money(data.available)} /> available in the pool. Offering this grant reserves <ConvertedAmount text={money(item.amountBaseUnits)} /> for seven days. The researcher must accept before it moves into this proposal’s escrow.</p>}
+          {eligible && reviewedProposal && !matchesReview && <p role="status">This proposal changed since you opened it. Refresh the page to review its latest version.</p>}
           {Number(item.acceptanceDeadline) > 0 && ["pending", "expired"].includes(item.status) && <small className="table-row-meta">Accept before {formatInstant(new Date(Number(item.acceptanceDeadline) * 1000))}</small>}
           {item.declined && item.declineReason && <small className="table-row-meta">Researcher’s reason: {item.declineReason}</small>}
           {item.canDecline && !declining && <small className="table-row-meta">Not taking this grant? Decline the offer to return the reserved amount to the pool’s available balance right away.</small>}
           {item.canAccept && !item.canDecline && <small className="table-row-meta">Not taking this grant? Leave it unaccepted and the reserved amount returns to the pool after this deadline. Withdrawing this proposal lets the reservation be released sooner.</small>}
-          {item.status === "none" && data.canSelect && !canSelect && <small className="table-row-meta">{item.canSelect === false ? "This proposal is not currently eligible for selection." : "Deposit more funds to cover this request."}</small>}
+          {item.status === "none" && data.canSelect && !eligible && <small className="table-row-meta">{item.canSelect === false ? "This proposal is not currently eligible for selection." : "Deposit more funds to cover this request."}</small>}
           {declining && <div className="field-group" role="group" aria-label="Decline grant offer">
             <p>Declining is final: this proposal cannot be offered a grant from this pool again, and the reserved <ConvertedAmount text={money(item.amountBaseUnits)} /> returns to the pool’s available balance.</p>
             <Field label="Reason for declining" htmlFor={reasonId} error={reasonError}
@@ -119,7 +124,8 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
             <button type="button" className="secondary small" disabled={busy} onClick={() => onDeclineChange?.(null)}>Keep offer</button>
           </div>}
         </div><div className="table-row-actions">
-          {canSelect && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("select", item.proposalId)}>{proposalId ? `Offer ${money(item.amountBaseUnits)} grant` : "Select for funding"}</button>}
+          {canSelect && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("select", item.proposalId, { reviewedProposal: item.reviewedProposal })}>{proposalId ? `Offer ${money(item.amountBaseUnits)} grant` : "Select for funding"}</button>}
+          {eligible && !reviewedProposal && onNavigate && <button type="button" className="primary small" onClick={() => onNavigate(`proposal/${item.proposalId}?tab=funding`)}>Review proposal to offer grant</button>}
           {item.canAccept && <button type="button" className="primary small" disabled={disabled || integrityBlocked || declining} onClick={() => onAction("accept", item.proposalId)}>Accept grant</button>}
           {item.canDecline && !declining && <button type="button" className="secondary small" disabled={disabled} onClick={() => onDeclineChange?.({ proposalId: item.proposalId, reason: "" })}>Decline grant offer</button>}
           {item.canVoid && <button type="button" className="secondary small" disabled={disabled} onClick={() => onAction("void", item.proposalId)}>{expired ? "Void expired offer" : "Release reserved funds"}</button>}
@@ -158,7 +164,11 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
   </section>;
 }
 
-export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, integrityBlocked = false }) {
+export function OpenFundingPanel({ problemId, postingOwnerId, proposalId, reviewedProposalRecord, onNavigate, onChange, integrityBlocked = false }) {
+  const reviewedProposal = useMemo(() => {
+    try { return reviewedProposalRecord ? prepareStoredProposal(reviewedProposalRecord, { registryConfig: AUDIT_REGISTRY_CONFIG }) : null; }
+    catch { return null; }
+  }, [reviewedProposalRecord]);
   const { user } = useAuth();
   const queryClient = useContext(QueryClientContext);
   const { address, isConnected } = useWallet();
@@ -227,9 +237,10 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
     const pendingRecord = (transactionHash, step) => ({ transactionHash, action: step, proposalId: selectedProposalId,
       ...(["approve", "resetAllowance"].includes(step) ? { tokenAddress: data.tokenAddress, poolAddress: data.poolAddress } : {}) });
     try {
-      const result = await writeOpenFundingAction({ problemId, proposalId: selectedProposalId, account: address,
+      const result = await writeOpenFundingAction({ problemId, postingOwnerId, proposalId: selectedProposalId, account: address,
         action, amount: action === "withdraw" ? withdrawalAmount : amount, decimals: data.tokenDecimals, tokenAddress: data.tokenAddress,
         ...(action === "decline" ? { reason: extra.reason } : {}),
+        ...(action === "select" ? { reviewedProposal: extra.reviewedProposal } : {}),
         onProgress: progress => {
           if (currentPanel()) setProgress(progress);
           if (progress.action) walletStep = progress.action;
@@ -287,7 +298,7 @@ export function OpenFundingPanel({ problemId, proposalId, onNavigate, onChange, 
     } catch (err) { if (err.terminal) remember(null); if (currentPanel()) setError(escrowErrorMessage(err)); }
     finally { actionBusy.current = false; setBusy(false); setProgress(null); }
   };
-  return <><OpenFundingView {...{ data, loading, error, notice, busy, progress, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, proposalId, onNavigate, integrityBlocked, decline }}
+  return <><OpenFundingView {...{ data, loading, error, notice, busy, progress, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, proposalId, onNavigate, integrityBlocked, decline, reviewedProposal }}
     onDeclineChange={setDecline}
     onAction={act} onRefresh={() => { setError(""); void refresh(); }} onConfirm={confirm} onConnect={() => { void signIn(); }} /></>;
 }

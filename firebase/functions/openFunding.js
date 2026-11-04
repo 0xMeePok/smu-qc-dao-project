@@ -36,6 +36,10 @@ export function supportsOpenFunding(config) {
 export function supportsOpenFundingDecline(config) {
   return supportsOpenFunding(config) && hasFunctions(config.escrow.openFundingPoolAbi, ["declineProposal", "declineReasonHash"]);
 }
+export function supportsBoundOpenFundingSelection(config) {
+  return config.escrow?.openFundingPoolAbi?.some(item => item.type === "function" && item.name === "selectProposal"
+    && item.inputs?.map(input => input.type).join(",") === "bytes32,uint256,bytes32,bytes32");
+}
 export function normalizeDeclineReason(reason) {
   const message = String(reason ?? "").trim().normalize("NFC");
   if (message.length < DECLINE_REASON_MIN || message.length > DECLINE_REASON_MAX) fail("invalid-argument", "Provide a decline reason of 10–2,000 characters.");
@@ -163,29 +167,31 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
     const offer = offers[index], state = Number(at(offer, "state", 2)), deadline = BigInt(at(offer, "acceptanceDeadline", 1));
     if (!OFFER_STATES[state]) fail("failed-precondition", "The grant selection state cannot be verified.");
     const expired = state === 1 && deadline <= block.timestamp;
-    let escrowAddress, deposited, active, invalidated;
+    let escrowAddress, deposited, active, invalidated, revisionCount;
     try {
       const escrow = await verifyProposalEscrow({ expected, config, readContract: request => client.readContract({ ...request, blockNumber }) });
       escrowAddress = escrow.address;
-      const [linkedPool, actual, paid, fundingActive, fundingInvalidated] = await Promise.all([
+      const [linkedPool, actual, paid, fundingActive, fundingInvalidated, revisions] = await Promise.all([
         read(escrowAddress, config.escrow.escrowAbi, "openFundingPool"), read(config.address, config.abi, "getProposal", [expected.entityId]),
         read(escrowAddress, config.escrow.escrowAbi, "totalDeposited"),
         read(config.address, config.abi, "isFundingActive", [expected.entityId, escrowAddress]),
         read(config.address, config.abi, "isFundingInvalidated", [expected.entityId, escrowAddress]),
+        read(config.address, config.abi, "revisionCount", [expected.entityId]),
       ]);
       if (!same(linkedPool, base.poolAddress) || !same(expected.fundingTerms.token, base.tokenAddress)
           || !same(at(actual, "researcher", 0), expected.expectedResearcher) || !same(at(actual, "opportunityId", 1), expected.opportunityId)
           || !same(at(actual, "proposalHash", 4), expected.proposalHash) || !same(at(actual, "solutionHash", 5), expected.solutionHash)) return null;
-      deposited = BigInt(paid); active = fundingActive; invalidated = fundingInvalidated;
+      deposited = BigInt(paid); active = fundingActive; invalidated = fundingInvalidated; revisionCount = String(revisions);
     } catch { return null; }
     const declineReasonHash = declineHashes[index] && !same(declineHashes[index], ZERO_HASH) ? String(declineHashes[index]).toLowerCase() : null;
     return { proposalId: proposal.id, entityId: ids[index], title: proposal.title || "Proposal", researcherId: proposal.researcherId,
+      reviewedProposal: { entityId: expected.entityId, revisionCount, proposalHash: expected.proposalHash, solutionHash: expected.solutionHash },
       escrowAddress, amountBaseUnits: state === 0 ? expected.fundingTerms.target.toString() : String(at(offer, "amount", 0)), acceptanceDeadline: deadline.toString(),
       status: expired ? "expired" : OFFER_STATES[state], declined: Boolean(declineReasonHash), declineReasonHash,
       canAccept: state === 1 && !expired && active && !hidden(proposal) && !hidden(record) && same(uid, proposal.researcherId),
       // Declining is an exit: moderation pauses and hidden content never block it.
       canDecline: declineSupported && state === 1 && !expired && same(uid, proposal.researcherId),
-      canVoid: state === 1 && (expired || invalidated), canSelect: isOwner && live && active && state === 0 && deposited === 0n
+      canVoid: state === 1 && (expired || invalidated), canSelect: supportsBoundOpenFundingSelection(config) && isOwner && live && active && state === 0 && deposited === 0n
         && expected.fundingTerms.target <= BigInt(base.available) && ["submitted", "under_review"].includes(proposal.status) && !hidden(proposal) };
   });
   base.selections = selections.filter(Boolean);
@@ -269,10 +275,19 @@ export async function prepareOpenFundingAction(options) {
     if (!same(linkedPool, summary.poolAddress) || !same(expected.fundingTerms.token, summary.tokenAddress)) fail("failed-precondition", "The proposal's escrow is not linked to this grant pool and token.");
     const state = Number(at(offer, "state", 2)), deadline = BigInt(at(offer, "acceptanceDeadline", 1));
     if (action === "select") {
+      if (!supportsBoundOpenFundingSelection(config)) fail("failed-precondition", "This grant pool cannot bind selection to your reviewed revision. Use the updated deployment.");
+      const review = options.reviewedProposal;
+      const revisionCount = await readContract({ address: config.address, abi: config.abi, functionName: "revisionCount", args: [expected.entityId] });
+      if (!review || !same(review.entityId, expected.entityId) || !same(review.proposalHash, expected.proposalHash)
+          || !same(review.solutionHash, expected.solutionHash) || typeof review.revisionCount !== "string"
+          || !/^[1-9][0-9]{0,77}$/.test(review.revisionCount) || BigInt(review.revisionCount) !== BigInt(revisionCount)) {
+        fail("failed-precondition", "The proposal changed since your review. Refresh and review the current revision before selecting it.");
+      }
       if (!summary.canSelect || hidden(context.record) || !["submitted", "under_review"].includes(context.record.status) || state !== 0) fail("permission-denied", "Only the owner can select an eligible proposal from available grant funding.");
       const deposited = actionState;
       if (deposited !== 0n || expected.fundingTerms.target > BigInt(summary.available)) fail("failed-precondition", "The requested grant must fit the available pool balance and its proposal escrow must be empty.");
       functionName = "selectProposal";
+      args = [expected.entityId, BigInt(review.revisionCount), review.proposalHash, review.solutionHash];
     } else if (action === "accept") {
       if (!same(uid, context.record.researcherId)) fail("permission-denied", "Only the selected proposal owner can accept the grant.");
       const active = actionState;
@@ -292,7 +307,7 @@ export async function prepareOpenFundingAction(options) {
       if (state !== 1 || (deadline > BigInt(summary.timestamp) && !invalidated)) fail("failed-precondition", "The selected proposal can be voided after its acceptance deadline or the opportunity is invalidated.");
       functionName = "expireProposal";
     }
-    if (action !== "decline") args = [expected.entityId];
+    if (!["decline", "select"].includes(action)) args = [expected.entityId];
   } else fail("invalid-argument", "Choose a valid grant action.");
   const abi = contractType === "factory" ? config.escrow.factoryAbi : config.escrow.openFundingPoolAbi;
   const data = encodeFunctionData({ abi, functionName, args });
@@ -322,7 +337,7 @@ export async function prepareOpenFundingAction(options) {
       if (!(await tx.get(ref)).exists) tx.set(ref, { ...decline, status: "prepared", createdAt: Timestamp.now() });
     });
   }
-  const request = { address: address.toLowerCase(), functionName, args };
+  const request = { address: address.toLowerCase(), functionName, args: args.map(arg => typeof arg === "bigint" ? arg.toString() : arg) };
   return { ...request, request, contractType, data, chainId: config.chainId, ...token, poolAddress: summary.poolAddress,
     ...(decline ? { reasonHash: decline.reasonHash } : {}),
     ...(functionName === "deposit" ? { approvalRequired } : {}),

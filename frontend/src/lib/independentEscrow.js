@@ -3,7 +3,7 @@ import { erc20Abi, formatUnits } from "viem";
 import { functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { AUDIT_REGISTRY_CHAIN_ID, AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
-import { prepareIndependentEscrowCommit } from "../../../firebase/functions/proposalAuditPayload.js";
+import { opportunityEntityId } from "../../../firebase/functions/auditCanonical.js";
 import { auditErrorMessage, isRpcQuotaExceeded, isRpcUnreachable } from "./errors.js";
 import { normalizeWalletWriteError } from "./auditRegistry.js";
 import independentConfig from "../config/independentFunding.contract.json" with { type: "json" };
@@ -81,10 +81,13 @@ const ACTIONS = Object.freeze({ activate: "createEscrow", deposit: "deposit", ac
   submitEvidence: "submitEvidence", vote: "voteCompletion", expire: "expire", claimRefund: "claimRefund" });
 const MISMATCH = "The funding transaction does not match the configured deployment. Refresh before continuing.";
 
-function expectedListingId(proposal) {
-  if (!proposal) return null;
-  try { return prepareIndependentEscrowCommit(proposal, { registryConfig: AUDIT_REGISTRY_CONFIG }).entityId; }
-  catch { return null; } // Older records without stored terms still get the canonical-escrow check below.
+function expectedListingId(proposalId, proposal, action) {
+  // The escrow is keyed by the listing's opportunity ID, not its child proposal ID.
+  // A refund pays only its caller, so the dashboard can still show it with an ID-only shell.
+  if (action === "claimRefund" && !proposal?.researcherId) return null;
+  if (proposal?.id !== proposalId || !isAddress(proposal.researcherId)) throw new Error(MISMATCH);
+  return opportunityEntityId(proposalId, { hashScheme: 2,
+    actor: AUDIT_REGISTRY_CONFIG.entityIdScheme === 2 ? proposal.researcherId : undefined });
 }
 
 /**
@@ -93,7 +96,7 @@ function expectedListingId(proposal) {
  * (read on-chain), with the bundled ABI. An approval goes only to that escrow and only for
  * the token the escrow itself holds, so a tampered callable response cannot redirect funds.
  */
-async function verifiedTarget({ prepared, action, proposal, adapters, config = independentConfig }) {
+async function verifiedTarget({ prepared, action, proposalId, proposal, adapters, config = independentConfig }) {
   if (!independentFundingConfigured(config)) throw new Error("Independent crowdfunding is awaiting its contract deployment.");
   if (prepared.chainId !== AUDIT_REGISTRY_CHAIN_ID || prepared.chainId !== config.chainId) {
     throw new Error("This funding transaction was prepared for the wrong network. Refresh the app and try again.");
@@ -106,7 +109,7 @@ async function verifiedTarget({ prepared, action, proposal, adapters, config = i
     throw new Error("The funding transaction could not be prepared. Refresh and retry.");
   }
   const read = (address, contractAbi, name, args = []) => adapters.readContract({ address, abi: contractAbi, functionName: name, args, chainId: config.chainId });
-  const listing = expectedListingId(proposal);
+  const listing = expectedListingId(proposalId, proposal, action);
   if (action === "activate") {
     if (!same(prepared.address, config.factoryAddress) || (listing && !same(prepared.args[0], listing))) throw new Error(MISMATCH);
     return { address: config.factoryAddress, abi, spec };
@@ -148,7 +151,7 @@ export async function writeIndependentFundingAction({ proposalId, proposal, acti
   const prepared = await prepare({ proposalId, action, ...(amount !== undefined ? { amount } : {}),
     ...(hash ? { evidenceHash: hash } : {}), ...(evidence ? { evidence } : {}), ...(approve !== undefined ? { approve } : {}),
     ...(declineReason !== null ? { reason: declineReason } : {}) });
-  const target = await verifiedTarget({ prepared, action, proposal, adapters });
+  const target = await verifiedTarget({ prepared, action, proposalId, proposal, adapters });
   const { spec } = target;
   const send = async (request, step) => {
     onChange?.({ status: "preparing", action: step });
@@ -190,7 +193,8 @@ export async function writeIndependentFundingAction({ proposalId, proposal, acti
 
 /** Called only after the listing has been successfully saved and attested. */
 export async function activateIndependentFunding(proposalId, { account, adapters, onProgress } = {}) {
-  const result = await writeIndependentFundingAction({ proposalId, action: "activate", account, adapters, onChange: onProgress });
+  const result = await writeIndependentFundingAction({ proposalId, proposal: { id: proposalId, researcherId: account },
+    action: "activate", account, adapters, onChange: onProgress });
   try { await syncIndependentFunding({ proposalId, transactionHash: result.transactionHash }); }
   catch (error) { error.transactionHash = result.transactionHash; error.action = "activate"; throw error; }
   return result;

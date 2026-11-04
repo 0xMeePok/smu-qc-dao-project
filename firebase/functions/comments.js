@@ -5,6 +5,7 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
 import { recommendationEntries, workflowStatusLabel } from "./workflowStatus.js";
 import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
+import { boundedCommentHistory } from "./commentHistory.js";
 
 export const ROLE_EVALUATOR = 2;
 export const ROLE_ADMIN = 1;
@@ -440,7 +441,7 @@ export async function editComment({ db, uid, commentId, body, recommendation, no
       qftGrade: data.qftGrade ?? null,
       qftGradedAt: data.qftGradedAt ?? null,
       qftGradedBy: data.qftGradedBy ?? null,
-      revisions: [...(data.revisions || []), revision("edit", data, now)],
+      ...boundedCommentHistory(data, revision("edit", data, now)),
     };
     next.qualifying = commentIsQualifying(next, role);
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id,
@@ -507,7 +508,7 @@ export async function deleteComment({ db, uid, commentId, now = Timestamp.now() 
       deletedAt: now,
       deletedBy: uid,
       updatedAt: now,
-      revisions: [...(data.revisions || []), revision("delete", data, now)],
+      ...boundedCommentHistory(data, revision("delete", data, now)),
     };
     const gate = await evaluationGateReads(tx, db, { proposalId: data.proposalId, commentId: ref.id });
     const removedNotices = await queueQualifyingRemovedNotices(tx, db, {

@@ -110,10 +110,12 @@ describe("Independent crowdfunding: real contract and application service integr
       assert.equal(voted.summary.totalReleased, "1000000");
       assert.equal(voted.actions.releaseCompletion, false);
       await assert.rejects(c.prepare(c.bob, "releaseCompletion"), /not available/);
-      await assert.rejects(c.escrow.connect(c.bob).releaseCompletion(), /AccessDenied/);
-      await assert.rejects(releaseIndependentFundingCompletion({ ...c.options(c.alice), getWallet: c.getWallet }), /Administrator/);
+      await assert.rejects(c.escrow.connect(c.bob).releaseCompletion(voted.summary.evidenceVersion, voted.summary.evidenceHash), /AccessDenied/);
+      await assert.rejects(releaseIndependentFundingCompletion({ ...c.options(c.alice),
+        expectedEvidenceVersion: voted.summary.evidenceVersion, expectedEvidenceHash: voted.summary.evidenceHash, getWallet: c.getWallet }), /Administrator/);
       assert.equal((await getIndependentFundingState(c.options(c.admin))).actions.releaseCompletion, true);
-      const release = await releaseIndependentFundingCompletion({ ...c.options(c.admin), getWallet: c.getWallet });
+      const release = await releaseIndependentFundingCompletion({ ...c.options(c.admin),
+        expectedEvidenceVersion: voted.summary.evidenceVersion, expectedEvidenceHash: voted.summary.evidenceHash, getWallet: c.getWallet });
       assert.equal(release.status, "pending");
       assert.match(release.transactionHash, /^0x[0-9a-f]{64}$/);
       await c.mine(); await c.mine();

@@ -204,11 +204,11 @@ describe("security deployment configuration", () => {
     assert.match(writer, /\.doc\(eventId\)/);
   });
 
-  it("enables TTL cleanup for publication attempts and AI abuse-limit documents", () => {
+  it("enables TTL cleanup for publication attempts, AI limits and private export sessions", () => {
     const ttlGroups = indexes.fieldOverrides
       .filter((entry) => entry.fieldPath === "expiresAt" && entry.ttl === true)
       .map((entry) => entry.collectionGroup)
       .sort();
-    assert.deepEqual(ttlGroups, ["aiRequests", "aiUsage", "publicationAttempts"]);
+    assert.deepEqual(ttlGroups, ["aiRequests", "aiUsage", "proposalExportSessions", "publicationAttempts"]);
   });
 });

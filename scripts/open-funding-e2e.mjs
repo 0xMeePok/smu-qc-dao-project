@@ -130,7 +130,10 @@ try {
   const summary = (uid, selectedProblemId = problemId) => getOpenFundingSummary({ ...options(uid), problemId: selectedProblemId });
   const action = async (signer, name, extra = {}) => {
     const actionOptions = { ...options(signer.address), problemId: extra.problemId ?? problemId };
-    const request = await prepareOpenFundingAction({ ...actionOptions, action: name, ...extra });
+    const reviewedProposal = name === "select"
+      ? (await getOpenFundingSummary(actionOptions)).selections.find(row => row.proposalId === extra.proposalId)?.reviewedProposal
+      : undefined;
+    const request = await prepareOpenFundingAction({ ...actionOptions, action: name, reviewedProposal, ...extra });
     const tx = await confirm(signer.sendTransaction({ to: request.address, data: request.data }));
     const result = await syncOpenFunding({ ...actionOptions, transactionHash: tx.hash, now: await chainNow() });
     return { tx, summary: result };

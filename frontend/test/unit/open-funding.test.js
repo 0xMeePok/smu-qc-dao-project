@@ -3,11 +3,13 @@ import { describe, it } from "node:test";
 import { encodeFunctionData, parseAbi } from "viem";
 import { normalizeDeclineReason, openFundingDeclineReasonHash, openFundingDeclineSupported, openFundingSupported, writeOpenFundingAction } from "../../src/lib/openFunding.js";
 import { escrowConfig } from "../../../firebase/functions/test/fixtures/escrowConfigFixture.js";
+import { opportunityEntityId } from "../../../firebase/functions/auditCanonical.js";
 
-const pool = `0x${"7".repeat(40)}`, account = `0x${"8".repeat(40)}`, hash = `0x${"9".repeat(64)}`, postingId = `0x${"5".repeat(64)}`;
+const pool = `0x${"7".repeat(40)}`, account = `0x${"8".repeat(40)}`, hash = `0x${"9".repeat(64)}`;
+const postingId = opportunityEntityId("grant", { hashScheme: 1, actor: account });
 const config = { ...escrowConfig, escrow: { ...escrowConfig.escrow,
   factoryAbi: parseAbi(["function createOpenFundingPool(bytes32 postingId, address token) returns (address)"]),
-  openFundingPoolAbi: parseAbi(["function deposit(uint256 amount)", "function selectProposal(bytes32 proposalId)",
+  openFundingPoolAbi: parseAbi(["function deposit(uint256 amount)", "function selectProposal(bytes32 proposalId,uint256 revisionCount,bytes32 proposalHash,bytes32 solutionHash)",
     "function acceptProposal(bytes32 proposalId)", "function expireProposal(bytes32 proposalId)", "function withdrawAvailable(uint256 amount)"]),
 } };
 function fixture(overrides = {}) {
@@ -24,7 +26,7 @@ function fixture(overrides = {}) {
     writeContract: async request => { encodeFunctionData(request); writes.push(request); return hash; },
     waitForTransactionReceipt: async request => { waits.push(request); if (overrides.failure) throw overrides.failure; return { transactionHash: hash, status: "success" }; },
   };
-  const options = { problemId: "grant", account, action: "deposit", amount: "1.25", decimals: 6,
+  const options = { problemId: "grant", postingOwnerId: account, account, action: "deposit", amount: "1.25", decimals: 6,
     config, adapters, prepare: async () => prepared, onProgress: value => progress.push(value) };
   return { writes, progress, waits, options };
 }
@@ -87,6 +89,27 @@ it("does not sign against a pool the configured factory did not deploy, or appro
   const unlisted = fixture({ chain: { token: account }, prepared: { tokenAddress: account } });
   await assert.rejects(writeOpenFundingAction({ ...unlisted.options, tokenAddress: account }), /token or amount changed/);
   assert.equal(unlisted.writes.length, 0);
+});
+it("does not sign against a canonical pool for a different posting or owner", async () => {
+  const other = fixture({ chain: { postingId: `0x${"6".repeat(64)}` } });
+  await assert.rejects(writeOpenFundingAction(other.options), /canonical pool/);
+  assert.equal(other.writes.length, 0);
+  const owner = fixture();
+  await assert.rejects(writeOpenFundingAction({ ...owner.options, postingOwnerId: `0x${"a".repeat(40)}` }), /canonical pool/);
+  assert.equal(owner.writes.length, 0);
+});
+it("signs only the grant proposal revision captured by the displayed review", async () => {
+  const reviewedProposal = { entityId: hash, revisionCount: "1", proposalHash: `0x${"2".repeat(64)}`, solutionHash: `0x${"3".repeat(64)}` };
+  const args = [reviewedProposal.entityId, "1", reviewedProposal.proposalHash, reviewedProposal.solutionHash];
+  const good = fixture({ prepared: { request: { address: pool, functionName: "selectProposal", args } } });
+  await writeOpenFundingAction({ ...good.options, action: "select", reviewedProposal });
+  assert.deepEqual(good.writes.map(row => row.args), [[hash, 1n, reviewedProposal.proposalHash, reviewedProposal.solutionHash]]);
+  for (const index of [0, 1, 2, 3]) {
+    const changed = [...args]; changed[index] = index === 1 ? "2" : `0x${"4".repeat(64)}`;
+    const f = fixture({ prepared: { request: { address: pool, functionName: "selectProposal", args: changed } } });
+    await assert.rejects(writeOpenFundingAction({ ...f.options, action: "select", reviewedProposal }), /revision changed/);
+    assert.equal(f.writes.length, 0);
+  }
 });
 it("does not request approval when the token balance is insufficient", async () => {
   const { options, writes } = fixture({ balance: 0n });

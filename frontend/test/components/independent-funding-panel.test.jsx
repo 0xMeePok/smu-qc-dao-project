@@ -345,7 +345,7 @@ it("lets an administrator release the approved final payment through the platfor
   render(<IndependentFundingPanel proposal={{ id: "admin-release" }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Release final 50%" }));
   await screen.findByText(/Platform transaction submitted/);
-  expect(mocks.release).toHaveBeenCalledWith({ proposalId: "admin-release" });
+  expect(mocks.release).toHaveBeenCalledWith({ proposalId: "admin-release", expectedEvidenceVersion: approved.summary.evidenceVersion, expectedEvidenceHash: approved.summary.evidenceHash });
   expect(mocks.write).not.toHaveBeenCalled();
   expect(mocks.sync).not.toHaveBeenCalled();
   expect(mocks.read).toHaveBeenCalledTimes(2); // initial load, then the refresh after the request

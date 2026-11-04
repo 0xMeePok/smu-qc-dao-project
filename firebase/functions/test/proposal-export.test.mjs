@@ -6,7 +6,12 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { memoryDb } from "./memoryDb.mjs";
 import {
   CSV_COLUMNS,
-  EXPORT_COMMENT_CAP,
+  EXPORT_COMMENT_PAGE_SIZE,
+  EXPORT_PAGE_BYTES,
+  EXPORT_SESSION_BYTES,
+  EXPORT_SESSION_COLLECTION,
+  EXPORT_SESSION_TTL_MS,
+  exportToCsv,
   EXPORT_NOTICE,
   EXPORT_SCAN_CAP,
   EXPORT_SCHEMA_VERSION,
@@ -73,8 +78,33 @@ function store(records) {
   return memoryDb(records);
 }
 
-function exportOf(db, input, now = at("2026-10-27T08:00:00.000Z")) {
-  return exportSelectedProposals({ db, ...actor, input, now });
+async function exportOf(db, input, now = at("2026-10-27T08:00:00.000Z")) {
+  let page = await exportSelectedProposals({ db, ...actor, input: { protocolVersion: 1, ...input }, now });
+  const document = { ...page.document, postings: [] };
+  const postings = new Map();
+  while (true) {
+    assertConforms(schema, page.document, "page.document.");
+    assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= EXPORT_PAGE_BYTES);
+    for (const row of page.document.postings) {
+      const key = page.postingIndex;
+      if (!postings.has(key)) postings.set(key, { ...row, proposals: [] });
+      const posting = postings.get(key);
+      for (const proposal of row.proposals) {
+        let selected = posting.proposals.find((existing) => existing.id === proposal.id);
+        if (!selected) { selected = { ...proposal, comments: [] }; posting.proposals.push(selected); }
+        selected.comments.push(...proposal.comments);
+      }
+    }
+    if (page.done) break;
+    page = await exportSelectedProposals({ db, ...actor, input: page.nextCursor, now });
+  }
+  document.postings = [...postings.values()];
+  for (const posting of document.postings) {
+    posting.proposals.sort((a, b) => a.id.localeCompare(b.id));
+    for (const proposal of posting.proposals) proposal.comments.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || "") || a.id.localeCompare(b.id));
+  }
+  Object.assign(document, page.totals);
+  return { ...page, ...page.totals, document, csv: exportToCsv(document) };
 }
 
 function audits(db) {
@@ -352,17 +382,295 @@ describe("QCDAO-107 selected proposal export", () => {
     assert.equal(audits(db).length, 1);
   });
 
-  it("stops instead of returning a partial comment list", async () => {
+  it("exports 1001 comments through bounded pages without a partial extract", async () => {
     const records = {
       "problems/full": posting("full"),
       "proposals/proposal-full": proposal("proposal-full", { problemId: "full" }),
     };
-    for (let index = 0; index <= EXPORT_COMMENT_CAP; index += 1) {
+    for (let index = 0; index <= 1000; index += 1) {
       records[`comments/c${index}`] = comment({ proposalId: "proposal-full", body: `note ${index}` });
     }
     const db = store(records);
-    await assert.rejects(() => exportOf(db, { proposalId: "proposal-full" }), (error) => error instanceof HttpsError && error.code === "resource-exhausted");
-    assert.equal(audits(db).length, 0);
+    const result = await exportOf(db, { proposalId: "proposal-full" });
+    assert.equal(result.commentCount, 1001);
+    assert.equal(new Set(result.document.postings[0].proposals[0].comments.map((row) => row.id)).size, 1001);
+    assert.equal(audits(db).length, 1);
+    assert.equal(audits(db)[0][1].commentCount, 1001);
     assert.ok(EXPORT_SCAN_CAP >= 1);
   });
+});
+
+const exportNow = at("2026-10-27T08:00:00.000Z");
+const beginInput = (extra = {}) => ({ protocolVersion: 1, proposalId: "selected", requestId: "export-request-0001", ...extra });
+const callPage = (db, input, extra = {}) => exportSelectedProposals({ db, ...actor, now: exportNow, input, ...extra });
+function floodRecords(count, extra = {}) {
+  const records = { "problems/parent": posting("parent"), "proposals/selected": proposal("selected", { problemId: "parent" }) };
+  for (let index = 0; index < count; index++) {
+    records[`comments/c${String(index).padStart(5, "0")}`] = comment({ proposalId: "selected", body: `Comment ${index}`, ...extra });
+  }
+  return records;
+}
+
+// Decorate the existing fake with Firestore's authoritative snapshot timestamps.
+// Application fields are left untouched so legacy date behavior stays testable.
+function systemTimedDb(db, created = new Map(), readTime = exportNow) {
+  const original = db.collection;
+  const wrap = (query, name) => ({
+    doc: (...args) => query.doc(...args),
+    ...Object.fromEntries(["where", "select", "orderBy", "limit", "startAfter"].map((method) => [method, (...args) => wrap(query[method](...args), name)])),
+    get: async () => {
+      const rows = await query.get();
+      return { ...rows, readTime, docs: rows.docs.map((doc) => ({ ...doc, createTime: created.get(`${name}/${doc.id}`) || at("2026-01-01T00:00:00.000Z") })) };
+    },
+  });
+  db.collection = (name) => wrap(original(name), name);
+  return db;
+}
+
+describe("bounded proposal export continuation", () => {
+  it("requires explicit protocol opt-in so stale clients never save a partial file", async () => {
+    const db = store(floodRecords(51));
+    await assert.rejects(() => callPage(db, { proposalId: "selected" }), { code: "failed-precondition" });
+    assert.equal(audits(db).length, 0);
+    assert.equal([...db.records.keys()].some((key) => key.startsWith(`${EXPORT_SESSION_COLLECTION}/`)), false);
+  });
+
+  it("pages at 50 documents, retries exactly, and commits one complete audit under concurrent retries", async () => {
+    const queries = [];
+    const db = memoryDb(floodRecords(51), { onQuery: (query) => queries.push(query) });
+    const first = await callPage(db, beginInput());
+    assert.equal(first.document.commentCount, EXPORT_COMMENT_PAGE_SIZE);
+    assert.equal(first.done, false);
+    assert.equal(first.auditId, null);
+    assert.equal(audits(db).length, 0);
+    assert.deepEqual(await callPage(db, beginInput()), first);
+    await assert.rejects(() => callPage(db, { exportId: first.exportId, page: 2 }), { code: "failed-precondition" });
+    const [last, retry] = await Promise.all([callPage(db, first.nextCursor), callPage(db, first.nextCursor)]);
+    assert.deepEqual(retry, last);
+    assert.deepEqual(await callPage(db, first.nextCursor), last);
+    assert.equal(last.done, true);
+    assert.equal(last.document.commentCount, 1);
+    assert.equal(last.totals.commentCount, 51);
+    assert.equal(audits(db).length, 1);
+    assert.equal(audits(db)[0][1].commentCount, 51);
+    assert.ok(queries.filter((row) => row.name === "comments").every((row) => row.cap <= EXPORT_COMMENT_PAGE_SIZE));
+    await assert.rejects(() => callPage(db, beginInput()), { code: "failed-precondition" });
+    await assert.rejects(() => callPage(db, { exportId: first.exportId, page: 2 }), { code: "failed-precondition" });
+  });
+
+  it("does not drop the exact page-size boundary and completes after the bounded empty continuation", async () => {
+    const db = store(floodRecords(50));
+    const result = await exportOf(db, beginInput());
+    assert.equal(result.commentCount, 50);
+    assert.equal(audits(db).length, 1);
+  });
+
+  it("binds session state to actor, scope, expiry and sequential validated cursors", async () => {
+    const db = store(floodRecords(51));
+    const first = await callPage(db, beginInput());
+    await assert.rejects(() => callPage(db, first.nextCursor, { actorUid: "other-admin" }), { code: "permission-denied" });
+    await assert.rejects(() => callPage(db, beginInput({ acceptance: "accepted" })), { code: "invalid-argument" });
+    await assert.rejects(() => callPage(db, { ...first.nextCursor, proposalId: "other" }), { code: "invalid-argument" });
+    await assert.rejects(() => callPage(db, { exportId: first.exportId, page: -1 }), { code: "invalid-argument" });
+    await assert.rejects(() => callPage(db, { exportId: "a".repeat(64), page: 1 }), { code: "not-found" });
+    await assert.rejects(() => callPage(db, first.nextCursor, { now: Timestamp.fromMillis(exportNow.toMillis() + EXPORT_SESSION_TTL_MS + 1) }), { code: "failed-precondition" });
+    assert.equal(audits(db).length, 0);
+    assert.equal([...db.records.keys()].filter((key) => key.startsWith(`${EXPORT_SESSION_COLLECTION}/`)).length, 1);
+  });
+
+  it("uses system creation times and a monotonic ID scan while retaining all legacy application dates", async () => {
+    const records = floodRecords(51);
+    records["comments/c00000"].createdAt = at("2099-01-01T00:00:00.000Z");
+    records["comments/c00001"].createdAt = null;
+    records["comments/c00002"].createdAt = "malformed old date";
+    const created = new Map();
+    const db = systemTimedDb(store(records), created);
+    const first = await callPage(db, beginInput());
+    assert.equal(first.document.postings[0].proposals[0].comments[0].createdAt, "2099-01-01T00:00:00.000Z");
+    assert.equal(first.document.postings[0].proposals[0].comments[1].createdAt, null);
+    assert.equal(first.document.postings[0].proposals[0].comments[2].createdAt, null);
+    // Created later but sorting before an old unexported row: skip by immutable system time,
+    // including a timestamp only one nanosecond after the cutoff.
+    db.records.set("comments/c00049x", comment({ proposalId: "selected", createdAt: null }));
+    created.set("comments/c00049x", new Timestamp(exportNow.seconds, exportNow.nanoseconds + 1));
+    // Later IDs also advance the bounded scan and are excluded by system time.
+    db.records.set("comments/z-new", comment({ proposalId: "selected", createdAt: at("2020-01-01T00:00:00.000Z") }));
+    created.set("comments/z-new", at("2026-10-28T00:00:00.000Z"));
+    db.records.get("comments/c00050").body = "A current edit made between pages.";
+    const last = await callPage(db, first.nextCursor);
+    assert.equal(last.done, true);
+    assert.equal(last.totals.commentCount, 51);
+    assert.deepEqual(last.document.postings[0].proposals[0].comments.map((row) => row.id), ["c00050"]);
+    assert.equal(last.document.postings[0].proposals[0].comments[0].body, "A current edit made between pages.");
+  });
+
+  it("bounds UTF-8 page and session bytes without truncating maximum-length multibyte bodies", async () => {
+    const body = "漢".repeat(5000);
+    const queries = [];
+    const db = memoryDb(floodRecords(101, { body, revisions: [{ body: "not exported".repeat(10000) }] }), { onQuery: (query) => queries.push(query) });
+    let page = await callPage(db, beginInput());
+    const ids = new Set();
+    let pages = 0;
+    while (true) {
+      pages++;
+      assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= EXPORT_PAGE_BYTES);
+      for (const row of page.document.postings[0].proposals[0].comments) { assert.equal(row.body, body); ids.add(row.id); }
+      const state = db.records.get(`${EXPORT_SESSION_COLLECTION}/${page.exportId}`);
+      assert.ok(Buffer.byteLength(JSON.stringify(state), "utf8") <= EXPORT_SESSION_BYTES);
+      assert.equal(Object.hasOwn(state, "pages"), false);
+      if (page.done) break;
+      page = await callPage(db, page.nextCursor);
+    }
+    assert.ok(pages > 3);
+    assert.equal(ids.size, 101);
+    assert.equal(page.totals.commentCount, 101);
+    assert.equal(audits(db).length, 1);
+    assert.ok(queries.filter((row) => row.name === "comments").every((row) => row.cap <= EXPORT_COMMENT_PAGE_SIZE));
+  });
+
+  it("returns no audit and no cursor advancement when an individual legacy row exceeds the byte budget", async () => {
+    const db = store(floodRecords(1, { body: "x".repeat(EXPORT_PAGE_BYTES) }));
+    await assert.rejects(() => callPage(db, beginInput()), { code: "resource-exhausted" });
+    assert.equal(audits(db).length, 0);
+    assert.equal([...db.records.keys()].some((key) => key.startsWith(`${EXPORT_SESSION_COLLECTION}/`)), false);
+  });
+
+  it("keeps the global 500-proposal scan cap separate and gives an accurate single-proposal workaround", async () => {
+    const records = {};
+    for (let index = 0; index <= EXPORT_SCAN_CAP; index++) records[`proposals/p${index}`] = proposal(`p${index}`, { problemId: null });
+    const db = store(records);
+    await assert.rejects(() => callPage(db, { protocolVersion: 1, startDate: "2026-10-01", endDate: "2026-10-02" }), (error) => error.code === "resource-exhausted" && /shorter date range cannot/.test(error.message));
+    const selected = await exportOf(db, { proposalId: "p0" });
+    assert.equal(selected.proposalCount, 1);
+    assert.equal(selected.document.postings[0].id, "");
+  });
+});
+
+it("preserves separate missing-parent groups and stable posting metadata across sibling proposals", async () => {
+  const records = floodRecords(1);
+  records["proposals/sibling"] = proposal("sibling", { problemId: "parent" });
+  records["proposals/orphan-a"] = proposal("orphan-a", { problemId: "missing-a" });
+  records["proposals/orphan-b"] = proposal("orphan-b", { problemId: "missing-b" });
+  const db = store(records);
+  let page = await callPage(db, { protocolVersion: 1, startDate: "2026-09-01", endDate: "2026-10-27" });
+  const headers = new Map(), proposals = [];
+  while (true) {
+    const posting = page.document.postings[0];
+    const header = { ...posting, proposals: [] };
+    if (headers.has(page.postingIndex)) assert.deepEqual(header, headers.get(page.postingIndex));
+    else headers.set(page.postingIndex, header);
+    proposals.push(posting.proposals[0].id);
+    // The first parent proposal's group header must survive this update.
+    if (posting.id === "parent") db.records.get("problems/parent").title = "Edited between sibling pages";
+    if (page.done) break;
+    page = await callPage(db, page.nextCursor);
+  }
+  assert.equal(headers.size, 3);
+  assert.equal([...headers.values()].filter((posting) => posting.id === "").length, 2);
+  assert.equal(proposals.length, 4);
+  assert.equal(page.totals.postingCount, 3);
+  assert.equal(page.totals.proposalCount, 4);
+});
+
+it("does not advance a session or audit a failed intermediate page", async () => {
+  const records = floodRecords(51);
+  records["comments/c00050"].body = "x".repeat(EXPORT_PAGE_BYTES);
+  const db = store(records);
+  const first = await callPage(db, beginInput());
+  const before = JSON.stringify(db.records.get(`${EXPORT_SESSION_COLLECTION}/${first.exportId}`));
+  await assert.rejects(() => callPage(db, first.nextCursor), { code: "resource-exhausted" });
+  assert.equal(JSON.stringify(db.records.get(`${EXPORT_SESSION_COLLECTION}/${first.exportId}`)), before);
+  assert.equal(audits(db).length, 0);
+  db.records.get("comments/c00050").body = "Repaired legacy row";
+  const last = await callPage(db, first.nextCursor);
+  assert.equal(last.done, true);
+  assert.equal(last.totals.commentCount, 51);
+  assert.equal(audits(db).length, 1);
+});
+
+it("keeps exact JSON bodies and shared CSV formula/quoting rules across pages", async () => {
+  const db = store(floodRecords(53));
+  const bodies = ["=SUM(A1)", "+formula", "-formula", "@formula", 'Quotes "and commas",\r\nsecond line'];
+  bodies.forEach((body, index) => { db.records.get(`comments/c${String(48 + index).padStart(5, "0")}`).body = body; });
+  const result = await exportOf(db, { proposalId: "selected" });
+  const comments = result.document.postings[0].proposals[0].comments;
+  for (let index = 0; index < bodies.length; index++) assert.equal(comments.find((row) => row.id === `c${String(48 + index).padStart(5, "0")}`).body, bodies[index]);
+  for (const prefix of ["=SUM(A1)", "+formula", "-formula", "@formula"]) assert.ok(result.csv.includes(`'${prefix}`));
+  assert.ok(result.csv.includes('"Quotes ""and commas"",\r\nsecond line"'));
+  assertConforms(schema, result.document, "document.");
+});
+
+it("emits no false zero-comment row for an exact 50-comment page followed by an empty scan", async () => {
+  const records = floodRecords(50);
+  records["comments/z-unrelated"] = comment({ proposalId: "outside" });
+  records["proposals/zero"] = proposal("zero", { problemId: "parent" });
+  const db = store(records);
+  let page = await callPage(db, { protocolVersion: 1, startDate: "2026-09-01", endDate: "2026-10-27" });
+  let csvRows = 0, emptyProgressPages = 0, zeroRows = 0;
+  while (true) {
+    csvRows += exportToCsv(page.document).split("\r\n").length - 2;
+    if (!page.document.postings.length) emptyProgressPages++;
+    for (const posting of page.document.postings) for (const proposal of posting.proposals) {
+      if (!proposal.comments.length) { zeroRows++; assert.equal(proposal.id, "zero"); }
+    }
+    if (page.done) break;
+    page = await callPage(db, page.nextCursor);
+  }
+  assert.equal(emptyProgressPages, 1);
+  assert.equal(zeroRows, 1);
+  assert.equal(csvRows, 51); // Independently flushed page files remain complete.
+  assert.equal(page.totals.commentCount, 50);
+  assert.equal(audits(db)[0][1].commentCount, 50);
+});
+
+it("emits only genuine empty proposals once after future-only progress pages", async () => {
+  const records = floodRecords(50);
+  records["comments/z-unrelated"] = comment({ proposalId: "outside" });
+  records["proposals/zero"] = proposal("zero", { problemId: "parent" });
+  const created = new Map(), db = systemTimedDb(store(records), created);
+  let page = await callPage(db, { protocolVersion: 1, startDate: "2026-09-01", endDate: "2026-10-27" });
+  assert.equal(page.document.commentCount, 50);
+  for (let index = 0; index < 51; index++) {
+    for (const [prefix, proposalId] of [["d", "selected"], ["q", "zero"]]) {
+      const path = `comments/${prefix}${String(index).padStart(5, "0")}`;
+      db.records.set(path, comment({ proposalId, createdAt: null }));
+      created.set(path, new Timestamp(exportNow.seconds, exportNow.nanoseconds + 1));
+    }
+  }
+  let csvRows = 0, emptyProgressPages = 0, zeroRows = 0;
+  while (true) {
+    assertConforms(schema, page.document, "page.document.");
+    csvRows += exportToCsv(page.document).split("\r\n").length - 2;
+    if (!page.document.postings.length) emptyProgressPages++;
+    for (const posting of page.document.postings) for (const proposal of posting.proposals) {
+      if (!proposal.comments.length) { zeroRows++; assert.equal(proposal.id, "zero"); }
+    }
+    if (page.done) break;
+    page = await callPage(db, page.nextCursor);
+  }
+  assert.equal(emptyProgressPages, 3);
+  assert.equal(zeroRows, 1);
+  assert.equal(csvRows, 51);
+  assert.equal(page.totals.commentCount, 50);
+  assert.equal(audits(db).length, 1);
+  assert.equal(audits(db)[0][1].proposalCount, 2);
+  assert.equal(audits(db)[0][1].commentCount, 50);
+});
+
+it("retries an initial request when Firestore returns equivalent scope fields in a different map order", async () => {
+  const db = store(floodRecords(51));
+  const first = await callPage(db, beginInput());
+  assert.equal(first.done, false);
+  const state = db.records.get(`${EXPORT_SESSION_COLLECTION}/${first.exportId}`);
+  state.scope = Object.fromEntries(Object.entries(state.scope).reverse());
+  const before = JSON.stringify(state);
+  assert.deepEqual(await callPage(db, beginInput()), first);
+  assert.equal(JSON.stringify(db.records.get(`${EXPORT_SESSION_COLLECTION}/${first.exportId}`)), before);
+  assert.equal(state.lastPage, 0);
+  assert.equal(state.commentCount, 50);
+  assert.equal(audits(db).length, 0);
+  await assert.rejects(() => callPage(db, beginInput({ acceptance: "accepted" })), { code: "invalid-argument" });
+  state.scope.unexpected = true;
+  await assert.rejects(() => callPage(db, beginInput()), { code: "invalid-argument" });
+  assert.equal(audits(db).length, 0);
 });

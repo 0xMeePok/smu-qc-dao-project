@@ -401,6 +401,9 @@ function auditEvent(row, { isAdmin, proposal, problem }) {
   }
   if (row.type === "escrow") {
     const { actorRole, funding } = escrowFundingDetails(row, { isAdmin, proposal, problem });
+    // Historical audit rows retain copied titles after a proposal is hidden or
+    // edited. Members may only see its currently readable content.
+    const title = isAdmin ? row.title || proposal?.title : proposal?.title;
     const anchored = Boolean(funding.transactionHash) && row.verified !== false;
     const label = funding.eventType === "Deposit" && !anchored ? "Escrow deposit"
       : Object.hasOwn(ESCROW_LABELS, funding.eventType) ? ESCROW_LABELS[funding.eventType] : "Escrow funding update";
@@ -410,14 +413,14 @@ function auditEvent(row, { isAdmin, proposal, problem }) {
       types: ["funding_status"],
       label,
       description: anchored
-        ? `${label} for “${row.title || "a proposal"}” is anchored on Arbitrum Sepolia.`
-        : `${label} for “${row.title || "a proposal"}” is waiting for on-chain verification.`,
+        ? `${label} for “${title || "a proposal"}” is anchored on Arbitrum Sepolia.`
+        : `${label} for “${title || "a proposal"}” is waiting for on-chain verification.`,
       at,
       actorRole,
       actorLabel: funding.actorAddress ? shortActor(funding.actorAddress, actorRole) : funding.actorLabel,
       entityType: "proposal",
       entityId: row.proposalId || row.targetId,
-      entityLabel: row.title || "Proposal",
+      entityLabel: title || "Proposal",
       problemId: row.problemId,
       proposalId: row.proposalId || row.targetId,
       verification: anchored ? "anchored" : "pending",
@@ -469,8 +472,10 @@ function auditEvent(row, { isAdmin, proposal, problem }) {
 
 function visibleProposal(row, uid, isAdmin) {
   if (!row || row.status === "draft") return false;
-  if (isAdmin || row.researcherId === uid || row.postingOwnerId === uid) return true;
-  return !BLOCKED.has(row.moderationStatus);
+  if (isAdmin || row.researcherId === uid) return true;
+  // The scope has already authorized the parent for members and sponsors.
+  // A copied sponsor ACL must not bypass the proposal's current moderation.
+  return Boolean(row.status) && !BLOCKED.has(row.moderationStatus);
 }
 
 async function loadScope(db, uid, profile, filters) {
@@ -562,7 +567,8 @@ async function collect(db, scope, filters, uid) {
     ? [[scope.proposal.id, scope.proposal]] : []);
   const proposalIds = new Set();
   for (const row of batches.flat()) {
-    if (row.proposalId) proposalIds.add(row.proposalId);
+    const proposalId = row.proposalId || (row.type === "escrow" ? row.targetId : null);
+    if (proposalId) proposalIds.add(proposalId);
     if (row.title && row.researcherId && visibleProposal(row, uid, scope.isAdmin)) titles.proposal.set(row.id, row.title);
     if (row.researcherId && row.status && visibleProposal(row, uid, scope.isAdmin)) proposals.set(row.id, row);
     if (row.title && row.ownerId && !row.researcherId) titles.problem.set(row.id, row.title);

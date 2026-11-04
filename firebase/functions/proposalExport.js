@@ -1,59 +1,29 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { opportunityWorkflowStatus, proposalWorkflowStatus, workflowStatusLabel } from "./workflowStatus.js";
 import { EXPORT_NOTICE, EXPORT_SCHEMA_VERSION, latestCurrentDate } from "./proposalExportNotice.js";
 
 export { EXPORT_NOTICE, EXPORT_SCHEMA_VERSION };
+export { CSV_COLUMNS, exportToCsv } from "./proposalExportFormat.js";
 
 /** One pass reads at most this many accepted postings or proposals. */
 export const EXPORT_SCAN_CAP = 500;
-/** Comments beyond this on one proposal are refused rather than silently dropped. */
-export const EXPORT_COMMENT_CAP = 1000;
+/** Each call scans at most this many projected comment documents. */
+export const EXPORT_COMMENT_PAGE_SIZE = 50;
+export const EXPORT_PAGE_BYTES = 256 * 1024;
+export const EXPORT_SESSION_BYTES = 800 * 1024;
+export const EXPORT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+export const EXPORT_SESSION_COLLECTION = "proposalExportSessions";
+const PROPOSAL_FIELDS = ["problemId", "title", "summary", "status", "matching.status", "matching.confirmedAt", "problemMatching.status", "fundingTerms", "researcherId", "amount", "currency", "category", "createdAt", "updatedAt", "proposalKind", "moderationStatus"];
+const POSTING_FIELDS = ["title", "summary", "status", "matching.status", "matching.proposalId", "matching.confirmedAt", "hasAcceptedSolution", "acceptedProposalId", "opportunityType", "ownerId", "organisation", "categories", "amount", "currency", "createdAt", "updatedAt", "expiresAt", "moderationStatus"];
+const COMMENT_FIELDS = ["authorId", "authorRole", "badge", "recommendation", "body", "parentId", "createdAt", "updatedAt", "editedAt", "deletedAt", "qualifying", "moderationStatus"];
+const byteSize = (value) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
 const RECOMMENDATIONS = new Set(["recommend", "recommend_with_revisions", "do_not_recommend"]);
 const EXPORTABLE_STATUSES = ["submitted", "under_review", "accepted", "rejected", "withdrawn"];
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-export const CSV_COLUMNS = Object.freeze([
-  "schemaVersion",
-  "exportedAt",
-  "postingId",
-  "postingTitle",
-  "postingSummary",
-  "postingStatus",
-  "postingWorkflowStatus",
-  "opportunityType",
-  "ownerId",
-  "organisation",
-  "postingAmount",
-  "postingCurrency",
-  "acceptedAt",
-  "proposalId",
-  "proposalTitle",
-  "proposalSummary",
-  "proposalStatus",
-  "proposalWorkflowStatus",
-  "accepted",
-  "researcherId",
-  "proposalAmount",
-  "proposalCurrency",
-  "proposalCategory",
-  "commentId",
-  "authorId",
-  "authorRole",
-  "badge",
-  "recommendation",
-  "recommendationLabel",
-  "commentBody",
-  "parentId",
-  "commentCreatedAt",
-  "commentUpdatedAt",
-  "editedAt",
-  "deletedAt",
-  "qualifying",
-  "moderationStatus",
-]);
 
 const fail = (code, message) => { throw new HttpsError(code, message); };
 
@@ -171,18 +141,18 @@ function acceptanceMs(problem, proposal) {
 }
 
 async function readCapped(query, label) {
-  const snap = await query.limit(EXPORT_SCAN_CAP + 1).get();
+  const snap = await query.select(...PROPOSAL_FIELDS).limit(EXPORT_SCAN_CAP + 1).get();
   if (snap.size > EXPORT_SCAN_CAP) {
-    fail("resource-exhausted", `Too many ${label} to export in one pass. Export a single posting instead.`);
+    fail("resource-exhausted", `Too many ${label} to export in one pass. Choose one proposal instead. A shorter date range cannot bypass this scan limit.`);
   }
-  return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() ?? {}) }));
+  return snap.docs.map((doc) => ({ ...(doc.data() ?? {}), id: doc.id }));
 }
 
 async function loadProblem(db, id, cached) {
   if (cached.has(id)) return cached.get(id);
-  const snap = await db.collection("problems").doc(id).get();
+  const snap = await projectedDocument(db, "problems", id, POSTING_FIELDS);
   if (!snap.exists) return null;
-  const problem = { id: snap.id, ...(snap.data() ?? {}) };
+  const problem = { ...(snap.data() ?? {}), id: snap.id };
   cached.set(id, problem);
   return problem;
 }
@@ -198,7 +168,7 @@ async function hydrate(db, problem, known) {
     if (!ID.test(id)) fail("failed-precondition", `Posting ${problem.id} points at a proposal reference that is not valid.`);
     const snap = await db.collection("proposals").doc(id).get();
     if (!snap.exists) fail("failed-precondition", `Accepted proposal ${id} on posting ${problem.id} is missing.`);
-    const proposal = { id: snap.id, ...(snap.data() ?? {}) };
+    const proposal = { ...(snap.data() ?? {}), id: snap.id };
     if (proposal.problemId && proposal.problemId !== problem.id) {
       fail("failed-precondition", `Accepted proposal ${id} does not belong to posting ${problem.id}.`);
     }
@@ -207,13 +177,10 @@ async function hydrate(db, problem, known) {
   return [...byId.values()].filter((proposal) => ids.has(proposal.id));
 }
 
-async function loadComments(db, proposalId) {
-  const snap = await db.collection("comments").where("proposalId", "==", proposalId).limit(EXPORT_COMMENT_CAP + 1).get();
-  if (snap.size > EXPORT_COMMENT_CAP) {
-    fail("resource-exhausted", `Proposal ${proposalId} has more comments than one export can include.`);
-  }
-  return snap.docs.map((doc) => commentView(doc.id, doc.data() ?? {}))
-    .sort((left, right) => (left.createdAt || "").localeCompare(right.createdAt || "") || left.id.localeCompare(right.id));
+async function projectedDocument(db, collection, id, fields, tx) {
+  const query = db.collection(collection).where(FieldPath.documentId(), "==", id).select(...fields).limit(1);
+  const rows = await (tx ? tx.get(query) : query.get());
+  return rows.docs[0] || { exists: false };
 }
 
 function commentView(id, data) {
@@ -282,18 +249,11 @@ function inRange(ms, scope) {
   return ms > 0 && ms >= scope.start && ms <= scope.end;
 }
 
-async function withComments(db, problem, proposals) {
-  const selected = [];
-  for (const proposal of proposals) {
-    selected.push({ ...proposal, comments: await loadComments(db, proposal.id) });
-  }
-  return postingView(problem, selected);
-}
 
 async function loadOne(db, scope) {
-  const snap = await db.collection("proposals").doc(scope.proposalId).get();
+  const snap = await projectedDocument(db, "proposals", scope.proposalId, PROPOSAL_FIELDS);
   if (!snap.exists) fail("not-found", "That proposal was not found.");
-  const proposal = { id: snap.id, ...(snap.data() ?? {}) };
+  const proposal = { ...(snap.data() ?? {}), id: snap.id };
   if (proposal.status === "draft" || !EXPORTABLE_STATUSES.includes(proposal.status)) {
     fail("failed-precondition", "Draft proposals are not exported.");
   }
@@ -302,7 +262,7 @@ async function loadOne(db, scope) {
   if (scope.acceptance === "accepted" && !proposal.accepted) {
     fail("failed-precondition", "This proposal has not been accepted. Choose accepted and not accepted to include it.");
   }
-  return [await withComments(db, problem || emptyPosting(), [proposal])];
+  return [postingView(problem || emptyPosting(), [proposal])];
 }
 
 function emptyPosting() {
@@ -336,7 +296,7 @@ async function loadRange(db, scope) {
       .map((proposal) => ({ ...proposal, accepted: isAcceptedProposal(problem, proposal) }))
       .filter((proposal) => scope.acceptance === "all" || proposal.accepted);
     if (!marked.length) continue;
-    postings.push(await withComments(db, problem || emptyPosting(), marked));
+    postings.push(postingView(problem || emptyPosting(), marked));
   }
   postings.sort((left, right) => (left.acceptedAt || left.createdAt || "").localeCompare(right.acceptedAt || right.createdAt || "") || left.id.localeCompare(right.id));
   return postings;
@@ -362,69 +322,6 @@ function buildDocument(postings, scope, exportedAt) {
     commentCount,
     postings,
   };
-}
-
-function csvCell(value) {
-  if (value == null) return "";
-  let textValue = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
-  // Spreadsheets treat a leading =, +, - or @ as a formula. The JSON file keeps the exact text.
-  if (/^[=+\-@]/.test(textValue)) textValue = `'${textValue}`;
-  if (/[",\r\n]/.test(textValue)) return `"${textValue.replaceAll("\"", "\"\"")}"`;
-  return textValue;
-}
-
-/** One row per comment. A selected proposal with no comments still occupies one row. */
-export function exportToCsv(document) {
-  const lines = [CSV_COLUMNS.join(",")];
-  for (const posting of document.postings) {
-    const proposals = posting.proposals.length ? posting.proposals : [null];
-    for (const proposal of proposals) {
-      const comments = proposal?.comments.length ? proposal.comments : [null];
-      for (const comment of comments) {
-        const row = {
-          schemaVersion: document.schemaVersion,
-          exportedAt: document.exportedAt,
-          postingId: posting.id,
-          postingTitle: posting.title,
-          postingSummary: posting.summary,
-          postingStatus: posting.status,
-          postingWorkflowStatus: posting.workflowStatus,
-          opportunityType: posting.opportunityType,
-          ownerId: posting.ownerId,
-          organisation: posting.organisation,
-          postingAmount: posting.amount,
-          postingCurrency: posting.currency,
-          acceptedAt: posting.acceptedAt,
-          proposalId: proposal?.id ?? null,
-          proposalTitle: proposal?.title ?? null,
-          proposalSummary: proposal?.summary ?? null,
-          proposalStatus: proposal?.status ?? null,
-          proposalWorkflowStatus: proposal?.workflowStatus ?? null,
-          accepted: proposal ? proposal.accepted === true : null,
-          researcherId: proposal?.researcherId ?? null,
-          proposalAmount: proposal?.amount ?? null,
-          proposalCurrency: proposal?.currency ?? null,
-          proposalCategory: proposal?.category ?? null,
-          commentId: comment?.id ?? null,
-          authorId: comment?.authorId ?? null,
-          authorRole: comment?.authorRole ?? null,
-          badge: comment?.badge ?? null,
-          recommendation: comment?.recommendation ?? null,
-          recommendationLabel: comment?.recommendationLabel ?? null,
-          commentBody: comment?.body ?? null,
-          parentId: comment?.parentId ?? null,
-          commentCreatedAt: comment?.createdAt ?? null,
-          commentUpdatedAt: comment?.updatedAt ?? null,
-          editedAt: comment?.editedAt ?? null,
-          deletedAt: comment?.deletedAt ?? null,
-          qualifying: comment ? comment.qualifying : null,
-          moderationStatus: comment?.moderationStatus ?? null,
-        };
-        lines.push(CSV_COLUMNS.map((column) => csvCell(row[column])).join(","));
-      }
-    }
-  }
-  return `${lines.join("\r\n")}\r\n`;
 }
 
 /**
@@ -458,45 +355,203 @@ export async function listExportableProposals({ db }) {
   return { proposals: rows };
 }
 
-export async function exportSelectedProposals({ db, actorUid, actorName, input, now }) {
-  if (typeof actorUid !== "string" || !actorUid) fail("unauthenticated", "Authentication required.");
+
+function scopeView(scope) {
+  const { mode, acceptance, proposalId, startDate, endDate } = scope;
+  return { mode, acceptance, proposalId, startDate, endDate };
+}
+
+function sameScope(left, right) {
+  const fields = ["mode", "acceptance", "proposalId", "startDate", "endDate"];
+  return right != null && typeof right === "object" && !Array.isArray(right)
+    && Object.keys(left).length === fields.length && Object.keys(right).length === fields.length
+    && fields.every((field) => Object.hasOwn(right, field) && left[field] === right[field]);
+}
+
+async function initialSession({ db, actorUid, actorName, input, now, exportId }) {
   const scope = parseExportRequest(input, now);
   const postings = scope.mode === "proposal" ? await loadOne(db, scope) : await loadRange(db, scope);
-  const document = buildDocument(postings, scope, iso(now) || new Date().toISOString());
-  const csv = exportToCsv(document);
-  const auditId = randomBytes(12).toString("hex");
-  const parentId = document.postings.find((posting) => posting.id)?.id || null;
-  const title = scope.mode === "proposal"
-    ? (document.postings[0]?.proposals[0]?.title || scope.proposalId)
-    : `Proposals ${scope.startDate} to ${scope.endDate}`;
-  await db.collection("audits").doc(auditId).set({
-    type: "proposal_comment_export",
-    action: "PROPOSAL_COMMENT_EXPORT",
-    actor: actorUid,
-    actorName: actorName || actorUid,
-    scope: scope.mode,
-    acceptance: scope.acceptance,
-    proposalId: scope.proposalId,
-    postingId: scope.mode === "proposal" ? parentId : null,
-    startDate: scope.startDate,
-    endDate: scope.endDate,
-    postingIds: document.postings.map((posting) => posting.id).filter(Boolean),
-    postingCount: document.postingCount,
-    proposalCount: document.proposalCount,
-    commentCount: document.commentCount,
-    schemaVersion: EXPORT_SCHEMA_VERSION,
-    problemId: scope.mode === "proposal" ? parentId : null,
-    targetId: scope.mode === "proposal" ? parentId : null,
-    title,
-    timestamp: now,
-    createdAt: now,
-  });
-  return {
-    document,
-    csv,
-    auditId,
-    postingCount: document.postingCount,
-    proposalCount: document.proposalCount,
-    commentCount: document.commentCount,
+  // IDs, acceptance and group order are fixed before paging. Metadata and comment
+  // bodies are read when their proposal is reached; this is not a global snapshot.
+  const manifest = postings.flatMap((posting, postingIndex) => posting.proposals.map((proposal) => ({
+    postingIndex, proposalId: proposal.id, postingId: posting.id, accepted: proposal.accepted, acceptedAt: posting.acceptedAt,
+  })));
+  // An ascending, projected one-row query captures authoritative server time.
+  // Descending document-key scans are unsupported. Membership is frozen by
+  // system createTime, while the monotonic ID cursor bounds each later scan.
+  const start = await db.collection("comments").select().limit(1).get();
+  const startedAt = millis(start.readTime) || millis(now);
+  const state = {
+    actorUid, actorName: actorName || actorUid, exportId, scope: scopeView(scope),
+    exportedAt: new Date(startedAt).toISOString(), startedAt,
+    readTime: start.readTime || Timestamp.fromMillis(startedAt), expiresAt: Timestamp.fromMillis(startedAt + EXPORT_SESSION_TTL_MS),
+    hasCommentsAtStart: start.size > 0,
+    manifest, postingIds: postings.map((posting) => posting.id).filter(Boolean),
+    postingCount: postings.length, proposalCount: manifest.length, commentCount: 0,
+    title: scope.mode === "proposal" ? (postings[0]?.proposals[0]?.title || scope.proposalId)
+      : `Proposals ${scope.startDate} to ${scope.endDate}`,
+    index: 0, afterId: null, proposalCommentCount: 0, metadata: null, groupMetadata: null, lastPage: -1, lastResponse: null, done: false,
   };
+  if (byteSize(state) > EXPORT_SESSION_BYTES - EXPORT_PAGE_BYTES * 2) {
+    fail("resource-exhausted", "The proposal selection is too large. Choose one proposal instead.");
+  }
+  return state;
+}
+
+async function proposalMetadata(db, tx, entry, groupMetadata) {
+  const snap = await projectedDocument(db, "proposals", entry.proposalId, PROPOSAL_FIELDS, tx);
+  if (!snap.exists) fail("failed-precondition", "A proposal in this export was deleted. Start the export again.");
+  const proposal = { ...(snap.data() ?? {}), id: snap.id, accepted: entry.accepted };
+  if (groupMetadata) return { ...groupMetadata, proposals: [proposalView(proposal)] };
+  const parent = entry.postingId ? await projectedDocument(db, "problems", entry.postingId, POSTING_FIELDS, tx) : null;
+  if (entry.postingId && !parent?.exists) {
+    fail("failed-precondition", "A posting in this export was deleted. Start the export again.");
+  }
+  const posting = postingView(parent ? { ...(parent.data() ?? {}), id: parent.id } : emptyPosting(), [proposal]);
+  posting.acceptedAt = entry.acceptedAt;
+  return posting;
+}
+
+function createdAfterCutoff(created, cutoff) {
+  if (!created) return false; // Only the unit-test fake omits system timestamps.
+  if (Number.isInteger(created.seconds) && Number.isInteger(cutoff.seconds)) {
+    return created.seconds > cutoff.seconds || (created.seconds === cutoff.seconds && created.nanoseconds > cutoff.nanoseconds);
+  }
+  return millis(created) > millis(cutoff);
+}
+
+function responseFor(state, page, posting, comments, done, emptyProposal = false) {
+  const postings = posting && (comments.length > 0 || emptyProposal) ? [{ ...posting, proposals: [{ ...posting.proposals[0], comments }] }] : [];
+  return {
+    protocolVersion: 1,
+    exportId: state.exportId,
+    page,
+    postingIndex: state.manifest[state.index]?.postingIndex ?? null,
+    document: buildDocument(postings, state.scope, state.exportedAt),
+    done,
+    nextCursor: done ? null : { exportId: state.exportId, page: page + 1 },
+    auditId: done ? state.exportId : null,
+    totals: { postingCount: state.postingCount, proposalCount: state.proposalCount, commentCount: state.commentCount + comments.length },
+  };
+}
+
+function completedAudit(state, now) {
+  const parentId = state.postingIds[0] || null;
+  return {
+    type: "proposal_comment_export", action: "PROPOSAL_COMMENT_EXPORT",
+    actor: state.actorUid, actorName: state.actorName, scope: state.scope.mode,
+    acceptance: state.scope.acceptance, proposalId: state.scope.proposalId,
+    postingId: state.scope.mode === "proposal" ? parentId : null,
+    startDate: state.scope.startDate, endDate: state.scope.endDate,
+    postingIds: state.postingIds, postingCount: state.postingCount,
+    proposalCount: state.proposalCount, commentCount: state.commentCount,
+    schemaVersion: EXPORT_SCHEMA_VERSION,
+    problemId: state.scope.mode === "proposal" ? parentId : null,
+    targetId: state.scope.mode === "proposal" ? parentId : null,
+    title: state.title, timestamp: now, createdAt: now,
+  };
+}
+
+/**
+ * Server-owned, sequential export continuation. Only the last response is cached;
+ * the caller must consume each page before requesting the next one. The callable
+ * wrapper authenticates the administrator and enforces production App Check on
+ * every call. No browser-provided cursor controls document selection or counts.
+ */
+export async function exportSelectedProposals({ db, actorUid, actorName, input, now = Timestamp.now() }) {
+  if (typeof actorUid !== "string" || !actorUid) fail("unauthenticated", "Authentication required.");
+  const data = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const continuation = data.exportId != null;
+  let exportId, page, scope = null;
+  if (continuation) {
+    if (typeof data.exportId !== "string" || !/^[a-f0-9]{64}$/.test(data.exportId) || !Number.isSafeInteger(data.page) || data.page < 1) {
+      fail("invalid-argument", "Invalid export continuation.");
+    }
+    if (["proposalId", "startDate", "endDate", "acceptance", "requestId"].some((key) => data[key] != null)) {
+      fail("invalid-argument", "An export continuation cannot change the selected scope.");
+    }
+    exportId = data.exportId;
+    page = data.page;
+  } else {
+    // Stale clients interpret `document` as a complete extract. Require an
+    // explicit protocol opt-in before returning any partial document or audit.
+    if (data.protocolVersion !== 1) fail("failed-precondition", "Refresh QC DAO before downloading proposal exports.");
+    scope = scopeView(parseExportRequest(data, now));
+    if (data.page != null || (data.requestId != null && (typeof data.requestId !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(data.requestId)))) {
+      fail("invalid-argument", "Invalid export request reference.");
+    }
+    const requestId = data.requestId || randomBytes(16).toString("hex");
+    exportId = createHash("sha256").update(`${actorUid}\n${requestId}`).digest("hex");
+    page = 0;
+  }
+  const ref = db.collection(EXPORT_SESSION_COLLECTION).doc(exportId);
+  const prior = await ref.get();
+  if (continuation && !prior.exists) fail("not-found", "This export is no longer available. Start it again.");
+  const prepared = !prior.exists ? await initialSession({ db, actorUid, actorName, input: data, now, exportId }) : null;
+  return db.runTransaction(async (tx) => {
+    const existing = await tx.get(ref);
+    const state = existing.exists ? { ...existing.data() } : prepared;
+    if (!state || state.actorUid !== actorUid) fail("permission-denied", "This export belongs to another administrator.");
+    if (millis(state.expiresAt) <= millis(now)) fail("failed-precondition", "This export expired. Start it again.");
+    if (scope && !sameScope(scope, state.scope)) {
+      fail("invalid-argument", "An export request reference cannot be reused for a different scope.");
+    }
+    if (page === state.lastPage) return JSON.parse(state.lastResponse);
+    if (state.done || page !== state.lastPage + 1) {
+      fail("failed-precondition", "Consume export pages in order. Start again if a page was lost.");
+    }
+    const entry = state.manifest[state.index];
+    const posting = entry ? (state.metadata || await proposalMetadata(db, tx, entry, state.groupMetadata)) : null;
+    const comments = [];
+    let afterId = state.afterId;
+    let exhausted = !entry || !state.hasCommentsAtStart;
+    // Fixed read budget even if every scanned document was created after the export.
+    if (!exhausted) {
+      let query = db.collection("comments").where("proposalId", "==", entry.proposalId)
+        .orderBy(FieldPath.documentId(), "asc").select(...COMMENT_FIELDS).limit(EXPORT_COMMENT_PAGE_SIZE);
+      if (afterId) query = query.startAfter(afterId);
+      const rows = await tx.get(query);
+      let consumed = 0;
+      for (const doc of rows.docs) {
+        const raw = doc.data() ?? {};
+        // Firestore system timestamps, rather than application createdAt, freeze
+        // membership. Legacy future/missing/malformed application dates remain.
+        // Snapshot system timestamps are absent only in the in-memory test fake.
+        if (!createdAfterCutoff(doc.createTime, state.readTime)) {
+          const comment = commentView(doc.id, raw);
+          const candidate = responseFor(state, page, posting, [...comments, comment], false);
+          if (byteSize(candidate) > EXPORT_PAGE_BYTES - 2048) {
+            if (!comments.length) fail("resource-exhausted", "One export row is too large to download safely. Contact an administrator.");
+            break;
+          }
+          comments.push(comment);
+        }
+        afterId = doc.id;
+        consumed++;
+      }
+      exhausted = consumed === rows.size && rows.size < EXPORT_COMMENT_PAGE_SIZE;
+    }
+    const done = exhausted && (!entry || state.index + 1 === state.manifest.length);
+    // Empty scans are transport progress, not zero-comment CSV rows. An empty
+    // proposal is emitted once, only after its entire selected discussion ends.
+    const emptyProposal = exhausted && state.proposalCommentCount === 0 && comments.length === 0;
+    const response = responseFor(state, page, posting, comments, done, emptyProposal);
+    // Reserve/check bytes again for terminal audit ID and counters.
+    if (byteSize(response) > EXPORT_PAGE_BYTES) fail("resource-exhausted", "The export metadata is too large to download safely.");
+    state.commentCount += comments.length;
+    state.proposalCommentCount = exhausted ? 0 : state.proposalCommentCount + comments.length;
+    state.lastPage = page;
+    state.lastResponse = JSON.stringify(response);
+    state.done = done;
+    state.index += exhausted && entry ? 1 : 0;
+    state.afterId = exhausted ? null : afterId;
+    state.metadata = exhausted ? null : posting;
+    state.groupMetadata = exhausted && entry && state.manifest[state.index]?.postingIndex === entry.postingIndex
+      ? { ...posting, proposals: [] } : null;
+    if (byteSize(state) > EXPORT_SESSION_BYTES) fail("resource-exhausted", "The export state is too large. Choose one proposal instead.");
+    // A completed audit and the exact final retry response commit together.
+    if (done) tx.set(db.collection("audits").doc(exportId), completedAudit(state, now));
+    tx.set(ref, state);
+    return response;
+  });
 }

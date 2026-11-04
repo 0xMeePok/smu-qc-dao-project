@@ -134,13 +134,24 @@ describe("single-owner prefunded open funding", () => {
   it("reserves two 50,000 requests from one 100,000 pool and rejects over-allocation", async () => {
     const f = openFundingFixture();
     const first = await prepareOpenFundingAction({ ...f, proposalId: f.proposals[0].id, action: "select" });
-    assert.deepEqual(first.args, [f.expected[0].entityId]); f.select(0);
-    const second = await prepareOpenFundingAction({ ...f, proposalId: f.proposals[1].id, action: "select" });
-    assert.deepEqual(second.args, [f.expected[1].entityId]); f.select(1);
+    assert.deepEqual(first.args, [f.expected[0].entityId, "1", f.expected[0].proposalHash, f.expected[0].solutionHash]); f.select(0);
+    const second = await prepareOpenFundingAction({ ...f, proposalId: f.proposals[1].id, action: "select", reviewedProposal: f.reviewed(1) });
+    assert.deepEqual(second.args, [f.expected[1].entityId, "1", f.expected[1].proposalHash, f.expected[1].solutionHash]); f.select(1);
     const summary = await getOpenFundingSummary(f);
     assert.equal(summary.totalReserved, "100000000000"); assert.equal(summary.available, "0");
     assert.equal(summary.selections.length, 2);
     await assert.rejects(prepareOpenFundingAction({ ...f, proposalId: f.proposals[0].id, action: "select" }), /Only the owner can select/);
+  });
+  it("rejects a missing, substituted or stale reviewed proposal commitment before wallet preparation", async () => {
+    const f = openFundingFixture();
+    for (const reviewedProposal of [undefined, { ...f.reviewed(), revisionCount: "0" },
+      { ...f.reviewed(), revisionCount: "2" }, { ...f.reviewed(), entityId: f.expected[1].entityId },
+      { ...f.reviewed(), proposalHash: `0x${"1".repeat(64)}` }, { ...f.reviewed(), solutionHash: `0x${"2".repeat(64)}` }]) {
+      await assert.rejects(prepareOpenFundingAction({ ...f, proposalId: f.proposals[0].id, action: "select", reviewedProposal }), /changed since your review/);
+    }
+    assert.equal(f.simulations.length, 0);
+    const old = f.reviewed(); f.state.revisionCounts = [3n, 1n];
+    await assert.rejects(prepareOpenFundingAction({ ...f, proposalId: f.proposals[0].id, action: "select", reviewedProposal: old }), /changed since your review/);
   });
   it("restricts selection to the grant owner and to the canonical attached proposal", async () => {
     const f = openFundingFixture();

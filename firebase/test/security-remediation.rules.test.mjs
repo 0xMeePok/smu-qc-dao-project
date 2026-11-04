@@ -27,10 +27,11 @@ const problem = (extra = {}) => ({
   businessContext: "Many deliveries", currentApproach: "Classical optimisation", currentLimitations: "Too slow",
   expectedOutcome: "Faster routing", successCriteria: "Ten percent better", dataAvailability: "Anonymised deliveries",
   categories: ["ai", "quantum"], amount: 1000, currency: "USDC", expiresAt: EXPIRES_AT,
-  status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
+  status: "submitted", attachments: [], audit: publicationAudit(),
+  createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
 });
 const publicationAudit = (extra = {}) => ({
-  schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+  schemaVersion: 1, digestVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
   contentHash: `0x${"2".repeat(64)}`, status: "pending", transactionHash: `0x${"3".repeat(64)}`,
   blockNumber: 10, attemptCount: 1, lastError: "", ...extra,
 });
@@ -93,7 +94,8 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
       const id = `bind-missing-audit-${status}`, reference = doc(db, "problems", id);
       const data = problem({ audit });
       await trusted("problems", id, data);
-      await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), problem({ status })));
+      const { audit: omitted, ...legacy } = problem({ status });
+      await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), legacy));
       if (status === "draft") await assertFails(updateDoc(reference, { status: "submitted", updatedAt: serverTimestamp() }));
       await assertFails(updateDoc(reference, { status: "submitted", audit: publicationAudit({ transactionHash: `0x${"4".repeat(64)}` }), updatedAt: serverTimestamp() }));
       await assertSucceeds(updateDoc(reference, { status: "submitted", audit, updatedAt: serverTimestamp() }));

@@ -181,7 +181,8 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
       // Administrator review: the platform signer pays, so there is no wallet transaction to track.
       try {
         setProgress({ status: "preparing", action });
-        const result = await releaseIndependentFundingCompletion({ proposalId: proposal.id });
+        const result = await releaseIndependentFundingCompletion({ proposalId: proposal.id,
+          expectedEvidenceVersion: snapshot?.summary?.evidenceVersion, expectedEvidenceHash: snapshot?.summary?.evidenceHash });
         invalidateFundingDashboardSummaries(queryClient);
         if (currentPanel()) { setNotice(result?.message || SUCCESS.releaseCompletion); await load(); }
       } catch (err) { if (currentPanel()) setError(independentFundingError(err)); }

@@ -22,7 +22,7 @@ async function readAttachmentBytes(path) {
 async function verifyAttachmentBytes(record, reader = readAttachmentBytes, { independent = false } = {}) {
   for (const attachment of record.attachments ?? []) {
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(attachment?.id ?? "")
-        || (!(independent && attachment.sha256 === undefined)
+        || (!(independent && record.audit?.digestVersion !== 1 && attachment.sha256 === undefined)
           && !/^0x[0-9a-f]{64}$/.test(attachment?.sha256 ?? ""))) {
       throw new Error("Mismatch detected: the proposal attachment digest is missing or invalid.");
     }

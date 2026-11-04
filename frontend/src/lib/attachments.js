@@ -4,8 +4,10 @@ import {
   uploadBytesResumable,
 } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
+import { getToken as getAppCheckToken } from "firebase/app-check";
 import { sha256 } from "viem";
-import { functions, storage, isStorageConfigured, storageNeedsEmulator } from "./firebase.js";
+import { appCheck, auth, functions, FUNCTIONS_REGION, isUsingEmulators,
+  storage, isStorageConfigured, storageNeedsEmulator } from "./firebase.js";
 
 /**
  * QCDAO-58 - supporting files attached to a posting.
@@ -259,19 +261,50 @@ export async function deleteAttachment({ attachment, ownerId, problemId, scope =
   await httpsCallable(functions, "removeAttachment")({ scope, recordId: problemId, attachmentId: attachment.id });
 }
 
+function downloadError(code, message) {
+  const error = new Error(message); error.code = code; return error;
+}
+
+async function downloadProposalBlob({ proposalId, attachmentId }) {
+  const user = auth?.currentUser;
+  if (!user) throw downloadError("storage/unauthenticated", "Sign in to download this PDF.");
+  const projectId = functions?.app?.options?.projectId;
+  if (!projectId) throw new Error("Firebase Functions is not configured for PDF downloads.");
+  const headers = { Authorization: `Bearer ${await user.getIdToken()}` };
+  if (!isUsingEmulators) {
+    if (!appCheck) throw downloadError("storage/unauthorized", "App verification is unavailable. Refresh the page and retry.");
+    headers["X-Firebase-AppCheck"] = (await getAppCheckToken(appCheck)).token;
+  }
+  const base = isUsingEmulators
+    ? `http://127.0.0.1:5001/${projectId}/${FUNCTIONS_REGION}`
+    : `https://${FUNCTIONS_REGION}-${projectId}.cloudfunctions.net`;
+  const query = new URLSearchParams({ proposalId, attachmentId });
+  const response = await fetch(`${base}/downloadProposalAttachment?${query}`, {
+    method: "GET", headers, cache: "no-store", credentials: "omit", redirect: "error",
+  });
+  if (!response.ok) {
+    const code = response.status === 401 ? "storage/unauthenticated"
+      : response.status === 403 ? "storage/unauthorized"
+        : response.status === 404 ? "storage/object-not-found" : "storage/download-failed";
+    throw downloadError(code, "The PDF download failed. Please try again.");
+  }
+  const blob = await response.blob();
+  if (blob.size <= 0 || blob.size > MAX_FILE_BYTES) throw downloadError("storage/download-failed", "The PDF has an invalid size.");
+  return blob;
+}
+
 /**
- * Downloads through the authenticated SDK path rather than getDownloadURL().
- *
- * getDownloadURL() mints a URL carrying a permanent access token that works for
- * ANYONE who has the link, with no sign-in. getBlob() sends the user's ID token
- * and is evaluated against firebase/storage.rules on every request: any signed-in
- * wallet may read, only the owner may write or delete.
+ * Proposal readers use the live authorization proxy; an author keeps direct
+ * authenticated Storage access for pre-save draft previews. Posting downloads
+ * continue through getBlob. Neither path returns a permanent download URL.
  */
 export async function downloadAttachment({ attachment, ownerId, problemId, scope = "problems" }) {
   requireStorage();
-  const blob = await getBlob(storageRef(storage, attachmentPath({
-    ownerId, problemId, attachmentId: attachment.id, scope,
-  })));
+  const path = attachmentPath({ ownerId, problemId, attachmentId: attachment.id, scope });
+  const useProxy = scope === "proposals" && auth?.currentUser?.uid !== String(ownerId).toLowerCase();
+  const blob = useProxy
+    ? await downloadProposalBlob({ proposalId: problemId, attachmentId: attachment.id })
+    : await getBlob(storageRef(storage, path));
   if (attachment.sha256 && await sha256Blob(blob) !== attachment.sha256) {
     const error = new Error("The downloaded file does not match its recorded digest.");
     error.code = "storage/integrity-check-failed";

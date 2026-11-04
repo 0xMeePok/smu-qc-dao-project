@@ -73,6 +73,12 @@ afterEach(cleanup);
 const card = () => screen.getByText("Cold-chain routing").closest(".rollup-card");
 
 describe("QCDAO-92 problem owner dashboard", () => {
+  it("labels overflow recommendation counts as partial", async () => {
+    mocks.listOwnerDashboard.mockResolvedValue(dashboard({ postings: [posting({ feedbackTruncated: true })], truncated: { feedback: true } }));
+    render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
+    expect(await screen.findByText(/Feedback totals below are partial/)).toBeTruthy();
+    expect(screen.getByText(/Recommendation counts are partial/)).toBeTruthy();
+  });
   it("rolls up solutions, funding and evaluator feedback for each posting", async () => {
     render(<OwnerDashboardPanel onNavigate={vi.fn()} />);
     await screen.findByText("Cold-chain routing");

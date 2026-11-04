@@ -56,6 +56,12 @@ afterEach(cleanup);
 const group = (name) => screen.getByRole("heading", { name: new RegExp(`^${name}`) }).closest(".card-table");
 
 describe("QCDAO-93 solution developer dashboard", () => {
+  it("labels overflow feedback as partial on the overview and solution", async () => {
+    queue([row({ feedbackTruncated: true })], { feedbackTruncated: true });
+    render(<DeveloperDashboardPanel onNavigate={vi.fn()} />);
+    expect(await screen.findByText(/Feedback totals below are partial/)).toBeTruthy();
+    expect(screen.getByText(/Feedback counts are partial/)).toBeTruthy();
+  });
   it("separates solutions nobody has looked at from solutions with feedback", async () => {
     queue([
       row(),

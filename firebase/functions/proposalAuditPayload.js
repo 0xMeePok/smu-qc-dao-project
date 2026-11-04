@@ -1,6 +1,7 @@
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { asEscrowProposal, prepareOpportunityCommit, prepareProposalCommit } from "./auditCanonical.js";
 import { isEscrowRegistry } from "./escrowAudit.js";
+import { auditAttachments } from "./opportunityAuditPayload.js";
 import { fundingAmountText, validateStoredFundingTerms } from "./escrowProposalTerms.js";
 import {
   INDEPENDENT_PROPOSAL_HASH_SCHEME,
@@ -42,14 +43,7 @@ export function independentProposalAuditPayload(record) {
       || !/^\d+\.\d{1,2}$/.test(amountText))) {
     throw new TypeError("Funding targets support at most 2 decimal places.");
   }
-  const attachments = [...(record.attachments ?? [])]
-    .map((item) => ({
-      id: trimmed(item.id),
-      name: trimmed(item.name),
-      size: Number(item.size),
-      contentType: trimmed(item.contentType || "application/pdf"),
-    }))
-    .sort((left, right) => left.id.localeCompare(right.id));
+  const attachments = auditAttachments(record);
   return {
     proposalKind: INDEPENDENT_PROPOSAL_KIND,
     researcherId,

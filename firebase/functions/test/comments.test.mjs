@@ -15,6 +15,7 @@ import { listReportableComments, moderateContent } from "../moderation.js";
 import { fundMockProposal, getMockMatching, selectMockProposal } from "../matching.js";
 import { listActionItems, listEvaluatorQueue, listMyProposals } from "../proposalQueues.js";
 import { REPLIES_PER_MEMBER_PER_THREAD, REPLIES_PER_THREAD } from "../comments.js";
+import { COMMENT_REVISIONS_MAX } from "../commentHistory.js";
 
 const now = Timestamp.fromMillis(1_800_000_000_000);
 const later = (ms) => Timestamp.fromMillis(now.toMillis() + ms);
@@ -486,6 +487,80 @@ test("removing the last qualifying comment clears the gate and records readiness
   assert.deepEqual(event.evaluationReadiness, { proposalId: "a", before: true, after: false });
   await act("restore", "no_violation");
   assert.equal(db.records.get(`comments/${created.id}`).qualifying, true);
+  assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
+});
+
+test("repeated maximum-size edits retain recent revisions and disclose the dropped count", async () => {
+  const db = fixture();
+  const body = index => `${index}:`.padEnd(COMMENT_BODY_MAX, "界");
+  const created = await create(db, { uid: "evaluator", recommendation: "recommend", body: body(0) });
+  for (let index = 1; index <= COMMENT_REVISIONS_MAX + 3; index++) {
+    await editComment({ db, uid: "evaluator", commentId: created.id, body: body(index), now: later(index) });
+  }
+  const stored = db.records.get(`comments/${created.id}`);
+  assert.equal(stored.body, body(COMMENT_REVISIONS_MAX + 3));
+  assert.equal(stored.revisions.length, COMMENT_REVISIONS_MAX);
+  assert.equal(stored.revisions[0].body, body(3));
+  assert.equal(stored.revisions.at(-1).body, body(COMMENT_REVISIONS_MAX + 2));
+  assert.equal(stored.revisionsDropped, 3);
+  assert.equal(stored.revisionsTruncated, true);
+  assert.equal(stored.recommendation, "recommend");
+  assert.equal(stored.qualifying, true);
+  assert(Buffer.byteLength(JSON.stringify(stored)) < 400_000);
+});
+
+test("deletion compacts legacy large histories without losing the current comment or cumulative count", async () => {
+  const db = fixture();
+  const created = await create(db, { uid: "evaluator", recommendation: "recommend" });
+  const stored = db.records.get(`comments/${created.id}`);
+  stored.revisions = Array.from({ length: 64 }, (_, index) => ({ action: "edit", body: `${index}:`.padEnd(COMMENT_BODY_MAX, "界"), at: now }));
+  stored.revisionsDropped = 7;
+  assert(Buffer.byteLength(JSON.stringify(stored)) > 900_000);
+  assert(Buffer.byteLength(JSON.stringify(stored)) < 1_048_576);
+  await deleteComment({ db, uid: "evaluator", commentId: created.id, now: later(1000) });
+  const deleted = db.records.get(`comments/${created.id}`);
+  assert.equal(deleted.body, created.body);
+  assert.equal(deleted.recommendation, "recommend");
+  assert.equal(deleted.qualifying, false);
+  assert.equal(deleted.revisions.length, COMMENT_REVISIONS_MAX);
+  assert.equal(deleted.revisionsDropped, 7 + 65 - COMMENT_REVISIONS_MAX);
+  assert.equal(deleted.revisionsTruncated, true);
+  assert.equal(deleted.revisions.at(-1).action, "delete");
+  assert.equal(deleted.revisions.at(-1).body, created.body);
+  assert(Buffer.byteLength(JSON.stringify(deleted)) < 400_000);
+});
+
+test("moderation recovers legacy large comment histories and preserves recommendation readiness on restore", async () => {
+  const db = fixture();
+  const created = await create(db, { uid: "evaluator", recommendation: "recommend" });
+  const stored = db.records.get(`comments/${created.id}`);
+  const legacyHistory = Array.from({ length: 64 }, (_, index) => ({ action: "edit", body: `${index}:`.padEnd(COMMENT_BODY_MAX, "界"), at: now }));
+  stored.revisions = legacyHistory;
+  stored.revisionsDropped = 7;
+  assert(Buffer.byteLength(JSON.stringify(stored)) > 900_000);
+  assert(Buffer.byteLength(JSON.stringify(stored)) < 1_048_576);
+  db.records.set(`moderationQueue/comment_${created.id}`, { status: "pending", contentType: "comment", contentId: created.id });
+  const act = (action, reason) => moderateContent({ db, uid: "admin", queueId: `comment_${created.id}`, action, reason, now,
+    prepareCommentGate: prepareCommentEvaluationGate });
+  await act("remove", "abusive");
+  let current = db.records.get(`comments/${created.id}`);
+  assert.equal(current.moderationStatus, "removed");
+  assert.equal(current.qualifying, false);
+  assert.equal(current.body, created.body);
+  assert.equal(current.recommendation, "recommend");
+  assert.equal(current.revisions.length, COMMENT_REVISIONS_MAX);
+  assert.equal(current.revisionsDropped, 7 + 64 - COMMENT_REVISIONS_MAX);
+  assert.equal(current.revisionsTruncated, true);
+  assert(Buffer.byteLength(JSON.stringify(current)) < 400_000);
+  // A comment removed by the earlier implementation can still carry its full history.
+  current.revisions = legacyHistory;
+  await act("restore", "no_violation");
+  current = db.records.get(`comments/${created.id}`);
+  assert.equal(current.moderationStatus, "visible");
+  assert.equal(current.qualifying, true);
+  assert.equal(current.revisions.length, COMMENT_REVISIONS_MAX);
+  assert.equal(current.revisionsDropped, 7 + 2 * (64 - COMMENT_REVISIONS_MAX));
+  assert(Buffer.byteLength(JSON.stringify(current)) < 400_000);
   assert.equal(db.records.get("proposals/a").matching.evaluationComplete, true);
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { saveBlobAs } from "../lib/attachments.js";
 import { exportSelectedProposals, listExportableProposals } from "../lib/proposalExport.js";
 import { EXPORT_NOTICE, latestCurrentDate } from "../../../firebase/functions/proposalExportNotice.js";
@@ -27,16 +27,20 @@ export function ProposalExportPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const controller = useRef(null);
+  const mounted = useRef(true);
   const latest = latestCurrentDate();
   const listed = acceptance === "accepted" ? proposals.filter((proposal) => proposal.accepted) : proposals;
 
   useEffect(() => {
     let active = true;
+    mounted.current = true;
     listExportableProposals()
       .then((data) => { if (active) setProposals(data.proposals || []); })
       .catch((listError) => { if (active) setError(listError?.message || "The proposal list could not be loaded."); })
       .finally(() => { if (active) setLoadingList(false); });
-    return () => { active = false; };
+    return () => { active = false; mounted.current = false; controller.current?.abort(); };
   }, []);
 
   const onSubmit = async (event) => {
@@ -63,16 +67,39 @@ export function ProposalExportPanel() {
       return;
     }
     setBusy(true);
+    setProgress({ commentCount: 0 });
+    const operation = new AbortController();
+    controller.current = operation;
+    let downloadedParts = 0;
     try {
-      const exported = await exportSelectedProposals(input);
-      const json = `${JSON.stringify(exported.document, null, 2)}\n`;
-      saveBlobAs(new Blob([json], { type: "application/json" }), fileName(input, "json"));
-      saveBlobAs(new Blob([exported.csv], { type: "text/csv;charset=utf-8" }), fileName(input, "csv"));
+      const exported = await exportSelectedProposals(input, {
+        signal: operation.signal,
+        onProgress: (value) => { if (mounted.current) setProgress(value); },
+        onPart: ({ document, csv, exportId, partNumber }) => {
+          if (operation.signal.aborted || !mounted.current) return;
+          const stem = `qcdao-proposals-${exportId}-part${partNumber}`;
+          saveBlobAs(new Blob([`${JSON.stringify(document, null, 2)}\n`], { type: "application/json" }), `${stem}.json`);
+          saveBlobAs(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${stem}.csv`);
+          downloadedParts++;
+        },
+      });
+      if (!mounted.current || operation.signal.aborted) return;
+      if (exported.multipart) {
+        saveBlobAs(new Blob([`${JSON.stringify(exported.manifest, null, 2)}\n`], { type: "application/json" }), `qcdao-proposals-${exported.manifest.exportId}-complete.manifest.json`);
+      } else {
+        const json = `${JSON.stringify(exported.document, null, 2)}\n`;
+        saveBlobAs(new Blob([json], { type: "application/json" }), fileName(input, "json"));
+        saveBlobAs(new Blob([exported.csv], { type: "text/csv;charset=utf-8" }), fileName(input, "csv"));
+      }
       setResult(exported);
     } catch (exportError) {
-      setError(exportError?.message || "The export could not be created. Try again.");
+      if (mounted.current) {
+        const message = exportError?.name === "AbortError" ? "Export stopped." : (exportError?.message || "The export could not be created. Try again.");
+        setError(downloadedParts ? `${message} The downloaded parts are incomplete. No completion manifest was created. Start a new export and keep its parts together.` : message);
+      }
     } finally {
-      setBusy(false);
+      if (mounted.current) { setBusy(false); setProgress(null); }
+      if (controller.current === operation) controller.current = null;
     }
   };
 
@@ -127,10 +154,12 @@ export function ProposalExportPanel() {
       {error && <p className="field-error" role="alert">{error}</p>}
       <div className="proposal-export-actions">
         <button className="primary" type="submit" disabled={busy}>{busy ? "Preparing the files…" : "Download JSON and CSV"}</button>
+        {busy && <button type="button" onClick={() => controller.current?.abort()}>Stop export</button>}
       </div>
+      {busy && progress && <p className="field-hint" role="status">Preparing files: {progress.commentCount} comments collected. Large exports download numbered parts; allow multiple downloads if your browser asks, and keep every part and the final completion manifest.</p>}
       {result && (
         <p className="field-hint" role="status">
-          Downloaded {result.postingCount} {result.postingCount === 1 ? "posting" : "postings"}, {result.proposalCount} {result.proposalCount === 1 ? "proposal" : "proposals"} and {result.commentCount} {result.commentCount === 1 ? "comment" : "comments"}. The export was recorded in the audit trail.
+          {result.multipart ? `Downloaded ${result.manifest.partCount} numbered parts and the completion manifest. ` : "Downloaded "}{result.postingCount} {result.postingCount === 1 ? "posting" : "postings"}, {result.proposalCount} {result.proposalCount === 1 ? "proposal" : "proposals"} and {result.commentCount} {result.commentCount === 1 ? "comment" : "comments"}. The export was recorded in the audit trail.
         </p>
       )}
     </form>

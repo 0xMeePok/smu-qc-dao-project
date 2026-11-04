@@ -13,6 +13,10 @@ export async function verifyPublication({ scope, record, client, readAttachment 
     return verifyMinedProposal(record, client, { readAttachment });
   }
   const openFunding = record.opportunityType === "open-funding";
+  if (record.audit?.digestVersion === 1 && (record.attachments ?? []).some(
+    item => !/^0x[0-9a-f]{64}$/.test(item.sha256 ?? ""))) {
+    throw new Error("A PDF digest is required for this publication.");
+  }
   const expected = prepareOpportunityCommit({ recordId: record.id,
     actor: registry.entityIdScheme === 2 ? record.ownerId : undefined,
     payload: openFunding ? fundingOpportunityAuditPayload(record) : postingAuditPayload(record),

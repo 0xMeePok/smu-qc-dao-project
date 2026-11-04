@@ -24,7 +24,8 @@ export function registerIndependentFundingFunctions({ db, client, config, requir
     // final payment through the platform signer. No member wallet can release it.
     releaseIndependentFundingCompletion: onCall({ ...options, timeoutSeconds: 180, secrets: [escrowPlatformKey] }, async request => {
       const { uid } = await requireAdmin(request);
-      try { return await releaseIndependentFundingCompletion({ ...shared, getWallet, uid, proposalId: request.data?.proposalId }); }
+      try { return await releaseIndependentFundingCompletion({ ...shared, getWallet, uid, proposalId: request.data?.proposalId,
+        expectedEvidenceVersion: request.data?.expectedEvidenceVersion, expectedEvidenceHash: request.data?.expectedEvidenceHash }); }
       catch (error) {
         if (error instanceof HttpsError) throw error;
         // Never echo transport or signing details from viem errors.

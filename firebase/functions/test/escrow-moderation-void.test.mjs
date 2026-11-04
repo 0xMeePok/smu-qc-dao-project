@@ -51,7 +51,7 @@ test("[BUT-ACM-75] remove enqueues a void for the affected escrow only", async (
   })).enqueued, 0);
   assert.equal((await enqueueIndependentFundingCancellation({
     db, contentType: "proposal", contentId: "indie", eventId: indie.eventId, reason: "misleading", now,
-  })).enqueued, 1);
+  })).enqueued, 0, "removal already committed the independent cancellation job");
   const problem = await moderateContent({
     db, uid: "admin", queueId: "problem_problem", action: "remove", reason: "abusive", now, prepareMatching: prepareModerationMatching,
   });

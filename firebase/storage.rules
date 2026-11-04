@@ -74,7 +74,7 @@ service firebase.storage {
       let user = attachmentRecord('users', request.auth.uid);
       return activeProfile(user)
         && (user.data.get('role', 0) == 1 || isWallet(ownerId)
-          || (scope == 'problems' ? postingIsPublished(recordId, ownerId) : proposalReader(recordId, ownerId)));
+          || (scope == 'problems' && postingIsPublished(recordId, ownerId)));
     }
 
     function postingIsPublished(problemId, ownerId) {
@@ -224,29 +224,10 @@ service firebase.storage {
       allow delete: if false; // removeAttachment retires the reservation before deleting.
     }
 
-    // Proposal files stay private while the record is a draft. Once submitted and
-    // not moderated, onboarded members may download the same bytes they can read
-    // on the proposal detail page, but only while the parent is still member-
-    // gettable (submitted, open, cancelled, expired — not hidden or removed).
-    // postingOwnerId. Storage allows only two Firestore reads (profile + record),
-    // so this cannot get() the parent posting. Moderating a problem stamps
-    // problemBrowsable onto EVERY child proposal - syncProblemProposalsBrowsable
-    // pages through all of them and resumes from a checkpoint if interrupted, so a
-    // posting with more children than one page cannot leave a stale `true` behind.
-    // Write triggers and posting lists backfill the same field from the live
-    // parent. Absent or false denies member downloads (fail closed).
-    // activeProfile already enforces the same onboarding/suspension gate as
-    // hasCompletedProfile + isActiveUser in firestore.rules.
-    function proposalReader(proposalId, ownerId) {
-      let proposal = attachmentRecord('proposals', proposalId);
-      return proposal != null && proposal.data.researcherId == ownerId
-        && proposal.data.status in ['submitted', 'under_review', 'accepted', 'rejected', 'withdrawn']
-        && !(proposal.data.get('moderationStatus', 'visible') in ['hidden', 'removed'])
-        && (
-          proposal.data.get('postingOwnerId', '') == request.auth.uid
-          || proposal.data.get('problemBrowsable', false) == true
-        );
-    }
+    // Only the active author/admin reads proposal bytes directly. Other readers
+    // use downloadProposalAttachment, which checks the live user, proposal and
+    // parent without Storage's two-Firestore-read limit. The asynchronously
+    // maintained problemBrowsable projection cannot authorize a PDF download.
 
     // Drafts (and the pre-save path where no document exists yet) may gain and
     // drop files. Submission is chain-first: commitProposal is mined before the

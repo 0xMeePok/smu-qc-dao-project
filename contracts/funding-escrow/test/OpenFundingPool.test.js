@@ -26,12 +26,45 @@ async function proposal(c, label, signer = c.solution, changes = {}) {
   return { id, address, signer, escrow: await c.ethers.getContractAt("FundingEscrow", address) };
 }
 
+async function selectArgs(c, proposalId) {
+  const current = await c.registry.getProposal(proposalId);
+  return [proposalId, await c.registry.revisionCount(proposalId), current.proposalHash, current.solutionHash];
+}
+
 async function accept(c, p) {
-  await c.pool.connect(c.owner).selectProposal(p.id);
+  await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
   await c.pool.connect(p.signer).acceptProposal(p.id);
 }
 
 describe("OpenFundingPool: prefunded single-owner grants", function () {
+  it("reserves only the reviewed proposal revision and rejects the removed unbound selector", async function () {
+    const c = await grantFixture();
+    const p = await proposal(c, "reviewed-grant"), other = await proposal(c, "different-grant", c.bob);
+    const reviewed = await selectArgs(c, p.id);
+    const replacementProposalHash = c.ethers.id("replacement proposal"), replacementSolutionHash = c.ethers.id("replacement solution");
+    await c.registry.connect(p.signer).updateHashes(p.id, replacementProposalHash, replacementSolutionHash, 0);
+    await expect(c.pool.connect(c.owner).selectProposal(...reviewed)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    const replacement = await selectArgs(c, p.id);
+    for (const args of [[p.id, replacement[1], reviewed[2], replacement[3]],
+      [p.id, replacement[1], replacement[2], reviewed[3]], [p.id, reviewed[1], replacement[2], replacement[3]],
+      [other.id, ...replacement.slice(1)]]) {
+      await expect(c.pool.connect(c.owner).selectProposal(...args)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    }
+    // The registry also prevents restoring an earlier content pair to revive stale review.
+    await expect(c.registry.connect(p.signer).updateHashes(p.id, reviewed[2], reviewed[3], 0))
+      .to.be.revertedWithCustomError(c.registry, "InvalidInput");
+    await expect(c.pool.connect(c.owner).selectProposal(...reviewed)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await expect(c.owner.sendTransaction({ to: c.poolAddress,
+      data: c.ethers.id("selectProposal(bytes32)").slice(0, 10) + p.id.slice(2) })).to.revert(c.ethers);
+    expect(await c.pool.reservedAmount()).to.equal(0n);
+    expect(await c.pool.offerState(p.id)).to.equal(0n);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
+    expect(await c.pool.reservedAmount()).to.equal(c.target);
+    await c.pool.connect(p.signer).acceptProposal(p.id);
+    expect(await p.escrow.totalDeposited()).to.equal(c.target);
+    expect(await c.pool.totalAllocated()).to.equal(c.target);
+  });
+
   it("keeps two grant awards independent while a business posting has a pending handshake", async function () {
     const c = await grantFixture();
     const businessPostingId = await c.escrow.postingId();
@@ -59,8 +92,8 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     const c = await grantFixture();
     const first = await proposal(c, "grant-one");
     const second = await proposal(c, "grant-two", c.bob);
-    await c.pool.connect(c.owner).selectProposal(first.id);
-    await c.pool.connect(c.owner).selectProposal(second.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, first.id));
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, second.id));
     expect(await c.registry.pendingProposalForPosting(c.postingId)).to.equal(c.ethers.ZeroHash);
     expect(await c.pool.reservedAmount()).to.equal(GRANT);
     expect(await c.pool.availableBalance()).to.equal(0);
@@ -107,14 +140,14 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     const first = await proposal(c, "larger", c.solution, { target: 60_000n * UNIT });
     const second = await proposal(c, "remaining", c.bob);
     await expect(c.pool.connect(c.bob).deposit(1)).to.be.revertedWithCustomError(c.pool, "AccessDenied");
-    await expect(c.pool.connect(c.solution).selectProposal(first.id)).to.be.revertedWithCustomError(c.pool, "AccessDenied");
-    await c.pool.connect(c.owner).selectProposal(first.id);
-    await expect(c.pool.connect(c.owner).selectProposal(first.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await expect(c.pool.connect(c.solution).selectProposal(...await selectArgs(c, first.id))).to.be.revertedWithCustomError(c.pool, "AccessDenied");
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, first.id));
+    await expect(c.pool.connect(c.owner).selectProposal(...await selectArgs(c, first.id))).to.be.revertedWithCustomError(c.pool, "InvalidState");
     await expect(c.pool.connect(c.other).acceptProposal(first.id)).to.be.revertedWithCustomError(c.pool, "AccessDenied");
-    await expect(c.pool.connect(c.owner).selectProposal(second.id))
+    await expect(c.pool.connect(c.owner).selectProposal(...await selectArgs(c, second.id)))
       .to.be.revertedWithCustomError(c.pool, "InsufficientAvailableFunding").withArgs(40_000n * UNIT);
     await c.pool.connect(c.owner).deposit(10_000n * UNIT);
-    await c.pool.connect(c.owner).selectProposal(second.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, second.id));
     await c.pool.connect(c.solution).acceptProposal(first.id);
     await c.pool.connect(c.bob).acceptProposal(second.id);
     await expect(c.pool.connect(c.solution).acceptProposal(first.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
@@ -125,7 +158,7 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     const c = await grantFixture();
     const first = await proposal(c, "timeout");
     const second = await proposal(c, "replacement", c.bob, { target: GRANT });
-    await c.pool.connect(c.owner).selectProposal(first.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, first.id));
     const offer = await c.pool.getOffer(first.id);
     const block = await c.ethers.provider.getBlock("latest");
     expect(offer.acceptanceDeadline - BigInt(block.timestamp)).to.equal(7n * 86400n);
@@ -139,14 +172,14 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     expect(await c.pool.availableBalance()).to.equal(GRANT);
     expect(await c.registry.proposalVoided(first.id)).to.equal(true);
     expect(await first.escrow.state()).to.equal(State.Voided);
-    await expect(c.pool.connect(c.owner).selectProposal(first.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
-    await c.pool.connect(c.owner).selectProposal(second.id);
+    await expect(c.pool.connect(c.owner).selectProposal(...await selectArgs(c, first.id))).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, second.id));
   });
 
   it("accepts just before the boundary and retains the full window past posting expiry", async function () {
     const c = await grantFixture({ duration: 86400 });
     const p = await proposal(c, "full-window");
-    await c.pool.connect(c.owner).selectProposal(p.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
     const offer = await c.pool.getOffer(p.id);
     await at(c, c.expiresAt);
     await expect(p.escrow.expire()).to.be.revertedWithCustomError(p.escrow, "InvalidState");
@@ -161,7 +194,7 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
   it("protects reserved funds on close, permits later top ups, and returns unspent custody", async function () {
     const c = await grantFixture({ duration: 86400 });
     const p = await proposal(c, "reserved");
-    await c.pool.connect(c.owner).selectProposal(p.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
     const offer = await c.pool.getOffer(p.id);
     expect(offer.acceptanceDeadline).to.be.greaterThan(c.expiresAt);
     await at(c, c.expiresAt - 1n);
@@ -202,13 +235,13 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
   it("releases pending reservations when a proposal or posting is withdrawn, even before deadline", async function () {
     const c = await grantFixture();
     const p = await proposal(c, "withdrawn");
-    await c.pool.connect(c.owner).selectProposal(p.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
     await c.registry.connect(c.solution).withdrawProposal(p.id, c.reason);
     await expect(c.pool.connect(c.solution).acceptProposal(p.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
     await c.pool.expireProposal(p.id);
     expect(await c.pool.availableBalance()).to.equal(GRANT);
     const next = await proposal(c, "posting-withdrawn", c.bob);
-    await c.pool.connect(c.owner).selectProposal(next.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, next.id));
     await c.registry.connect(c.owner).withdrawOpportunity(c.postingId, c.reason);
     await c.pool.expireProposal(next.id);
     await c.pool.connect(c.owner).withdrawAvailable(GRANT);
@@ -218,7 +251,7 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
   it("keeps custody and offer accounting atomic when the token transfer is rejected", async function () {
     const c = await grantFixture();
     const p = await proposal(c, "atomic");
-    await c.pool.connect(c.owner).selectProposal(p.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
     await c.token.blockRecipient(p.address);
     await expect(c.pool.connect(c.solution).acceptProposal(p.id)).to.be.revertedWithCustomError(c.token, "TestTransferRejected");
     expect((await c.pool.getOffer(p.id)).state).to.equal(1);
@@ -248,7 +281,7 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     const selectedSolutionHash = c.ethers.id("researcher revised solution before selection");
     await c.registry.connect(c.solution).updateHashes(p.id, selectedHash, selectedSolutionHash, 0);
     expect(await c.registry.revisionCount(p.id)).to.equal(2);
-    await c.pool.connect(c.owner).selectProposal(p.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
     expect(await p.escrow.state()).to.equal(State.Open);
     expect(await p.escrow.totalDeposited()).to.equal(0);
     const edit = () => c.registry.connect(c.solution).updateHashes(p.id,
@@ -272,7 +305,7 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
       .to.be.revertedWithCustomError(c.factory, "AccessDenied");
     await expect(c.factory.connect(c.owner).createOpenFundingPool(c.postingId, c.tokenAddress))
       .to.be.revertedWithCustomError(c.factory, "InvalidInput");
-    await c.pool.connect(c.owner).selectProposal(p.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
     await c.factory.connect(c.admin).setTokenAllowed(c.tokenAddress, false);
     await expect(c.pool.connect(c.owner).deposit(1)).to.be.revertedWithCustomError(c.pool, "TokenNotListed");
     await expect(c.pool.connect(c.solution).acceptProposal(p.id)).to.be.revertedWithCustomError(c.pool, "TokenNotListed");
@@ -306,8 +339,8 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
     const first = await proposal(c, "decline-one");
     const second = await proposal(c, "decline-two", c.bob);
     const third = await proposal(c, "after-decline", c.other);
-    await c.pool.connect(c.owner).selectProposal(first.id);
-    await c.pool.connect(c.owner).selectProposal(second.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, first.id));
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, second.id));
     expect(await c.pool.availableBalance()).to.equal(0);
     const poolBalance = await c.token.balanceOf(c.poolAddress);
     const reasonHash = declineReason("Our team has secured other funding for this work.");
@@ -336,7 +369,7 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
     // The other offer is untouched and the released funds can back a new award.
     expect((await c.pool.getOffer(second.id)).state).to.equal(1);
     await c.pool.connect(c.bob).acceptProposal(second.id);
-    await c.pool.connect(c.owner).selectProposal(third.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, third.id));
     await c.pool.connect(c.other).acceptProposal(third.id);
     expect(await c.pool.totalAllocated()).to.equal(GRANT);
     expect(await c.pool.availableBalance()).to.equal(0);
@@ -346,8 +379,8 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
     const c = await grantFixture();
     const p = await proposal(c, "decline-access");
     const other = await proposal(c, "decline-access-other", c.bob);
-    await c.pool.connect(c.owner).selectProposal(p.id);
-    await c.pool.connect(c.owner).selectProposal(other.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, p.id));
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, other.id));
     const reasonHash = declineReason("Not the right fit for our lab at this time.");
     for (const actor of [c.owner, c.bob, c.other, c.platform, c.admin]) {
       await expect(c.pool.connect(actor).declineProposal(p.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "AccessDenied");
@@ -366,13 +399,13 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
     await accept(c, accepted);
     await expect(c.pool.connect(c.bob).declineProposal(accepted.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "InvalidState");
     expect(await c.pool.totalAllocated()).to.equal(c.target);
-    await c.pool.connect(c.owner).selectProposal(unselected.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, unselected.id));
     await expect(c.pool.connect(c.solution).declineProposal(unselected.id, c.ethers.ZeroHash)).to.be.revertedWithCustomError(c.pool, "InvalidInput");
     await c.pool.connect(c.solution).declineProposal(unselected.id, reasonHash);
     await expect(c.pool.connect(c.solution).declineProposal(unselected.id, reasonHash)).to.be.revertedWithCustomError(c.pool, "InvalidState");
     await expect(c.pool.connect(c.solution).acceptProposal(unselected.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
     await expect(c.pool.expireProposal(unselected.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
-    await expect(c.pool.connect(c.owner).selectProposal(unselected.id)).to.be.revertedWithCustomError(c.pool, "InvalidState");
+    await expect(c.pool.connect(c.owner).selectProposal(...await selectArgs(c, unselected.id))).to.be.revertedWithCustomError(c.pool, "InvalidState");
     await expect(c.registry.connect(c.solution).updateHashes(unselected.id, c.ethers.id("edit"), c.ethers.id("edit solution"), 0))
       .to.be.revertedWithCustomError(c.registry, "InvalidState");
     expect(await c.pool.reservedAmount()).to.equal(0);
@@ -383,7 +416,7 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
     const c = await grantFixture();
     const late = await proposal(c, "decline-late");
     const edge = await proposal(c, "decline-edge", c.bob);
-    await c.pool.connect(c.owner).selectProposal(late.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, late.id));
     const reasonHash = declineReason("The project timeline no longer works for us.");
     const offer = await c.pool.getOffer(late.id);
     await at(c, offer.acceptanceDeadline);
@@ -392,7 +425,7 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
     await c.pool.expireProposal(late.id);
     expect(await c.pool.declineReasonHash(late.id)).to.equal(c.ethers.ZeroHash);
     expect(await c.pool.availableBalance()).to.equal(GRANT);
-    await c.pool.connect(c.owner).selectProposal(edge.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, edge.id));
     const edgeOffer = await c.pool.getOffer(edge.id);
     await at(c, edgeOffer.acceptanceDeadline - 1n);
     await c.pool.connect(c.bob).declineProposal(edge.id, reasonHash);
@@ -404,8 +437,8 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
     const c = await grantFixture({ duration: 86400 });
     const delisted = await proposal(c, "decline-delisted");
     const paused = await proposal(c, "decline-paused", c.bob);
-    await c.pool.connect(c.owner).selectProposal(delisted.id);
-    await c.pool.connect(c.owner).selectProposal(paused.id);
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, delisted.id));
+    await c.pool.connect(c.owner).selectProposal(...await selectArgs(c, paused.id));
     const reasonHash = declineReason("Circumstances changed after we applied.");
     await c.factory.connect(c.admin).setTokenAllowed(c.tokenAddress, false);
     await c.pool.connect(c.solution).declineProposal(delisted.id, reasonHash);
@@ -419,7 +452,7 @@ describe("OpenFundingPool: researcher declines a pending grant offer", function 
 
     const w = await grantFixture();
     const withdrawn = await proposal(w, "decline-withdrawn");
-    await w.pool.connect(w.owner).selectProposal(withdrawn.id);
+    await w.pool.connect(w.owner).selectProposal(...await selectArgs(w, withdrawn.id));
     await w.registry.connect(w.solution).withdrawProposal(withdrawn.id, w.reason);
     await w.pool.connect(w.solution).declineProposal(withdrawn.id, reasonHash);
     expect(await w.pool.availableBalance()).to.equal(GRANT);

@@ -106,6 +106,7 @@ function baseFunding(overrides = {}) {
 function baseAudit(overrides = {}) {
   return {
     schemaVersion: 1,
+    digestVersion: 1,
     chainId: 421614,
     entityId: `0x${"1".repeat(64)}`,
     contentHash: `0x${"2".repeat(64)}`,
@@ -1557,6 +1558,7 @@ describe("problems/{problemId} funded posting", () => {
       currency: "USDC",
       expiresAt: FUTURE,
       status: "submitted",
+      audit: baseAudit({ status: "pending", transactionHash: `0x${"3".repeat(64)}` }),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       ...overrides,
@@ -1893,6 +1895,7 @@ describe("problems/{problemId} open funding opportunity", () => {
       currency: "USDC",
       expiresAt: FUTURE,
       status: "submitted",
+      audit: baseAudit({ status: "pending", transactionHash: `0x${"3".repeat(64)}` }),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       ...overrides,
@@ -2161,6 +2164,7 @@ describe("problems/{problemId} drafts", () => {
       amount: 80000,
       currency: "USDT",
       expiresAt: FUTURE,
+      audit: baseAudit({ status: "pending", transactionHash: `0x${"3".repeat(64)}` }),
       ...overrides,
     };
   }
@@ -2468,6 +2472,7 @@ describe("problems/{problemId} full client payload", () => {
     const id = `${"abcd"[index]}aaeadc3-c06e-4f70-9406-e094ee68300${index}`;
     return {
       id, name: "design-spec.pdf", size: 759469, contentType: "application/pdf",
+      sha256: `0x${"a".repeat(64)}`,
     };
   }
 
@@ -2490,6 +2495,7 @@ describe("problems/{problemId} full client payload", () => {
       expiresAt: FUTURE,
       status: "submitted",
       attachments: Array.from({ length: count }, (_, i) => attachmentAt(problemId, i)),
+      audit: baseAudit({ status: "pending", transactionHash: `0x${"3".repeat(64)}` }),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       ...overrides,
@@ -2554,7 +2560,7 @@ describe("problems/{problemId} full client payload", () => {
     await assertSucceeds(edit({ title: "Corrected title" }));
   });
 
-  const auditMap = () => ({ schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
+  const auditMap = () => ({ schemaVersion: 1, digestVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`,
     contentHash: `0x${"2".repeat(64)}`, status: "queued", transactionHash: "",
     blockNumber: 0, attemptCount: 0, lastError: "" });
 

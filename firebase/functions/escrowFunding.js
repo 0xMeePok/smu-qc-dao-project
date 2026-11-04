@@ -9,8 +9,8 @@ import { prepareIndependentEscrowCommit, prepareStoredProposal } from "./proposa
 import { opportunityEntityId } from "./auditCanonical.js";
 import { verifyProposalEscrow } from "./escrowAudit.js";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
-import { ESCROW_STATES, milestoneValue, reconcileFundingReceipt, same } from "./escrowFundingEvents.js";
-import { VOID_JOBS, voidDecision } from "./escrowModerationVoid.js";
+import { ESCROW_STATES, milestoneValue, reconcileFundingReceiptPage, same } from "./escrowFundingEvents.js";
+import { VOID_JOBS, voidDecision, reconcileModerationVoidEnumerations } from "./escrowModerationVoid.js";
 import { ANCHOR_JOBS } from "./moderationAnchor.js";
 import { independentListingWindowOpen, isIndependentProposal } from "./independentProposal.js";
 import { FUNDING_POSITIONS, fundingAllocationBasis, saveFundingSnapshot } from "./fundingSnapshots.js";
@@ -26,7 +26,7 @@ export { FUNDING_POSITIONS } from "./fundingSnapshots.js";
 
 export const FUNDING_JOBS = "escrowFundingJobs", FUNDING_SUMMARIES = "escrowFundingSummaries";
 export const FUNDING_EVENTS = "escrowFundingEvents", PLATFORM_OUTBOX = "escrowPlatformOutbox", PAUSE_JOBS = "escrowPostingPauseJobs";
-const ZERO = `0x${"0".repeat(64)}`, BLOCK_SPAN = 10_000n, TX_PAGE = 15;
+const ZERO = `0x${"0".repeat(64)}`, BLOCK_SPAN = 10_000n, TX_PAGE = 15, ANCHOR_PAGE = 100;
 const validId = id => { if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new HttpsError("invalid-argument", "A valid proposal reference is required."); };
 const fail = (code, message) => { throw new HttpsError(code, message); };
 const at = (value, name, index) => value?.[name] ?? value?.[index];
@@ -136,8 +136,16 @@ export async function loadFundingContext({ db, proposalId, uid, readDocument = r
   return { record, parent: { ...parent.data(), id: parent.id } };
 }
 
+function manualExpiryBlockReason(parent) {
+  // Scheduled response-window expiry does not cancel an already selected escrow.
+  return parent.status === "expired" && parent.expirySource === "manual"
+    ? "An administrator has force-expired this posting." : null;
+}
+
 export function fundingBlockReason(record, parent, chain, now = Date.now(), { deposit = false } = {}) {
   if (["queued", "pending"].includes(record?.escrowAdminCancellation?.status)) return "An administrator cancellation is awaiting on-chain confirmation.";
+  const expiryBlockReason = manualExpiryBlockReason(parent);
+  if (expiryBlockReason) return expiryBlockReason;
   if (blocked(parent) || blocked(record)) return "Funding is paused while this content is moderated.";
   if (["draft", "withdrawn", "cancelled", "rejected"].includes(record.status)
       || ["draft", "withdrawn", "cancelled"].includes(parent.status)) return "This posting or proposal is no longer eligible for funding.";
@@ -379,9 +387,25 @@ export async function prepareEscrowDeposit({ db, client, config, uid, proposalId
  * those exact bytes, never a fresh transaction or a different recipient. */
 export async function submitPlatformAction({ db, client, config, getWallet, action, now = Timestamp.now() }) {
   const ref = db.collection(PLATFORM_OUTBOX).doc(deploymentKey(config)), token = randomUUID();
-  const paymentAction = action.proposalId && ["lockSelection", "release", "releaseMilestone"].includes(action.functionName);
+  const paymentAction = ["lockSelection", "release", "releaseMilestone"].includes(action.functionName);
+  if (paymentAction && !action.proposalId) fail("invalid-argument", "The escrow payment must identify its proposal.");
+  const paymentBlockReason = async tx => {
+    if (!paymentAction) return null;
+    const { parent } = await loadFundingContext({ db, proposalId: action.proposalId, readDocument: ref => tx.get(ref) });
+    return manualExpiryBlockReason(parent);
+  };
+  const independentRelease = action.functionName === "releaseCompletion";
+  if (independentRelease && !action.proposalId) fail("invalid-argument", "The independent release must identify its listing.");
+  const releaseBlocked = async tx => {
+    if (!independentRelease) return false;
+    const proposal = await tx.get(db.collection("proposals").doc(action.proposalId));
+    return !proposal.exists || blocked(proposal.data());
+  };
   const claim = (resuming = false) => db.runTransaction(async tx => {
     const row = await tx.get(ref), old = row.data() || {};
+    if (await releaseBlocked(tx)) return { releaseBlocked: true };
+    const paymentBlocked = await paymentBlockReason(tx);
+    if (paymentBlocked) return { paymentBlocked };
     if (paymentAction) {
       const job = await tx.get(db.collection(FUNDING_JOBS).doc(jobKey(config, action.proposalId)));
       if (job.data()?.adminCancellationId && !["complete", "blocked"].includes(job.data().adminCancellationStatus)) return { cancellationPending: true };
@@ -425,6 +449,8 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
     }
   }
   if (claimed.superseded) return { status: "superseded", message: "A newer posting update replaced this action." };
+  if (claimed.releaseBlocked) return { status: "blocked", message: "This listing is no longer available for a final payment." };
+  if (claimed.paymentBlocked) return { status: "blocked", message: claimed.paymentBlocked };
   if (claimed.cancellationPending) return { status: "blocked", message: "An administrator cancellation is awaiting on-chain confirmation." };
   if (claimed.confirmed) return { status: "confirmed", transactionHash: claimed.confirmed,
     message: "Platform transaction confirmed; reconciling funding events." };
@@ -447,6 +473,9 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
     await db.runTransaction(async tx => {
       const row = await tx.get(ref);
       if (row.data()?.leaseToken !== token || row.data()?.transactionHash) fail("aborted", "The signer lease changed. Retry the same action.");
+      if (await releaseBlocked(tx)) fail("aborted", "This listing was removed before the final payment could be signed.");
+      const paymentBlocked = await paymentBlockReason(tx);
+      if (paymentBlocked) fail("aborted", paymentBlocked);
       if (paymentAction) {
         const job = await tx.get(db.collection(FUNDING_JOBS).doc(jobKey(config, action.proposalId)));
         if (job.data()?.adminCancellationId && !["complete", "blocked"].includes(job.data().adminCancellationStatus)) {
@@ -525,9 +554,9 @@ export async function resumePlatformTransaction({ db, client, config, now = Time
         status: "pending", transactionOutcome: receipt.status, nextAttemptAt: now, updatedAt: now });
     }
     if (voidJob?.exists) {
-      const proposalId = voidJob.data().proposalId;
       tx.set(voidRef, { ...voidJob.data(), status: "complete", transactionHash: pending.transactionHash, updatedAt: now });
-      if (event?.exists) tx.set(eventRef, { ...event.data(), escrowVoids: { ...(event.data().escrowVoids || {}), [proposalId]: { status: "complete", transactionHash: pending.transactionHash } } });
+      if (event?.exists && voidJob.data().status !== "complete") tx.set(eventRef, { ...event.data(),
+        escrowVoidCompletedCount: (event.data().escrowVoidCompletedCount || 0) + 1 });
     }
     if (anchorJob?.exists && receipt.status === "success") {
       tx.set(anchorRef, { ...anchorJob.data(), status: "complete", transactionHash: pending.transactionHash, updatedAt: now });
@@ -608,7 +637,11 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
   if (!job) return getEscrowFundingHistory({ db, config, uid, proposalId });
   try {
     const head = await client.getBlockNumber({ cacheTime: 0 }), safeBlock = head - 1n;
-    const fromBlock = job.cursorBlock == null ? await initialBlock(context.record, client, config) : BigInt(job.cursorBlock) + 1n;
+    // A null log index denotes a fully consumed block. A partial checkpoint
+    // includes that block again and resumes strictly after its saved anchor.
+    const partialBlock = job.cursorLogIndex != null;
+    const fromBlock = job.cursorBlock == null ? await initialBlock(context.record, client, config)
+      : BigInt(job.cursorBlock) + (partialBlock ? 0n : 1n);
     if (job.cursorBlock != null) {
       const previous = await client.getBlock({ blockNumber: BigInt(job.cursorBlock) });
       if (!same(previous.hash, job.cursorHash)) throw new Error("Escrow reconciliation mismatch: the saved checkpoint was reorganized.");
@@ -616,38 +649,66 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
     const toBlock = fromBlock + BLOCK_SPAN - 1n < safeBlock ? fromBlock + BLOCK_SPAN - 1n : safeBlock;
     const verified = await readVerifiedFunding({ client, config, ...context, blockNumber: safeBlock, readConcurrency });
     const event = config.abi.find(item => item.type === "event" && item.name === "FundingEventAnchored");
-    const logs = fromBlock <= toBlock ? await client.getLogs({ address: config.address, event,
+    const fetchedLogs = fromBlock <= toBlock ? await client.getLogs({ address: config.address, event,
       args: { proposalId: verified.expected.entityId, escrow: verified.escrow.address }, fromBlock, toBlock, strict: true }) : [];
+    const logs = fetchedLogs.filter(log => !partialBlock || log.blockNumber > BigInt(job.cursorBlock)
+      || log.blockNumber === BigInt(job.cursorBlock) && log.logIndex > job.cursorLogIndex).sort((a, b) => a.blockNumber < b.blockNumber ? -1
+      : a.blockNumber > b.blockNumber ? 1 : a.logIndex - b.logIndex);
     const hashes = [...new Set(logs.map(log => log.transactionHash))];
-    // Stop at a complete receipt boundary and persist the block cursor. Never
-    // skip a receipt when a busy proposal exceeds this invocation's budget.
-    const pageHashes = hashes.slice(0, TX_PAGE);
-    let cursorBlock = toBlock;
-    if (hashes.length > TX_PAGE) {
-      cursorBlock = logs.find(log => same(log.transactionHash, hashes[TX_PAGE])).blockNumber - 1n;
-    }
-    const selected = pageHashes.filter(hash => logs.find(log => same(log.transactionHash, hash)).blockNumber <= cursorBlock);
-    if (hashes.length > TX_PAGE && cursorBlock < fromBlock) fail("resource-exhausted", "A single block exceeds the escrow reconciliation budget; administrator review is required.");
-    let added = 0, lastHash = job.lastTransactionHash || null, selectionConsumed = false, latestRefundEvent = null;
-    const invalidatedSelections = new Set();
-    for (const hash of selected) {
-      const events = await reconcileFundingReceipt({ client, config, expected: verified.expected,
-        escrowAddress: verified.escrow.address, transactionHash: hash, safeBlock });
-      for (const item of events) {
-        const projected = await saveEvent({ db, event: item, record: context.record, summary: verified.summary, now });
-        if (projected.refundReason) latestRefundEvent = projected;
-        if (["SelectionLocked", "SelectionInvalidated"].includes(item.eventType) && same(item.selectionId, job.selectionId)) selectionConsumed = true;
-        if (item.eventType === "SelectionInvalidated") invalidatedSelections.add(item.selectionId);
+    let cursorBlock = toBlock, cursorLogIndex = null, cursorTransactionHash = null, cursorReceiptOffset = null, partialHash = null;
+    let added = 0, lastHash = job.lastTransactionHash || null, selectionConsumed = false,
+      latestRefundEvent = job.reconciliationRefundEvent || null;
+    const invalidatedSelections = new Set(job.reconciliationInvalidatedSelection ? [job.reconciliationInvalidatedSelection] : []), selected = [];
+    for (const hash of hashes) {
+      if (selected.length === TX_PAGE || added === ANCHOR_PAGE) break;
+      const anchorOffset = partialBlock && same(hash, job.cursorTransactionHash) ? job.cursorReceiptOffset : 0;
+      const page = await reconcileFundingReceiptPage({ client, config, expected: verified.expected,
+        escrowAddress: verified.escrow.address, transactionHash: hash, safeBlock,
+        anchorOffset: anchorOffset ?? 0, anchorLimit: ANCHOR_PAGE - added });
+      // The exact frontier is only meaningful for the receipt discovered by
+      // this scan, in this block, with precisely the saved anchor prefix.
+      const scanned = logs.filter(log => same(log.transactionHash, hash));
+      if (page.blockNumber !== scanned[0].blockNumber || !same(page.blockHash, scanned[0].blockHash)
+          || page.events[0].logIndex !== scanned[0].logIndex
+          || page.events.some(item => !scanned.some(log => log.logIndex === item.logIndex))
+          || partialBlock && same(hash, job.cursorTransactionHash)
+            && page.events[0].logIndex <= job.cursorLogIndex) {
+        throw new Error("Escrow reconciliation mismatch: receipt page differs from the scanned anchors.");
       }
-      added += events.length;
+      for (const item of page.events) {
+        const projected = await saveEvent({ db, event: item, record: context.record, summary: verified.summary, now });
+        if (projected.refundReason) latestRefundEvent = { refundReason: projected.refundReason,
+          transactionHash: projected.transactionHash, reasonHash: projected.reasonHash ?? null };
+        if (["SelectionLocked", "SelectionInvalidated"].includes(item.eventType) && same(item.selectionId, job.selectionId)) selectionConsumed = true;
+        if (item.eventType === "SelectionInvalidated") {
+          // Invalidation opens refunds and terminates selection for this
+          // escrow. Keep one ID across pages, never an expanding history.
+          invalidatedSelections.clear();
+          invalidatedSelections.add(item.selectionId);
+        }
+      }
+      added += page.events.length;
       lastHash = hash;
+      selected.push(hash);
+      cursorBlock = page.blockNumber;
+      cursorLogIndex = page.events.at(-1).logIndex;
+      cursorTransactionHash = page.nextAnchorOffset == null ? null : hash;
+      cursorReceiptOffset = page.nextAnchorOffset;
+      partialHash = page.blockHash;
+      if (page.nextAnchorOffset != null) break;
+    }
+    if (selected.length === hashes.length && cursorReceiptOffset == null) {
+      cursorBlock = toBlock;
+      cursorLogIndex = null;
+      cursorTransactionHash = null;
     }
     if (transactionHash && !selected.some(hash => same(hash, transactionHash))) {
       // Validate the wallet receipt immediately, without advancing the cursor or
       // counting it twice; the sequential index will ingest it on its own page.
-      await reconcileFundingReceipt({ client, config, expected: verified.expected, escrowAddress: verified.escrow.address, transactionHash, safeBlock });
+      await reconcileFundingReceiptPage({ client, config, expected: verified.expected, escrowAddress: verified.escrow.address,
+        transactionHash, safeBlock, anchorLimit: 1 });
     }
-    const complete = cursorBlock === safeBlock, anchorCount = (job.anchorCount || 0) + added;
+    const complete = cursorLogIndex == null && cursorBlock === safeBlock, anchorCount = (job.anchorCount || 0) + added;
     if (complete && anchorCount !== verified.anchorCount) throw new Error("Escrow reconciliation mismatch: indexed anchor count differs from the registry.");
     // A payout changes every depositor's allocation, not just the wallet that
     // submitted it. Refresh all indexed depositors at the same confirmed block.
@@ -664,6 +725,9 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
     const positions = complete && !unchangedAllocations
       ? await readFundingPositions({ db, client, config, summary: verified.summary }) : [];
     const cursor = await client.getBlock({ blockNumber: cursorBlock });
+    if (cursorLogIndex != null && !same(cursor.hash, partialHash)) {
+      throw new Error("Escrow reconciliation mismatch: the partial checkpoint was reorganized.");
+    }
     const reconciliation = { status: complete ? "verified" : "syncing", matched: complete, complete, anchors: anchorCount, blockNumber: Number(cursorBlock) };
     const fresh = await loadFundingContext({ db, proposalId });
     let settlement = publicSettlement(job);
@@ -689,7 +753,10 @@ export async function syncEscrowFunding({ db, client, config, getWallet, uid, pr
         complete ? tx.get(summaryRef) : null,
       ]);
       const terminal = ["Released", "Refunded"].includes(verified.summary.state);
-      tx.set(ref, { ...current.data(), cursorBlock: Number(cursorBlock), cursorHash: cursor.hash, anchorCount,
+      tx.set(ref, { ...current.data(), cursorBlock: Number(cursorBlock), cursorHash: cursor.hash,
+        cursorLogIndex, cursorTransactionHash, cursorReceiptOffset, anchorCount,
+        reconciliationRefundEvent: complete ? null : latestRefundEvent,
+        reconciliationInvalidatedSelection: complete ? null : [...invalidatedSelections].at(-1) ?? null,
         selectionRequested: current.data().selectionRequested === true
           && !((selectionConsumed || unpaidTerminal) && same(current.data().selectionId, job.selectionId)),
         lastTransactionHash: lastHash, reconciliation, settlement, leaseUntil: timestamp(0),
@@ -1013,6 +1080,7 @@ export async function reconcilePostingFundingPause({ db, client, config, getWall
 }
 
 export async function reconcileModerationVoids({ db, client, config, getWallet, now = Timestamp.now() }) {
+  await reconcileModerationVoidEnumerations({ db, now });
   const rows = await db.collection(VOID_JOBS).where("status", "==", "pending").where("nextAttemptAt", "<=", now)
     .orderBy("nextAttemptAt").limit(3).get();
   for (const row of rows.docs) {

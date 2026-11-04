@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXPORT_NOTICE, latestCurrentDate } from "../../../firebase/functions/proposalExportNotice.js";
 
@@ -65,7 +65,7 @@ describe("QCDAO-107 proposal export panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download JSON and CSV" }));
 
     expect(await screen.findByRole("status")).toBeTruthy();
-    expect(mocks.exportSelected).toHaveBeenCalledWith({ proposalId: "proposal-b", acceptance: "accepted" });
+    expect(mocks.exportSelected).toHaveBeenCalledWith({ proposalId: "proposal-b", acceptance: "accepted" }, expect.objectContaining({ signal: expect.any(AbortSignal), onPart: expect.any(Function), onProgress: expect.any(Function) }));
     expect(mocks.save.mock.calls[0][1]).toBe("qcdao-proposals-proposal-b.json");
     expect(mocks.save.mock.calls[1][1]).toBe("qcdao-proposals-proposal-b.csv");
   });
@@ -82,7 +82,7 @@ describe("QCDAO-107 proposal export panel", () => {
     fireEvent.change(end, { target: { value: latestCurrentDate() } });
     fireEvent.click(screen.getByRole("button", { name: "Download JSON and CSV" }));
     expect(await screen.findByRole("status")).toBeTruthy();
-    expect(mocks.exportSelected).toHaveBeenCalledWith({ startDate: "2020-01-01", endDate: latestCurrentDate(), acceptance: "accepted" });
+    expect(mocks.exportSelected).toHaveBeenCalledWith({ startDate: "2020-01-01", endDate: latestCurrentDate(), acceptance: "accepted" }, expect.any(Object));
   });
 
   it("shows the reason an export was refused and does not download a file", async () => {
@@ -97,6 +97,66 @@ describe("QCDAO-107 proposal export panel", () => {
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toMatch(/Draft proposals/);
     expect(mocks.save).not.toHaveBeenCalled();
-    expect(mocks.exportSelected).toHaveBeenCalledWith({ proposalId: "proposal-a", acceptance: "all" });
+    expect(mocks.exportSelected).toHaveBeenCalledWith({ proposalId: "proposal-a", acceptance: "all" }, expect.any(Object));
+  });
+});
+
+
+describe("proposal export progress and numbered files", () => {
+  async function start() {
+    mocks.list.mockResolvedValue({ proposals });
+    const view = render(<ProposalExportPanel />);
+    await screen.findByRole("option", { name: "Cold chain — Accepted · Grant call" });
+    fireEvent.change(screen.getByLabelText("Proposal"), { target: { value: "proposal-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "Download JSON and CSV" }));
+    return view;
+  }
+  it("shows comment progress and allows the running export to stop", async () => {
+    mocks.exportSelected.mockImplementation((_, { signal, onProgress }) => {
+      onProgress({ commentCount: 1001 });
+      return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("Export stopped.", "AbortError")), { once: true }));
+    });
+    await start();
+    expect(screen.getByRole("status").textContent).toMatch(/1001 comments/);
+    fireEvent.click(screen.getByRole("button", { name: "Stop export" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Export stopped/);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+  it("downloads each numbered pair immediately and only creates a completion manifest on success", async () => {
+    mocks.exportSelected.mockImplementation(async (_, { onPart }) => {
+      onPart({ document: exported.document, csv: exported.csv, exportId: "session-a", partNumber: 1 });
+      onPart({ document: exported.document, csv: exported.csv, exportId: "session-a", partNumber: 2 });
+      return { ...exported, document: undefined, csv: undefined, multipart: true, manifest: { exportId: "session-a", auditId: "audit-a", partCount: 2, status: "complete" } };
+    });
+    await start();
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(5));
+    expect(mocks.save.mock.calls.map(([, name]) => name)).toEqual([
+      "qcdao-proposals-session-a-part1.json", "qcdao-proposals-session-a-part1.csv",
+      "qcdao-proposals-session-a-part2.json", "qcdao-proposals-session-a-part2.csv",
+      "qcdao-proposals-session-a-complete.manifest.json",
+    ]);
+    expect(screen.getByRole("status").textContent).toMatch(/2 numbered parts and the completion manifest/);
+  });
+  it("labels already downloaded parts incomplete after a late failure and shows no success", async () => {
+    mocks.exportSelected.mockImplementation(async (_, { onPart }) => {
+      onPart({ document: exported.document, csv: exported.csv, exportId: "session-a", partNumber: 1 });
+      throw new Error("Access changed.");
+    });
+    await start();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/downloaded parts are incomplete.*No completion manifest/);
+    expect(mocks.save).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+  it("aborts on unmount and never downloads a late result", async () => {
+    let resolve;
+    mocks.exportSelected.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const view = await start();
+    const signal = mocks.exportSelected.mock.calls[0][1].signal;
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+    resolve(exported);
+    await Promise.resolve();
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 });

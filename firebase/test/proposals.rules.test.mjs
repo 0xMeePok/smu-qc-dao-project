@@ -8,6 +8,7 @@ import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, server
 const AUTHOR = `0x${"81".repeat(20)}`;
 const SPONSOR = `0x${"91".repeat(20)}`;
 const OUTSIDER = `0x${"71".repeat(20)}`;
+const ADMIN = `0x${"61".repeat(20)}`;
 const ATTACHMENT_DIGEST = `0x${"4".repeat(64)}`;
 let env;
 async function setDoc(reference, data, ...options) {
@@ -24,6 +25,7 @@ before(async () => {
   env = await initializeTestEnvironment({ projectId: "qc-dao-rules-test", firestore: { rules: fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8") } });
   await env.withSecurityRulesDisabled(async (ctx) => {
     for (const id of [AUTHOR, SPONSOR, OUTSIDER]) await setDoc(doc(ctx.firestore(), "users", id), { address: id, role: 0, suspended: false, fullName: "Research User", organisation: "University", walletVerified: true, termsAcceptedAt: new Date(), termsVersion: "2026-08-24" });
+    await setDoc(doc(ctx.firestore(), "users", ADMIN), { address: ADMIN, role: 1, suspended: false, fullName: "Administrator", organisation: "University", walletVerified: true, termsAcceptedAt: new Date(), termsVersion: "2026-08-24" });
   });
 });
 after(async () => { await env?.cleanup(); });
@@ -35,6 +37,10 @@ async function parent(overrides = {}) {
 function record(problemId, overrides = {}) {
   return { researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId, opportunityType: "business-problem", title: "Annealing routing", summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare annealing against a classical baseline", suitability: "A combinatorial routing problem", expectedOutcomes: "Improved routing", successCriteria: "10 percent less travel", timeline: "12 weeks", milestones: "Baseline, prototype, validation", team: "Operations research team", amount: 1500, currency: "USDC", status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides };
 }
+function attachedReceipt(extra = {}) {
+  return { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
+    status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 0, attemptCount: 1, lastError: "", ...extra };
+}
 async function submit(db, id, data, withSlot = true) {
   await seedPublicationFixture(env, doc(db, "proposals", id), data);
   const batch = writeBatch(db);
@@ -43,6 +49,53 @@ async function submit(db, id, data, withSlot = true) {
   return batch.commit();
 }
 describe("QCDAO-59/60 submitted proposals", () => {
+  it("refuses new attached drafts pointing to another member's private or moderated parent", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    for (const extra of [{ status: "draft" }, { status: "moderated_removed" },
+      { status: "submitted", moderationStatus: "hidden" }, { status: "open", moderationStatus: "removed" }]) {
+      const problemId = await parent(extra);
+      await assertFails(setDoc(doc(db, "proposals", `private-parent-draft-${serial}`), {
+        researcherId: AUTHOR, problemId, status: "draft", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }));
+    }
+    await assertFails(setDoc(doc(db, "proposals", "missing-parent-draft"), {
+      researcherId: AUTHOR, problemId: "missing-private-parent", status: "draft", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("preserves owner and administrator draft workflows and all readable parent statuses", async () => {
+    for (const [uid, extra] of [[AUTHOR, { ownerId: AUTHOR, status: "draft" }], [ADMIN, { status: "draft" }],
+      ...["submitted", "open", "cancelled", "expired"].map(status => [AUTHOR, { status }])]) {
+      const problemId = await parent(extra);
+      const db = env.authenticatedContext(uid).firestore();
+      const proposalId = `readable-parent-draft-${serial}`;
+      await assertSucceeds(setDoc(doc(db, "proposals", proposalId), {
+        researcherId: uid, problemId, status: "draft", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }));
+      const privateParent = await parent({ status: "draft" });
+      await assertFails(updateDoc(doc(db, "proposals", proposalId), { problemId: privateParent, updatedAt: serverTimestamp() }));
+    }
+  });
+
+  it("saves a complete attached draft with maximum text, AI metadata and two PDFs within the expression budget", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    for (const extra of [{ status: "submitted" }, { status: "draft", ownerId: AUTHOR }]) {
+      const problemId = await parent(extra);
+      const data = record(problemId, {
+        status: "draft", opportunityType: "open-funding", aiAssisted: true, title: "t".repeat(160), category: "c".repeat(80),
+        ...Object.fromEntries(["summary", "methodology", "suitability", "expectedOutcomes", "successCriteria", "timeline",
+          "milestones", "team", "proposedProblem", "relevance", "thesisFit"].map(field => [field, "x".repeat(4000)])),
+        fundingPlan: { tranchePercentages: "5".repeat(80), reviewDays: "7".repeat(40), funderVoting: true },
+        attachments: ["maxfile1", "maxfile2"].map(id => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })),
+      });
+      delete data.postingOwnerId;
+      const ref = doc(db, "proposals", `max-parent-draft-${serial}`);
+      await assertSucceeds(setDoc(ref, data));
+      const { createdAt, ...edited } = data;
+      await assertSucceeds(updateDoc(ref, { ...edited, summary: "y".repeat(4000), updatedAt: serverTimestamp() }));
+    }
+  });
+
   it("refuses custom escrow splits on creates and draft promotions even with an existing exact publication proof", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     for (const trancheBps of [[10000], [4000, 6000], [2000, 3000, 5000]]) {
@@ -142,6 +195,77 @@ describe("QCDAO-59/60 submitted proposals", () => {
       updatedAt: serverTimestamp(),
     }));
   });
+
+  for (const versioned of [false, true]) for (const mode of ["create", "draft"]) {
+    it(`publishes ${mode} with a ${versioned ? "ten-field digest-v1" : "nine-field legacy"} receipt and two PDFs within the expression budget`, async () => {
+      const problemId = await parent();
+      const db = env.authenticatedContext(AUTHOR).firestore();
+      const proposalId = `bounded-receipt-${versioned}-${mode}`;
+      const data = record(problemId, {
+        aiAssisted: true,
+        fundingTerms: { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: true,
+          trancheBps: [5000, 5000], reviewWindows: [604800, 2592000], milestoneHashes: [ATTACHMENT_DIGEST, ATTACHMENT_DIGEST] },
+        attachments: ["receipt1", "receipt2"].map(id => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })),
+        audit: attachedReceipt(versioned ? { digestVersion: 1 } : {}),
+      });
+      if (mode === "create") {
+        await assertSucceeds(submit(db, proposalId, data));
+      } else {
+        const reference = doc(db, "proposals", proposalId);
+        const { audit, fundingTerms, postingOwnerId, ...draft } = data;
+        await assertSucceeds(setDoc(reference, { ...draft, status: "draft" }));
+        const patch = { status: "submitted", audit, fundingTerms, postingOwnerId, updatedAt: serverTimestamp() };
+        await seedPublicationFixture(env, reference, patch, true);
+        const batch = writeBatch(db);
+        batch.update(reference, patch);
+        batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+        await assertSucceeds(batch.commit());
+      }
+      const reference = doc(db, "proposals", proposalId);
+      await assertSucceeds(rawUpdateDoc(reference, { "audit.status": "failed", "audit.lastError": "Retry confirmation", updatedAt: serverTimestamp() }));
+      await assertSucceeds(rawUpdateDoc(reference, { "audit.status": "pending", "audit.lastError": "", updatedAt: serverTimestamp() }));
+    });
+  }
+
+  it("rejects arbitrary tenth receipt fields on attached drafts and attested submissions", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    for (const status of ["draft", "submitted"]) {
+      const problemId = await parent();
+      const proposalId = `unknown-receipt-create-${status}`;
+      const data = record(problemId, { status, audit: attachedReceipt({ extraField: { padding: "x".repeat(64_000) } }) });
+      if (status === "draft") {
+        delete data.postingOwnerId;
+        const reference = doc(db, "proposals", proposalId);
+        await assertFails(setDoc(reference, data));
+        await assertSucceeds(setDoc(reference, { ...data, audit: attachedReceipt() }));
+        await assertFails(rawUpdateDoc(reference, {
+          "audit.extraField": { padding: "x".repeat(64_000) }, updatedAt: serverTimestamp(),
+        }));
+      } else await assertFails(submit(db, proposalId, data));
+    }
+  });
+
+  it("rejects an unknown tenth field or malformed digest version added after publication", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const problemId = await parent();
+    const proposalId = "unknown-receipt-pending-update";
+    await assertSucceeds(submit(db, proposalId, record(problemId, { audit: attachedReceipt() })));
+    const reference = doc(db, "proposals", proposalId);
+    const original = (await getDoc(reference)).data().audit;
+    for (const patch of [
+      { "audit.extraField": { padding: "x".repeat(64_000) } },
+      { audit: attachedReceipt({ extraField: { padding: "x".repeat(64_000) } }) },
+      { "audit.digestVersion": { padding: "x".repeat(64_000) } },
+      { "audit.digestVersion": 2 },
+      { "audit.digestVersion": "1" },
+    ]) {
+      await assertFails(rawUpdateDoc(reference, { ...patch, updatedAt: serverTimestamp() }));
+      assert.deepEqual((await getDoc(reference)).data().audit, original);
+    }
+    await assertSucceeds(rawUpdateDoc(reference, { "audit.digestVersion": 1, updatedAt: serverTimestamp() }));
+    assert.equal(Object.keys((await getDoc(reference)).data().audit).length, 10);
+  });
+
   it("[QCDAO-57] corrects a submitted proposal the way updateProposal writes it", async () => {
     const id = await parent();
     const db = env.authenticatedContext(AUTHOR).firestore();

@@ -1,5 +1,18 @@
 const OPEN_FUNDING_TYPE = "open-funding";
 const trimmed = (value) => String(value ?? "").trim();
+// Existing receipts predate attachment digests. A recorded transaction without
+// digestVersion keeps its original payload; every new anchor commits the digest.
+export const commitsAttachmentDigests = (record) => record?.audit?.digestVersion === 1
+  || !record?.audit?.transactionHash;
+
+export function auditAttachments(record) {
+  const includeDigest = commitsAttachmentDigests(record);
+  return [...(record.attachments ?? [])].map((item) => ({
+    id: trimmed(item.id), name: trimmed(item.name), size: Number(item.size),
+    contentType: trimmed(item.contentType || "application/pdf"),
+    ...(includeDigest ? { sha256: trimmed(item.sha256) } : {}),
+  })).sort((left, right) => left.id.localeCompare(right.id));
+}
 export function parseFundingTags(value = "") {
   const source = Array.isArray(value) ? value : String(value).split(",");
   const seen = new Set();
@@ -32,26 +45,12 @@ export function postingAuditPayload(posting) {
     amount: Number(posting.amount),
     currency: trimmed(posting.currency),
     expiresAt: posting.expiresAt,
-    attachments: [...(posting.attachments ?? [])]
-      .map((item) => ({
-        id: trimmed(item.id),
-        name: trimmed(item.name),
-        size: Number(item.size),
-        contentType: trimmed(item.contentType || "application/pdf"),
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id)),
+    attachments: auditAttachments(posting),
   };
 }
 
 export function fundingOpportunityAuditPayload(opportunity) {
-  const attachments = [...(opportunity.attachments ?? [])]
-    .map((item) => ({
-      id: trimmed(item.id),
-      name: trimmed(item.name),
-      size: Number(item.size),
-      contentType: trimmed(item.contentType || "application/pdf"),
-    }))
-    .sort((left, right) => left.id.localeCompare(right.id));
+  const attachments = auditAttachments(opportunity);
   return {
     opportunityType: OPEN_FUNDING_TYPE,
     ownerId: trimmed(opportunity.ownerId).toLowerCase(),

@@ -157,7 +157,7 @@ export function isPublishableProblem(record, { uid, profileOrganisation }) {
   // The create rule admits only an empty seed; a draft is never withdrawn.
   if (has(record, "withdrawalReason") && record.withdrawalReason !== "") return false;
   if (!isString(profileOrganisation)) return false;
-  if (!validAttachments(record)) return false;
+  if (!validAttachments(record) || (record.attachments ?? []).some((item) => !item.sha256)) return false;
   return has(record, "opportunityType") && record.opportunityType === "open-funding"
     ? validOpenFunding(record, profileOrganisation)
     : validBusinessProblem(record, profileOrganisation);
@@ -178,7 +178,7 @@ export function isPublishableIndependentProposal(record, { uid }) {
   if (!Object.keys(record).every((key) => INDEPENDENT_KEYS.has(key))) return false;
   if (!isTimestamp(record.expiresAt)) return false;
   if (has(record, "withdrawalReason") && record.withdrawalReason !== "") return false;
-  if (!validAttachments(record)) return false;
+  if (!validAttachments(record) || (record.attachments ?? []).some((item) => !item.sha256)) return false;
   if (!nonEmpty(record.title, 160) || !nonEmpty(record.summary, 4000)
     || !nonEmpty(record.methodology, 4000) || !nonEmpty(record.addressedProblems, 4000)
     || !nonEmpty(record.team, 4000)) return false;

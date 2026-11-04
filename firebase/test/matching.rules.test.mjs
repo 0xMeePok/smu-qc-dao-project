@@ -27,7 +27,10 @@ async function fixture({ problemMatching, proposalMatching } = {}) {
       businessContext: "Delivery routes", currentApproach: "Classical solver", currentLimitations: "Long running times",
       expectedOutcome: "Faster routes", successCriteria: "Lower distance", dataAvailability: "Anonymised routes",
       categories: ["quantum"], amount: 1500, currency: "USDC", expiresAt: new Date("2099-01-01"), status: "submitted",
-      attachments: [], createdAt: new Date(), updatedAt: new Date(), ...(problemMatching ? { matching: problemMatching } : {}),
+      attachments: [], audit: { schemaVersion: 1, digestVersion: 1, chainId: 421614,
+        entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
+        status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 0, attemptCount: 1, lastError: "" },
+      createdAt: new Date(), updatedAt: new Date(), ...(problemMatching ? { matching: problemMatching } : {}),
     });
     await setDoc(doc(ctx.firestore(), "proposals", id), {
       ...proposal(id), createdAt: new Date(), updatedAt: new Date(), ...(proposalMatching ? { matching: proposalMatching } : {}),

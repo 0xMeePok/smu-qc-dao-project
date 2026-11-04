@@ -14,7 +14,7 @@ before(async () => {
 });
 after(async () => env?.cleanup());
 function audit() {
-  return { schemaVersion: 1, chainId: 421614, entityId: `0x${'1'.repeat(64)}`, contentHash: `0x${'2'.repeat(64)}`,
+  return { schemaVersion: 1, digestVersion: 1, chainId: 421614, entityId: `0x${'1'.repeat(64)}`, contentHash: `0x${'2'.repeat(64)}`,
     status: 'pending', transactionHash: originalHash, blockNumber: 0, attemptCount: 1, lastError: '' };
 }
 async function seed(id, scope, state) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbiParameters } from "viem";
-import { escrowEventId, reconcileFundingReceipt } from "../escrowFundingEvents.js";
+import { escrowEventId, reconcileFundingReceipt, reconcileFundingReceiptPage } from "../escrowFundingEvents.js";
 import { escrowConfig as config } from "./fixtures/escrowConfigFixture.js";
 
 const address = digit => `0x${digit.repeat(40)}`;
@@ -44,7 +44,40 @@ function depositPair({ amount = 123456789n, cumulativeAmount = amount, at, actor
       token: expected.fundingTerms.token, amount, cumulativeAmount, depositNumber: 1n }, 1, at)];
 }
 
+function denseDepositLogs(count) {
+  return Array.from({ length: count }, (_, index) => [
+    anchor(1, digest("address,uint256,uint256", [actor, 1000000n, BigInt(index + 1) * 1000000n]), index * 2),
+    log("Deposited", { postingId: expected.opportunityId, proposalId: expected.entityId, depositor: actor,
+      token: expected.fundingTerms.token, amount: 1000000n, cumulativeAmount: BigInt(index + 1) * 1000000n,
+      depositNumber: BigInt(index + 1) }, index * 2 + 1),
+  ]).flat();
+}
+
 describe("confirmed escrow funding event reconciliation", () => {
+  it("validates dense receipts and returns every anchor through bounded pages while retaining the array API", async () => {
+    const f = fixture(denseDepositLogs(251)), events = [];
+    let anchorOffset = 0;
+    do {
+      const page = await reconcileFundingReceiptPage({ ...f, anchorOffset, anchorLimit: 100 });
+      assert(page.events.length <= 100);
+      assert.equal(page.anchorCount, 251);
+      events.push(...page.events);
+      anchorOffset = page.nextAnchorOffset;
+    } while (anchorOffset != null);
+    assert.equal(events.length, 251);
+    assert.equal(new Set(events.map(event => event.id)).size, 251);
+    assert.deepEqual(events, await reconcileFundingReceipt(f));
+  });
+
+  it("validates malformed and unpaired receipt tails before returning even the first bounded page", async () => {
+    const malformed = denseDepositLogs(101);
+    malformed[200] = anchor(1, hash("2"), 200);
+    await assert.rejects(reconcileFundingReceiptPage({ ...fixture(malformed), anchorLimit: 1 }), /no matching canonical escrow event/);
+    const orphan = denseDepositLogs(101);
+    orphan.push({ ...orphan.at(-1), logIndex: 202 });
+    await assert.rejects(reconcileFundingReceiptPage({ ...fixture(orphan), anchorLimit: 1 }), /missing its registry anchor/);
+  });
+
   it("pairs exact deposit units and participants with the independently encoded audit digest", async () => {
     const [event] = await reconcileFundingReceipt(fixture(depositPair()));
     assert.equal(event.type, "Deposit"); assert.equal(event.amountBaseUnits, "123456789");

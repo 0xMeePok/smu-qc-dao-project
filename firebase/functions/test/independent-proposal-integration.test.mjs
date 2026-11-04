@@ -57,7 +57,7 @@ function listingFields(overrides = {}) {
 function attestInput(overrides = {}) {
   const { createdAt, updatedAt, id, ...rest } = listingFields({
     expiresAt: FUTURE.toISOString(),
-    audit: { transactionHash: HASH },
+    audit: { transactionHash: HASH, digestVersion: 1 },
     ...overrides,
   });
   return rest;
@@ -100,6 +100,7 @@ function integrationDb(initial = {}) {
     doc: (id) => reference(`${name}/${id}`),
     where: (field, op, value) => collection(name, [...filters, [field, op, value]], cap, orders, cursor),
     limit: (n) => collection(name, filters, n, orders, cursor),
+    select: () => collection(name, filters, cap, orders, cursor),
     orderBy: (field, direction = "asc") => collection(name, filters, cap, [...orders, { field, direction }], cursor),
     startAfter: (...values) => collection(name, filters, cap, orders, values.map(comparable)),
     get: async () => {
