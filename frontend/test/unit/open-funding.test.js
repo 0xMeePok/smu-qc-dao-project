@@ -4,7 +4,7 @@ import { encodeFunctionData, parseAbi } from "viem";
 import { normalizeDeclineReason, openFundingDeclineReasonHash, openFundingDeclineSupported, openFundingSupported, writeOpenFundingAction } from "../../src/lib/openFunding.js";
 import { escrowConfig } from "../../../firebase/functions/test/fixtures/escrowConfigFixture.js";
 
-const pool = `0x${"7".repeat(40)}`, account = `0x${"8".repeat(40)}`, hash = `0x${"9".repeat(64)}`;
+const pool = `0x${"7".repeat(40)}`, account = `0x${"8".repeat(40)}`, hash = `0x${"9".repeat(64)}`, postingId = `0x${"5".repeat(64)}`;
 const config = { ...escrowConfig, escrow: { ...escrowConfig.escrow,
   factoryAbi: parseAbi(["function createOpenFundingPool(bytes32 postingId, address token) returns (address)"]),
   openFundingPoolAbi: parseAbi(["function deposit(uint256 amount)", "function selectProposal(bytes32 proposalId)",
@@ -15,8 +15,12 @@ function fixture(overrides = {}) {
   const prepared = { poolAddress: pool, chainId: config.chainId, tokenAddress: config.escrow.tokens[0].address,
     tokenSymbol: config.escrow.tokens[0].symbol, tokenDecimals: 6,
     request: { address: pool, functionName: "deposit", args: ["1250000"] }, ...overrides.prepared };
+  // The wallet signs only against a pool the configured factory deployed and approves only
+  // the token that pool holds; the fixture answers those on-chain reads like the live contracts.
+  const chain = { postingId, openFundingPoolForPosting: pool, token: config.escrow.tokens[0].address, ...overrides.chain };
   const adapters = {
-    readContract: async ({ functionName }) => functionName === "balanceOf" ? overrides.balance ?? 10_000_000n : overrides.allowance ?? 0n,
+    readContract: async ({ functionName }) => functionName === "balanceOf" ? overrides.balance ?? 10_000_000n
+      : Object.hasOwn(chain, functionName) ? chain[functionName] : overrides.allowance ?? 0n,
     writeContract: async request => { encodeFunctionData(request); writes.push(request); return hash; },
     waitForTransactionReceipt: async request => { waits.push(request); if (overrides.failure) throw overrides.failure; return { transactionHash: hash, status: "success" }; },
   };
@@ -68,6 +72,21 @@ it("does not sign a changed contract, amount, method, decimals or chain", async 
     await assert.rejects(writeOpenFundingAction(options), /changed|match/);
     assert.equal(writes.length, 0);
   }
+});
+it("does not sign against a pool the configured factory did not deploy, or approve a different token", async () => {
+  for (const chain of [{ openFundingPoolForPosting: account }, { openFundingPoolForPosting: `0x${"0".repeat(40)}` }, { postingId: "0x" }]) {
+    const { options, writes } = fixture({ chain });
+    await assert.rejects(writeOpenFundingAction(options), /canonical pool/);
+    assert.equal(writes.length, 0);
+  }
+  const mismatch = fixture({ prepared: { postingId: `0x${"6".repeat(64)}` } });
+  await assert.rejects(writeOpenFundingAction(mismatch.options), /canonical pool/);
+  const other = fixture({ chain: { token: account } });
+  await assert.rejects(writeOpenFundingAction(other.options), /token or amount changed/);
+  assert.equal(other.writes.length, 0);
+  const unlisted = fixture({ chain: { token: account }, prepared: { tokenAddress: account } });
+  await assert.rejects(writeOpenFundingAction({ ...unlisted.options, tokenAddress: account }), /token or amount changed/);
+  assert.equal(unlisted.writes.length, 0);
 });
 it("does not request approval when the token balance is insufficient", async () => {
   const { options, writes } = fixture({ balance: 0n });

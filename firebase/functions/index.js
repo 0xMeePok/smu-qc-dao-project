@@ -324,8 +324,9 @@ export const { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding,
   hot: HOT_CALL_OPTIONS,
 });
 
-export const { getIndependentFundingState, prepareIndependentFundingAction, syncIndependentFunding } = registerIndependentFundingFunctions({
-  db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+export const { getIndependentFundingState, prepareIndependentFundingAction, syncIndependentFunding,
+  releaseIndependentFundingCompletion } = registerIndependentFundingFunctions({
+  db, client: publicClient, config: auditRegistryConfig, requireMember, requireAdmin, options: MEMBER_CALL_OPTIONS, region: REGION,
 });
 
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,

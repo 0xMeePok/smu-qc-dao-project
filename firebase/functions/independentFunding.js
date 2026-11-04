@@ -232,6 +232,11 @@ async function readState({ db, client, config, uid, proposalId, readAttachment }
     active: snapshot.active === true, feeBps: safeInteger(snapshot.feeBps, "platform fee"), feeRecipient: snapshot.feeRecipient,
     upfrontReleased: amounts.totalReleased >= expected.target / 2n && amounts.totalReleased > 0n,
     finalReleased: amounts.totalReleased === expected.target, timestamp, blockNumber: safeInteger(blockNumber, "confirmed block"),
+    // The funder majority has approved the current evidence inside the completion window.
+    // The payment itself is submitted by the platform signer after an administrator review.
+    completionApproved: state === "Accepted" && snapshot.active === true && validHash(snapshot.evidenceHash)
+      && !same(snapshot.evidenceHash, ZERO_HASH) && amounts.yesWeight > amounts.totalDeposited / 2n
+      && BigInt(timestamp) < units(snapshot.completionDeadline, "completion deadline"),
   };
   const wallet = { deposited: amounts.contribution.toString(), contribution: amounts.contribution.toString(),
     refunded: amounts.refunded.toString(), claimable: amounts.claimable.toString(),
@@ -244,7 +249,9 @@ async function readState({ db, client, config, uid, proposalId, readAttachment }
   actions.decline = visible && author && snapshot.canDecline === true;
   actions.submitEvidence = visible && author && snapshot.canSubmitEvidence === true;
   actions.vote = visible && Boolean(evidence) && snapshot.canVote === true && amounts.contribution > 0n;
-  actions.releaseCompletion = visible && snapshot.canReleaseCompletion === true;
+  // Only an administrator triggers the final payment, and only through the platform signer
+  // (releaseIndependentFundingCompletion). Members never receive a wallet transaction for it.
+  actions.releaseCompletion = visible && context.profile?.role === 1 && summary.completionApproved === true;
   // claimRefund applies expiry atomically; a separate expire transaction is not
   // necessary, and effective Expired snapshots cannot distinguish repeated calls.
   actions.expire = false;
@@ -261,6 +268,7 @@ export async function prepareIndependentFundingAction({ action, amount, evidence
   const verified = await readState(options), { response, record, expected } = verified;
   if (!Object.hasOwn(response.actions, action)) fail("invalid-argument", "Choose a valid independent funding action.");
   if (!response.actions[action]) fail("failed-precondition", "This funding action is not available for your wallet or the confirmed listing state.");
+  if (action === "releaseCompletion") fail("failed-precondition", "The final payment is released by the platform signer after an administrator review, not from a member wallet.");
   const funding = options.config.independentFunding;
   let address = response.summary?.escrowAddress, abi = funding.escrowAbi, functionName, args, amountBaseUnits;
   if (action === "activate") {
@@ -378,8 +386,10 @@ async function persistSnapshot({ db, config, verified, events = [], now = Timest
     });
     const terminal = ["Released", "Declined", "Expired", "Cancelled", "Refunded"].includes(summary.state);
     const deadline = summary.state === "Accepted" ? summary.completionDeadline : summary.expiresAt;
-    tx.set(jobRef, { ...(job.data() || {}), proposalId: record.id, status: terminal ? "complete" : "pending",
-      nextAttemptAt: stamp(Math.max(now.toMillis() + 60_000, Number(deadline) * 1000)), updatedAt: now });
+    const release = job.data()?.release;
+    const releaseOutstanding = Boolean(release) && !RELEASE_SETTLED.includes(release.status);
+    tx.set(jobRef, { ...(job.data() || {}), proposalId: record.id, status: terminal && !releaseOutstanding ? "complete" : "pending",
+      nextAttemptAt: stamp(releaseOutstanding ? now.toMillis() + 60_000 : Math.max(now.toMillis() + 60_000, Number(deadline) * 1000)), updatedAt: now });
   });
   for (const event of events) {
     const ref = db.collection(INDEPENDENT_FUNDING_EVENTS).doc(event.id);
@@ -443,6 +453,90 @@ export async function assertIndependentPublicationUnlocked({ db, client, config,
   const escrow = await client.readContract({ address: config.independentFunding.factoryAddress,
     abi: config.independentFunding.factoryAbi, functionName: "escrowForListing", args: [oldPrepared.entityId] });
   if (!same(escrow, ZERO_ADDRESS)) fail("failed-precondition", "An activated independent listing has immutable content and funding terms. Create a new listing for revisions.");
+}
+
+const RELEASE_SETTLED = ["complete", "failed"];
+
+function releaseAction(summary, proposalId) {
+  return { address: summary.escrowAddress, abi: undefined, functionName: "releaseCompletion", args: [],
+    key: `independent-release:${proposalId}:${summary.evidenceVersion}:${String(summary.evidenceHash).toLowerCase()}` };
+}
+
+async function recordRelease({ db, config, proposalId, now, release }) {
+  const key = independentFundingKey(config, proposalId), jobRef = db.collection(INDEPENDENT_FUNDING_JOBS).doc(key);
+  await db.runTransaction(async tx => {
+    const job = await tx.get(jobRef);
+    tx.set(jobRef, { ...(job.data() || {}), proposalId, status: "pending", nextAttemptAt: stamp(now.toMillis() + 60_000), updatedAt: now,
+      release: { ...(job.data()?.release || {}), ...release } });
+  });
+}
+
+/**
+ * An administrator has reviewed the delivery evidence that the funder majority approved.
+ * The platform signer submits `releaseCompletion`; the contract still enforces the
+ * majority, the evidence and the completion window, so this call cannot pay anything
+ * the funders did not approve. The signed bytes go through the shared outbox.
+ */
+export async function releaseIndependentFundingCompletion({ db, client, config, getWallet, uid, proposalId, now = Timestamp.now() }) {
+  const verified = await readState({ db, client, config, uid, proposalId });
+  if (verified.profile?.role !== 1) fail("permission-denied", "Administrator privilege required.");
+  if (!verified.response.configured) fail("failed-precondition", "Independent funding is not configured for this deployment.");
+  if (!verified.response.exists) fail("failed-precondition", "This listing has no independent funding escrow.");
+  const { summary, evidence } = verified.response;
+  if (summary.state === "Released") return { status: "confirmed", transactionHash: null, message: "The final payment has already been released." };
+  if (summary.completionApproved !== true) {
+    fail("failed-precondition", "The funder majority has not approved the current evidence inside the completion window.");
+  }
+  if (!evidence || !same(evidence.hash, summary.evidenceHash)) fail("failed-precondition", "The approved delivery evidence record is not available for review.");
+  const wallet = await getWallet();
+  if (!same(wallet.account.address, verified.signer)) fail("failed-precondition", "The independent funding platform signer does not match.");
+  const action = { ...releaseAction(summary, proposalId), abi: config.independentFunding.escrowAbi };
+  const result = await submitPlatformAction({ db, client, config, getWallet: () => wallet, now, action });
+  await recordRelease({ db, config, proposalId, now, release: { adminId: uid, evidenceHash: summary.evidenceHash,
+    evidenceVersion: summary.evidenceVersion, requestedAt: now, status: result.status,
+    ...(result.transactionHash ? { transactionHash: result.transactionHash } : {}) } });
+  const auditId = `independent_release_${independentFundingKey(config, proposalId)}_${summary.evidenceVersion}`;
+  await db.collection("audits").doc(auditId).set({ type: "escrow", fundingWorkflow: "independent", action: "INDEPENDENT_RELEASE_REQUESTED",
+    actorId: uid, targetId: proposalId, researcherId: summary.researcherId, escrowAddress: summary.escrowAddress,
+    evidenceHash: summary.evidenceHash, evidenceVersion: summary.evidenceVersion, transactionHash: result.transactionHash ?? null,
+    chainStatus: "pending", timestamp: now, createdAt: now }, { merge: true });
+  return { status: result.status, transactionHash: result.transactionHash ?? null, message: result.message };
+}
+
+/** Confirm, retry or close an administrator's release request from the scheduled sweep. */
+async function followReleaseRequest({ db, client, config, getWallet, verified, ref, job, now }) {
+  const { release } = job, { summary } = verified.response;
+  const settle = async changes => {
+    await db.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      tx.set(ref, { ...(current.data() || {}), updatedAt: now, release: { ...(current.data()?.release || release), ...changes } });
+    });
+  };
+  if (release.transactionHash) {
+    try {
+      const events = await verifiedReceipt({ client, config, verified, transactionHash: release.transactionHash });
+      await persistSnapshot({ db, config, verified, events, now });
+    } catch (error) {
+      if (error instanceof HttpsError && error.message === "The independent funding transaction reverted.") {
+        await settle({ transactionHash: null, status: "retrying" });
+        return readState({ db, client, config, proposalId: job.proposalId });
+      }
+      throw error;
+    }
+  }
+  if (summary.state === "Released") { await settle({ status: "complete" }); return verified; }
+  if (["Declined", "Expired", "Cancelled", "Refunded"].includes(summary.state)) { await settle({ status: "failed", reason: `escrow-${summary.state.toLowerCase()}` }); return verified; }
+  if (release.transactionHash) return verified; // Still awaiting canonical confirmation.
+  if (summary.completionApproved !== true || !same(summary.evidenceHash, release.evidenceHash)) {
+    await settle({ status: "failed", reason: "approval-no-longer-current" });
+    return verified;
+  }
+  const wallet = await getWallet();
+  if (!same(wallet.account.address, verified.signer)) fail("failed-precondition", "The independent funding platform signer does not match.");
+  const result = await submitPlatformAction({ db, client, config, getWallet: () => wallet, now,
+    action: { ...releaseAction(summary, job.proposalId), abi: config.independentFunding.escrowAbi } });
+  await settle({ status: result.status, ...(result.transactionHash ? { transactionHash: result.transactionHash } : {}) });
+  return verified;
 }
 
 async function updateCancellation({ db, ref, job, now, changes }) {
@@ -521,7 +615,11 @@ export async function reconcileIndependentFunding({ db, client, config, getWalle
   }
   for (const row of jobs.docs) {
     try {
-      const verified = await readState({ db, client, config, proposalId: row.data().proposalId });
+      const job = row.data();
+      let verified = await readState({ db, client, config, proposalId: job.proposalId });
+      if (job.release && !RELEASE_SETTLED.includes(job.release.status)) {
+        verified = await followReleaseRequest({ db, client, config, getWallet, verified, ref: row.ref, job, now });
+      }
       // getState derives Expired and proportional claims from the confirmed
       // block time, so refunds need no keeper transaction or historical scan.
       await persistSnapshot({ db, config, verified, now });

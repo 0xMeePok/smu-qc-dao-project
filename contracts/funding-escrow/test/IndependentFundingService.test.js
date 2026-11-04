@@ -4,11 +4,15 @@ import { network } from "hardhat";
 import mainConfig from "../../../firebase/functions/auditRegistry.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { getIndependentFundingState, prepareIndependentFundingAction, syncIndependentFunding,
-  hashIndependentFundingEvidence, readIndependentFundingPortfolio } from "../../../firebase/functions/independentFunding.js";
+  hashIndependentFundingEvidence, readIndependentFundingPortfolio, reconcileIndependentFunding,
+  releaseIndependentFundingCompletion } from "../../../firebase/functions/independentFunding.js";
 import { memoryDb } from "../../../firebase/functions/test/memoryDb.mjs";
 
 const requireFunctions = createRequire(new URL("../../../firebase/functions/package.json", import.meta.url));
-const { createPublicClient, custom } = requireFunctions("viem");
+const { createPublicClient, createWalletClient, custom } = requireFunctions("viem");
+const { privateKeyToAccount } = requireFunctions("viem/accounts");
+// Hardhat's first default account (the fixture's admin, factory owner and platform signer).
+const ADMIN_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const { Timestamp } = requireFunctions("firebase-admin/firestore");
 const abi = contract => JSON.parse(contract.interface.formatJson());
 const uid = signer => signer.address.toLowerCase();
@@ -49,7 +53,11 @@ async function fixture() {
     collection.doc = id => { const ref = originalDoc(id); ref.collection = child => db.collection(`${ref.path}/${child}`); return ref; };
     return collection;
   };
-  const client = createPublicClient({ cacheTime: 0, transport: custom({ request: ({ method, params }) => ethers.provider.send(method, params ?? []) }) });
+  const transport = custom({ request: ({ method, params }) => ethers.provider.send(method, params ?? []) });
+  const client = createPublicClient({ cacheTime: 0, transport });
+  const platformAccount = privateKeyToAccount(ADMIN_KEY);
+  if (platformAccount.address.toLowerCase() !== admin.address.toLowerCase()) throw new Error("Hardhat default accounts changed; update ADMIN_KEY.");
+  const getWallet = () => createWalletClient({ account: platformAccount, chain: { id: 421614, name: "hardhat", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [] } } }, transport });
   const mine = () => ethers.provider.send("evm_mine", []);
   await mine();
   for (const funder of [alice, bob]) await token.mint(funder.address, 5_000_000n);
@@ -73,13 +81,13 @@ async function fixture() {
     return run(funder, "deposit", { amount });
   };
   return { connection, ethers, admin, researcher, alice, bob, token, registry, policy, factory, escrow,
-    db, client, config, record, expected, options, prepare, run, deposit, mine };
+    db, client, config, record, expected, options, prepare, run, deposit, mine, getWallet };
 }
 
 describe("Independent crowdfunding: real contract and application service integration", function () {
   this.timeout(120_000);
 
-  it("publishes with a pending receipt, funds, accepts, verifies evidence and pays on the strict majority vote", async function () {
+  it("publishes with a pending receipt, funds, accepts, verifies evidence, and pays only when an administrator releases the strict majority vote", async function () {
     const c = await fixture();
     try {
       await c.deposit(c.alice);
@@ -94,10 +102,39 @@ describe("Independent crowdfunding: real contract and application service integr
       const tied = await c.run(c.alice, "vote", { approve: true, evidenceHash });
       assert.equal(tied.summary.state, "Accepted");
       assert.equal(tied.summary.totalReleased, "1000000");
-      const paid = await c.run(c.bob, "vote", { approve: true, evidenceHash });
+      const voted = await c.run(c.bob, "vote", { approve: true, evidenceHash });
+      // The majority exists, but the vote itself moves nothing: the final payment waits for an
+      // administrator's review and is sent by the platform signer, never by a member wallet.
+      assert.equal(voted.summary.state, "Accepted");
+      assert.equal(voted.summary.completionApproved, true);
+      assert.equal(voted.summary.totalReleased, "1000000");
+      assert.equal(voted.actions.releaseCompletion, false);
+      await assert.rejects(c.prepare(c.bob, "releaseCompletion"), /not available/);
+      await assert.rejects(c.escrow.connect(c.bob).releaseCompletion(), /AccessDenied/);
+      await assert.rejects(releaseIndependentFundingCompletion({ ...c.options(c.alice), getWallet: c.getWallet }), /Administrator/);
+      assert.equal((await getIndependentFundingState(c.options(c.admin))).actions.releaseCompletion, true);
+      const release = await releaseIndependentFundingCompletion({ ...c.options(c.admin), getWallet: c.getWallet });
+      assert.equal(release.status, "pending");
+      assert.match(release.transactionHash, /^0x[0-9a-f]{64}$/);
+      await c.mine(); await c.mine();
+      const paid = await syncIndependentFunding(c.options(c.bob));
       assert.equal(paid.summary.state, "Released");
       assert.equal(paid.summary.totalReleased, "2000000");
       assert.equal(paid.summary.feePaid, "5000");
+      // The scheduled sweep confirms the administrator's request from the receipt and closes it.
+      const sweep = await reconcileIndependentFunding({ ...c.options(c.admin), getWallet: () => { throw new Error("must not re-sign"); },
+        now: Timestamp.fromMillis(Date.now() + 120_000) });
+      assert.equal(sweep.processed, 1);
+      const jobs = [...c.db.records.entries()].filter(([path]) => path.startsWith("independentFundingJobs/"));
+      assert.equal(jobs.length, 1);
+      assert.equal(jobs[0][1].release.status, "complete");
+      assert.equal(jobs[0][1].release.adminId, uid(c.admin));
+      // Both halves emit TrancheReleased; the final one must come from the platform-signed transaction.
+      const finals = [...c.db.records.entries()].filter(([path, value]) => path.startsWith("independentFundingEvents/")
+        && value.eventType === "TrancheReleased" && String(value.args?.index) === "1").map(([, value]) => value);
+      assert.equal(finals.length, 1);
+      assert.equal(finals[0].transactionHash.toLowerCase(), release.transactionHash.toLowerCase());
+      assert.equal(finals[0].actorId, uid(c.admin));
       assert.equal(paid.summary.outstandingBalance, "0");
       assert.equal(await c.token.balanceOf(c.researcher.address), 1995000n);
       assert.equal(await c.token.balanceOf(c.admin.address), 5000n);

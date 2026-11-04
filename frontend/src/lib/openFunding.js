@@ -62,6 +62,26 @@ export async function writeOpenFundingAction({ problemId, proposalId, account, a
   if (amountBaseUnits && (prepared.tokenDecimals !== decimals || String(args[0]) !== amountBaseUnits)) {
     throw new Error("The token or amount changed. Refresh before continuing.");
   }
+  // The server names the pool, but the wallet signs only against a pool the configured
+  // factory deployed (read on-chain) and approves only the token that pool holds. A
+  // tampered callable response can therefore not redirect an approval or a deposit.
+  const read = (address, abi, functionName, args = []) => adapters.readContract({ address, abi, functionName, args, chainId: config.chainId });
+  const listedToken = address => (config.escrow.tokens ?? []).some(token => same(token.address, address));
+  if (action === "create") {
+    if (!listedToken(args[1])) throw new Error("The grant pool token is not supported by this deployment.");
+  } else {
+    const postingId = await read(request.address, config.escrow.openFundingPoolAbi, "postingId");
+    const canonical = await read(config.escrow.factoryAddress, config.escrow.factoryAbi, "openFundingPoolForPosting", [postingId]);
+    if (!/^0x[0-9a-f]{64}$/i.test(postingId ?? "") || !same(canonical, request.address) || (prepared.postingId && !same(prepared.postingId, postingId))) {
+      throw new Error("The grant pool is not the canonical pool for this posting. Refresh before continuing.");
+    }
+    if (amountBaseUnits) {
+      const poolToken = await read(request.address, config.escrow.openFundingPoolAbi, "token");
+      if (!same(poolToken, prepared.tokenAddress) || (tokenAddress && !same(poolToken, tokenAddress)) || !listedToken(poolToken)) {
+        throw new Error("The token or amount changed. Refresh before continuing.");
+      }
+    }
+  }
   // The wallet must sign a commitment to exactly the reason the researcher typed.
   if (declineReason && (!/^0x[0-9a-f]{64}$/i.test(args[0] ?? "") || !same(args[1], prepared.reasonHash)
       || !same(args[1], openFundingDeclineReasonHash({ proposalId: args[0], reason: declineReason })))) {

@@ -10,7 +10,7 @@ import { auditEvent } from "./auditEvent.mjs";
 import { createFundingApproach, decideFundingApproach } from "../fundingApproach.js";
 import { assertIndependentPublicationUnlocked, getIndependentFundingState, hashIndependentFundingEvidence,
   independentFundingKey, prepareIndependentFundingAction, readIndependentFundingPortfolio,
-  reconcileIndependentFunding, syncIndependentFunding } from "../independentFunding.js";
+  reconcileIndependentFunding, releaseIndependentFundingCompletion, syncIndependentFunding } from "../independentFunding.js";
 import { enqueueIndependentFundingCancellation } from "../independentFundingModeration.js";
 import { reconcileModerationVoids } from "../escrowFunding.js";
 
@@ -404,4 +404,112 @@ it("independent funding signals change for balances and votes but not repeated v
   f.state.yesWeight = 1_000_000n;
   await syncIndependentFunding(f.options(funder));
   assert.deepEqual(f.db.records.get(path), { funding: 3, fundingSnapshot: null });
+});
+
+describe("independent funding completion release: funder majority plus administrator review", () => {
+  const evidence = { summary: "Delivered the routing prototype", url: "https://example.com/prototype" };
+  const evidenceHash = hashIndependentFundingEvidence(evidence);
+  function approved() {
+    const f = fixture();
+    // Fully funded, accepted, upfront half paid, current evidence approved by 60% of deposits.
+    Object.assign(f.state, { state: 1, totalDeposited: 2_000_000n, totalReleased: 1_000_000n, outstandingBalance: 1_000_000n,
+      completionDeadline: BigInt(now.toMillis() / 1000) + 86_400n, evidenceHash, evidenceVersion: 1n,
+      yesWeight: 1_200_000n, noWeight: 0n, funderCount: 2n, depositsOpen: false, canSubmitEvidence: true });
+    f.db.records.set(`proposals/${f.record.id}/independentFundingEvidence/${evidenceHash}`, { ...evidence, ownerId: researcher });
+    const read = f.client.readContract;
+    f.client.readContract = async request => request.address === f.config.escrow.factoryAddress && request.functionName === "platformSigner"
+      ? platform : read(request);
+    f.client.getTransactionCount = async () => 0;
+    f.sent = [];
+    f.client.sendRawTransaction = async request => { f.sent.push(request); return keccak256(request.serializedTransaction); };
+    f.wallet = { account: { address: platform }, chain: { id: f.config.chainId },
+      prepareTransactionRequest: async request => request, signTransaction: async () => "0xabcd" };
+    return f;
+  }
+
+  it("marks the approval for everyone but offers the release action only to administrators", async () => {
+    const f = approved();
+    const asFunder = await getIndependentFundingState(f.options(funder));
+    assert.equal(asFunder.summary.completionApproved, true);
+    assert.equal(asFunder.actions.releaseCompletion, false);
+    assert.equal(asFunder.actions.vote, false); // already counted in the fixture weights
+    const asResearcher = await getIndependentFundingState(f.options(researcher));
+    assert.equal(asResearcher.actions.releaseCompletion, false);
+    const asAdmin = await getIndependentFundingState(f.options(platform));
+    assert.equal(asAdmin.actions.releaseCompletion, true);
+    // Even an administrator receives no wallet transaction for the payment.
+    await assert.rejects(prepareIndependentFundingAction({ ...f.options(platform), action: "releaseCompletion" }), /platform signer/);
+  });
+
+  it("refuses the release to members and before the funder majority exists", async () => {
+    const f = approved();
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(funder), getWallet: async () => f.wallet }), /Administrator/);
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(researcher), getWallet: async () => f.wallet }), /Administrator/);
+    f.state.yesWeight = 1_000_000n; // exactly half is not a majority
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet }), /majority/);
+    assert.equal(f.sent.length, 0);
+  });
+
+  it("signs releaseCompletion through the shared outbox, records the request, and completes it from the sweep", async () => {
+    const f = approved();
+    const result = await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet });
+    assert.equal(result.status, "pending");
+    const pendingHash = keccak256("0xabcd");
+    assert.equal(result.transactionHash, pendingHash);
+    assert.equal(f.sent.length, 1);
+    const outbox = f.db.records.get(`escrowPlatformOutbox/${f.config.chainId}_${f.config.address}`);
+    assert.equal(outbox.functionName, "releaseCompletion");
+    assert.equal(outbox.serializedTransaction, "0xabcd");
+    const jobPath = `independentFundingJobs/${independentFundingKey(f.config, f.record.id)}`;
+    assert.equal(f.db.records.get(jobPath).release.adminId, platform);
+    assert.equal(f.db.records.get(jobPath).release.transactionHash, pendingHash);
+    assert.equal(f.db.records.get(jobPath).status, "pending");
+    const audit = f.db.records.get(`audits/independent_release_${independentFundingKey(f.config, f.record.id)}_1`);
+    assert.equal(audit.action, "INDEPENDENT_RELEASE_REQUESTED"); assert.equal(audit.actorId, platform);
+    // A second administrator click while the signed transaction is outstanding re-signs nothing.
+    const again = await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => { throw new Error("must not re-sign"); } })
+      .catch(error => error);
+    assert.ok(again instanceof Error || again.status === "pending");
+    assert.equal(f.sent.length, 1);
+
+    // The payment confirms on-chain; the escrow reports Released.
+    const eventName = "TrancheReleased", eventArgs = { index: 1, grossAmount: 1_000_000n, fee: 0n, netAmount: 1_000_000n };
+    const event = f.config.independentFunding.escrowAbi.find(item => item.type === "event" && item.name === eventName);
+    const dataInputs = event.inputs.filter(input => !input.indexed);
+    f.receipts.set(pendingHash, { transactionHash: pendingHash, status: "success", blockNumber: 90n, blockHash: hash("6"),
+      logs: [{ address: f.escrow, transactionHash: pendingHash, logIndex: 0,
+        topics: encodeEventTopics({ abi: f.config.independentFunding.escrowAbi, eventName, args: eventArgs }),
+        data: encodeAbiParameters(dataInputs, dataInputs.map(input => eventArgs[input.name])) }] });
+    f.transactions.set(pendingHash, { hash: pendingHash, from: platform, to: f.escrow, chainId: f.config.chainId,
+      blockNumber: 90n, blockHash: hash("6"), input: encodeFunctionData({ abi: f.config.independentFunding.escrowAbi, functionName: "releaseCompletion", args: [] }) });
+    Object.assign(f.state, { state: 2, totalReleased: 2_000_000n, outstandingBalance: 0n, canSubmitEvidence: false });
+    const later = Timestamp.fromMillis(now.toMillis() + 60_000);
+    const sweep = await reconcileIndependentFunding({ ...f.options(undefined), now: later, getWallet: async () => { throw new Error("must not re-sign"); } });
+    assert.equal(sweep.processed, 1);
+    assert.equal(f.db.records.get(jobPath).release.status, "complete");
+    assert.equal(f.db.records.get(jobPath).status, "complete");
+    assert.equal(f.db.records.get(`independentFundingSummaries/${independentFundingKey(f.config, f.record.id)}`).state, "Released");
+    const released = [...f.db.records.entries()].find(([path, value]) => path.startsWith("independentFundingEvents/") && value.eventType === "TrancheReleased");
+    assert.ok(released, "the confirmed release event is recorded");
+    assert.equal(released[1].actorId, platform);
+  });
+
+  it("drops a request whose approval is no longer current instead of paying", async () => {
+    const f = approved();
+    await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet });
+    const pendingHash = keccak256("0xabcd");
+    // The signed transaction reverted (for example the researcher replaced the evidence first).
+    f.receipts.set(pendingHash, { transactionHash: pendingHash, status: "reverted", blockNumber: 90n, blockHash: hash("6") });
+    f.transactions.set(pendingHash, { hash: pendingHash, from: platform, to: f.escrow, chainId: f.config.chainId,
+      blockNumber: 90n, blockHash: hash("6"), input: encodeFunctionData({ abi: f.config.independentFunding.escrowAbi, functionName: "releaseCompletion", args: [] }) });
+    Object.assign(f.state, { evidenceHash: hash("9"), evidenceVersion: 2n, yesWeight: 0n });
+    const later = Timestamp.fromMillis(now.toMillis() + 60_000);
+    await reconcileIndependentFunding({ ...f.options(undefined), now: later, getWallet: async () => { throw new Error("must not re-sign"); } });
+    const jobPath = `independentFundingJobs/${independentFundingKey(f.config, f.record.id)}`;
+    assert.equal(f.db.records.get(jobPath).release.status, "retrying");
+    await reconcileIndependentFunding({ ...f.options(undefined), now: Timestamp.fromMillis(now.toMillis() + 180_000), getWallet: async () => { throw new Error("must not re-sign"); } });
+    assert.equal(f.db.records.get(jobPath).release.status, "failed");
+    assert.equal(f.db.records.get(jobPath).release.reason, "approval-no-longer-current");
+    assert.equal(f.sent.length, 1);
+  });
 });

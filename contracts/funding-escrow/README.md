@@ -16,9 +16,13 @@ the current registry and main factory addresses come from the application config
    Acceptance pays the first 50% immediately and starts the completion period.
    Decline or expiry before acceptance makes all deposited funds refundable.
 3. The researcher submits completion evidence. Each funder's vote is weighted by
-   their deposit; yes votes must exceed 50% of **all** deposits. The vote crossing
-   that threshold pays the remaining 50% automatically. A new evidence revision
-   starts a new vote without extending the completion deadline.
+   their deposit; yes votes must exceed 50% of **all** deposits. The vote alone
+   moves no funds: once the majority exists, an administrator reviews the evidence
+   and the platform signer (or an escrow admin on the main factory) calls
+   `releaseCompletion`, which pays the remaining 50%. Member wallets cannot call
+   it, so a researcher who funds their own listing from a second wallet cannot
+   vote the final payment out alone. A new evidence revision starts a new vote
+   without extending the completion deadline.
 4. Admin cancellation stops new deposits and opens pull refunds. Expiry after
    acceptance likewise refunds only unpaid custody. Previous payments cannot be
    clawed back. Each funder claims their own proportional share; exact rounding
