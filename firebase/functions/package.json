@@ -35,6 +35,12 @@
     "firebase-tools": {
       "glob": "14.0.3",
       "@google-cloud/pubsub": "6.3.2"
+    },
+    "rimraf": {
+      "glob": "14.0.3"
+    },
+    "archiver-utils": {
+      "glob": "14.0.3"
     }
   }
 }
