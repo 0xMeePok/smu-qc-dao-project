@@ -10,9 +10,9 @@ import { memoryDb } from "../../../firebase/functions/test/memoryDb.mjs";
 
 const requireFunctions = createRequire(new URL("../../../firebase/functions/package.json", import.meta.url));
 const { createPublicClient, createWalletClient, custom } = requireFunctions("viem");
-const { privateKeyToAccount } = requireFunctions("viem/accounts");
-// Hardhat's first default account (the fixture's admin, factory owner and platform signer).
-const ADMIN_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const { mnemonicToAccount } = requireFunctions("viem/accounts");
+// Hardhat's public test mnemonic; account 0 is the fixture's admin, factory owner and platform signer.
+const HARDHAT_TEST_MNEMONIC = "test test test test test test test test test test test junk";
 const { Timestamp } = requireFunctions("firebase-admin/firestore");
 const abi = contract => JSON.parse(contract.interface.formatJson());
 const uid = signer => signer.address.toLowerCase();
@@ -55,8 +55,8 @@ async function fixture() {
   };
   const transport = custom({ request: ({ method, params }) => ethers.provider.send(method, params ?? []) });
   const client = createPublicClient({ cacheTime: 0, transport });
-  const platformAccount = privateKeyToAccount(ADMIN_KEY);
-  if (platformAccount.address.toLowerCase() !== admin.address.toLowerCase()) throw new Error("Hardhat default accounts changed; update ADMIN_KEY.");
+  const platformAccount = mnemonicToAccount(HARDHAT_TEST_MNEMONIC, { addressIndex: 0 });
+  if (platformAccount.address.toLowerCase() !== admin.address.toLowerCase()) throw new Error("Hardhat default accounts changed; update HARDHAT_TEST_MNEMONIC.");
   const getWallet = () => createWalletClient({ account: platformAccount, chain: { id: 421614, name: "hardhat", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [] } } }, transport });
   const mine = () => ethers.provider.send("evm_mine", []);
   await mine();
