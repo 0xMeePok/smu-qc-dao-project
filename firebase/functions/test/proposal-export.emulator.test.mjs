@@ -68,6 +68,15 @@ test("real Firestore proposal export pagination, projection, system timestamps a
     assert.ok(bytes(page) <= EXPORT_PAGE_BYTES, `page ${page.page} exceeds UTF-8 budget`);
     const ref = own(EXPORT_SESSION_COLLECTION, page.exportId);
     const snap = await ref.get(), state = snap.data();
+    if (!snap.exists) {
+      const sessions = await db.collection(EXPORT_SESSION_COLLECTION).limit(100).get();
+      console.error("EXPORT_MISSING_SESSION_DIAGNOSTIC", JSON.stringify({
+        page: page.page, done: page.done, exportId: page.exportId, projectId: db.projectId,
+        appProject: app.options.projectId, refPath: ref.path,
+        readTime: snap.readTime?.toDate().toISOString(), sessionIds: sessions.docs.map((row) => row.id),
+      }));
+    }
+    assert.ok(snap.exists, `Committed export session must exist after page ${page.page}`);
     assert.ok(state.readTime instanceof Timestamp);
     assert.ok(state.expiresAt instanceof Timestamp);
     assert.ok(bytes(state) <= EXPORT_SESSION_BYTES);

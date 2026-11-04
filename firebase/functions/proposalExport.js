@@ -490,7 +490,9 @@ export async function exportSelectedProposals({ db, actorUid, actorName, input, 
   const prepared = !prior.exists ? await initialSession({ db, actorUid, actorName, input: data, now, exportId }) : null;
   return db.runTransaction(async (tx) => {
     const existing = await tx.get(ref);
-    const state = existing.exists ? { ...existing.data() } : prepared;
+    // Firestore may rerun this callback after discarding its writes. Keep the
+    // prepared selection pristine so an aborted attempt cannot become a cache hit.
+    const state = existing.exists ? { ...existing.data() } : prepared ? { ...prepared } : null;
     if (!state || state.actorUid !== actorUid) fail("permission-denied", "This export belongs to another administrator.");
     if (millis(state.expiresAt) <= millis(now)) fail("failed-precondition", "This export expired. Start it again.");
     if (scope && !sameScope(scope, state.scope)) {

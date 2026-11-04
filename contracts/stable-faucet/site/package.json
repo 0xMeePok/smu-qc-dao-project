@@ -23,9 +23,14 @@
     "eslint": "9.39.4",
     "globals": "16.4.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.59.3",
-    "vite": "8.2.2",
-    "vitest": "4.1.11"
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.5",
+    "vitest": "4.1.12"
   },
-  "type": "module"
+  "type": "module",
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.4"
+    }
+  }
 }

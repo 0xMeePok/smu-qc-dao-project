@@ -674,3 +674,53 @@ it("retries an initial request when Firestore returns equivalent scope fields in
   await assert.rejects(() => callPage(db, beginInput()), { code: "invalid-argument" });
   assert.equal(audits(db).length, 0);
 });
+
+for (const count of [1, 51]) {
+  it(`commits export state and its audit after aborted transaction callbacks (${count} comments)`, async () => {
+    const db = store(floodRecords(count));
+    const runTransaction = db.runTransaction.bind(db);
+    const aborted = new Error("Test transaction aborted before commit");
+    let abortNext = true, attempts = 0;
+    db.runTransaction = async (callback) => {
+      if (abortNext) {
+        abortNext = false;
+        await assert.rejects(runTransaction(async (tx) => {
+          attempts++;
+          await callback(tx);
+          // The fake transaction rolls back queued writes when its callback throws.
+          throw aborted;
+        }), (error) => error === aborted);
+      }
+      return runTransaction((tx) => { attempts++; return callback(tx); });
+    };
+    const initialInput = beginInput();
+    let page = await callPage(db, initialInput);
+    assert.equal(attempts, 2);
+    const sessionPath = `${EXPORT_SESSION_COLLECTION}/${page.exportId}`;
+    assert.ok(db.records.has(sessionPath), "A successful page must have committed its session");
+    assert.equal(db.records.get(sessionPath).lastPage, 0);
+    assert.equal(db.records.get(sessionPath).commentCount, Math.min(count, 50));
+    assert.equal(audits(db).length, page.done ? 1 : 0);
+    assert.deepEqual(await callPage(db, initialInput), page);
+    const ids = [];
+    while (true) {
+      for (const posting of page.document.postings) for (const proposal of posting.proposals) {
+        ids.push(...proposal.comments.map((comment) => comment.id));
+      }
+      if (page.done) break;
+      const cursor = page.nextCursor;
+      abortNext = true;
+      page = await callPage(db, cursor);
+      assert.deepEqual(await callPage(db, cursor), page);
+    }
+    assert.equal(ids.length, count);
+    assert.equal(new Set(ids).size, count);
+    assert.equal(page.totals.commentCount, count);
+    assert.equal(db.records.get(sessionPath).commentCount, count);
+    assert.equal(audits(db).length, 1);
+    assert.equal(audits(db)[0][1].commentCount, count);
+    assert.equal(audits(db)[0][0], `audits/${page.auditId}`);
+    if (count === 1) assert.deepEqual(await callPage(db, initialInput), page);
+    else await assert.rejects(() => callPage(db, initialInput), { code: "failed-precondition" });
+  });
+}
