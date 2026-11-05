@@ -2,7 +2,8 @@ import { AUDIT_ENTITY_ID_SCHEME } from "../config/auditRegistry.js";
 import { assertCurrentAuditRecord, configuredAuditRegistryAddress, createOpportunityAuditFlow } from "./opportunityAuditFlow.js";
 import {
   commitProposalAudit, prepareOpportunityWithdrawal, prepareProposalWithdrawal,
-  readOpportunityRevisionIndex, readProposalHashes, readProposalIsAnchored, updateProposalAudit,
+  readProposalHashes, readProposalIsAnchored, updateProposalAudit,
+  readReviewedOpportunity,
   verifyProposalAudit, withdrawOpportunityAudit, withdrawProposalAudit, writeOpportunityAudit,
 } from "./auditRegistry.js";
 import { findProposal, updateProposalReceipt } from "./proposals.js";
@@ -10,15 +11,21 @@ import { INDEPENDENT_PROPOSAL_HASH_SCHEME, isIndependentProposal } from "../../.
 
 export { proposalAuditPayload } from "../../../firebase/functions/proposalAuditPayload.js";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
-import { asProposalUpdate, withOpportunityRevisionIndex } from "../../../firebase/functions/auditCanonical.js";
+import { asProposalUpdate } from "../../../firebase/functions/auditCanonical.js";
 
 async function anchorProposal(prepared, options) {
   // Both registry lookups are independent. Attach rejection handlers together so
   // a failed proposal lookup cannot escape while the parent read is still pending.
   const [operation, anchored] = await Promise.all([
-    readOpportunityRevisionIndex(prepared.opportunityId, options)
-      .then(index => withOpportunityRevisionIndex(prepared, index))
-      .catch(() => prepared), // Missing parent: the contract supplies its mapped error.
+    (async () => {
+      const reviewed = prepared.reviewedParentAudit;
+      if (!reviewed) throw new Error("Open the proposal editor and review the opportunity before signing.");
+      const current = await readReviewedOpportunity({ entityId: reviewed.entityId, contentHash: reviewed.contentHash }, options);
+      if (current.revisionIndex !== reviewed.revisionIndex || current.revisionDigest !== reviewed.revisionDigest) {
+        throw new Error("The opportunity changed since you reviewed it. Reload it before signing.");
+      }
+      return prepared;
+    })(),
     readProposalIsAnchored(prepared.entityId, options),
   ]);
   if (!anchored) {

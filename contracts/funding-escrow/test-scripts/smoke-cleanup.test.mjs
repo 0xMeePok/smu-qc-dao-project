@@ -9,7 +9,7 @@ function fixture() {
   const config = { address: Wallet.createRandom().address, escrow: { factoryAddress: Wallet.createRandom().address } };
   const token = Wallet.createRandom().address;
   const report = { status: "failed", failedStep: GAS_RETURN_STEP, chainId: 421614, registry: config.address,
-    factory: config.escrow.factoryAddress, owner, testWallet: wallet.address, token, amountBaseUnits: "1000000",
+    factory: config.escrow.factoryAddress, owner, testWallet: wallet.address, token, amountBaseUnits: "3000000",
     firebaseVerification: true, frontendVerification: true,
     fundingAuditReconciliation: { status: "matched", events: 13, eventIds: Array.from({ length: 13 }, (_, i) => hash(i)) },
     transactions: BUSINESS_STEPS.map((step, i) => ({ step, hash: hash(i + 1), status: "confirmed", blockNumber: 100 + i })) };
@@ -57,6 +57,14 @@ test("cleanup resume rejects a different failure stage or active deployment", ()
   f.report.failedStep = GAS_RETURN_STEP;
   f.report.factory = Wallet.createRandom().address;
   assert.throws(() => assertCleanupJournal(f.report, f.opts), /factory differs/);
+});
+
+test("cleanup resume rejects journals for any other funding amount", () => {
+  const f = fixture();
+  for (const amount of ["1000000", "2999999", "3000001", undefined]) {
+    f.report.amountBaseUnits = amount;
+    assert.throws(() => assertCleanupJournal(f.report, f.opts));
+  }
 });
 
 test("gas plan accounts for capped fees plus a separate conservative reserve", () => {

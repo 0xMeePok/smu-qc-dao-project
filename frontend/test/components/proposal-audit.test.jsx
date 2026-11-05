@@ -15,17 +15,21 @@ vi.mock("../../src/lib/proposals.js", () => ({
 }));
 import { anchorProposalAudit, proposalAuditReceipt, proposalAuditPayload, readProposalAudit } from "../../src/lib/proposalAudit.js";
 import { AUDIT_ENTITY_ID_SCHEME, AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
-import { prepareProposalCommit } from "../../src/lib/auditRegistry.js";
+import { prepareProposalCommit, opportunityEntityId } from "../../src/lib/auditRegistry.js";
 const account = `0x${"a".repeat(40)}`;
 const tx = `0x${"3".repeat(64)}`;
 const record = { id: "proposal123", problemId: "problem123", researcherId: account, postingOwnerId: `0x${"b".repeat(40)}`, title: "Annealing", methodology: "Benchmark routing", attachments: [] };
+record.reviewedParentAudit = { chainId: AUDIT_REGISTRY_CONFIG.chainId, contractAddress: AUDIT_REGISTRY_CONFIG.address.toLowerCase(),
+  entityId: opportunityEntityId(record.problemId, { actor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.postingOwnerId : undefined }),
+  contentHash: `0x${"6".repeat(64)}`, revisionIndex: 0, revisionDigest: `0x${"6".repeat(64)}` };
 const prepared = prepareProposalCommit({ actor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.researcherId : undefined, opportunityActor: AUDIT_ENTITY_ID_SCHEME === 2 ? record.postingOwnerId : undefined, recordId: record.id, opportunityRecordId: record.problemId, expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(record), solutionPayload: { ...proposalAuditPayload(record), attachments: [] } });
 function readContract({ functionName }) {
   // Defaults to the record's own hashes so verification reads match. An amendment
   // sets mocks.stored to the PRE-edit hashes, which is what the chain holds.
-  if (functionName === "getProposal") return { researcher: account, opportunityId: prepared.opportunityId, opportunityRevisionIndex: 0, ...(mocks.stored ?? { proposalHash: prepared.proposalHash, solutionHash: prepared.solutionHash }) };
+  if (functionName === "getProposal") return { researcher: account, opportunityId: prepared.opportunityId, opportunityRevisionIndex: 0, opportunityRevisionDigest: record.reviewedParentAudit.revisionDigest, ...(mocks.stored ?? { proposalHash: prepared.proposalHash, solutionHash: prepared.solutionHash }) };
   if (functionName === "revisionCount") return mocks.revisions;
   if (functionName === "opportunityRevisionCount") return 1n;
+  if (functionName === "getOpportunity" || functionName === "opportunityRevisionAt") return { contentHash: record.reviewedParentAudit.contentHash };
   if (functionName === "anchorCount") return 1n;
   if (functionName === "anchorAt") return { contentHash: prepared.anchorHash };
   throw new Error(`Unexpected read: ${functionName}`);
@@ -65,22 +69,28 @@ describe("proposal audit handoff", () => {
       expect(chainRead.mock.calls.some(([request]) => request.functionName === "revisionCount")).toBe(true);
     });
     expect(writeContract).not.toHaveBeenCalled();
-    finishParent(3n);
+    finishParent(1n);
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(writeContract).not.toHaveBeenCalled();
     finishProposal(0n);
     await pending;
     expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
-    expect(writeContract.mock.calls[0][0].args.at(-1)).toBe(2);
+    expect(writeContract.mock.calls[0][0].args.at(-1)).toBe(0);
   });
-  it("retains the original parent revision fallback when its concurrent lookup fails", async () => {
+  it("blocks signing when the parent lookup fails", async () => {
     const writeContract = vi.fn(async () => tx);
     const chainRead = request => request.functionName === "opportunityRevisionCount"
       ? Promise.reject(new Error("Parent lookup unavailable")) : readContract(request);
-    await anchorProposalAudit(record, { account, adapters: { writeContract, readContract: chainRead,
-      waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } });
-    expect(writeContract.mock.calls[0][0].functionName).toBe("commitProposal");
-    expect(writeContract.mock.calls[0][0].args.at(-1)).toBe(0);
+    await expect(anchorProposalAudit(record, { account, adapters: { writeContract, readContract: chainRead,
+      waitForTransactionReceipt: async () => ({ status: "success", blockNumber: 88n }) } })).rejects.toThrow(/Parent lookup unavailable/);
+    expect(writeContract).not.toHaveBeenCalled();
+  });
+  it("refuses an unbound legacy write until the parent has been reviewed", async () => {
+    const { reviewedParentAudit, ...legacy } = record;
+    const writeContract = vi.fn();
+    await expect(anchorProposalAudit(legacy, { account, adapters: { writeContract, readContract, waitForTransactionReceipt: vi.fn() } }))
+      .rejects.toThrow(/review the opportunity/);
+    expect(writeContract).not.toHaveBeenCalled();
   });
   it("blocks signing on a failed proposal lookup even while the parent remains pending", async () => {
     let finishParent;
@@ -200,11 +210,16 @@ it("re-verifies a fresh server read and detects a changed proposal", async () =>
   expect(mocks.find).toHaveBeenCalledWith(record.id, { fromServer: true });
   expect(result.verified).toBe(false);
 });
-it("verifies a saved proposal against its recorded nonzero parent revision without signing", async () => {
-  mocks.find.mockResolvedValue(record);
+it("verifies a legacy saved proposal against its recorded nonzero parent revision without signing", async () => {
+  const { reviewedParentAudit, ...legacy } = record;
+  const legacyPrepared = prepareProposalCommit({ recordId: legacy.id, opportunityRecordId: legacy.problemId,
+    actor: AUDIT_ENTITY_ID_SCHEME === 2 ? legacy.researcherId : undefined,
+    opportunityActor: AUDIT_ENTITY_ID_SCHEME === 2 ? legacy.postingOwnerId : undefined,
+    expectedOpportunityRevisionIndex: 0, proposalPayload: proposalAuditPayload(legacy), solutionPayload: { ...proposalAuditPayload(legacy), attachments: [] } });
+  mocks.find.mockResolvedValue(legacy);
   const chainRead = vi.fn((request) => request.functionName === "getProposal"
-    ? { ...readContract(request), opportunityRevisionIndex: 3n }
-    : readContract(request));
+    ? { ...readContract(request), opportunityRevisionIndex: 3n, proposalHash: legacyPrepared.proposalHash, solutionHash: legacyPrepared.solutionHash }
+    : request.functionName === "anchorAt" ? { contentHash: legacyPrepared.anchorHash } : readContract(request));
   const writeContract = vi.fn();
   const waitForTransactionReceipt = vi.fn();
   const result = await readProposalAudit(record, {
@@ -226,7 +241,7 @@ it("still detects changed content when the recorded parent revision is nonzero",
   });
   expect(result.verified).toBe(false);
   expect(result.mismatches.map(({ field }) => field)).toContain("proposalHash");
-  expect(result.mismatches.map(({ field }) => field)).not.toContain("opportunityRevisionIndex");
+  expect(result.mismatches.map(({ field }) => field)).toContain("opportunityRevisionIndex");
 });
 it("does not broadcast beyond the wallet attempt cap", async () => {
   const writeContract = vi.fn();

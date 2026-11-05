@@ -101,7 +101,7 @@ for (const pdfCount of [0, 1, 2]) {
       trancheBps: [5000, 5000], reviewWindows: [604800, 604800],
       milestoneHashes: [1, 2].map(value => `0x${String(value).repeat(64)}`) };
     assert.ok(isPublishableIndependentProposal(record, { uid: AUTHOR }));
-    const audit = { schemaVersion: 2, chainId: 421614,
+    const audit = { schemaVersion: 2, digestVersion: 1, chainId: 421614,
       entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, status: "pending",
       transactionHash: `0x${"3".repeat(64)}`, blockNumber: 123, attemptCount: 1, lastError: "" };
     await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), "publicationProofs", `proposals_${id}`), {

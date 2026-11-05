@@ -2,7 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qc-dao.local/schemas/selected-proposal-export.schema.json",
   "title": "QC DAO selected proposal export",
-  "description": "JSON file returned when an administrator exports proposals and their comments, accepted or not. Grading and token distribution are not in this file. The CSV form uses x-csv-columns, one row per comment. A leading spreadsheet formula character in a CSV cell is prefixed with an apostrophe; the JSON comment body is the exact text.",
+  "description": "JSON file returned when an administrator exports proposals and their comments, accepted or not. Grading and token distribution are not in this file. The CSV form uses x-csv-columns, one row per comment. Spreadsheet formula introducers, including those hidden behind leading whitespace/control/format characters, are prefixed with an apostrophe; JSON preserves the exact text. Small exports remain one JSON and one CSV file. Large exports use numbered JSON/CSV parts conforming to this schema and a separate completion manifest. Each part has its own counts and a partial-segment notice; retain all numbered parts and the matching completed manifest. Proposal/posting metadata can repeat across parts, so use the manifest's unique-record totals rather than summing part proposal/posting counts.",
+  "x-continuation-protocol": {
+    "version": 1,
+    "maxCommentDocumentsPerCall": 50,
+    "maxResponseUtf8Bytes": 262144,
+    "maxBrowserPartUtf8Bytes": 8388608,
+    "sessionLifetimeHours": 24,
+    "membership": "Firestore system creation time at or before the initial query's read time; legacy application timestamps are preserved",
+    "bodyConsistency": "Current body when its page is read; this is not a global point-in-time body snapshot",
+    "ordering": "Complete small files preserve normalized date/ID order. Numbered parts follow proposal/document-ID traversal and are date/ID sorted internally.",
+    "failure": "No completed export audit or completion manifest before terminal success. If a large export stops after downloading parts, those parts remain explicitly incomplete."
+  },
   "x-schema-version": 2,
   "x-csv-columns": [
     "schemaVersion",

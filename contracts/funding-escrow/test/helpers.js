@@ -62,7 +62,13 @@ export async function mineAt(ctx, timestamp) {
   await ctx.ethers.provider.send("evm_mine", []);
 }
 export async function fund(ctx) {
-  await ctx.escrow.connect(ctx.alice).deposit(ctx.target);
+  await reviewedDeposit(ctx.escrow.connect(ctx.alice), ctx.target);
+}
+export async function reviewedDeposit(escrow, amount) {
+  if (!escrow.interface.hasFunction("depositReviewed")) return escrow.deposit(amount);
+  const registry = new (await import("ethers")).Contract(await escrow.auditRegistry(),
+    ["function fundingContextDigest(bytes32) view returns(bytes32)"], escrow.runner);
+  return escrow.depositReviewed(amount, await registry.fundingContextDigest(await escrow.proposalId()));
 }
 export async function lock(ctx) {
   await fund(ctx);

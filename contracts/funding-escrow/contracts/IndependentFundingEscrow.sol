@@ -11,6 +11,8 @@ import {TokenDecimals} from "./TokenDecimals.sol";
 import {IndependentEscrowInit, IIndependentTokenPolicy, IIndependentRegistryPolicy} from "./IndependentFundingTypes.sol";
 
 /// @notice Independent crowdfunding, isolated from proposal selection and grant pools.
+/// @dev The final payment needs the funder majority's approval and a release by the platform
+/// signer or an escrow admin; neither side alone can move the completion half.
 contract IndependentFundingEscrow is ReentrancyGuard {
     using SafeERC20 for IERC20;
     enum State { Open, Accepted, Released, Declined, Expired, Cancelled, Refunded }
@@ -209,10 +211,18 @@ contract IndependentFundingEscrow is ReentrancyGuard {
         if (approve) yesWeight += weight;
         else noWeight += weight;
         emit CompletionVoted(version, hash, msg.sender, approve, weight);
-        if (yesWeight > totalDeposited / 2) _releaseCompletion();
     }
 
-    function releaseCompletion() external nonReentrant { _releaseCompletion(); }
+    /// @notice The funder majority approves; an independent party releases. The platform
+    /// signer (acting on an administrator review) or an escrow admin submits the payment, so a
+    /// researcher who also funds the listing cannot vote the completion payment out alone.
+    /// @dev The signed call commits to the exact evidence version and hash reviewed by the releaser.
+    function releaseCompletion(uint256 expectedEvidenceVersion, bytes32 expectedEvidenceHash) external nonReentrant {
+        if (!_canRelease(msg.sender)) revert AccessDenied();
+        if (expectedEvidenceVersion != evidenceVersion || expectedEvidenceHash == bytes32(0)
+            || expectedEvidenceHash != evidenceHash) revert InvalidInput();
+        _releaseCompletion();
+    }
 
     function adminCancel(bytes32 reasonHash) external nonReentrant {
         if (msg.sender != platformSigner && !tokenRegistry.isEscrowAdmin(msg.sender)) revert AccessDenied();
@@ -291,7 +301,8 @@ contract IndependentFundingEscrow is ReentrancyGuard {
         result.canDecline = effective == State.Open && account == researcher && totalDeposited == fundingTarget;
         result.canSubmitEvidence = effective == State.Accepted && active && account == researcher;
         result.canVote = effective == State.Accepted && active && evidenceHash != bytes32(0) && result.contribution != 0 && !result.hasVoted;
-        result.canReleaseCompletion = effective == State.Accepted && active && evidenceHash != bytes32(0) && yesWeight > totalDeposited / 2;
+        result.canReleaseCompletion = effective == State.Accepted && active && evidenceHash != bytes32(0) && yesWeight > totalDeposited / 2
+            && _canRelease(account);
     }
 
     function depositorSummary(address account) external view returns (DepositorSummary memory result) {
@@ -304,6 +315,9 @@ contract IndependentFundingEscrow is ReentrancyGuard {
         }
     }
 
+    function _canRelease(address account) private view returns (bool) {
+        return account != address(0) && (account == platformSigner || tokenRegistry.isEscrowAdmin(account));
+    }
     function _requireResearcherDecision() private view {
         if (msg.sender != researcher) revert AccessDenied();
         if (state != State.Open) revert InvalidState();

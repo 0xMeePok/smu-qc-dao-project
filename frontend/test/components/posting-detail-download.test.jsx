@@ -35,6 +35,7 @@ vi.mock("../../src/lib/firebase.js", () => ({
 }));
 vi.mock("../../src/lib/postings.js", () => ({
   findPosting: async () => {
+    if (mocks.postingRead) return mocks.postingRead();
     if (mocks.postingError) throw mocks.postingError;
     return mocks.posting;
   },
@@ -55,6 +56,7 @@ vi.mock("../../src/lib/attachments.js", () => ({
   messageForStorageError: (error) => error?.message ?? "download failed",
   downloadAttachment: async (args) => {
     mocks.downloadArgs.push(args);
+    if (mocks.downloadRead) return mocks.downloadRead();
     if (mocks.downloadShouldFail) throw mocks.downloadShouldFail;
     return new Blob(["%PDF-1.7"], { type: "application/pdf" });
   },
@@ -66,7 +68,7 @@ vi.mock("../../src/lib/postingAudit.js", () => ({
   anchorPostingAudit: async () => ({ status: "confirmed" }),
 }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({
-  useAuth: () => ({ isAuthenticated: true, user: mocks.user }),
+  useAuth: () => ({ isAuthenticated: Boolean(mocks.user), user: mocks.user }),
 }));
 vi.mock("../../src/components/MatchingPanel.jsx", () => ({
   MatchingPanel: ({ onNavigate }) => <section id="proposal-funding"><button onClick={() => onNavigate("proposal/proposal1")}>View funded proposal</button></section>,
@@ -107,8 +109,10 @@ beforeEach(() => {
   mocks.downloadArgs = [];
   mocks.saved = [];
   mocks.downloadShouldFail = null;
+  mocks.downloadRead = null;
   mocks.posting = publishedPosting();
   mocks.postingError = null;
+  mocks.postingRead = null;
   mocks.removedError = null;
   mocks.removedProblem = null;
   mocks.user = { id: VIEWER };
@@ -116,6 +120,79 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("downloading an attachment from someone else's posting", () => {
+  it.each(["permission-denied", "not-found"])("discards a pending download after a %s refresh", async code => {
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("spec.pdf");
+    let finishDownload;
+    mocks.downloadRead = () => new Promise(resolve => { finishDownload = resolve; });
+    fireEvent.click(downloadButton());
+    await waitFor(() => expect(finishDownload).toBeTypeOf("function"));
+    mocks.postingError = Object.assign(new Error("Access lost"), { code });
+    await act(async () => live.channels.all.onRefresh());
+    await act(async () => finishDownload(new Blob(["private PDF"])));
+    expect(mocks.saved).toHaveLength(0);
+  });
+  it("does not repopulate content from a successful refresh that predates an access denial", async () => {
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("spec.pdf");
+    let finishOldRead;
+    mocks.postingRead = () => new Promise(resolve => { finishOldRead = resolve; });
+    let oldRefresh;
+    act(() => { oldRefresh = live.channels.all.onRefresh(); });
+    mocks.postingRead = null;
+    mocks.postingError = Object.assign(new Error("Access lost"), { code: "permission-denied" });
+    await act(async () => live.channels.all.onRefresh());
+    await act(async () => { finishOldRead(publishedPosting()); await oldRefresh; });
+    expect(screen.queryByText("spec.pdf")).toBeNull();
+  });
+  it("clears previously loaded private content as soon as the viewer signs out", async () => {
+    const view = render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("spec.pdf");
+    mocks.user = null;
+    mocks.postingError = Object.assign(new Error("Denied"), { code: "permission-denied" });
+    view.rerender(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    expect(screen.queryByText("spec.pdf")).toBeNull();
+    await screen.findByText("Sign in to view this posting.");
+    expect(screen.queryByText("Routing degrades under demand spikes.")).toBeNull();
+  });
+  it("removes loaded content after a live refresh reports revoked access", async () => {
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("spec.pdf");
+    mocks.postingError = Object.assign(new Error("Denied"), { code: "permission-denied" });
+    await act(async () => live.channels.all.onRefresh());
+    expect(screen.queryByText("spec.pdf")).toBeNull();
+  });
+  it("keeps readable content during a temporary network failure", async () => {
+    render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("spec.pdf");
+    mocks.postingError = Object.assign(new Error("Network unavailable"), { code: "unavailable" });
+    await act(async () => live.channels.all.onRefresh());
+    expect(screen.getByText("spec.pdf")).toBeTruthy();
+  });
+  it("discards a late refresh from the previous viewer after an account change", async () => {
+    const view = render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("spec.pdf");
+    let finishOldRead;
+    mocks.postingRead = () => new Promise(resolve => { finishOldRead = resolve; });
+    let oldRefresh;
+    act(() => { oldRefresh = live.channels.all.onRefresh(); });
+    mocks.user = { id: `0x${"7".repeat(40)}` };
+    mocks.postingRead = null;
+    mocks.postingError = Object.assign(new Error("Denied"), { code: "permission-denied" });
+    view.rerender(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    expect(screen.queryByText("spec.pdf")).toBeNull();
+    await act(async () => { finishOldRead(publishedPosting()); await oldRefresh; });
+    expect(screen.queryByText("spec.pdf")).toBeNull();
+  });
+  it("clears private content immediately when the current member loses their role", async () => {
+    const view = render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    await screen.findByText("spec.pdf");
+    mocks.user = { id: VIEWER, role: "guest", isSuspended: true };
+    mocks.postingRead = () => new Promise(() => {});
+    view.rerender(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
+    expect(screen.queryByText("spec.pdf")).toBeNull();
+    expect(screen.queryByText("Routing degrades under demand spikes.")).toBeNull();
+  });
   it("[FIT-OPD-201] shows the attachment on a posting the viewer does not own", async () => {
     render(<PostingDetailPage postingId="posting777" onNavigate={() => {}} />);
     await waitFor(() => expect(screen.getByText("spec.pdf")).toBeTruthy());

@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, at, assertAccounting, State } from "./helpers.js";
 
@@ -20,7 +21,7 @@ describe("FundingEscrow: model-based accounting", function () {
         for (let step = 0; step < 30; step++) {
           const index = random() % actors.length;
           const amount = BigInt(random() % 2000 + 1);
-          await c.escrow.connect(actors[index]).deposit(amount);
+          await reviewedDeposit(c.escrow.connect(actors[index]), amount);
           balances[index] += amount; counts[index]++; deposited += amount;
           expect(await c.escrow.totalDeposited()).to.equal(deposited);
           expect(await c.escrow.contributions(actors[index].address)).to.equal(balances[index]);
@@ -29,7 +30,7 @@ describe("FundingEscrow: model-based accounting", function () {
         }
         if (outcome === "release") {
           const remainder = c.target - deposited;
-          await c.escrow.connect(c.alice).deposit(remainder);
+          await reviewedDeposit(c.escrow.connect(c.alice), remainder);
           balances[0] += remainder; counts[0]++;
           await c.escrow.lockSelection(c.selectionId, c.solution.address);
           await c.escrow.connect(c.owner).approveSelection(c.selectionId);

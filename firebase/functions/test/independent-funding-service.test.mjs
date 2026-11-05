@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
-import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, parseUnits } from "viem";
+import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, parseAbi, parseUnits } from "viem";
 import main from "../auditRegistry.contract.json" with { type: "json" };
 import independent from "../independentFunding.contract.json" with { type: "json" };
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
@@ -10,9 +10,10 @@ import { auditEvent } from "./auditEvent.mjs";
 import { createFundingApproach, decideFundingApproach } from "../fundingApproach.js";
 import { assertIndependentPublicationUnlocked, getIndependentFundingState, hashIndependentFundingEvidence,
   independentFundingKey, prepareIndependentFundingAction, readIndependentFundingPortfolio,
-  reconcileIndependentFunding, syncIndependentFunding } from "../independentFunding.js";
+  reconcileIndependentFunding, releaseIndependentFundingCompletion, syncIndependentFunding } from "../independentFunding.js";
 import { enqueueIndependentFundingCancellation } from "../independentFundingModeration.js";
 import { reconcileModerationVoids } from "../escrowFunding.js";
+import { registerIndependentFundingFunctions } from "../independentFundingFunctions.js";
 
 const address = digit => `0x${digit.repeat(40)}`, hash = digit => `0x${digit.repeat(64)}`;
 const researcher = address("a"), funder = address("b"), outsider = address("c"), platform = address("d");
@@ -45,6 +46,7 @@ function fixture({ activated = true, requestedAmount = 2 } = {}) {
     hasVoted: false, votedApprove: false, active: true, depositsOpen: true, canAccept: false, canDecline: false,
     canSubmitEvidence: false, canVote: false, canReleaseCompletion: false };
   const db = memoryDb({ [`proposals/${record.id}`]: record,
+    "maintenanceState/evidenceQuotasV1": { ready: true, version: 1 },
     [`users/${researcher}`]: { role: 0 }, [`users/${funder}`]: { role: 3 },
     [`users/${outsider}`]: { role: 2 }, [`users/${platform}`]: { role: 1 } });
   const originalCollection = db.collection;
@@ -186,6 +188,42 @@ describe("independent funding backend authorization and preparation", () => {
     assert.deepEqual(vote.args, ["2", evidenceHash, true]);
     await assert.rejects(prepareIndependentFundingAction({ ...f.options(funder), action: "vote", evidenceHash: hash("2"), approve: true }), /current evidence/);
     await assert.rejects(prepareIndependentFundingAction({ ...f.options(researcher), action: "submitEvidence", evidence: { ...evidence, url: "javascript:alert(1)" }, evidenceHash }), /HTTPS/);
+  });
+
+  it("bounds unbroadcast evidence and retains charges after simulation failure", async () => {
+    const f = fixture(); Object.assign(f.state, { state: 1, canSubmitEvidence: true, depositsOpen: false });
+    const stage = i => { const evidence = { summary: `Unbroadcast results ${i}`, url: "https://example.org/results" };
+      return prepareIndependentFundingAction({ ...f.options(researcher), action: "submitEvidence", evidence, evidenceHash: hashIndependentFundingEvidence(evidence) }); };
+    await stage(0);
+    const before = new Map(f.db.records);
+    await stage(0);
+    assert.deepEqual(f.db.records, before, "an exact staged retry does not alter accounting or timestamps");
+    f.client.simulateContract = async () => { throw new Error("simulation rejected"); };
+    await assert.rejects(stage(1), /simulation rejected/);
+    assert.equal(f.db.records.get("evidenceQuotas/global").count, 2, "persisted content stays charged after failure");
+    f.client.simulateContract = async () => ({});
+    for (let i = 2; i < 30; i++) await stage(i);
+    await assert.rejects(stage(30), error => error.code === "resource-exhausted");
+    assert.equal([...f.db.records.keys()].filter(path => path.includes("/independentFundingEvidence/")).length, 30);
+    f.state.evidenceHash = hashIndependentFundingEvidence({ summary: "Unbroadcast results 0", url: "https://example.org/results" });
+    await assert.rejects(stage(0), /Submit new evidence/);
+  });
+
+  it("forwards fresh authentication and rechecks revocation after independent preparation reads", async () => {
+    const f = fixture(); Object.assign(f.state, { state: 1, canSubmitEvidence: true, depositsOpen: false });
+    f.db.records.set(`users/${researcher}`, { role: 0, sessionsValidAfterEpoch: 100 });
+    const functions = registerIndependentFundingFunctions({ ...f.options(researcher),
+      requireMember: async request => request.auth.uid, requireAdmin: async () => ({}), options: {} });
+    const evidence = { summary: "Freshly authenticated delivery", url: "https://example.org/results" };
+    const request = { auth: { uid: researcher, token: { auth_time: 101 } }, data: {
+      proposalId: f.record.id, action: "submitEvidence", evidence, evidenceHash: hashIndependentFundingEvidence(evidence) } };
+    await functions.prepareIndependentFundingAction.run(request);
+    const transaction = f.db.runTransaction.bind(f.db);
+    f.db.runTransaction = callback => {
+      f.db.records.set(`sessionRevocations/${researcher}`, { sessionsValidAfterEpoch: 101 });
+      return transaction(callback);
+    };
+    await assert.rejects(functions.prepareIndependentFundingAction.run(request), error => error.code === "permission-denied");
   });
 
   it("requires a readable decline reason and locks a changed publication even before the cache projection exists", async () => {
@@ -404,4 +442,166 @@ it("independent funding signals change for balances and votes but not repeated v
   f.state.yesWeight = 1_000_000n;
   await syncIndependentFunding(f.options(funder));
   assert.deepEqual(f.db.records.get(path), { funding: 3, fundingSnapshot: null });
+});
+
+describe("independent funding completion release: funder majority plus administrator review", () => {
+  const evidence = { summary: "Delivered the routing prototype", url: "https://example.com/prototype" };
+  const evidenceHash = hashIndependentFundingEvidence(evidence);
+  function approved() {
+    const f = fixture();
+    f.config.independentFunding.escrowAbi = [...f.config.independentFunding.escrowAbi.filter(item => item.name !== "releaseCompletion"),
+      ...parseAbi(["function releaseCompletion(uint256 expectedEvidenceVersion, bytes32 expectedEvidenceHash)"])];
+    const originalOptions = f.options;
+    f.options = uid => ({ ...originalOptions(uid), expectedEvidenceVersion: 1, expectedEvidenceHash: evidenceHash });
+    // Fully funded, accepted, upfront half paid, current evidence approved by 60% of deposits.
+    Object.assign(f.state, { state: 1, totalDeposited: 2_000_000n, totalReleased: 1_000_000n, outstandingBalance: 1_000_000n,
+      completionDeadline: BigInt(now.toMillis() / 1000) + 86_400n, evidenceHash, evidenceVersion: 1n,
+      yesWeight: 1_200_000n, noWeight: 0n, funderCount: 2n, depositsOpen: false, canSubmitEvidence: true });
+    f.db.records.set(`proposals/${f.record.id}/independentFundingEvidence/${evidenceHash}`, { ...evidence, ownerId: researcher });
+    const read = f.client.readContract;
+    f.client.readContract = async request => request.address === f.config.escrow.factoryAddress && request.functionName === "platformSigner"
+      ? platform : read(request);
+    f.client.getTransactionCount = async () => 0;
+    f.sent = [];
+    f.client.sendRawTransaction = async request => { f.sent.push(request); return keccak256(request.serializedTransaction); };
+    f.wallet = { account: { address: platform }, chain: { id: f.config.chainId },
+      prepareTransactionRequest: async request => request, signTransaction: async () => "0xabcd" };
+    return f;
+  }
+
+  it("marks the approval for everyone but offers the release action only to administrators", async () => {
+    const f = approved();
+    const asFunder = await getIndependentFundingState(f.options(funder));
+    assert.equal(asFunder.summary.completionApproved, true);
+    assert.equal(asFunder.actions.releaseCompletion, false);
+    assert.equal(asFunder.actions.vote, false); // already counted in the fixture weights
+    const asResearcher = await getIndependentFundingState(f.options(researcher));
+    assert.equal(asResearcher.actions.releaseCompletion, false);
+    const asAdmin = await getIndependentFundingState(f.options(platform));
+    assert.equal(asAdmin.actions.releaseCompletion, true);
+    // Even an administrator receives no wallet transaction for the payment.
+    await assert.rejects(prepareIndependentFundingAction({ ...f.options(platform), action: "releaseCompletion" }), /platform signer/);
+  });
+  it("rejects missing or replaced reviewed evidence before accessing the platform signer", async () => {
+    const f = approved();
+    for (const changes of [{ expectedEvidenceVersion: undefined }, { expectedEvidenceVersion: 2 },
+      { expectedEvidenceHash: hash("9") }, { expectedEvidenceHash: "malformed" }]) {
+      await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(platform), ...changes,
+        getWallet: async () => { throw new Error("must not access signer"); } }), /changed since your review/);
+    }
+    assert.equal(f.sent.length, 0);
+  });
+  it("never upgrades a queued review to newly approved replacement evidence", async () => {
+    const f = approved();
+    f.db.records.set(`escrowPlatformOutbox/${f.config.chainId}_${f.config.address}`, { leaseUntil: Timestamp.fromMillis(now.toMillis() + 120_000) });
+    await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet });
+    Object.assign(f.state, { evidenceHash: hash("9"), evidenceVersion: 2n, yesWeight: 1_200_000n });
+    await reconcileIndependentFunding({ ...f.options(undefined), now: Timestamp.fromMillis(now.toMillis() + 60_000),
+      getWallet: async () => { throw new Error("must not sign replacement evidence"); } });
+    assert.equal(f.db.records.get(`independentFundingJobs/${independentFundingKey(f.config, f.record.id)}`).release.status, "failed");
+    assert.equal(f.sent.length, 0);
+  });
+
+  it("refuses the release to members and before the funder majority exists", async () => {
+    const f = approved();
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(funder), getWallet: async () => f.wallet }), /Administrator/);
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(researcher), getWallet: async () => f.wallet }), /Administrator/);
+    f.state.yesWeight = 1_000_000n; // exactly half is not a majority
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet }), /majority/);
+    assert.equal(f.sent.length, 0);
+  });
+
+  it("signs releaseCompletion through the shared outbox, records the request, and completes it from the sweep", async () => {
+    const f = approved();
+    const result = await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet });
+    assert.equal(result.status, "pending");
+    const pendingHash = keccak256("0xabcd");
+    assert.equal(result.transactionHash, pendingHash);
+    assert.equal(f.sent.length, 1);
+    const outbox = f.db.records.get(`escrowPlatformOutbox/${f.config.chainId}_${f.config.address}`);
+    assert.equal(outbox.functionName, "releaseCompletion");
+    assert.equal(outbox.serializedTransaction, "0xabcd");
+    const jobPath = `independentFundingJobs/${independentFundingKey(f.config, f.record.id)}`;
+    assert.equal(f.db.records.get(jobPath).release.adminId, platform);
+    assert.equal(f.db.records.get(jobPath).release.transactionHash, pendingHash);
+    assert.equal(f.db.records.get(jobPath).status, "pending");
+    const audit = f.db.records.get(`audits/independent_release_${independentFundingKey(f.config, f.record.id)}_1`);
+    assert.equal(audit.action, "INDEPENDENT_RELEASE_REQUESTED"); assert.equal(audit.actorId, platform);
+    // A second administrator click while the signed transaction is outstanding re-signs nothing.
+    const again = await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => { throw new Error("must not re-sign"); } })
+      .catch(error => error);
+    assert.ok(again instanceof Error || again.status === "pending");
+    assert.equal(f.sent.length, 1);
+
+    // The payment confirms on-chain; the escrow reports Released.
+    const eventName = "TrancheReleased", eventArgs = { index: 1, grossAmount: 1_000_000n, fee: 0n, netAmount: 1_000_000n };
+    const event = f.config.independentFunding.escrowAbi.find(item => item.type === "event" && item.name === eventName);
+    const dataInputs = event.inputs.filter(input => !input.indexed);
+    f.receipts.set(pendingHash, { transactionHash: pendingHash, status: "success", blockNumber: 90n, blockHash: hash("6"),
+      logs: [{ address: f.escrow, transactionHash: pendingHash, logIndex: 0,
+        topics: encodeEventTopics({ abi: f.config.independentFunding.escrowAbi, eventName, args: eventArgs }),
+        data: encodeAbiParameters(dataInputs, dataInputs.map(input => eventArgs[input.name])) }] });
+    f.transactions.set(pendingHash, { hash: pendingHash, from: platform, to: f.escrow, chainId: f.config.chainId,
+      blockNumber: 90n, blockHash: hash("6"), input: encodeFunctionData({ abi: f.config.independentFunding.escrowAbi, functionName: "releaseCompletion", args: [1n, evidenceHash] }) });
+    Object.assign(f.state, { state: 2, totalReleased: 2_000_000n, outstandingBalance: 0n, canSubmitEvidence: false });
+    const later = Timestamp.fromMillis(now.toMillis() + 60_000);
+    const sweep = await reconcileIndependentFunding({ ...f.options(undefined), now: later, getWallet: async () => { throw new Error("must not re-sign"); } });
+    assert.equal(sweep.processed, 1);
+    assert.equal(f.db.records.get(jobPath).release.status, "complete");
+    assert.equal(f.db.records.get(jobPath).status, "complete");
+    assert.equal(f.db.records.get(`independentFundingSummaries/${independentFundingKey(f.config, f.record.id)}`).state, "Released");
+    const released = [...f.db.records.entries()].find(([path, value]) => path.startsWith("independentFundingEvents/") && value.eventType === "TrancheReleased");
+    assert.ok(released, "the confirmed release event is recorded");
+    assert.equal(released[1].actorId, platform);
+  });
+
+  it("drops a request whose approval is no longer current instead of paying", async () => {
+    const f = approved();
+    await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet });
+    const pendingHash = keccak256("0xabcd");
+    // The signed transaction reverted (for example the researcher replaced the evidence first).
+    f.receipts.set(pendingHash, { transactionHash: pendingHash, status: "reverted", blockNumber: 90n, blockHash: hash("6") });
+    f.transactions.set(pendingHash, { hash: pendingHash, from: platform, to: f.escrow, chainId: f.config.chainId,
+      blockNumber: 90n, blockHash: hash("6"), input: encodeFunctionData({ abi: f.config.independentFunding.escrowAbi, functionName: "releaseCompletion", args: [1n, evidenceHash] }) });
+    Object.assign(f.state, { evidenceHash: hash("9"), evidenceVersion: 2n, yesWeight: 0n });
+    const later = Timestamp.fromMillis(now.toMillis() + 60_000);
+    await reconcileIndependentFunding({ ...f.options(undefined), now: later, getWallet: async () => { throw new Error("must not re-sign"); } });
+    const jobPath = `independentFundingJobs/${independentFundingKey(f.config, f.record.id)}`;
+    assert.equal(f.db.records.get(jobPath).release.status, "retrying");
+    await reconcileIndependentFunding({ ...f.options(undefined), now: Timestamp.fromMillis(now.toMillis() + 180_000), getWallet: async () => { throw new Error("must not re-sign"); } });
+    assert.equal(f.db.records.get(jobPath).release.status, "failed");
+    assert.equal(f.db.records.get(jobPath).release.reason, "approval-no-longer-current");
+    assert.equal(f.sent.length, 1);
+  });
+  it("does not sign a queued final payment after the listing is removed", async () => {
+    const f = approved();
+    const outboxPath = `escrowPlatformOutbox/${f.config.chainId}_${f.config.address}`;
+    f.db.records.set(outboxPath, { leaseUntil: Timestamp.fromMillis(now.toMillis() + 120_000) });
+    const queued = await releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet });
+    assert.equal(queued.status, "queued");
+    f.record.moderationStatus = "removed";
+    await reconcileIndependentFunding({ ...f.options(undefined), now: Timestamp.fromMillis(now.toMillis() + 60_000),
+      getWallet: async () => { throw new Error("must not sign a removed listing"); } });
+    const jobPath = `independentFundingJobs/${independentFundingKey(f.config, f.record.id)}`;
+    assert.equal(f.db.records.get(jobPath).release.status, "failed");
+    assert.equal(f.sent.length, 0);
+  });
+  it("rechecks removal while the platform signer prepares the final payment", async () => {
+    const f = approved();
+    f.client.simulateContract = async () => { f.record.moderationStatus = "removed"; return { request: {} }; };
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => f.wallet }),
+      /removed before the final payment/);
+    assert.equal(f.sent.length, 0);
+    const outbox = f.db.records.get(`escrowPlatformOutbox/${f.config.chainId}_${f.config.address}`);
+    assert.equal(outbox.transactionHash, undefined);
+  });
+  it("does not record a pending release if removal happens just before the outbox claim", async () => {
+    const f = approved();
+    await assert.rejects(releaseIndependentFundingCompletion({ ...f.options(platform), getWallet: async () => {
+      f.record.moderationStatus = "removed";
+      return f.wallet;
+    } }), /removed before the final payment/);
+    assert.equal(f.sent.length, 0);
+    assert.equal(f.db.records.has(`audits/independent_release_${independentFundingKey(f.config, f.record.id)}_1`), false);
+  });
 });

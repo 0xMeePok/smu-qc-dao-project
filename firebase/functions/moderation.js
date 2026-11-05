@@ -4,6 +4,9 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { WORKFLOW_STATUS } from "./workflowStatus.js";
 import { isIndependentProposal } from "./independentProposal.js";
 import { moderationDecisionId, moderationRecordHash, queueModerationAnchor } from "./moderationAnchor.js";
+import { queueModerationVoidEnumeration } from "./escrowModerationVoid.js";
+import { queueIndependentFundingCancellation } from "./independentFundingModeration.js";
+import { boundedCommentHistory } from "./commentHistory.js";
 
 export const REPORT_REASONS = ["off_topic", "abusive", "misleading", "duplicate", "other"];
 const REMOVE_REASONS = ["off_topic", "abusive", "misleading", "duplicate", "spam", "policy_violation", "other"];
@@ -148,9 +151,8 @@ export async function syncProblemProposalsBrowsable({
   const parent = await db.collection("problems").doc(problemId).get();
   if (!parent.exists) return { ok: true, synced: 0, complete: true };
   const problemBrowsable = problemIsMemberBrowsable(parent.data());
-  // Storage authorises proposal PDFs from each child's own problemBrowsable flag,
-  // so EVERY child has to be stamped - not the first page. A hidden posting with
-  // more children than one page would otherwise keep serving their PDFs.
+  // Keep every child projection current, including children beyond the first
+  // page. PDF authorization uses the live-parent proxy rather than this cache.
   const checkpointRef = db.collection("jobState").doc(`proposalVisibility_${problemId}`);
   const checkpoint = (await checkpointRef.get()).data() ?? {};
   let cursor = checkpoint.problemBrowsable === problemBrowsable ? checkpoint.cursorId ?? null : null;
@@ -360,7 +362,8 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
     tx.update(ref, { status: action === "restore" ? previousStatus : `moderated_${DECISIONS[action]}`,
       moderationStatus: action === "restore" ? "visible" : DECISIONS[action], moderation,
       ...(contentType === "proposal" ? { postingOwnerId: action === "restore" ? originalPostingOwnerId || "" : "" } : {}),
-      ...(commentGate ? { qualifying: commentGate.qualifying } : {}), updatedAt: now });
+      ...(commentGate ? { qualifying: commentGate.qualifying } : {}),
+      ...(contentType === "comment" ? boundedCommentHistory(data) : {}), updatedAt: now });
     tx.update(queueRef, { status: DECISIONS[action], lastAction: action, lastReason: reason, updatedAt: now });
     writeStats(tx, statsRef, stats, pendingDelta(previous, DECISIONS[action]), now);
     const independentListing = contentType === "proposal" && isIndependentProposal(data);
@@ -380,10 +383,17 @@ export async function moderateContent({ db, uid, queueId, action, reason, detail
       createdAt: now, decisionAt, sequence, chainStatus: "pending", eventVersion: 1, settlement: settlement?.summary || null,
       evaluationReadiness: commentGate?.readiness || null,
       escrowVoid: opensEscrowRefund ? { status: "queued" } : null,
+      ...(action === "remove" && independentListing ? { independentFundingCancellation: { status: "queued" } } : {}),
       salt, moderationId, recordHash,
       ...(parentProblemId ? { parentProblemId } : {}),
       ...(parentProposalId ? { parentProposalId } : {}),
     });
+    if (action === "remove" && (contentType === "problem" || (contentType === "proposal" && !independentListing))) {
+      queueModerationVoidEnumeration(tx, db, { contentType, contentId, eventId, reason, now });
+    }
+    if (action === "remove" && independentListing) {
+      queueIndependentFundingCancellation(tx, db, { contentId, eventId, reason, now });
+    }
     queueModerationAnchor(tx, db, { eventId, moderationId, recordHash, now });
     if (authorId) {
       const proposalId = contentType === "proposal" ? contentId : data.proposalId || null;
@@ -498,6 +508,9 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
   }
   return db.runTransaction(async (tx) => {
     const profile = await activeProfile(tx, db, uid);
+    // Reply threads belong to proposals. The ACL must cover that typed parent,
+    // even when an unrelated problem happens to have the same document id.
+    if (threadId && parentType !== "proposal") fail("invalid-argument", "Choose a proposal discussion to read replies.");
     const parent = await tx.get(db.collection(TYPES[parentType]).doc(parentId));
     if (!parent.exists || !await canReadContent(tx, db, parentType, parent.data(), uid, profile)) fail("permission-denied", "This discussion is not available.");
     if (proposalId && problemId && parent.data().problemId !== problemId) fail("permission-denied", "This proposal does not belong to that problem.");

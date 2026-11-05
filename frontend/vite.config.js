@@ -1,3 +1,6 @@
+import { manageDependencies } from "../firebase/functions/securityDependencies/manage.mjs";
+import { fileURLToPath } from "node:url";
+await manageDependencies([fileURLToPath(new URL("./", import.meta.url)), fileURLToPath(new URL("../firebase/functions/", import.meta.url))], { verify: true, production: true });
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { publicPrivyEnvironment } from "./scripts/privy-build-config.mjs";

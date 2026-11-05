@@ -8,6 +8,8 @@ import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, server
 const AUTHOR = `0x${"81".repeat(20)}`;
 const SPONSOR = `0x${"91".repeat(20)}`;
 const OUTSIDER = `0x${"71".repeat(20)}`;
+const ADMIN = `0x${"61".repeat(20)}`;
+const REVIEWED_PARENT = { chainId: 421614, contractAddress: `0x${"7".repeat(40)}`, entityId: `0x${"8".repeat(64)}`, contentHash: `0x${"9".repeat(64)}`, revisionIndex: 0, revisionDigest: `0x${"9".repeat(64)}` };
 const ATTACHMENT_DIGEST = `0x${"4".repeat(64)}`;
 let env;
 async function setDoc(reference, data, ...options) {
@@ -24,25 +26,139 @@ before(async () => {
   env = await initializeTestEnvironment({ projectId: "qc-dao-rules-test", firestore: { rules: fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8") } });
   await env.withSecurityRulesDisabled(async (ctx) => {
     for (const id of [AUTHOR, SPONSOR, OUTSIDER]) await setDoc(doc(ctx.firestore(), "users", id), { address: id, role: 0, suspended: false, fullName: "Research User", organisation: "University", walletVerified: true, termsAcceptedAt: new Date(), termsVersion: "2026-08-24" });
+    await setDoc(doc(ctx.firestore(), "users", ADMIN), { address: ADMIN, role: 1, suspended: false, fullName: "Administrator", organisation: "University", walletVerified: true, termsAcceptedAt: new Date(), termsVersion: "2026-08-24" });
   });
 });
 after(async () => { await env?.cleanup(); });
 async function parent(overrides = {}) {
   const id = `proposal-parent-${++serial}`;
-  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), { ownerId: SPONSOR, status: "submitted", currency: "USDC", expiresAt: new Date("2099-01-01"), ...overrides }));
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), { ownerId: SPONSOR, status: "submitted", currency: "USDC", expiresAt: new Date("2099-01-01"), audit: REVIEWED_PARENT, ...overrides }));
   return id;
 }
 function record(problemId, overrides = {}) {
-  return { researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId, opportunityType: "business-problem", title: "Annealing routing", summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare annealing against a classical baseline", suitability: "A combinatorial routing problem", expectedOutcomes: "Improved routing", successCriteria: "10 percent less travel", timeline: "12 weeks", milestones: "Baseline, prototype, validation", team: "Operations research team", amount: 1500, currency: "USDC", status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides };
+  return { reviewedParentAudit: REVIEWED_PARENT, researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId, opportunityType: "business-problem", title: "Annealing routing", summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare annealing against a classical baseline", suitability: "A combinatorial routing problem", expectedOutcomes: "Improved routing", successCriteria: "10 percent less travel", timeline: "12 weeks", milestones: "Baseline, prototype, validation", team: "Operations research team", amount: 1500, currency: "USDC", status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides };
+}
+function attachedReceipt(extra = {}) {
+  return { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
+    status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 0, attemptCount: 1, lastError: "", ...extra };
+}
+async function pairProposalLock(batch, db, problemId, proposalId) {
+  const ref = doc(db, "opportunityProposalLocks", problemId);
+  if (!(await getDoc(ref)).exists()) batch.set(ref, { proposalId, researcherId: AUTHOR, createdAt: serverTimestamp() });
 }
 async function submit(db, id, data, withSlot = true) {
   await seedPublicationFixture(env, doc(db, "proposals", id), data);
   const batch = writeBatch(db);
   batch.set(doc(db, "proposals", id), data);
   if (withSlot) batch.set(doc(db, "problems", data.problemId, "proposalAuthors", AUTHOR), { proposalId: id });
+  await pairProposalLock(batch, db, data.problemId, id);
   return batch.commit();
 }
 describe("QCDAO-59/60 submitted proposals", () => {
+  it("denies a fresh submission that carries server-owned matching, moderation or browsability fields", async () => {
+    // The proof marker vouches for the attested payload, not for the document the
+    // client then writes. A publish must reproduce that payload exactly; the wider
+    // tolerance exists only for corrections of records the server already stamped.
+    const problemId = await parent(), db = env.authenticatedContext(AUTHOR).firestore();
+    const clean = record(problemId, { audit: attachedReceipt() });
+    const seeded = [
+      { matching: { status: "awaiting_confirmation", proposalId: "forged", fundedMinor: 100000, evaluationComplete: true } },
+      { moderation: { lastAction: "restore", moderatorId: AUTHOR, reason: "self-restored" } },
+      { moderationStatus: "visible" },
+      { problemBrowsable: true },
+    ];
+    for (const [index, extra] of seeded.entries()) {
+      const id = `seeded-projection-${serial}-${index}`;
+      await seedPublicationFixture(env, doc(db, "proposals", id), clean);
+      const batch = writeBatch(db);
+      batch.set(doc(db, "proposals", id), { ...clean, ...extra });
+      batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId: id });
+      await pairProposalLock(batch, db, problemId, id);
+      await assertFails(batch.commit());
+    }
+    await assertSucceeds(submit(db, `seeded-projection-${serial}-clean`, clean));
+  });
+
+  it("requires an atomic immutable first-submission lock before projections exist", async () => {
+    const problemId = await parent(), db = env.authenticatedContext(AUTHOR).firestore();
+    const proposalId = "paired-first-submission", data = record(problemId, { audit: attachedReceipt() });
+    await seedPublicationFixture(env, doc(db, "proposals", proposalId), data);
+    const withoutLock = writeBatch(db);
+    withoutLock.set(doc(db, "proposals", proposalId), data);
+    withoutLock.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+    await assertFails(withoutLock.commit());
+    await assertSucceeds(submit(db, proposalId, data));
+    const ref = doc(db, "opportunityProposalLocks", problemId);
+    assert.equal((await getDoc(ref)).data().proposalId, proposalId);
+    await assertFails(rawUpdateDoc(ref, { proposalId: "forged" }));
+    await assertFails(deleteDoc(ref));
+    await assertFails(rawSetDoc(doc(db, "opportunityProposalLocks", "unrelated-parent"), {
+      proposalId, researcherId: AUTHOR, createdAt: serverTimestamp(),
+    }));
+    const standalone = doc(db, "opportunityProposalLocks", "no-child-parent");
+    await assertFails(rawSetDoc(standalone, { proposalId: "absent", researcherId: AUTHOR, createdAt: serverTimestamp() }));
+  });
+
+  it("rejects parent terms changed after attestation even when receipt hashes are spoofed", async () => {
+    const problemId = await parent(), db = env.authenticatedContext(AUTHOR).firestore();
+    const id = "stale-reviewed-parent", data = record(problemId, { audit: attachedReceipt() });
+    await seedPublicationFixture(env, doc(db, "proposals", id), data);
+    await env.withSecurityRulesDisabled(ctx => rawUpdateDoc(doc(ctx.firestore(), "problems", problemId), {
+      title: "Material terms changed after the child was attested", audit: REVIEWED_PARENT,
+    }));
+    const batch = writeBatch(db);
+    batch.set(doc(db, "proposals", id), data);
+    batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId: id });
+    await pairProposalLock(batch, db, problemId, id);
+    await assertFails(batch.commit());
+  });
+  it("refuses new attached drafts pointing to another member's private or moderated parent", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    for (const extra of [{ status: "draft" }, { status: "moderated_removed" },
+      { status: "submitted", moderationStatus: "hidden" }, { status: "open", moderationStatus: "removed" }]) {
+      const problemId = await parent(extra);
+      await assertFails(setDoc(doc(db, "proposals", `private-parent-draft-${serial}`), {
+        researcherId: AUTHOR, problemId, status: "draft", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }));
+    }
+    await assertFails(setDoc(doc(db, "proposals", "missing-parent-draft"), {
+      researcherId: AUTHOR, problemId: "missing-private-parent", status: "draft", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it("preserves owner and administrator draft workflows and all readable parent statuses", async () => {
+    for (const [uid, extra] of [[AUTHOR, { ownerId: AUTHOR, status: "draft" }], [ADMIN, { status: "draft" }],
+      ...["submitted", "open", "cancelled", "expired"].map(status => [AUTHOR, { status }])]) {
+      const problemId = await parent(extra);
+      const db = env.authenticatedContext(uid).firestore();
+      const proposalId = `readable-parent-draft-${serial}`;
+      await assertSucceeds(setDoc(doc(db, "proposals", proposalId), {
+        researcherId: uid, problemId, status: "draft", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }));
+      const privateParent = await parent({ status: "draft" });
+      await assertFails(updateDoc(doc(db, "proposals", proposalId), { problemId: privateParent, updatedAt: serverTimestamp() }));
+    }
+  });
+
+  it("saves a complete attached draft with maximum text, AI metadata and two PDFs within the expression budget", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    for (const extra of [{ status: "submitted" }, { status: "draft", ownerId: AUTHOR }]) {
+      const problemId = await parent(extra);
+      const data = record(problemId, {
+        status: "draft", opportunityType: "open-funding", aiAssisted: true, title: "t".repeat(160), category: "c".repeat(80),
+        ...Object.fromEntries(["summary", "methodology", "suitability", "expectedOutcomes", "successCriteria", "timeline",
+          "milestones", "team", "proposedProblem", "relevance", "thesisFit"].map(field => [field, "x".repeat(4000)])),
+        fundingPlan: { tranchePercentages: "5".repeat(80), reviewDays: "7".repeat(40), funderVoting: true },
+        attachments: ["maxfile1", "maxfile2"].map(id => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })),
+      });
+      delete data.postingOwnerId;
+      const ref = doc(db, "proposals", `max-parent-draft-${serial}`);
+      await assertSucceeds(setDoc(ref, data));
+      const { createdAt, ...edited } = data;
+      await assertSucceeds(updateDoc(ref, { ...edited, summary: "y".repeat(4000), updatedAt: serverTimestamp() }));
+    }
+  });
+
   it("refuses custom escrow splits on creates and draft promotions even with an existing exact publication proof", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     for (const trancheBps of [[10000], [4000, 6000], [2000, 3000, 5000]]) {
@@ -70,6 +186,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
         if (promoteDraft) batch.update(ref, patch);
         else batch.set(ref, patch);
         batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+        await pairProposalLock(batch, db, problemId, proposalId);
         await assertFails(batch.commit());
       }
     }
@@ -127,6 +244,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
     const batch = writeBatch(db);
     batch.update(doc(db, "proposals", "escrow-plan-draft"), patch);
     batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "escrow-plan-draft" });
+    await pairProposalLock(batch, db, id, "escrow-plan-draft");
     await assertSucceeds(batch.commit());
   });
 
@@ -142,6 +260,78 @@ describe("QCDAO-59/60 submitted proposals", () => {
       updatedAt: serverTimestamp(),
     }));
   });
+
+  for (const versioned of [false, true]) for (const mode of ["create", "draft"]) {
+    it(`publishes ${mode} with a ${versioned ? "ten-field digest-v1" : "nine-field legacy"} receipt and two PDFs within the expression budget`, async () => {
+      const problemId = await parent();
+      const db = env.authenticatedContext(AUTHOR).firestore();
+      const proposalId = `bounded-receipt-${versioned}-${mode}`;
+      const data = record(problemId, {
+        aiAssisted: true,
+        fundingTerms: { token: `0x${"c".repeat(40)}`, target: "1500000000", funderVoting: true,
+          trancheBps: [5000, 5000], reviewWindows: [604800, 2592000], milestoneHashes: [ATTACHMENT_DIGEST, ATTACHMENT_DIGEST] },
+        attachments: ["receipt1", "receipt2"].map(id => ({ id, name: "support.pdf", contentType: "application/pdf", size: 200, sha256: ATTACHMENT_DIGEST })),
+        audit: attachedReceipt(versioned ? { digestVersion: 1 } : {}),
+      });
+      if (mode === "create") {
+        await assertSucceeds(submit(db, proposalId, data));
+      } else {
+        const reference = doc(db, "proposals", proposalId);
+        const { audit, fundingTerms, postingOwnerId, ...draft } = data;
+        await assertSucceeds(setDoc(reference, { ...draft, status: "draft" }));
+        const patch = { status: "submitted", audit, fundingTerms, postingOwnerId, updatedAt: serverTimestamp() };
+        await seedPublicationFixture(env, reference, patch, true);
+        const batch = writeBatch(db);
+        batch.update(reference, patch);
+        batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+        await pairProposalLock(batch, db, problemId, proposalId);
+        await assertSucceeds(batch.commit());
+      }
+      const reference = doc(db, "proposals", proposalId);
+      await assertSucceeds(rawUpdateDoc(reference, { "audit.status": "failed", "audit.lastError": "Retry confirmation", updatedAt: serverTimestamp() }));
+      await assertSucceeds(rawUpdateDoc(reference, { "audit.status": "pending", "audit.lastError": "", updatedAt: serverTimestamp() }));
+    });
+  }
+
+  it("rejects arbitrary tenth receipt fields on attached drafts and attested submissions", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    for (const status of ["draft", "submitted"]) {
+      const problemId = await parent();
+      const proposalId = `unknown-receipt-create-${status}`;
+      const data = record(problemId, { status, audit: attachedReceipt({ extraField: { padding: "x".repeat(64_000) } }) });
+      if (status === "draft") {
+        delete data.postingOwnerId;
+        const reference = doc(db, "proposals", proposalId);
+        await assertFails(setDoc(reference, data));
+        await assertSucceeds(setDoc(reference, { ...data, audit: attachedReceipt() }));
+        await assertFails(rawUpdateDoc(reference, {
+          "audit.extraField": { padding: "x".repeat(64_000) }, updatedAt: serverTimestamp(),
+        }));
+      } else await assertFails(submit(db, proposalId, data));
+    }
+  });
+
+  it("rejects an unknown tenth field or malformed digest version added after publication", async () => {
+    const db = env.authenticatedContext(AUTHOR).firestore();
+    const problemId = await parent();
+    const proposalId = "unknown-receipt-pending-update";
+    await assertSucceeds(submit(db, proposalId, record(problemId, { audit: attachedReceipt() })));
+    const reference = doc(db, "proposals", proposalId);
+    const original = (await getDoc(reference)).data().audit;
+    for (const patch of [
+      { "audit.extraField": { padding: "x".repeat(64_000) } },
+      { audit: attachedReceipt({ extraField: { padding: "x".repeat(64_000) } }) },
+      { "audit.digestVersion": { padding: "x".repeat(64_000) } },
+      { "audit.digestVersion": 2 },
+      { "audit.digestVersion": "1" },
+    ]) {
+      await assertFails(rawUpdateDoc(reference, { ...patch, updatedAt: serverTimestamp() }));
+      assert.deepEqual((await getDoc(reference)).data().audit, original);
+    }
+    await assertSucceeds(rawUpdateDoc(reference, { "audit.digestVersion": 1, updatedAt: serverTimestamp() }));
+    assert.equal(Object.keys((await getDoc(reference)).data().audit).length, 10);
+  });
+
   it("[QCDAO-57] corrects a submitted proposal the way updateProposal writes it", async () => {
     const id = await parent();
     const db = env.authenticatedContext(AUTHOR).firestore();
@@ -296,6 +486,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
       const batch = writeBatch(db);
       batch.update(doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() });
       batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "proposal-draft-digest" });
+      await pairProposalLock(batch, db, id, "proposal-draft-digest");
       return batch.commit();
     };
     await assertFails(publish([attachment]));
@@ -417,6 +608,7 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     const batch = db.batch ? db.batch() : writeBatch(db);
     batch.update(doc(db, "proposals", "partial-draft"), correction(id));
     batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "partial-draft" });
+    await pairProposalLock(batch, db, id, "partial-draft");
     await assertSucceeds(batch.commit());
   });
 
@@ -497,11 +689,12 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
         // Use the real nonempty attested hash, then bypass fixture wrappers:
         // omitting the receipt must fail, and the author slot must stay absent.
         await seedPublicationFixture(env, ref, patch, promoteDraft);
-        const commit = (payload) => {
+        const commit = async (payload) => {
           const batch = writeBatch(db);
           if (promoteDraft) batch.update(ref, payload);
           else batch.set(ref, payload);
           batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+          await pairProposalLock(batch, db, problemId, proposalId);
           return batch.commit();
         };
         const { audit, ...withoutReceipt } = patch;

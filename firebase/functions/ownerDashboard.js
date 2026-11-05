@@ -132,10 +132,12 @@ export function summariseOwnerDashboard({
     let recommendationsTotal = 0;
     let fundedMinor = 0;
     let targetMinor = 0;
+    let feedbackTruncated = false;
     const outcomes = [];
 
     for (const row of rows) {
       const counts = feedback.get(row.id) ?? {};
+      feedbackTruncated ||= counts.feedbackTruncated === true;
       const qualifying = Number(counts.qualifying) || 0;
       const rowStatus = proposalWorkflowStatus(row, posting.matching);
       if (rowStatus === WORKFLOW_STATUS.ACCEPTED) {
@@ -242,6 +244,7 @@ export function summariseOwnerDashboard({
       selectableSolutions: solutions.selectable.length,
       awaitingFeedback: solutions.open.length - solutions.withFeedback.length,
       qualifyingRecommendations: recommendationsTotal,
+      feedbackTruncated,
       recommendationOutcomes: recommendationCounts(outcomes),
       recommendations,
       // Sum across the posting's open solutions, so the bar answers "how close
@@ -289,7 +292,7 @@ export function summariseOwnerDashboard({
       blockedPostings: new Set(blockers.map((row) => row.postingId)).size,
       acceptedSolutions: accepted.length,
     },
-    truncated,
+    truncated: { ...truncated, feedback: postings.some((posting) => posting.feedbackTruncated) },
     generatedAt: new Date(now).toISOString(),
   };
 }

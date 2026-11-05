@@ -3,13 +3,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const live = vi.hoisted(() => ({ options: null }));
 vi.mock("../../src/hooks/useLiveActivity.js", () => ({ useLiveActivity: options => { live.options = options; } }));
-const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(),
+const mocks = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), sync: vi.fn(), confirm: vi.fn(), release: vi.fn(),
   user: { id: `0x${"a".repeat(40)}` }, account: { address: `0x${"a".repeat(40)}`, isConnected: true, chainId: 421614 } }));
 vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("../../src/context/WalletContext.jsx", () => ({ useWallet: () => mocks.account }));
 vi.mock("../../src/lib/independentEscrow.js", async importOriginal => ({ ...await importOriginal(),
   getIndependentFundingState: (...args) => mocks.read(...args), writeIndependentFundingAction: (...args) => mocks.write(...args),
-  syncIndependentFunding: (...args) => mocks.sync(...args) }));
+  syncIndependentFunding: (...args) => mocks.sync(...args), releaseIndependentFundingCompletion: (...args) => mocks.release(...args) }));
 vi.mock("../../src/lib/escrow.js", async importOriginal => ({ ...await importOriginal(), confirmEscrowTransaction: (...args) => mocks.confirm(...args) }));
 import { IndependentFundingPanel, IndependentFundingView } from "../../src/components/IndependentFundingPanel.jsx";
 import { formatInstant } from "../../src/lib/datetime.js";
@@ -145,7 +145,7 @@ it("explains weighted majority completion and binds voting to the displayed evid
     evidence: { hash, summary: "Delivered prototype", url: "https://example.com/prototype" }, wallet: {}, actions: { vote: true } } });
   render(<IndependentFundingView {...p} />);
   expect(screen.getByRole("link", { name: "Open delivery evidence" }).href).toBe("https://example.com/prototype");
-  expect(screen.getByText(/yes vote that takes approval above 50% releases/)).toBeTruthy();
+  expect(screen.getByText(/an administrator reviews the evidence and releases the final payment/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Vote yes for completion" }));
   expect(p.onAction).toHaveBeenCalledWith("vote", { evidenceHash: hash, approve: true });
   expect(screen.queryByRole("button", { name: "Release final 50%" })).toBeNull();
@@ -325,4 +325,28 @@ it("keeps controls mounted and enabled through a passive refresh, then confirms 
   await act(async () => { finish({ ...props().snapshot, actions: { deposit: true, claimRefund: true } }); });
   expect(await screen.findByText(/Refund claimed/)).toBeTruthy();
   expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ action: "claimRefund" }));
+});
+
+it("tells funders the majority is waiting on an administrator and never offers them the release", () => {
+  const p = props({ snapshot: { exists: true, configured: true, summary: { ...summary, state: "Accepted", totalDeposited: "2000000",
+    totalReleased: "1000000", outstandingBalance: "1000000", yesWeight: "1200000", completionDeadline: "2002592000", completionApproved: true },
+  wallet: { deposited: "1000000", claimable: "0", hasVoted: true }, actions: {} } });
+  render(<IndependentFundingView {...p} />);
+  expect(screen.getByText(/An administrator reviews it and releases the final 50%/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Release final 50%" })).toBeNull();
+});
+
+it("lets an administrator release the approved final payment through the platform signer, not a wallet write", async () => {
+  const approved = { ...props().snapshot, summary: { ...summary, state: "Accepted", totalDeposited: "2000000", totalReleased: "1000000",
+    outstandingBalance: "1000000", yesWeight: "1200000", completionDeadline: "2002592000", completionApproved: true },
+  wallet: { deposited: "0", claimable: "0" }, actions: { releaseCompletion: true } };
+  mocks.read.mockResolvedValue(approved);
+  mocks.release.mockResolvedValue({ status: "pending", transactionHash: `0x${"7".repeat(64)}`, message: "Platform transaction submitted; confirmation will continue in the background." });
+  render(<IndependentFundingPanel proposal={{ id: "admin-release" }} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Release final 50%" }));
+  await screen.findByText(/Platform transaction submitted/);
+  expect(mocks.release).toHaveBeenCalledWith({ proposalId: "admin-release", expectedEvidenceVersion: approved.summary.evidenceVersion, expectedEvidenceHash: approved.summary.evidenceHash });
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect(mocks.sync).not.toHaveBeenCalled();
+  expect(mocks.read).toHaveBeenCalledTimes(2); // initial load, then the refresh after the request
 });

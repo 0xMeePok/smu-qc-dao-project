@@ -31,7 +31,7 @@ contract IndependentGuardToken is ERC20 {
         calls[2] = abi.encodeCall(IndependentFundingEscrow.declineFunding, (bytes32(0)));
         calls[3] = abi.encodeCall(IndependentFundingEscrow.submitEvidence, (bytes32(0)));
         calls[4] = abi.encodeCall(IndependentFundingEscrow.voteCompletion, (0, bytes32(0), true));
-        calls[5] = abi.encodeCall(IndependentFundingEscrow.releaseCompletion, ());
+        calls[5] = abi.encodeCall(IndependentFundingEscrow.releaseCompletion, (0, bytes32(0)));
         calls[6] = abi.encodeCall(IndependentFundingEscrow.adminCancel, (bytes32(0)));
         calls[7] = abi.encodeCall(IndependentFundingEscrow.expire, ());
         calls[8] = abi.encodeCall(IndependentFundingEscrow.claimRefund, ());

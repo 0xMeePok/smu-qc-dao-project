@@ -11,10 +11,14 @@ vi.mock("../../src/lib/openFunding.js", () => ({ getOpenFundingSummary: (...args
   writeOpenFundingAction: (...args) => mocks.write(...args), syncOpenFunding: (...args) => mocks.sync(...args), openFundingSupported: () => mocks.supported }));
 vi.mock("../../src/lib/escrow.js", () => ({ confirmEscrowTransaction: (...args) => mocks.confirm(...args),
   createWalletEscrowAdapters: () => ({ readContract: (...args) => mocks.readContract(...args) }), escrowErrorMessage: error => error.message }));
-import { OpenFundingPanel, OpenFundingView } from "../../src/components/OpenFundingPanel.jsx";
+vi.mock("../../../firebase/functions/proposalAuditPayload.js", () => ({ prepareStoredProposal: record => record.reviewedProposal }));
+import { OpenFundingPanel as RawPanel, OpenFundingView as RawView } from "../../src/components/OpenFundingPanel.jsx";
 import { ACTION_ITEMS_KEY } from "../../src/lib/proposalQueues.js";
 const account = `0x${"a".repeat(40)}`, hash = `0x${"1".repeat(64)}`;
-const proposal = { proposalId: "solution", title: "Quantum solution", amountBaseUnits: "50000000000", status: "none", canSelect: true };
+const proposal = { proposalId: "solution", title: "Quantum solution", amountBaseUnits: "50000000000", status: "none", canSelect: true,
+  reviewedProposal: { entityId: hash, revisionCount: "1", proposalHash: `0x${"2".repeat(64)}`, solutionHash: `0x${"3".repeat(64)}` } };
+const OpenFundingPanel = props => <RawPanel reviewedProposalRecord={{ reviewedProposal: proposal.reviewedProposal }} {...props} />;
+const OpenFundingView = props => <RawView reviewedProposal={proposal.reviewedProposal} {...props} />;
 const model = (extra = {}) => ({ supported: true, chainId: 421614, poolAddress: `0x${"b".repeat(40)}`, tokenAddress: `0x${"c".repeat(40)}`,
   tokenDecimals: 6, tokenSymbol: "USDC", totalDeposited: "100000000000", totalAllocated: "0", totalReserved: "0", available: "100000000000",
   canDeposit: true, canSelect: true, selections: [proposal], ...extra });
@@ -31,6 +35,20 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("open funding grant workflow UI", () => {
+  it("does not offer a refreshed revision while the proposal detail still displays an older record", async () => {
+    mocks.read.mockResolvedValue(model({ selections: [{ ...proposal, reviewedProposal: { ...proposal.reviewedProposal,
+      proposalHash: `0x${"4".repeat(64)}`, revisionCount: "2" } }] }));
+    render(<RawPanel problemId="grant" proposalId="solution" reviewedProposalRecord={{ reviewedProposal: proposal.reviewedProposal }} />);
+    await screen.findByText(/changed since you opened it/);
+    expect(screen.queryByRole("button", { name: /Offer .* grant/ })).toBeNull();
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it("requires opening the full proposal before selecting from the posting overview", async () => {
+    const navigate = vi.fn(); render(<RawPanel problemId="grant" onNavigate={navigate} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review proposal to offer grant" }));
+    expect(navigate).toHaveBeenCalledWith("proposal/solution?tab=funding");
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
   it.each([false, true])("refreshes an active action count after grant acceptance confirmation (recovery=%s)", async recovery => {
     let total = 1;
     mocks.read.mockResolvedValue(model({ canDeposit: false, selections: [{ ...proposal, status: "pending", canAccept: true }] }));
@@ -55,7 +73,7 @@ describe("open funding grant workflow UI", () => {
   it("routes grant selection through the grant API with a proposal reference", async () => {
     render(<OpenFundingPanel problemId="grant" />);
     fireEvent.click(await screen.findByRole("button", { name: "Select for funding" }));
-    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account })));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account, reviewedProposal: proposal.reviewedProposal })));
     expect(await screen.findByText("Offer recorded. The researcher has seven days to accept.")).toBeTruthy();
   });
   it("puts this proposal's amount-specific grant offer before the shared-pool top up", async () => {
@@ -67,7 +85,7 @@ describe("open funding grant workflow UI", () => {
     expect(offer.compareDocumentPosition(topUp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText(/The researcher must accept before it moves into this proposal’s escrow/)).toBeTruthy();
     fireEvent.click(offer);
-    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account })));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account, reviewedProposal: proposal.reviewedProposal })));
     expect(mocks.write).toHaveBeenCalledTimes(1);
     await screen.findByText("Offer recorded. The researcher has seven days to accept.");
   });

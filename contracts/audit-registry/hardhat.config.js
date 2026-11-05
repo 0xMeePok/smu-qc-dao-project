@@ -1,3 +1,6 @@
+import { manageDependencies } from "../../firebase/functions/securityDependencies/manage.mjs";
+import { fileURLToPath } from "node:url";
+await manageDependencies([fileURLToPath(new URL("./", import.meta.url))], { verify: true, production: true });
 import hardhatEthers from "@nomicfoundation/hardhat-ethers";
 import hardhatEthersChaiMatchers from "@nomicfoundation/hardhat-ethers-chai-matchers";
 import hardhatMocha from "@nomicfoundation/hardhat-mocha";

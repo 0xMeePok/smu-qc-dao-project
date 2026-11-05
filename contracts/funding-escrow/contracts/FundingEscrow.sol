@@ -50,6 +50,8 @@ contract FundingEscrow is ReentrancyGuard {
     error AlreadyVoted();
     error FunderMajorityRequired();
     error WorkflowInactive();
+    error ReviewedContextRequired();
+    error ReviewedContextChanged();
 
     uint256 public constant APPROVAL_WINDOW = 7 days;
     uint256 public constant MAX_REVIEW_WINDOW = 365 days;
@@ -165,6 +167,18 @@ contract FundingEscrow is ReentrancyGuard {
     }
 
     function deposit(uint256 amount) external nonReentrant {
+        // The amount-only selector is safe only once the registry is frozen.
+        if (totalDeposited == 0) revert ReviewedContextRequired();
+        _deposit(amount);
+    }
+
+    function depositReviewed(uint256 amount, bytes32 expectedContextDigest) external nonReentrant {
+        if (expectedContextDigest == bytes32(0)
+            || auditRegistry.fundingContextDigest(proposalId) != expectedContextDigest) revert ReviewedContextChanged();
+        _deposit(amount);
+    }
+
+    function _deposit(uint256 amount) private {
         if (openFundingPool != address(0)) revert AccessDenied();
         if (state != State.Open) revert InvalidState();
         if (block.timestamp >= expiresAt) revert WindowClosed();

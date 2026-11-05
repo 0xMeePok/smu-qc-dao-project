@@ -73,10 +73,11 @@ describe("proposal publication funding policy", () => {
 });
 
 describe("isPublishableProblem - business problem", () => {
-  it("accepts a complete posting with 0, 1 or 2 PDFs, with or without legacy 4-field entries", () => {
-    for (const attachments of [[], [pdf(0)], [pdf(0), pdf(1)], [without(pdf(0), "sha256")]]) {
+  it("accepts a complete posting with 0, 1 or 2 PDFs carrying digests", () => {
+    for (const attachments of [[], [pdf(0)], [pdf(0), pdf(1)]]) {
       assert.equal(isPublishableProblem(problem({ attachments }), ctx), true);
     }
+    assert.equal(isPublishableProblem(problem({ attachments: [without(pdf(0), "sha256")] }), ctx), false);
     assert.equal(isPublishableProblem(problem({ status: "open" }), ctx), true);
     assert.equal(isPublishableProblem(without(problem(), "attachments"), ctx), true);
   });

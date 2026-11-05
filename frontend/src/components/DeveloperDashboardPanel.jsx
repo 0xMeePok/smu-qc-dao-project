@@ -76,6 +76,7 @@ function RowShell({ row, onNavigate, children, meta }) {
         <small className="table-row-meta">
           Submitted {formatInstant(row.createdAt)} · {discussionCountLabel(row)}
         </small>
+        {row.feedbackTruncated && <p className="field-hint" role="status">Feedback counts are partial. Open the discussion for the full history.</p>}
         {meta}
         {row.escrow && <><FundingProgress summary={row.escrow} compact /><EscrowLifecycleBadge summary={row.escrow} compact /><EscrowMoneySummary summary={row.escrow} compact /><EscrowCustodyNotice summary={row.escrow} compact /></>}
         {row.escrowUnavailable && <p className="field-hint">Escrow progress and status need verification. Open funding to check current custody.</p>}
@@ -220,6 +221,7 @@ export function DeveloperDashboardPanel({ onNavigate }) {
 
       {!queue.isPending && !error && (
         <>
+          {queue.data?.feedbackTruncated && <p className="field-hint" role="status">Some discussions exceed this overview. Feedback totals below are partial.</p>}
           <div className="dashboard-stats-grid admin-activity-grid">
             <Stat label="Solutions submitted" value={groups.submitted.length} hint={`${groups.drafts.length} ${groups.drafts.length === 1 ? "draft" : "drafts"} saved below`} />
             <Stat

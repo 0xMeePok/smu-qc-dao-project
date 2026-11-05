@@ -83,11 +83,16 @@ contract OpenFundingPool is ReentrancyGuard {
         emit Deposited(postingId, owner, amount, totalDeposited);
     }
 
-    function selectProposal(bytes32 proposalId) external nonReentrant onlyOwner {
+    /// @notice Reserve funding for the exact proposal revision and content reviewed by the owner.
+    function selectProposal(
+        bytes32 proposalId, uint256 expectedRevisionCount, bytes32 expectedProposalHash, bytes32 expectedSolutionHash
+    ) external nonReentrant onlyOwner {
         AuditRegistry.Opportunity memory posting = registry.getOpportunity(postingId);
         if (posting.withdrawn || block.timestamp >= posting.expiresAt) revert WindowClosed();
         if (_offers[proposalId].state != OfferState.None) revert InvalidState();
         AuditRegistry.Proposal memory proposal = registry.getProposal(proposalId);
+        if (registry.revisionCount(proposalId) != expectedRevisionCount
+            || proposal.proposalHash != expectedProposalHash || proposal.solutionHash != expectedSolutionHash) revert InvalidState();
         address escrow = factory.escrowForProposal(proposalId);
         if (proposal.opportunityId != postingId || proposal.withdrawn || escrow == address(0)
             || !IEscrowAuditRegistry(address(registry)).isFundingActive(proposalId, escrow)) revert InvalidState();

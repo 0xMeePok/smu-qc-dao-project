@@ -19,7 +19,7 @@ export function registerOpenFundingFunctions({ db, client, config, requireMember
     try { return await service({ db, client, config, uid, problemId: request.data?.problemId,
       proposalId: request.data?.proposalId, action: request.data?.action, amountBaseUnits: request.data?.amountBaseUnits,
       tokenAddress: request.data?.tokenAddress, transactionHash: request.data?.transactionHash,
-      reason: request.data?.reason, reasonHash: request.data?.reasonHash }); }
+      reason: request.data?.reason, reasonHash: request.data?.reasonHash, reviewedProposal: request.data?.reviewedProposal }); }
     catch (error) {
       if (error instanceof HttpsError) throw error;
       throw new HttpsError("unavailable", "Confirmed funding information is temporarily unavailable. Try again shortly.");

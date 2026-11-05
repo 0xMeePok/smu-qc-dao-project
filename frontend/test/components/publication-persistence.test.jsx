@@ -19,6 +19,7 @@ import { createPosting, publishDraft } from "../../src/lib/postings.js";
 import { createFundingOpportunity, publishFundingDraft } from "../../src/lib/fundingOpportunities.js";
 import { buildProposalDocument, submitProposal } from "../../src/lib/proposals.js";
 import { PROPOSAL_FIELDS, PROBLEM_FRAMING_FIELDS } from "../../src/config/proposal.js";
+import { captureReviewedParentAudit } from "../../src/lib/reviewedParentAudit.js";
 const writers = [
   { name: "new funded problem", write: createPosting, draft: false },
   { name: "funded problem draft promotion", write: publishDraft, draft: true },
@@ -38,7 +39,17 @@ describe("proposal publication persists its attested receipt atomically", () => 
     it(`keeps receipt, content, and author slot together (open=${openFunding}, draft=${fromDraft})`, async () => {
       const researcherId = `0x${"b".repeat(40)}`;
       const posting = { id: "parent", ownerId: `0x${"c".repeat(40)}`, currency: "USDC", status: "submitted",
-        opportunityType: openFunding ? "open-funding" : "business-problem", expiresAt: new Date("2099-01-01") };
+        opportunityType: openFunding ? "open-funding" : "business-problem", amount: 5000, expiresAt: new Date("2099-01-01") };
+      // Derive the tuple from this exact document, using a deterministic chain.
+      const { prepareOpportunityCommit } = await import("../../src/lib/auditRegistry.js");
+      const { AUDIT_REGISTRY_CONFIG } = await import("../../src/config/auditRegistry.js");
+      const { postingAuditPayload, fundingOpportunityAuditPayload } = await import("../../../firebase/functions/opportunityAuditPayload.js");
+      const parent = prepareOpportunityCommit({ recordId: posting.id,
+        actor: AUDIT_REGISTRY_CONFIG.entityIdScheme === 2 ? posting.ownerId : undefined,
+        payload: openFunding ? fundingOpportunityAuditPayload(posting) : postingAuditPayload(posting), kind: openFunding ? 1 : 0, expiresAt: posting.expiresAt });
+      posting.reviewedParentAudit = await captureReviewedParentAudit(posting, { adapters: {
+        readContract: async ({ functionName }) => functionName === "opportunityRevisionCount" ? 1n : { contentHash: parent.contentHash },
+        writeContract: vi.fn(), waitForTransactionReceipt: vi.fn() } });
       mocks.parent = posting;
       const form = { ...Object.fromEntries([...PROPOSAL_FIELDS, ...PROBLEM_FRAMING_FIELDS].map(([key]) => [key, `${key} content`])), category: "quantum-annealing", amount: "1000" };
       const attachments = ["attachment01", "attachment02"].map((id) => ({ id, name: `${id}.pdf`, size: 10, contentType: "application/pdf", sha256: `0x${"1".repeat(64)}` }));
@@ -50,7 +61,9 @@ describe("proposal publication persists its attested receipt atomically", () => 
       expect(persisted.audit).toEqual(attested.audit);
       expect(persisted.attachments).toEqual(attested.attachments);
       expect(persisted.audit.status).toBe("pending");
+      expect(persisted.reviewedParentAudit).toEqual(posting.reviewedParentAudit);
       expect(mocks.set.mock.calls.some(([ref]) => ref.path === `problems/parent/proposalAuthors/${researcherId}`)).toBe(true);
+      expect(mocks.set.mock.calls.find(([ref]) => ref.path === "opportunityProposalLocks/parent")[1]).toMatchObject({ proposalId: "proposal1", researcherId });
       if (fromDraft) expect(persisted).not.toHaveProperty("createdAt");
     });
   }

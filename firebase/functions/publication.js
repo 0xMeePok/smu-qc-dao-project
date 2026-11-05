@@ -5,14 +5,39 @@ import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { getStorage } from "firebase-admin/storage";
 import { createHash } from "node:crypto";
 import { opportunityReceiptEvent } from "./auditReceipt.js";
+import { validReviewedParentAudit } from "./publicationValidation.js";
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+
+// A fresh child must refer to the exact parent document the author reviewed.
+// Existing publications retain their historical revision binding when repaired.
+export function requireReviewedParentPublication(record, { existingRecord, parent, registryConfig = registry } = {}) {
+  if (record.proposalKind === "independent" || (existingRecord && existingRecord.status !== "draft")) return;
+  const reviewed = record.reviewedParentAudit;
+  if (!validReviewedParentAudit(reviewed) || !parent
+      || reviewed.chainId !== registryConfig.chainId
+      || reviewed.contractAddress !== registryConfig.address.toLowerCase()) {
+    throw new Error("Review the current opportunity before publishing the proposal.");
+  }
+  const funding = parent.opportunityType === "open-funding";
+  const prepared = prepareOpportunityCommit({ recordId: record.problemId,
+    actor: registryConfig.entityIdScheme === 2 ? parent.ownerId : undefined,
+    payload: funding ? fundingOpportunityAuditPayload(parent) : postingAuditPayload(parent),
+    kind: funding ? 1 : 0, expiresAt: parent.expiresAt, hashScheme: parent.audit?.schemaVersion ?? 1 });
+  if (reviewed.entityId !== prepared.entityId || reviewed.contentHash !== prepared.contentHash) {
+    throw new Error("The opportunity changed since it was reviewed. Reload and review it before publishing.");
+  }
+}
 
 export async function verifyPublication({ scope, record, client, readAttachment }) {
   if (scope === "proposals") {
     return verifyMinedProposal(record, client, { readAttachment });
   }
   const openFunding = record.opportunityType === "open-funding";
+  if (record.audit?.digestVersion === 1 && (record.attachments ?? []).some(
+    item => !/^0x[0-9a-f]{64}$/.test(item.sha256 ?? ""))) {
+    throw new Error("A PDF digest is required for this publication.");
+  }
   const expected = prepareOpportunityCommit({ recordId: record.id,
     actor: registry.entityIdScheme === 2 ? record.ownerId : undefined,
     payload: openFunding ? fundingOpportunityAuditPayload(record) : postingAuditPayload(record),

@@ -163,6 +163,9 @@ try {
       methodology: "Hybrid simulation", suitability: "Matches the business problem", expectedOutcomes: "Working prototype",
       successCriteria: "Benchmark improvement", timeline: "Eight weeks", milestones: "Prototype and validation",
       team: "Local researcher", amount: 100000, currency: "USDC", status: "submitted", attachments: [] };
+    record.reviewedParentAudit = { chainId: config.chainId, contractAddress: lower(config.address),
+      entityId: parent.prepared.entityId, contentHash: parent.prepared.contentHash,
+      revisionIndex: 0, revisionDigest: parent.prepared.contentHash };
     record.fundingTerms = proposalFundingTerms({ form: { ...record, amount: String(record.amount), reviewDays: "3, 30", funderVoting: voting },
       currency: record.currency, config });
     const prepared = prepareStoredProposal(record, { registryConfig: config });
@@ -176,10 +179,11 @@ try {
     return item;
   };
   const deposit = async (item, signer, dollars) => {
-    const request = await prepareEscrowDeposit(await service(item, { uid: lower(signer.address) }));
+    const reviewedContextDigest = await registry.fundingContextDigest(item.prepared.entityId);
+    const request = await prepareEscrowDeposit(await service(item, { uid: lower(signer.address), reviewedContextDigest }));
     assert.equal(lower(request.escrowAddress), lower(await item.escrow.getAddress()));
     await confirm(token.connect(signer).approve(await item.escrow.getAddress(), units(dollars)));
-    const tx = await confirm(item.escrow.connect(signer).deposit(units(dollars)));
+    const tx = await confirm(item.escrow.connect(signer).depositReviewed(units(dollars), reviewedContextDigest));
     const result = await sync(item, { uid: lower(signer.address), transactionHash: tx.hash });
     assert.equal(result.reconciliation.status, "verified");
     return result;

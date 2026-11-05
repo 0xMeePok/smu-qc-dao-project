@@ -30,6 +30,10 @@ vi.mock("../../src/components/AttachmentUploader.jsx", () => ({ AttachmentUpload
   return <button type="button" onClick={() => onPendingChange(1)}>Upload {scope} PDF</button>;
 } }));
 vi.mock("../../src/pages/ProposalDetailPage.jsx", () => ({ default: ({ proposalId }) => <h1>Saved {proposalId}</h1> }));
+vi.mock("../../src/lib/reviewedParentAudit.js", () => ({
+  captureReviewedParentAudit: async posting => posting.currentParentAudit ?? ({ revisionIndex: 0, contentHash: "reviewed-parent" }),
+  assertReviewedParentAudit: async () => {},
+}));
 import CreateProposalPage from "../../src/pages/CreateProposalPage.jsx";
 beforeEach(() => { window.scrollTo = vi.fn(); Element.prototype.scrollIntoView = vi.fn(); mocks.posting = { id: "problem1", title: "Routing challenge", status: "submitted", expiresAt: new Date("2099-01-01"), currency: "USDC", amount: 5000 }; mocks.active = null; mocks.draft = null; mocks.record = null;
   mocks.submit.mockReset().mockResolvedValue({ id: "proposal1" });
@@ -51,6 +55,27 @@ const fill = (extra = []) => {
   toReview();
 };
 describe("proposal submission form", () => {
+  it("preserves a draft's saved parent until the author reviews and accepts the full changed terms", async () => {
+    const savedParent = { revisionIndex: 0, contentHash: "old-parent" };
+    const latestParent = { revisionIndex: 1, contentHash: "new-parent" };
+    mocks.posting = { ...mocks.posting, businessContext: "New material business context", currentParentAudit: latestParent };
+    mocks.draft = { id: "proposal1", status: "draft", reviewedParentAudit: savedParent,
+      ...Object.fromEntries(PROPOSAL_FIELDS.map(([key]) => [key, `${key} content`])), amount: 1000, category: "quantum-annealing" };
+    render(<CreateProposalPage postingId="problem1" onNavigate={vi.fn()} />);
+    await screen.findByRole("heading", { name: "Resume your draft" });
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+    await waitFor(() => expect(mocks.saveDraft).toHaveBeenCalled());
+    expect(mocks.saveDraft.mock.calls[0][0].posting.reviewedParentAudit).toEqual(savedParent);
+    toReview();
+    fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    expect(mocks.anchor).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(/Review current opportunity terms/));
+    expect(screen.getByText("New material business context")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Use this reviewed opportunity version" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign and submit proposal" }));
+    await screen.findByRole("heading", { name: "Saved proposal1" });
+    expect(mocks.submit.mock.calls[0][0].posting.reviewedParentAudit).toEqual(latestParent);
+  });
   it("blocks a new proposal on a historical parent before requesting a wallet signature", async () => {
     const message = "This record belongs to an earlier AuditRegistry deployment and is read-only. Its original verification remains available; create a new posting for the current funding workflow.";
     mocks.assertCurrent.mockRejectedValueOnce(new Error(message));

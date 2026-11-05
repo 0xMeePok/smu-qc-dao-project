@@ -1,4 +1,5 @@
 import { AggregateField, FieldPath } from "firebase-admin/firestore";
+import { EVALUATION_EXPIRY_MIGRATION } from "./evaluationExpiry.js";
 import {
   COUNTED_FUNDING_STATUSES,
   EXPIRY_REASONS,
@@ -95,6 +96,10 @@ function hasPendingProposal(db, problemId) {
 }
 
 async function hasUnacceptedEvaluation(db, problemId) {
+  const migration = await db.collection("maintenanceState").doc(EVALUATION_EXPIRY_MIGRATION).get();
+  if (snapshotData(migration).ready !== true) {
+    throw new Error("Evaluation expiry normalization is not ready; scheduled expiry is deferred.");
+  }
   let cursor = null;
   for (;;) {
     let page = db.collection("proposals")
@@ -106,8 +111,8 @@ async function hasUnacceptedEvaluation(db, problemId) {
     const { docs = [] } = await page.get();
     for (let index = 0; index < docs.length; index += EVALUATION_ID_CHUNK) {
       const ids = docs.slice(index, index + EVALUATION_ID_CHUNK).map((document) => document.id);
-      const { docs: evaluations = [] } = await db.collection("evaluations").where("proposalId", "in", ids).get();
-      if (evaluations.some((evaluation) => statusOf(snapshotData(evaluation)) !== "accepted")) return true;
+      if (await anyDocument(db.collection("evaluations").where("proposalId", "in", ids)
+        .where("expiryAccepted", "==", false))) return true;
     }
     if (docs.length < PROPOSAL_ID_PAGE_SIZE) return false;
     cursor = docs[docs.length - 1];

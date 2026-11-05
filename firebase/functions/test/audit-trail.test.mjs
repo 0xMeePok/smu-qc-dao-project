@@ -53,7 +53,7 @@ function memoryDb(initial) {
   return {
     records,
     collection: (name) => ({
-      doc: (id) => ({ get: async () => snapshot(`${name}/${id}`) }),
+      doc: (id) => ({ path: `${name}/${id}`, get: async () => snapshot(`${name}/${id}`) }),
       where: (field, op, value) => query(name).where(field, op, value),
       orderBy: (field, direction) => query(name).orderBy(field, direction),
     }),
@@ -240,20 +240,194 @@ describe("QCDAO-117 verified funding audit details", () => {
     assert.equal(malformed.funding.actorLabel, "Unavailable"); assert.equal(malformed.funding.counterpartyLabel, "Unavailable");
   });
 
-  it("uses existing readable context for actor roles without extra queries or hidden-author exposure", async () => {
+  it("uses content ACL context without profile queries or hidden-author exposure", async () => {
     const db = fixture(), collections = [], original = db.collection;
     db.records.set("proposals/hidden", { researcherId: funder, postingOwnerId: owner, problemId: "problem-1",
       status: "submitted", moderationStatus: "hidden", title: "Secret title", createdAt: at("2026-09-02T00:00:00Z") });
-    db.records.set("audits/hidden-release", fundingRow("TrancheReleased", { proposalId: "hidden", title: "Proposal", actor: funder, counterparty: funder }));
+    db.records.set("audits/hidden-release", fundingRow("TrancheReleased", { proposalId: "hidden", title: "Secret title", actor: funder, counterparty: funder }));
     db.collection = (name) => { collections.push(name); return original(name); };
     const result = await problemTrail(db, member, 0, { eventTypes: ["funding_status"] });
     const hidden = result.items.find((row) => row.id === "audit_hidden-release");
     assert.equal(hidden.funding.actorAddress, null); assert.equal(hidden.funding.counterpartyAddress, null);
     assert.equal(JSON.stringify(result).includes(funder), false); assert.equal(JSON.stringify(result).includes("Secret title"), false);
-    // Existing scope/source reads plus the existing missing-title lookup.
-    assert.equal(collections.length, 9);
+    assert.ok(collections.every(name => ["problems", "proposals", "matchingEvents", "comments", "moderationEvents", "audits"].includes(name)));
     const adminView = await problemTrail(db, admin, 1, { eventTypes: ["funding_status"] });
     assert.equal(adminView.items.find((row) => row.id === "audit_hidden-release").funding.actorAddress, funder);
+  });
+});
+
+describe("audit trail proposal title privacy", () => {
+  const currentTitle = "Current confidential design";
+  const savedTitle = "Earlier confidential design";
+  const withoutTitles = ({ description, entityLabel, ...event }) => event;
+
+  it("redacts saved and current titles without changing financial history for unreadable children", async () => {
+    for (const [status, moderationStatus, postingOwnerId, missing] of [
+      ["moderated_hidden", "hidden", ""],
+      ["moderated_removed", "removed", ""],
+      ["draft", "visible", owner],
+      ["submitted", "visible", owner, true],
+      ["submitted", "hidden", owner], // Legacy documents may retain a sponsor ACL.
+      ["submitted", "removed", owner],
+    ]) {
+      const db = fixture();
+      const proposal = { ...db.records.get("proposals/proposal-1"), title: currentTitle, postingOwnerId: owner };
+      db.records.set("proposals/proposal-1", proposal);
+      const exact = ((1n << 256n) - 1n).toString();
+      db.records.set("audits/private-deposit", fundingRow("Deposit", {
+        title: savedTitle, amountBaseUnits: exact, tokenDecimals: 0, tokenSymbol: "WHOLE", blockNumber: 0,
+      }));
+      db.records.set("audits/private-refund", fundingRow("RefundClaimed", {
+        title: savedTitle, counterparty: funder, amountBaseUnits: "0",
+      }));
+      const filters = { eventTypes: ["funding_status"], verification: "anchored",
+        startDate: "2026-09-20", endDate: "2026-09-20" };
+      const before = await problemTrail(db, member, 0, filters);
+      if (missing) db.records.delete("proposals/proposal-1");
+      else db.records.set("proposals/proposal-1", { ...proposal, status, moderationStatus, postingOwnerId });
+      for (const uid of [member, owner]) {
+        const result = await problemTrail(db, uid, 0, filters);
+        const serialized = JSON.stringify(result);
+        assert.equal(serialized.includes(savedTitle), false);
+        assert.equal(serialized.includes(currentTitle), false);
+        assert.equal(serialized.includes(funder), false);
+        assert.deepEqual(result.items.map(withoutTitles), before.items.map(withoutTitles));
+        assert.equal(result.count, before.count);
+        assert.equal(result.nextCursor, before.nextCursor);
+        assert.equal(result.truncated, before.truncated);
+        for (const event of result.items) {
+          assert.equal(event.entityLabel, "Proposal");
+          assert.match(event.description, /for “a proposal”/);
+        }
+        for (const related of [savedTitle, currentTitle]) {
+          const filtered = await problemTrail(db, uid, 0, { ...filters, related });
+          assert.deepEqual(filtered.items, []);
+          assert.equal(filtered.count, 0);
+          assert.equal(JSON.stringify(filtered).includes(related), false);
+        }
+        const byId = await problemTrail(db, uid, 0, { ...filters, related: "proposal-1" });
+        assert.deepEqual(byId, result);
+      }
+    }
+  });
+
+  it("keeps stale sponsor ACLs from exposing hidden submission and matching titles", async () => {
+    const db = fixture();
+    const proposal = db.records.get("proposals/proposal-1");
+    db.records.set("proposals/proposal-1", { ...proposal, title: currentTitle,
+      postingOwnerId: owner, moderationStatus: "hidden" });
+    db.records.set("audits/escrow-1", fundingRow("TrancheReleased", { title: savedTitle }));
+    for (const uid of [member, owner]) {
+      const result = await problemTrail(db, uid, 0);
+      const serialized = JSON.stringify(result);
+      assert.equal(serialized.includes(currentTitle), false);
+      assert.equal(serialized.includes(savedTitle), false);
+      assert.equal(result.items.some((event) => event.eventType === "proposal_submitted"), false);
+      assert.equal(result.items.find((event) => event.id === "match_selected").entityLabel, "Route medicines");
+      assert.ok(result.items.some((event) => event.id === "audit_escrow-1"));
+    }
+    await assert.rejects(() => readAuditTrail({ db, uid: owner, profile: profile(0),
+      input: { entityType: "proposal", entityId: "proposal-1" } }),
+    (error) => error.code === "permission-denied");
+  });
+
+  it("uses current authorized titles for members and authors while preserving administrator history", async () => {
+    const db = fixture();
+    const proposal = { ...db.records.get("proposals/proposal-1"), title: currentTitle, postingOwnerId: owner };
+    db.records.set("proposals/proposal-1", proposal);
+    db.records.set("audits/escrow-1", fundingRow("Deposit", { title: savedTitle }));
+    const inputs = [{ entityType: "problem", entityId: "problem-1" },
+      { entityType: "proposal", entityId: "proposal-1" }];
+    for (const input of inputs) {
+      for (const uid of [member, owner, creator]) {
+        const result = await readAuditTrail({ db, uid, profile: profile(0), input });
+        assert.equal(JSON.stringify(result).includes(savedTitle), false);
+        const event = result.items.find((item) => item.id === "audit_escrow-1");
+        assert.equal(event.entityLabel, currentTitle);
+        assert.ok(event.description.includes(currentTitle));
+      }
+    }
+    const renamed = await problemTrail(db, member, 0, { related: savedTitle });
+    assert.equal(renamed.count, 0);
+    const current = await problemTrail(db, member, 0, { related: currentTitle, eventTypes: ["funding_status"] });
+    assert.ok(current.items.some((event) => event.id === "audit_escrow-1"));
+
+    db.records.set("proposals/proposal-1", { ...proposal, moderationStatus: "hidden", postingOwnerId: "" });
+    for (const input of inputs) {
+      const authorView = await readAuditTrail({ db, uid: creator, profile: profile(0), input });
+      assert.equal(JSON.stringify(authorView).includes(savedTitle), false);
+      assert.ok(JSON.stringify(authorView).includes(currentTitle));
+    }
+    for (const input of [...inputs, {}]) {
+      const adminView = await readAuditTrail({ db, uid: admin, profile: profile(1), input });
+      const event = adminView.items.find((item) => item.id === "audit_escrow-1");
+      assert.ok(event.description.includes(savedTitle));
+      assert.equal(event.entityLabel, currentTitle);
+      assert.equal(event.funding.actorAddress, funder);
+    }
+    db.records.set("proposals/proposal-1", { ...proposal, status: "draft" });
+    for (const uid of [creator, admin]) {
+      const result = await problemTrail(db, uid, uid === admin ? 1 : 0);
+      assert.equal(JSON.stringify(result).includes(currentTitle), false);
+      assert.equal(result.items.some((event) => event.eventType === "proposal_submitted"), false);
+      assert.equal(JSON.stringify(result).includes(savedTitle), uid === admin);
+    }
+  });
+
+  it("hydrates targetId-only escrow rows through both supported document-read paths", async () => {
+    for (const batched of [false, true]) {
+      const db = fixture();
+      if (batched) db.getAll = (...refs) => Promise.all(refs.map((ref) => ref.get()));
+      db.records.set("proposals/legacy-child", { researcherId: creator, problemId: "problem-1",
+        status: "submitted", title: currentTitle, createdAt: at("2026-09-01T00:00:00Z") });
+      db.records.set("audits/legacy", fundingRow("Deposit", {
+        proposalId: undefined, targetId: "legacy-child", title: savedTitle,
+      }));
+      const filters = { startDate: "2026-09-20", endDate: "2026-09-20" };
+      const result = await problemTrail(db, member, 0, filters);
+      const event = result.items.find((item) => item.id === "audit_legacy");
+      assert.equal(event.proposalId, "legacy-child");
+      assert.equal(event.entityLabel, currentTitle);
+      assert.ok(event.description.includes(currentTitle));
+      assert.equal(JSON.stringify(result).includes(savedTitle), false);
+      db.records.delete("proposals/legacy-child");
+      const missing = await problemTrail(db, member, 0, filters);
+      assert.equal(JSON.stringify(missing).includes(savedTitle), false);
+      assert.equal(JSON.stringify(missing).includes(currentTitle), false);
+      assert.equal(missing.items.find((item) => item.id === "audit_legacy").entityLabel, "Proposal");
+      assert.deepEqual(missing.items.map(withoutTitles), result.items.map(withoutTitles));
+    }
+  });
+
+  it("hydrates every child from bounded sources while preserving financial events and pagination", async () => {
+    const db = memoryDb({ "problems/problem-1": { ownerId: owner, status: "open", title: "Route medicines" } });
+    const readIds = [], collection = db.collection;
+    db.collection = (name) => {
+      const source = collection(name);
+      return { ...source, doc: (id) => {
+        if (name === "proposals") readIds.push(id);
+        return source.doc(id);
+      } };
+    };
+    for (let index = 0; index < 41; index += 1) {
+      const id = `child-${index}`;
+      db.records.set(`proposals/${id}`, { researcherId: creator, problemId: "problem-1", status: "submitted",
+        title: `Current design ${index}`, createdAt: at("2026-09-01T00:00:00Z") });
+      db.records.set(`audits/history-${index}`, fundingRow("RefundClaimed", {
+        proposalId: undefined, targetId: id, title: `Saved secret ${index}`, counterparty: funder,
+      }));
+    }
+    const filters = { startDate: "2026-09-20", endDate: "2026-09-20", eventTypes: ["funding_status"] };
+    const first = await problemTrail(db, member, 0, filters);
+    assert.equal(new Set(readIds).size, 41);
+    const second = await problemTrail(db, member, 0, { ...filters, cursor: first.nextCursor });
+    assert.equal(first.count, 41); assert.equal(second.count, 41);
+    assert.equal(first.items.length, 25); assert.equal(second.items.length, 16);
+    const items = [...first.items, ...second.items];
+    assert.equal(new Set(items.map((event) => event.id)).size, 41);
+    assert.equal(JSON.stringify({ first, second }).includes("Saved secret"), false);
+    assert.ok(items.every(event => event.entityLabel.startsWith("Current design")));
+    assert.ok(items.every(event => event.funding.counterpartyAddress === null));
   });
 });
 
@@ -457,5 +631,50 @@ describe("QCDAO-96 and QCDAO-97 consolidated audit trail", () => {
     assert.equal(event.problemId, "problem-1");
     assert.match(event.description, /Ada Admin exported accepted postings/);
     assert.match(event.description, /outside the platform/);
+  });
+});
+
+
+describe("live child ACLs in parent audit recommendations", () => {
+  it("fails closed for hidden, draft, missing and private-parent children with author/admin exceptions", async () => {
+    for (const state of ["hidden", "draft", "missing", "private-parent"]) {
+      const db = fixture();
+      const child = db.records.get("proposals/proposal-1");
+      if (state === "missing") db.records.delete("proposals/proposal-1");
+      else db.records.set("proposals/proposal-1", { ...child,
+        ...(state === "hidden" ? { moderationStatus: "hidden" } : {}),
+        ...(state === "draft" ? { status: "draft" } : {}),
+        ...(state === "private-parent" ? { problemId: "draft-1", postingOwnerId: "" } : {}),
+      });
+      const comment = db.records.get("comments/comment-1");
+      db.records.set("comments/comment-1", { ...comment, authorId: funder });
+      const filters = { eventTypes: ["evaluator_recommendation"] };
+      assert.equal((await problemTrail(db, member, 0, filters)).count, 0, state);
+      assert.ok((await problemTrail(db, funder, 0, filters)).items.some(row => row.commentId === "comment-1"), state);
+      assert.ok((await problemTrail(db, admin, 1, filters)).items.some(row => row.commentId === "comment-1"), state);
+    }
+  });
+
+  it("authorizes children beyond forty and caches live proposal and parent reads", async () => {
+    const db = memoryDb({ "problems/problem-1": { ownerId: owner, status: "open", title: "Parent" } });
+    const counts = new Map(), collection = db.collection;
+    db.collection = name => {
+      const source = collection(name);
+      return { ...source, doc: id => {
+        const ref = source.doc(id), get = ref.get;
+        return { ...ref, get: async () => { counts.set(ref.path, (counts.get(ref.path) || 0) + 1); return get(); } };
+      } };
+    };
+    for (let index = 0; index < 55; index++) {
+      db.records.set(`proposals/child-${index}`, { problemId: "problem-1", researcherId: creator,
+        status: "submitted", moderationStatus: index === 54 ? "hidden" : "visible", title: `Design ${index}` });
+      db.records.set(`comments/recommendation-${index}`, { problemId: "problem-1", proposalId: `child-${index}`,
+        authorId: creator, recommendation: "recommend_with_revisions", moderationStatus: "visible", createdAt: at("2026-09-10T00:00:00Z") });
+    }
+    const result = await problemTrail(db, member, 0, { eventTypes: ["evaluator_recommendation"] });
+    assert.equal(result.count, 54);
+    assert.equal(counts.get("problems/problem-1"), 1);
+    assert.ok([...counts.values()].every(count => count === 1));
+    assert.equal(counts.size, 56);
   });
 });

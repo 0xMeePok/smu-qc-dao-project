@@ -96,6 +96,7 @@ Unless noted, callables require an onboarded, active member and enforce App Chec
 | `getIndependentFundingState` | callable | State of a listing's crowdfunding escrow |
 | `prepareIndependentFundingAction` | callable | Returns the transaction for a crowdfunding action |
 | `syncIndependentFunding` | callable | Reconciles a mined crowdfunding transaction |
+| `releaseIndependentFundingCompletion` | callable, administrators only | After the funder majority has approved the completion evidence, submits `releaseCompletion` from the platform signer through the shared outbox |
 
 ## Moderation
 

@@ -5,19 +5,29 @@ vi.mock("../../src/lib/firebase.js", () => ({ functions: {} }));
 vi.mock("../../src/lib/authFlow.js", () => ({ requireFirebase: () => {} }));
 vi.mock("../../src/lib/escrow.js", async importOriginal => ({ ...await importOriginal(), confirmEscrowTransaction: (...args) => mocks.confirm(...args) }));
 import { activateIndependentFunding, independentFundingConfigured, independentFundingError, independentFundingLocked, independentFundingStatus,
-  writeIndependentFundingAction } from "../../src/lib/independentEscrow.js";
+  writeIndependentFundingAction as writeIndependentFundingActionRaw } from "../../src/lib/independentEscrow.js";
 import { hashEscrowEvidence } from "../../src/lib/escrow.js";
+import { opportunityEntityId } from "../../../firebase/functions/auditCanonical.js";
+import independentConfig from "../../src/config/independentFunding.contract.json" with { type: "json" };
 
-const account = `0x${"a".repeat(40)}`, address = `0x${"b".repeat(40)}`, token = `0x${"c".repeat(40)}`;
+// The wallet signs only against the escrow the configured factory deployed for the listing,
+// and approves only the token that escrow holds, so the fixture mirrors those on-chain reads.
+const account = `0x${"a".repeat(40)}`, address = `0x${"b".repeat(40)}`, token = independentConfig.tokens.find(item => item.symbol === "USDT").address;
 const tx = `0x${"1".repeat(64)}`, evidenceHash = `0x${"2".repeat(64)}`;
+const listingId = opportunityEntityId("listing", { hashScheme: 2, actor: account });
+const writeIndependentFundingAction = options => writeIndependentFundingActionRaw({
+  proposal: { id: options.proposalId, researcherId: account }, ...options,
+});
 const abi = [{ type: "function", name: "deposit", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
   { type: "function", name: "voteCompletion", stateMutability: "nonpayable", inputs: [
     { name: "version", type: "uint256" }, { name: "evidenceHash", type: "bytes32" }, { name: "approve", type: "bool" }], outputs: [] },
   { type: "function", name: "submitEvidence", stateMutability: "nonpayable", inputs: [{ name: "evidenceHash", type: "bytes32" }], outputs: [] }];
 const prepared = (functionName = "deposit", args = ["2000000"]) => ({ chainId: 421614, address, abi, functionName, args,
   tokenAddress: token, tokenDecimals: 6, tokenSymbol: "USDT", amountBaseUnits: "2000000" });
-const adapters = (allowance = 0n, balance = 2000000n) => ({ writeContract: vi.fn().mockResolvedValue(tx),
-  readContract: vi.fn(async ({ functionName }) => functionName === "allowance" ? allowance : balance) });
+const chainReads = { listingId, escrowForListing: address, token, tokenDecimals: 6n };
+const adapters = (allowance = 0n, balance = 2000000n, reads = {}) => ({ writeContract: vi.fn().mockResolvedValue(tx),
+  readContract: vi.fn(async ({ functionName }) => functionName === "allowance" ? allowance
+    : Object.hasOwn(chainReads, functionName) ? { ...chainReads, ...reads }[functionName] : balance) });
 beforeEach(() => { vi.clearAllMocks(); mocks.confirm.mockResolvedValue({ transactionHash: tx, receipt: { status: "success" } }); });
 
 describe("independent crowdfunding wallet actions", () => {
@@ -29,6 +39,45 @@ describe("independent crowdfunding wallet actions", () => {
       ["approve", [address, 0n]], ["approve", [address, 2000000n]], ["deposit", [2000000n]],
     ]);
     expect(mocks.confirm).toHaveBeenCalledTimes(3);
+  });
+  it("refuses to sign against an escrow the configured factory did not deploy for the listing", async () => {
+    const stranger = `0x${"e".repeat(40)}`;
+    for (const reads of [{ escrowForListing: stranger }, { escrowForListing: `0x${"0".repeat(40)}` }]) {
+      const wallet = adapters(0n, 2000000n, reads);
+      await expect(writeIndependentFundingAction({ proposalId: "listing", action: "deposit", account, amount: "2",
+        adapters: wallet, prepare: async () => prepared() })).rejects.toThrow(/does not match the configured deployment/);
+      expect(wallet.writeContract).not.toHaveBeenCalled();
+      expect(wallet.readContract.mock.calls.some(([request]) => request.functionName === "escrowForListing"
+        && request.address.toLowerCase() === independentConfig.factoryAddress.toLowerCase() && request.args[0] === listingId)).toBe(true);
+    }
+    // The factory address and the contract function come from the bundle, never from the callable.
+    const wallet = adapters();
+    await expect(writeIndependentFundingAction({ proposalId: "listing", action: "deposit", account, amount: "2",
+      adapters: wallet, prepare: async () => ({ ...prepared(), functionName: "acceptFunding", args: [] }) })).rejects.toThrow(/does not match/);
+    await expect(writeIndependentFundingAction({ proposalId: "listing", action: "activate", account,
+      adapters: wallet, prepare: async () => ({ ...prepared("createEscrow", [listingId, token, "2000000", 30, evidenceHash]), address: `0x${"e".repeat(40)}` }) })).rejects.toThrow(/does not match/);
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+  });
+  it("binds a deposit to this listing and its researcher, even if the response names another canonical escrow", async () => {
+    for (const proposal of [{ id: "another-listing", researcherId: account },
+      { id: "listing", researcherId: `0x${"e".repeat(40)}` }]) {
+      const wallet = adapters();
+      await expect(writeIndependentFundingAction({ proposalId: "listing", proposal, action: "deposit", account,
+        amount: "2", adapters: wallet, prepare: async () => prepared() })).rejects.toThrow(/does not match/);
+      expect(wallet.writeContract).not.toHaveBeenCalled();
+    }
+  });
+  it("approves only the token the canonical escrow holds, from the bundled allow-list", async () => {
+    for (const reads of [{ token: `0x${"c".repeat(40)}` }, { tokenDecimals: 18n }]) {
+      const wallet = adapters(0n, 2000000n, reads);
+      await expect(writeIndependentFundingAction({ proposalId: "listing", action: "deposit", account, amount: "2",
+        adapters: wallet, prepare: async () => prepared() })).rejects.toThrow(/token or amount changed/);
+      expect(wallet.writeContract).not.toHaveBeenCalled();
+    }
+    const wallet = adapters();
+    await expect(writeIndependentFundingAction({ proposalId: "listing", action: "deposit", account, amount: "2",
+      adapters: wallet, prepare: async () => ({ ...prepared(), tokenAddress: `0x${"c".repeat(40)}` }) })).rejects.toThrow(/token or amount changed/);
+    expect(wallet.writeContract).not.toHaveBeenCalled();
   });
   it("skips token approval when an adequate allowance exists and rejects insufficient balances", async () => {
     const wallet = adapters(2000000n);
@@ -73,7 +122,7 @@ describe("independent crowdfunding wallet actions", () => {
   });
   it("sends the readable decline reason for the backend to hash with the independent domain", async () => {
     const reason = "The delivery scope has changed", wallet = adapters();
-    const prepare = vi.fn().mockResolvedValue(prepared("submitEvidence", [evidenceHash]));
+    const prepare = vi.fn().mockResolvedValue(prepared("declineFunding", [evidenceHash]));
     await writeIndependentFundingAction({ proposalId: "listing", action: "decline", account, reason: `  ${reason}  `,
       adapters: wallet, prepare });
     expect(prepare).toHaveBeenCalledWith({ proposalId: "listing", action: "decline", reason });
@@ -89,7 +138,7 @@ describe("independent crowdfunding wallet actions", () => {
   it("keeps a submitted hash on a confirmation outage instead of sending another wallet transaction", async () => {
     const wallet = adapters(); mocks.confirm.mockRejectedValue(Object.assign(new Error("Confirmation pending"), { transactionHash: tx }));
     await expect(writeIndependentFundingAction({ proposalId: "listing", action: "accept", account, adapters: wallet,
-      prepare: async () => prepared("submitEvidence", [evidenceHash]) })).rejects.toMatchObject({ transactionHash: tx, action: "accept" });
+      prepare: async () => prepared("acceptFunding", []) })).rejects.toMatchObject({ transactionHash: tx, action: "accept" });
     expect(wallet.writeContract).toHaveBeenCalledOnce();
   });
   it.each([["resetAllowance", 1n], ["approve", 0n], ["deposit", 2000000n]])("keeps a sponsored %s failure attached to its actual step", async (action, allowance) => {
@@ -119,7 +168,7 @@ describe("independent crowdfunding wallet actions", () => {
   });
   it("preserves the activation hash if indexing fails after the factory transaction confirms", async () => {
     mocks.call.mockImplementation(async name => {
-      if (name === "prepareIndependentFundingAction") return { data: prepared("submitEvidence", [evidenceHash]) };
+      if (name === "prepareIndependentFundingAction") return { data: { ...prepared("createEscrow", [listingId, token, "2000000", 30, evidenceHash]), address: independentConfig.factoryAddress } };
       throw new Error("Indexing unavailable");
     });
     const wallet = adapters();

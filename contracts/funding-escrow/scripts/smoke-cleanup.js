@@ -9,7 +9,7 @@ export const BUSINESS_STEPS = [
   "Approve second deposit", "Second depositor completes funding", "Lock funded selection",
   "Problem owner approves first payment", "Proposal owner approves first payment", "Release first tranche",
   "Submit milestone evidence", "Problem owner approves milestone", "Proposal owner approves milestone",
-  "60 percent funder majority vote", "Release voted second tranche", TOKEN_RETURN_STEP,
+  "Two-thirds funder majority vote", "Release voted second tranche", TOKEN_RETURN_STEP,
 ];
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const RESERVE_WEI = parseEther("0.00002");
@@ -21,7 +21,7 @@ export function assertCleanupJournal(report, { config, owner, testWallet, token 
   for (const [key, value] of Object.entries({ registry: config.address, factory: config.escrow.factoryAddress, owner, testWallet, token })) {
     assert(same(report[key], value), `Saved ${key} differs from the active smoke configuration.`);
   }
-  assert.equal(report.amountBaseUnits, "1000000");
+  assert.equal(report.amountBaseUnits, "3000000");
   assert.equal(report.firebaseVerification, true);
   assert.equal(report.frontendVerification, true);
   assert.equal(report.fundingAuditReconciliation?.status, "matched");

@@ -55,7 +55,9 @@ function clientFor(endpoints, options = {}) {
       primaryUrl: endpoints[0].url,
       backupUrls: endpoints.slice(1).map((endpoint) => endpoint.url),
       // Keep fixture tests entirely local, including all-endpoints-down tests.
-      defaultBackupUrls: [], timeoutMs: 60, ...options,
+      // Ordinary fixture requests need scheduling headroom on busy runners.
+      // The timeout-specific case below sets its own explicit deadline.
+      defaultBackupUrls: [], timeoutMs: 500, ...options,
     }) });
 }
 

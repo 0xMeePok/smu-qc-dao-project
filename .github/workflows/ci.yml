@@ -54,25 +54,36 @@ jobs:
           filters: |
             frontend:
               - 'frontend/**'
+              - 'scripts/dependency-discovery.test.mjs'
+              - 'scripts/install-contract-security.test.mjs'
+              - 'contracts/audit-registry/scripts/install-security.mjs'
               - 'firebase/functions/auditCanonical.js'
               - 'firebase/functions/proposalAuditPayload.js'
               - 'firebase/functions/aiDraftSchema.js'
               - 'firebase/functions/package.json'
               - 'firebase/functions/package-lock.json'
+              - 'scripts/patch-zod-security*'
+              - 'firebase/functions/securityDependencies/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
             rules:
               - 'firebase/**'
               - '!firebase/functions/**'
+              - 'scripts/patch-zod-security*'
+              - 'firebase/functions/securityDependencies/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
             functions:
               - 'firebase/functions/**'
               - 'firebase/firebase.json'
+              - 'scripts/patch-zod-security*'
+              - 'firebase/functions/securityDependencies/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
             audit-registry:
               - 'contracts/audit-registry/**'
+              - 'scripts/patch-zod-security*'
+              - 'firebase/functions/securityDependencies/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
             funding-escrow:
@@ -80,10 +91,14 @@ jobs:
               - 'contracts/audit-registry/contracts/**'
               - 'contracts/audit-registry/package.json'
               - 'firebase/functions/escrowRegistry.abis.json'
+              - 'scripts/patch-zod-security*'
+              - 'firebase/functions/securityDependencies/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
             faucet:
               - 'contracts/stable-faucet/**'
+              - 'scripts/patch-zod-security*'
+              - 'firebase/functions/securityDependencies/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
             semgrep:
@@ -121,6 +136,9 @@ jobs:
           npm ci
           npm ci --prefix ../firebase/functions --omit=dev
 
+      - name: Verify maintained dependency backport
+        run: node --test ../scripts/patch-zod-security.test.mjs ../scripts/dependency-discovery.test.mjs ../scripts/install-contract-security.test.mjs
+
       - name: Run unit, integration, and accessibility tests
         run: npm test
 
@@ -143,10 +161,15 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           java: "true"
-          cache-dependency-path: firebase/package-lock.json
+          cache-dependency-path: |
+            firebase/package-lock.json
+            frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          # Rules integration tests exercise the production frontend SDK helper.
+          npm ci --prefix ../frontend
 
       - name: Run test suite
         run: npm test
@@ -221,6 +244,7 @@ jobs:
           npm ci
           # The receipt integration tests execute the production Firebase reconciler.
           npm ci --prefix ../../firebase/functions --ignore-scripts
+          node ../../firebase/functions/securityDependencies/manage.mjs --apply --production ../../firebase/functions
 
       - name: Run coverage, production compile and verifier
         run: |

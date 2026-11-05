@@ -4,10 +4,18 @@ import { escrowConfig } from "./escrowConfigFixture.js";
 export { escrowConfig } from "./escrowConfigFixture.js";
 import { prepareStoredProposal } from "../../proposalAuditPayload.js";
 import { proposalFundingTerms } from "../../escrowProposalTerms.js";
+import { fundingContextDigest } from "../../escrowFundingContext.js";
 
 export const researcher = `0x${"a".repeat(40)}`, owner = `0x${"b".repeat(40)}`;
 export const escrowAddress = `0x${"d".repeat(40)}`;
 export const txHash = `0x${"3".repeat(64)}`, blockHash = `0x${"4".repeat(64)}`;
+
+export function reviewedFundingDigest(record, config = escrowConfig) {
+  const expected = prepareStoredProposal(record, { registryConfig: config });
+  return fundingContextDigest({ config, expected, proposal: { ...expected, opportunityRevisionIndex: 0,
+    opportunityRevisionDigest: AUDIT_REVISION_DIGEST }, revisionCount: 1n, parentCount: 1n,
+    parentHash: AUDIT_REVISION_DIGEST, currentDigest: AUDIT_REVISION_DIGEST });
+}
 
 export function escrowRecord() {
   const record = { id: "escrow-proposal", problemId: "escrow-posting", researcherId: researcher, postingOwnerId: owner,
@@ -22,12 +30,15 @@ export function escrowRecord() {
 
 export function escrowClient(record = escrowRecord()) {
   const expected = prepareStoredProposal(record, { registryConfig: escrowConfig });
+  const parentDigest = record.reviewedParentAudit?.contentHash ?? AUDIT_REVISION_DIGEST;
+  const parentIndex = record.reviewedParentAudit?.revisionIndex ?? 0;
   const terms = expected.fundingTerms;
   const calls = [];
   const client = {
     calls,
     getTransactionReceipt: async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: txHash,
-      logs: [auditEvent({ config: escrowConfig, functionName: expected.functionName, args: expected.args, actor: researcher })] }),
+      logs: [auditEvent({ config: escrowConfig, functionName: expected.functionName, args: expected.args, actor: researcher,
+        opportunityRevisionDigest: parentDigest })] }),
     getTransaction: async () => ({ hash: txHash, to: escrowConfig.address, from: researcher, chainId: 421614,
       blockNumber: 88n, blockHash, input: encodeFunctionData({ abi: escrowConfig.abi,
         functionName: expected.functionName, args: expected.args }) }),
@@ -37,8 +48,11 @@ export function escrowClient(record = escrowRecord()) {
       calls.push({ address, functionName, args });
       if (address.toLowerCase() === escrowConfig.address) {
         if (functionName === "getProposal") return { researcher, opportunityId: expected.opportunityId,
-          opportunityRevisionIndex: 0, opportunityRevisionDigest: AUDIT_REVISION_DIGEST, exists: true, withdrawn: false, proposalHash: expected.proposalHash, solutionHash: expected.solutionHash };
-        if (functionName === "getOpportunity") return { owner, expiresAt: 2_000_000_000n };
+          opportunityRevisionIndex: parentIndex, opportunityRevisionDigest: parentDigest, exists: true, withdrawn: false, proposalHash: expected.proposalHash, solutionHash: expected.solutionHash };
+        if (functionName === "getOpportunity") return { owner, contentHash: parentDigest, expiresAt: 2_000_000_000n };
+        if (["revisionCount", "opportunityRevisionCount"].includes(functionName)) return 1n;
+        if (functionName === "opportunityRevisionAt") return { contentHash: parentDigest };
+        if (functionName === "fundingContextDigest") return reviewedFundingDigest(record);
         if (functionName === "fundingFactory") return escrowConfig.escrow.factoryAddress;
         if (functionName === "proposalEscrow") return escrowAddress;
         if (functionName === "pendingProposalForPosting") return `0x${"0".repeat(64)}`;

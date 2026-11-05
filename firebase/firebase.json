@@ -17,6 +17,9 @@
         ".git",
         "firebase-debug.log",
         "*.local"
+      ],
+      "predeploy": [
+        "node \"$RESOURCE_DIR/securityDependencies/manage.mjs\" --verify --production \"$RESOURCE_DIR\""
       ]
     }
   ],
@@ -85,6 +88,9 @@
           }
         ]
       }
+    ],
+    "predeploy": [
+      "node \"$PROJECT_DIR/functions/securityDependencies/manage.mjs\" --verify --production \"$PROJECT_DIR\""
     ]
   },
   "emulators": {

@@ -42,6 +42,7 @@ import {
   receiptForWrite,
 } from "../lib/postingAudit.js";
 import { canEditOpportunity, isExpiredOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
+import { assertOpportunityMaterialEditAllowed } from "../lib/postings.js";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { OpportunityTypeSwitch } from "../components/OpportunityTypeSwitch.jsx";
 import { BriefPreview, ReviewRows, WizardPanel, WizardSteps, useWizard } from "../components/BriefWizard.jsx";
@@ -425,6 +426,8 @@ export default function CreatePostingPage({ postingId: resumeId, editPostingId, 
         } : {}),
       });
       pendingRecordRef.current = record;
+
+      if (editing) await assertOpportunityMaterialEditAllowed(postingId, record);
 
       const audit = await anchorPostingAudit({
         id: postingId,

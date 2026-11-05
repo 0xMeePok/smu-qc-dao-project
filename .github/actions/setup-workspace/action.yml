@@ -6,7 +6,7 @@ inputs:
     description: Lockfiles for the setup-node npm cache. One path per line.
     required: true
   java:
-    description: Install Temurin 17 when the job starts a Firebase emulator.
+    description: Install Temurin 21 when the job starts a Firebase emulator.
     required: false
     default: "false"
 
@@ -25,4 +25,4 @@ runs:
       uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
       with:
         distribution: temurin
-        java-version: "17"
+        java-version: "21"

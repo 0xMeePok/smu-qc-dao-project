@@ -36,7 +36,7 @@ A funder posts a call without a fixed problem and deposits grant funds into a si
 
 ### Researcher-led proposals
 
-A researcher can publish an independent proposal that is not tied to any posting. Funders and problem owners discover it under **Solutions** and either send a funding approach, which the researcher accepts or declines, or contribute to the listing's own crowdfunding escrow. Crowdfunding pays 50% when the researcher accepts a fully funded listing and 50% after a funding-weighted vote on completion evidence.
+A researcher can publish an independent proposal that is not tied to any posting. Funders and problem owners discover it under **Solutions** and either send a funding approach, which the researcher accepts or declines, or contribute to the listing's own crowdfunding escrow. Crowdfunding pays 50% when the researcher accepts a fully funded listing. The final 50% needs two things: funders holding more than half of the deposits vote yes on the completion evidence, and an administrator then reviews that evidence and releases the payment through the platform signer. A researcher who also funds their own listing can therefore not vote the final payment out alone.
 
 ### Discussion, review and moderation
 

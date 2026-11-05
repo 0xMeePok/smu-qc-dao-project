@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
 import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256 } from "viem";
-import { escrowClient, escrowConfig, escrowRecord, escrowAddress, owner, researcher, txHash } from "./fixtures/escrowAuditFixture.js";
+import { escrowClient, escrowConfig, escrowRecord, escrowAddress, owner, researcher, txHash, reviewedFundingDigest } from "./fixtures/escrowAuditFixture.js";
 import { memoryDb } from "./memoryDb.mjs";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { fundingDigest } from "../escrowFundingEvents.js";
@@ -79,7 +79,7 @@ function fixture({ release = false } = {}) {
       fee: 0n, paid: release && Number(request.args[0]) === 0 };
     return result;
   };
-  return { db, client, config, record, parent, expected, state, receipts, anchors, reads, ranges, add, eventLog, now };
+  return { db, client, config, record, parent, expected, state, receipts, anchors, reads, ranges, add, eventLog, now, reviewedContextDigest: reviewedFundingDigest(record, config) };
 }
 
 const currentMainConfig = { ...config, abi: [...config.abi.filter(item => item.name !== "pendingProposalForPosting"),
@@ -87,7 +87,135 @@ const currentMainConfig = { ...config, abi: [...config.abi.filter(item => item.n
 const localWorkerWallet = signedBytes => () => ({ account: { address: platform }, chain: { id: 421614 },
   prepareTransactionRequest: async request => request, signTransaction: async () => signedBytes });
 
+function denseDeposits(f, count, depositsPerReceipt) {
+  // Keep the creation anchor. Use valid whole-token top-ups, then the exact
+  // remaining target, so density does not depend on prohibited dust deposits.
+  f.anchors.splice(1);
+  f.receipts.delete(hash("6"));
+  let cumulativeAmount = 0n;
+  for (let index = 0; index < count; index++) {
+    const transactionHash = `0x${(256 + Math.floor(index / depositsPerReceipt)).toString(16).padStart(64, "0")}`;
+    const amount = index === count - 1 ? BigInt(f.record.fundingTerms.target) - cumulativeAmount : 1000000n;
+    cumulativeAmount += amount;
+    const anchor = f.eventLog("FundingEventAnchored", { proposalId: f.expected.entityId, escrow: escrowAddress,
+      eventType: 1, digest: fundingDigest(["address", "uint256", "uint256"], [owner, amount, cumulativeAmount]),
+      actor: owner, timestamp: 1900000000n }, index * 2, transactionHash, 90n);
+    const deposit = f.eventLog("Deposited", { postingId: f.expected.opportunityId, proposalId: f.expected.entityId,
+      depositor: owner, token: f.record.fundingTerms.token, amount, cumulativeAmount, depositNumber: BigInt(index + 1) },
+    index * 2 + 1, transactionHash, 90n);
+    f.anchors.push(anchor);
+    if (!f.receipts.has(transactionHash)) f.receipts.set(transactionHash, { transactionHash, status: "success",
+      blockNumber: 90n, blockHash: hash("4"), logs: [] });
+    f.receipts.get(transactionHash).logs.push(anchor, deposit);
+  }
+  f.client.getBlockNumber = async () => 91n;
+}
+
+const indexedEvents = f => [...f.db.records].filter(([path]) => path.startsWith("escrowFundingEvents/")).map(([, event]) => event);
+
 describe("escrow funding service", () => {
+  it("rejects missing or stale reviewed deposit context before creating any funding intent", async () => {
+    for (const change of ["missing", "proposal-revision", "parent-revision"]) {
+      const f = fixture(); f.state.totalDeposited = 10n;
+      const read = f.client.readContract;
+      f.client.readContract = request => request.functionName === (change === "proposal-revision" ? "revisionCount" : "opportunityRevisionCount")
+        && change !== "missing" ? 2n : read(request);
+      await assert.rejects(prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id,
+        reviewedContextDigest: change === "missing" ? undefined : f.reviewedContextDigest }), /revision changed/);
+      assert(!f.db.records.has(`escrowFundingJobs/${key(f.record.id)}`));
+    }
+  });
+
+  it("resumes a dense receipt within the confirmed head and only settles after every anchor is indexed", async () => {
+    const f = fixture(), payments = [], signedBytes = "0x2345";
+    denseDeposits(f, 101, 101);
+    await enqueueEscrowFunding(f);
+    const jobPath = `escrowFundingJobs/${key(f.record.id)}`;
+    Object.assign(f.db.records.get(jobPath), { selectionRequested: true, selectionId: hash("5") });
+    f.client.simulateContract = async request => { payments.push(request.functionName); };
+    f.client.getTransactionCount = async () => 7;
+    f.client.sendRawTransaction = async () => keccak256(signedBytes);
+    const options = { ...f, uid: owner, proposalId: f.record.id, getWallet: localWorkerWallet(signedBytes) };
+    let result = await syncEscrowFunding(options);
+    let job = f.db.records.get(jobPath);
+    assert.equal(result.reconciliation.complete, false);
+    assert.equal(result.summary, null);
+    assert.equal(job.cursorBlock, 90);
+    assert.equal(job.cursorHash, hash("4"));
+    assert.equal(job.cursorLogIndex, 196);
+    assert.equal(job.cursorReceiptOffset, 99);
+    assert.equal(job.anchorCount, 100);
+    assert.equal(indexedEvents(f).length, 100);
+    assert.deepEqual(payments, []);
+    result = await syncEscrowFunding(options);
+    job = f.db.records.get(jobPath);
+    assert.equal(result.reconciliation.complete, true);
+    assert.equal(job.cursorLogIndex, null);
+    assert.equal(job.cursorReceiptOffset, null);
+    assert.equal(job.anchorCount, 102);
+    assert.equal(indexedEvents(f).length, 102);
+    assert.deepEqual(payments, ["lockSelection"]);
+    assert.equal(indexedEvents(f).filter(event => event.eventType === "Deposit")
+      .reduce((total, event) => total + BigInt(event.amount), 0n), BigInt(f.record.fundingTerms.target));
+  });
+
+  it("resumes more than fifteen proposal transactions in a single block without skipping or exceeding the receipt budget", async () => {
+    const f = fixture(); denseDeposits(f, 31, 1);
+    f.anchors.reverse(); // Scan ordering must follow chain log order, not provider response order.
+    const receipt = f.client.getTransactionReceipt;
+    let receipts = 0;
+    f.client.getTransactionReceipt = async request => { receipts++; return receipt(request); };
+    const counts = [];
+    for (let index = 0; index < 3; index++) {
+      receipts = 0;
+      const result = await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+      // The initial creation identity check is one additional RPC on run one.
+      assert(receipts <= (index === 0 ? 16 : 15));
+      counts.push(result.reconciliation.anchors);
+      assert.equal(result.reconciliation.complete, index === 2);
+    }
+    assert.deepEqual(counts, [15, 30, 32]);
+    assert.equal(indexedEvents(f).length, 32);
+    assert.equal(f.ranges[1].fromBlock, 90n);
+  });
+
+  it("shares the hundred-anchor write budget across receipts and retries saved events idempotently after a checkpoint failure", async () => {
+    const f = fixture(); denseDeposits(f, 202, 101);
+    const jobPath = `escrowFundingJobs/${key(f.record.id)}`, transaction = f.db.runTransaction.bind(f.db);
+    let crash = true;
+    f.db.runTransaction = callback => transaction(tx => callback({ ...tx, set: (ref, data, ...rest) => {
+      if (crash && ref.path === jobPath && data.cursorLogIndex != null) {
+        crash = false; throw new Error("Crash before checkpoint");
+      }
+      return tx.set(ref, data, ...rest);
+    } }));
+    await assert.rejects(syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id }), /temporarily unavailable/);
+    assert.equal(indexedEvents(f).length, 100);
+    assert.equal(f.db.records.get(jobPath).anchorCount, 0);
+    const counts = [];
+    for (let index = 0; index < 3; index++) {
+      const before = indexedEvents(f).length;
+      const result = await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+      assert(indexedEvents(f).length - before <= 100);
+      counts.push(result.reconciliation.anchors);
+      assert.equal(result.reconciliation.complete, index === 2);
+    }
+    assert.deepEqual(counts, [100, 200, 203]);
+    assert.equal(indexedEvents(f).length, 203);
+    assert.equal([...f.db.records.keys()].filter(path => path.startsWith("audits/")).length, 203);
+  });
+
+  it("refuses to resume a partial block after its canonical hash changes", async () => {
+    const f = fixture(); denseDeposits(f, 101, 101);
+    await syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id });
+    const jobPath = `escrowFundingJobs/${key(f.record.id)}`;
+    f.client.getBlock = async () => ({ hash: hash("9"), timestamp: 1900000000n });
+    await assert.rejects(syncEscrowFunding({ ...f, uid: owner, proposalId: f.record.id }), /mismatch/);
+    assert.equal(f.db.records.get(jobPath).anchorCount, 100);
+    assert.equal(f.db.records.get(jobPath).cursorHash, hash("4"));
+    assert.equal(indexedEvents(f).length, 100);
+  });
+
   it("uses confirmed custody for the shared selection gate and ignores recorded or donated display funding", async () => {
     const f = fixture();
     let verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
@@ -374,12 +502,14 @@ describe("escrow funding service", () => {
     assert.equal(result.items.length, 1); assert.equal(result.unavailableItems, 0);
   });
 
-  it("rejects mismatched proposal content and never saves a confirmed projection on failed reconciliation", async () => {
+  it("reconciles immutable custody but blocks new funding when proposal content differs", async () => {
     const f = fixture(), read = f.client.readContract;
     f.client.readContract = async request => request.functionName === "getProposal"
       ? { ...await read(request), proposalHash: zero } : read(request);
-    await assert.rejects(syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner }), /mismatch/);
-    assert(!f.db.records.has(`escrowFundingSummaries/${key(f.record.id)}`));
+    const result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+    assert.equal(result.summary.contentMatches, false);
+    assert.match(result.summary.fundingBlockReason, /changed/);
+    assert.equal(result.summary.selectionGate.canSelect, false);
   });
 
   it("does not index a historical deployment as the active one", async () => {
@@ -565,6 +695,30 @@ describe("escrow funding service", () => {
     assert.equal(f.ranges.length, 0);
   });
 
+  it("blocks manual expiry selection and payments while preserving scheduled expiry and refund exits", async () => {
+    for (const [state, functionName] of [["Open", "lockSelection"], ["Locked", "release"], ["Active", "releaseMilestone"]]) {
+      const f = fixture({ release: state === "Active" });
+      const verified = await readVerifiedFunding({ ...f, blockNumber: 100n });
+      verified.summary.state = state;
+      verified.data.ownerApproved = true;
+      verified.data.solutionApproved = true;
+      verified.data.yesWeight = verified.data.totalDeposited;
+      const job = { selectionRequested: true, selectionId: hash("5") };
+      const decision = parent => settlementAction({ ...f, verified, parent, job });
+      const manual = { ...f.parent, status: "expired", expirySource: "manual" };
+      assert.equal(decision(manual).action, undefined);
+      assert.match(decision(manual).settlement.message, /force-expired/);
+      assert.match(fundingBlockReason(f.record, manual, verified.summary, now.toMillis(), { deposit: true }), /force-expired/);
+      assert.equal(decision({ ...manual, expirySource: "scheduled" }).action.functionName, functionName);
+      assert.equal(decision({ ...manual, expirySource: undefined }).action.functionName, functionName);
+      verified.summary.invalidated = true;
+      assert.equal(decision(manual).action.functionName, "refundInvalidated");
+      verified.summary.invalidated = false;
+      verified.summary.timestamp = Number(state === "Active" ? verified.data.approvalDeadline : verified.data.expiresAt);
+      assert.equal(decision(manual).action.functionName, "expire");
+    }
+  });
+
   it("automatically opens refunds for an invalidated losing sibling but never refunds one that is only temporarily paused", async () => {
     const f = fixture(); f.config = currentMainConfig; f.state.active = false;
     f.state.pendingProposalEntityId = hash("a");
@@ -707,6 +861,46 @@ describe("serialized platform signing outbox", () => {
     };
     return { path, transactionHash };
   }
+
+  it("rechecks manual expiry before claiming each payment action but allows scheduled expiry", async () => {
+    for (const [functionName, args] of [["lockSelection", [hash("5"), researcher]], ["release", [hash("5")]], ["releaseMilestone", [hash("5"), 1n, hash("8")]]]) {
+      const f = signingFixture();
+      f.action = { ...f.action, functionName, args };
+      await assert.rejects(submitPlatformAction({ ...f, action: { ...f.action, proposalId: undefined } }), { code: "invalid-argument" });
+      const parentPath = `problems/${f.parent.id}`;
+      f.db.records.set(parentPath, { ...f.parent, status: "expired", expirySource: "manual" });
+      assert.equal((await submitPlatformAction(f)).status, "blocked");
+      assert.equal(f.prepared.length, 0);
+      assert.equal(f.broadcasts.length, 0);
+      assert.equal(f.db.records.has(`escrowPlatformOutbox/${deploymentKey(config)}`), false);
+      f.db.records.set(parentPath, { ...f.parent, status: "expired", expirySource: "scheduled" });
+      assert.equal((await submitPlatformAction(f)).status, "pending");
+      assert.equal(f.prepared.length, 1);
+      assert.equal(f.broadcasts.length, 1);
+    }
+  });
+
+  it("does not persist or broadcast a payment when force expiry wins during transaction preparation", async () => {
+    for (const [functionName, args] of [["lockSelection", [hash("5"), researcher]], ["release", [hash("5")]], ["releaseMilestone", [hash("5"), 1n, hash("8")]]]) {
+      const f = signingFixture(), getWallet = f.getWallet;
+      f.action = { ...f.action, functionName, args };
+      f.getWallet = () => {
+        const wallet = getWallet(), prepare = wallet.prepareTransactionRequest;
+        wallet.prepareTransactionRequest = request => {
+          f.db.records.set(`problems/${f.parent.id}`, { ...f.parent, status: "expired", expirySource: "manual" });
+          return prepare(request);
+        };
+        return wallet;
+      };
+      await assert.rejects(submitPlatformAction(f), { code: "aborted", message: "An administrator has force-expired this posting." });
+      assert.equal(f.prepared.length, 1);
+      assert.equal(f.broadcasts.length, 0);
+      const outbox = f.db.records.get(`escrowPlatformOutbox/${deploymentKey(config)}`);
+      assert.equal(outbox.status, "idle");
+      assert.equal(outbox.transactionHash, undefined);
+      assert.equal(outbox.serializedTransaction, undefined);
+    }
+  });
 
   it("retains a manual cancellation's signed hash when the caller crashes before saving it", async () => {
     const f = signingFixture(), cancellationId = key(f.record.id);

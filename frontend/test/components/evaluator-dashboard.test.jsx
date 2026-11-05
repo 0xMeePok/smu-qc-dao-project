@@ -33,6 +33,12 @@ beforeEach(() => { mocks.listEvaluatorQueue.mockReset(); });
 afterEach(cleanup);
 
 describe("QCDAO-95 evaluator feedback dashboard", () => {
+  it("labels bounded recommendation history without hiding the proposal link", async () => {
+    queue([row({ recommendationHistoryTruncated: true })]);
+    render(<EvaluatorQueue onNavigate={vi.fn()} />);
+    expect(await screen.findByText(/Only part of your recommendation history is shown/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open proposal" })).toBeTruthy();
+  });
   it("states what a recommendation actually is before asking for one", async () => {
     queue([row()]);
     render(<EvaluatorQueue onNavigate={vi.fn()} />);

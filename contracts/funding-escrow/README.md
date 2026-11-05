@@ -9,6 +9,14 @@ truth. This workflow does not replace the business-proposal escrow or open-fundi
 grant pool described below. Historical deployment notes below retain their dates;
 the current registry and main factory addresses come from the application configs.
 
+**Reviewed-state rollout (4 November 2026):** The staging manifests select registry
+`0xD3bFffD29aFc8E90Df92f3a7df90DB8CbC15E16b`, main factory
+`0x04DDef74E2dac044C0d7D18660DDC666023B64D6`, and independent factory
+`0xee382174Ec4d3E666c9d57c0454e3F2b5e82F37F`. Production bytecode and wiring
+were verified before exporting the manifests, and source was verified on Arbiscan.
+This was an authorized staging reset. Existing factory and escrow bytecode does
+not change when a new stack is deployed; prior registry receipts remain read-only.
+
 1. The researcher publishes a target, token, listing expiry and completion period,
    then activates crowdfunding. Activation freezes those terms and the listing
    content. Funders deposit directly, up to the exact target.
@@ -16,9 +24,14 @@ the current registry and main factory addresses come from the application config
    Acceptance pays the first 50% immediately and starts the completion period.
    Decline or expiry before acceptance makes all deposited funds refundable.
 3. The researcher submits completion evidence. Each funder's vote is weighted by
-   their deposit; yes votes must exceed 50% of **all** deposits. The vote crossing
-   that threshold pays the remaining 50% automatically. A new evidence revision
-   starts a new vote without extending the completion deadline.
+   their deposit; yes votes must exceed 50% of **all** deposits. The vote alone
+   moves no funds: once the majority exists, an administrator reviews the evidence
+   and the platform signer (or an escrow admin on the main factory) calls
+   `releaseCompletion(expectedEvidenceVersion, expectedEvidenceHash)`, which pays
+   the remaining 50% only if the reviewed evidence is still current. Member wallets cannot call
+   it, so a researcher who funds their own listing from a second wallet cannot
+   vote the final payment out alone. A new evidence revision starts a new vote
+   without extending the completion deadline.
 4. Admin cancellation stops new deposits and opens pull refunds. Expiry after
    acceptance likewise refunds only unpaid custody. Previous payments cannot be
    clawed back. Each funder claims their own proportional share; exact rounding
@@ -92,7 +105,7 @@ rejection refund changes below also apply to this undeployed source version.
 3. Each researcher submits their requested target and immutable milestone plan
    through `commitProposalWithEscrow`. Grant proposal escrows reject ordinary
    pooled deposits and the main workflow's platform selection operation.
-4. The owner calls `pool.selectProposal(proposalId)` to reserve its full requested
+4. After reviewing the proposal, the owner calls `pool.selectProposal(proposalId, expectedRevisionCount, expectedProposalHash, expectedSolutionHash)` to reserve its full requested
    target. Several proposals may be selected. A 100,000-unit pool can reserve two
    50,000-unit proposals; an additional selection must fit the unreserved balance.
 5. The proposal researcher has exactly seven days to call

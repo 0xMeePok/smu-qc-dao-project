@@ -170,6 +170,22 @@ contract EscrowAuditRegistry is AuditRegistryExtensible, Ownable2Step {
         return !postingFundingPaused[postingId] && (pending == bytes32(0) || pending == proposalId);
     }
 
+    /// @notice Bind first funding to the reviewed proposal and its current parent revision.
+    /// A parent amendment requires the researcher to explicitly review and rebind first.
+    function fundingContextDigest(bytes32 proposalId) external view returns (bytes32) {
+        Proposal memory proposal = getProposal(proposalId);
+        Opportunity memory posting = getOpportunity(proposal.opportunityId);
+        uint256 parentCount = this.opportunityRevisionCount(proposal.opportunityId);
+        bytes32 parentDigest = this.opportunityRevisionAt(proposal.opportunityId, parentCount - 1).contentHash;
+        if (proposal.opportunityRevisionIndex != parentCount - 1
+            || proposal.opportunityRevisionDigest != posting.contentHash
+            || proposal.opportunityRevisionDigest != parentDigest) revert InvalidState();
+        return keccak256(abi.encode(address(this), block.chainid, proposalId, this.revisionCount(proposalId),
+            proposal.proposalHash, proposal.solutionHash, proposal.opportunityId,
+            proposal.opportunityRevisionIndex, proposal.opportunityRevisionDigest,
+            parentCount, posting.contentHash, parentDigest));
+    }
+
     function recordOpenFundingDeposit(bytes32 postingId) external {
         if (msg.sender == address(0) || fundingFactory.openFundingPoolForPosting(postingId) != msg.sender) revert AccessDenied();
         postingFundingStarted[postingId] = true;

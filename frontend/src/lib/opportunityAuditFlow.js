@@ -13,6 +13,7 @@ import {
 } from "./auditRegistry.js";
 import { auditErrorMessage, walletOutcomeError } from "./errors.js";
 import { assertActiveAuditDeployment, resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
+import { commitsAttachmentDigests } from "../../../firebase/functions/opportunityAuditPayload.js";
 
 const AUDIT_STATUSES = new Set(["queued", "submitted", "pending", "confirmed", "failed"]);
 
@@ -86,6 +87,7 @@ export function createOpportunityAuditFlow({
       prepared,
       audit: {
         schemaVersion: prepared.hashScheme ?? AUDIT_HASH_SCHEME,
+        ...(commitsAttachmentDigests(opportunity) ? { digestVersion: 1 } : {}),
         chainId: registryConfig.chainId,
         entityId: prepared.entityId,
         contentHash: prepared.contentHash,

@@ -142,6 +142,7 @@ function PostingRollup({ posting, onNavigate, stale = false }) {
         <div><dt>Recommendations</dt><dd>{posting.qualifyingRecommendations}</dd></div>
         <div><dt>Awaiting feedback</dt><dd>{posting.awaitingFeedback}</dd></div>
       </dl>
+      {posting.feedbackTruncated && <p className="field-hint" role="status">Recommendation counts are partial. Open the solutions for the full discussion history.</p>}
 
       {posting.fundingTarget > 0 && (
         <div className="rollup-meter">
@@ -247,6 +248,7 @@ export function OwnerDashboardPanel({ onNavigate }) {
           Counted from the most recent records only. The real totals are higher.
         </p>
       )}
+      {!dashboard.isPending && !error && data?.truncated?.feedback && <p className="field-hint" role="status">Some discussions exceed this overview. Feedback totals below are partial.</p>}
 
       <DashboardAttention
         items={attention}

@@ -517,9 +517,8 @@ export async function prepareModerationMatching({ tx, db, contentType, contentId
   return { summary: { refundedAmount: action === "restore" ? 0 : refundedMinor / 100,
     refundedCount: action === "restore" ? 0 : refunds.length, currency: ctx.problem.currency || null },
     apply() {
-      // Storage cannot get() the parent problem (two-read cap: profile + record).
-      // Stamp parent marketplace visibility onto every loaded child so proposal
-      // PDFs stay aligned with submittedProposalVisibleToMembers() in firestore.rules.
+      // Stamp parent marketplace visibility onto the loaded child projections.
+      // The PDF proxy independently checks the live parent before serving bytes.
       if (problemScope && ["hide", "remove", "restore"].includes(action)) {
         const problemBrowsable = action === "restore";
         for (const doc of ctx.proposals) tx.update(doc.ref, { problemBrowsable, updatedAt: at });

@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { deleteObject, getBytes, ref, uploadBytes as rawUploadBytes } from "firebase/storage";
+import { deleteObject, getBytes, getDownloadURL, ref, uploadBytes as rawUploadBytes } from "firebase/storage";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
 /**
@@ -437,15 +437,35 @@ describe("proposal supporting PDFs", () => {
   const proposalId = "storage-proposal-59";
   const path = `proposals/${OWNER}/${proposalId}/support01.pdf`;
   const metadata = pdfMetadata({ customMetadata: { problemId: proposalId } });
-  it("uploads before submission, then permits author and onboarded members to read once submitted", async () => {
+  it("denies stale-cache member bytes and download-token metadata before parent fanout", async () => {
+    const id = "stale-parent-proxy", stalePath = `proposals/${OWNER}/${id}/support01.pdf`;
+    await assertSucceeds(uploadBytes(ref(env.authenticatedContext(OWNER).storage(), stalePath), PDF_BYTES,
+      pdfMetadata({ customMetadata: { problemId: id } })));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "problems", "stale-parent"), {
+        ownerId: OTHER, status: "moderated_removed", moderationStatus: "removed",
+      });
+      await setDoc(doc(ctx.firestore(), "proposals", id), {
+        researcherId: OWNER, postingOwnerId: OTHER, problemId: "stale-parent",
+        status: "submitted", problemBrowsable: true,
+      });
+    });
+    for (const uid of [OTHER, MEMBER]) {
+      const object = ref(env.authenticatedContext(uid).storage(), stalePath);
+      await assertFails(getBytes(object));
+      await assertFails(getDownloadURL(object));
+    }
+    await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), stalePath)));
+  });
+  it("uploads before submission, then keeps direct downloads restricted to the author", async () => {
     const author = env.authenticatedContext(OWNER).storage();
     await assertSucceeds(uploadBytes(ref(author, path), PDF_BYTES, metadata));
     await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "proposals", proposalId), {
       researcherId: OWNER, postingOwnerId: OTHER, status: "submitted", problemBrowsable: true,
     }));
-    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
-    await assertSucceeds(getBytes(ref(env.authenticatedContext(MEMBER).storage(), path)));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), path)));
+    await assertFails(getBytes(ref(env.authenticatedContext(MEMBER).storage(), path)));
     await assertSucceeds(getBytes(ref(author, path)));
     // Submitted freezes the prefix: no delete, no extra upload, no overwrite.
     await assertFails(deleteObject(ref(author, path)));
@@ -564,7 +584,7 @@ describe("proposal supporting PDFs", () => {
       researcherId: OWNER, postingOwnerId: OTHER, status: "submitted", problemBrowsable: false,
     }));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), hiddenPath)));
-    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), hiddenPath)));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), hiddenPath)));
     await assertFails(getBytes(ref(env.authenticatedContext(MEMBER).storage(), hiddenPath)));
     await assertFails(getBytes(ref(env.authenticatedContext(SUSPENDED).storage(), hiddenPath)));
     await assertFails(getBytes(ref(env.unauthenticatedContext().storage(), hiddenPath)));
@@ -579,7 +599,7 @@ describe("proposal supporting PDFs", () => {
       researcherId: OWNER, postingOwnerId: OTHER, status: "submitted",
     }));
     await assertSucceeds(getBytes(ref(env.authenticatedContext(OWNER).storage(), unstampedPath)));
-    await assertSucceeds(getBytes(ref(env.authenticatedContext(OTHER).storage(), unstampedPath)));
+    await assertFails(getBytes(ref(env.authenticatedContext(OTHER).storage(), unstampedPath)));
     await assertFails(getBytes(ref(env.authenticatedContext(MEMBER).storage(), unstampedPath)));
   });
 

@@ -1,12 +1,13 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, fund, at, assertAccounting, State, Status, Behavior } from "./helpers.js";
 import { first, submit, approveLater, payLater } from "./milestoneHelpers.js";
 
 async function sharedFunding(c) {
-  await c.escrow.connect(c.alice).deposit(1n);
-  await c.escrow.connect(c.bob).deposit(333n);
-  await c.escrow.connect(c.alice).deposit(332n);
-  await c.escrow.connect(c.other).deposit(c.target - 666n);
+  await reviewedDeposit(c.escrow.connect(c.alice), 1n);
+  await reviewedDeposit(c.escrow.connect(c.bob), 333n);
+  await reviewedDeposit(c.escrow.connect(c.alice), 332n);
+  await reviewedDeposit(c.escrow.connect(c.other), c.target - 666n);
   await c.escrow.lockSelection(c.selectionId, c.solution.address);
   await c.escrow.connect(c.owner).approveSelection(c.selectionId);
   await c.escrow.connect(c.solution).approveSelection(c.selectionId);
@@ -52,7 +53,7 @@ describe("Admin voids and partial refunds", function () {
   }
   for (const phase of ["empty", "open", "cancelled", "expired"]) it(`voids ${phase} escrow immediately`, async function () {
     const c = await fixture();
-    if (phase !== "empty") await c.escrow.connect(c.alice).deposit(200n);
+    if (phase !== "empty") await reviewedDeposit(c.escrow.connect(c.alice), 200n);
     if (phase === "cancelled") await c.escrow.cancel(c.reason);
     if (phase === "expired") { await at(c, c.expiresAt); await c.escrow.expire(); }
     await c.escrow.connect(c.admin).voidEscrow(c.reason);
@@ -98,7 +99,7 @@ describe("Admin voids and partial refunds", function () {
   });
   it("tiny contributions and indivisible refunds leave no dust or claim-order dependency", async function () {
     const c = await fixture({ target: 3n, trancheBps: [6667, 3333] });
-    for (const who of [c.alice, c.bob, c.other]) await c.escrow.connect(who).deposit(1n);
+    for (const who of [c.alice, c.bob, c.other]) await reviewedDeposit(c.escrow.connect(who), 1n);
     await c.escrow.lockSelection(c.selectionId, c.solution.address);
     await c.escrow.connect(c.owner).approveSelection(c.selectionId); await c.escrow.connect(c.solution).approveSelection(c.selectionId);
     await c.escrow.release(c.selectionId); await c.escrow.connect(c.admin).voidEscrow(c.reason);
@@ -134,7 +135,7 @@ describe("Full uint256 accounting boundary", function () {
   it("conserves a maximum-size pool across tranche fees and three partial refunds", async function () {
     const target = (1n << 256n) - 1n;
     const c = await fixture({ target, feeBps: 9999, trancheBps: [3333, 3333, 3334] });
-    for (const who of [c.alice, c.bob, c.other]) await c.escrow.connect(who).deposit(target / 3n);
+    for (const who of [c.alice, c.bob, c.other]) await reviewedDeposit(c.escrow.connect(who), target / 3n);
     await c.escrow.lockSelection(c.selectionId, c.solution.address);
     await c.escrow.connect(c.owner).approveSelection(c.selectionId);
     await c.escrow.connect(c.solution).approveSelection(c.selectionId);

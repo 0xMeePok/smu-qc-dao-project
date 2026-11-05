@@ -6,6 +6,7 @@ import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { confirmEscrowTransaction, createWalletEscrowAdapters, escrowErrorMessage } from "./escrow.js";
 import { normalizeWalletWriteError } from "./auditRegistry.js";
 import { fundingAmountUnits } from "../../../firebase/functions/escrowProposalTerms.js";
+import { opportunityEntityId } from "../../../firebase/functions/auditCanonical.js";
 
 async function call(name, payload = {}) {
   requireFirebase();
@@ -22,6 +23,9 @@ export const openFundingSupported = (config = AUDIT_REGISTRY_CONFIG) =>
 /** Pools created by a factory without declineProposal can only release an offer by expiry. */
 export const openFundingDeclineSupported = (config = AUDIT_REGISTRY_CONFIG) =>
   Boolean(config.escrow?.openFundingPoolAbi?.some(item => item.type === "function" && item.name === "declineProposal"));
+export const openFundingBoundSelectionSupported = (config = AUDIT_REGISTRY_CONFIG) =>
+  Boolean(config.escrow?.openFundingPoolAbi?.some(item => item.type === "function" && item.name === "selectProposal"
+    && item.inputs?.map(input => input.type).join(",") === "bytes32,uint256,bytes32,bytes32"));
 
 const ACTIONS = Object.freeze({ create: "createOpenFundingPool", deposit: "deposit", select: "selectProposal",
   accept: "acceptProposal", decline: "declineProposal", void: "expireProposal", withdraw: "withdrawAvailable" });
@@ -39,15 +43,26 @@ export const openFundingDeclineReasonHash = ({ proposalId, reason }) =>
   keccak256(stringToHex(JSON.stringify({ scheme: "qcdao.open-funding.decline.v1", proposalId: String(proposalId).toLowerCase(), reason })));
 
 /** Only a user action submits a transaction. Failed confirmation retains its hash. */
-export async function writeOpenFundingAction({ problemId, proposalId, account, action, amount, tokenAddress,
-  decimals, reason, onProgress, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG,
+export async function writeOpenFundingAction({ problemId, postingOwnerId, proposalId, account, action, amount, tokenAddress,
+  decimals, reason, reviewedProposal, onProgress, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG,
   prepare = prepareOpenFundingAction }) {
   if (!openFundingSupported(config)) throw new Error("Open funding pools are awaiting a contract deployment.");
   if (!Object.hasOwn(ACTIONS, action)) throw new Error("Unknown open funding action.");
+  if (config.entityIdScheme === 2 && !/^0x[0-9a-f]{40}$/i.test(postingOwnerId ?? "")) {
+    throw new Error("The grant posting owner cannot be verified. Refresh before continuing.");
+  }
+  const expectedPostingId = opportunityEntityId(problemId, { hashScheme: 1,
+    actor: config.entityIdScheme === 2 ? postingOwnerId : undefined });
   const amountBaseUnits = ["deposit", "withdraw"].includes(action) ? fundingAmountUnits(amount, decimals).toString() : undefined;
   if (action === "decline" && !openFundingDeclineSupported(config)) throw new Error("This grant pool cannot record a decline. Leave the offer unaccepted to let it expire.");
   const declineReason = action === "decline" ? normalizeDeclineReason(reason) : undefined;
-  const prepared = await prepare({ problemId, proposalId, action, amountBaseUnits, tokenAddress, ...(declineReason ? { reason: declineReason } : {}) });
+  if (action === "select" && (!openFundingBoundSelectionSupported(config) || !reviewedProposal
+      || ![reviewedProposal.entityId, reviewedProposal.proposalHash, reviewedProposal.solutionHash].every(value => /^0x[0-9a-f]{64}$/i.test(value ?? ""))
+      || typeof reviewedProposal.revisionCount !== "string" || !/^[1-9][0-9]{0,77}$/.test(reviewedProposal.revisionCount))) {
+    throw new Error("Refresh and review the current proposal revision before selecting it.");
+  }
+  const prepared = await prepare({ problemId, proposalId, action, amountBaseUnits, tokenAddress, ...(declineReason ? { reason: declineReason } : {}),
+    ...(action === "select" ? { reviewedProposal } : {}) });
   const request = prepared.request ?? prepared;
   const abi = action === "create" ? config.escrow.factoryAbi : config.escrow.openFundingPoolAbi;
   const method = abi.find(item => item.type === "function" && item.name === ACTIONS[action]);
@@ -59,8 +74,32 @@ export async function writeOpenFundingAction({ problemId, proposalId, account, a
     throw new Error("The funding transaction does not match the configured deployment. Refresh before continuing.");
   }
   const args = method.inputs.map((input, index) => input.type.startsWith("uint") ? BigInt(request.args[index]) : request.args[index]);
+  if (action === "select" && (!same(args[0], reviewedProposal.entityId) || String(args[1]) !== reviewedProposal.revisionCount
+      || !same(args[2], reviewedProposal.proposalHash) || !same(args[3], reviewedProposal.solutionHash))) {
+    throw new Error("The selected proposal revision changed. Refresh and review it before continuing.");
+  }
   if (amountBaseUnits && (prepared.tokenDecimals !== decimals || String(args[0]) !== amountBaseUnits)) {
     throw new Error("The token or amount changed. Refresh before continuing.");
+  }
+  // The server names the pool, but the wallet signs only against a pool the configured
+  // factory deployed (read on-chain) and approves only the token that pool holds. A
+  // tampered callable response can therefore not redirect an approval or a deposit.
+  const read = (address, abi, functionName, args = []) => adapters.readContract({ address, abi, functionName, args, chainId: config.chainId });
+  const listedToken = address => (config.escrow.tokens ?? []).some(token => same(token.address, address));
+  if (action === "create") {
+    if (!same(args[0], expectedPostingId) || !listedToken(args[1])) throw new Error("The grant pool terms do not match this posting.");
+  } else {
+    const postingId = await read(request.address, config.escrow.openFundingPoolAbi, "postingId");
+    const canonical = await read(config.escrow.factoryAddress, config.escrow.factoryAbi, "openFundingPoolForPosting", [postingId]);
+    if (!same(postingId, expectedPostingId) || !same(canonical, request.address) || (prepared.postingId && !same(prepared.postingId, postingId))) {
+      throw new Error("The grant pool is not the canonical pool for this posting. Refresh before continuing.");
+    }
+    if (amountBaseUnits) {
+      const poolToken = await read(request.address, config.escrow.openFundingPoolAbi, "token");
+      if (!same(poolToken, prepared.tokenAddress) || (tokenAddress && !same(poolToken, tokenAddress)) || !listedToken(poolToken)) {
+        throw new Error("The token or amount changed. Refresh before continuing.");
+      }
+    }
   }
   // The wallet must sign a commitment to exactly the reason the researcher typed.
   if (declineReason && (!/^0x[0-9a-f]{64}$/i.test(args[0] ?? "") || !same(args[1], prepared.reasonHash)

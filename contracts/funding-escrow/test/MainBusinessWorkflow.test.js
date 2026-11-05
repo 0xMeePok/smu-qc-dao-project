@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, createProposal, scopedId, fund, lock, approve, at, mineAt, State, Status, assertAccounting } from "./helpers.js";
 import { submit, approveLater } from "./milestoneHelpers.js";
@@ -15,12 +16,12 @@ describe("Main business workflow: exclusive pending selection and refunds", func
   it("blocks sibling deposits and selections while preserving their custody before the handshake", async function () {
     const c = await fixture({ trancheBps: [5000, 5000] });
     const other = await sibling(c);
-    await other.escrow.connect(c.alice).deposit(300n);
+    await reviewedDeposit(other.escrow.connect(c.alice), 300n);
     await lock(c);
     expect(await c.registry.pendingProposalForPosting(c.postingId)).to.equal(c.proposalId);
     expect(await c.registry.isFundingActive(other.proposalId, other.escrowAddress)).to.equal(false);
     expect(await c.registry.isFundingInvalidated(other.proposalId, other.escrowAddress)).to.equal(false);
-    await expect(other.escrow.connect(c.alice).deposit(1n)).to.be.revertedWithCustomError(other.escrow, "WorkflowInactive");
+    await expect(reviewedDeposit(other.escrow.connect(c.alice), 1n)).to.be.revertedWithCustomError(other.escrow, "WorkflowInactive");
     await expect(other.escrow.lockSelection(other.selectionId, c.bob.address)).to.be.revertedWithCustomError(other.escrow, "WorkflowInactive");
     await expect(other.escrow.refundInvalidated()).to.be.revertedWithCustomError(other.escrow, "InvalidState");
     expect(await other.escrow.totalDeposited()).to.equal(300n);
@@ -32,7 +33,7 @@ describe("Main business workflow: exclusive pending selection and refunds", func
   for (const actor of ["owner", "solution"]) it(`${actor} rejection refunds the selected escrow immediately and reopens its sibling`, async function () {
     const c = await fixture({ trancheBps: [5000, 5000], feeBps: 100 });
     const other = await sibling(c);
-    await other.escrow.connect(c.alice).deposit(300n);
+    await reviewedDeposit(other.escrow.connect(c.alice), 300n);
     await approve(c);
     await expect(c.escrow.connect(c[actor]).rejectSelection(c.selectionId, c.reason))
       .to.emit(c.escrow, "SelectionInvalidated").withArgs(c.selectionId, c.reason);
@@ -45,8 +46,8 @@ describe("Main business workflow: exclusive pending selection and refunds", func
     await c.escrow.connect(c.alice).claimRefund();
     expect(await c.escrow.totalRefunded()).to.equal(c.target);
     expect(await c.escrow.feePaid()).to.equal(0n);
-    await expect(c.escrow.connect(c.alice).deposit(1n)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
-    await other.escrow.connect(c.alice).deposit(700n);
+    await expect(reviewedDeposit(c.escrow.connect(c.alice), 1n)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
+    await reviewedDeposit(other.escrow.connect(c.alice), 700n);
     await other.escrow.lockSelection(other.selectionId, c.bob.address);
     expect(await c.registry.pendingProposalForPosting(c.postingId)).to.equal(other.proposalId);
     await assertAccounting(c);
@@ -70,7 +71,7 @@ describe("Main business workflow: exclusive pending selection and refunds", func
   it("expires exactly at the handshake deadline, returns selected funds and reopens siblings", async function () {
     const c = await fixture({ duration: 30 * 86400, trancheBps: [5000, 5000] });
     const other = await sibling(c);
-    await other.escrow.connect(c.alice).deposit(300n);
+    await reviewedDeposit(other.escrow.connect(c.alice), 300n);
     await lock(c);
     const deadline = await c.escrow.approvalDeadline();
     const anchors = await c.registry.fundingAnchorCount(c.proposalId);
@@ -87,7 +88,7 @@ describe("Main business workflow: exclusive pending selection and refunds", func
       ["uint256", "uint256", "uint256"], [0n, deadline, c.target])));
     expect(await c.registry.pendingProposalForPosting(c.postingId)).to.equal(c.ethers.ZeroHash);
     await c.escrow.connect(c.alice).claimRefund();
-    await other.escrow.connect(c.alice).deposit(700n);
+    await reviewedDeposit(other.escrow.connect(c.alice), 700n);
     await other.escrow.lockSelection(other.selectionId, c.bob.address);
     await assertAccounting(c);
   });
@@ -112,7 +113,7 @@ describe("Main business workflow: exclusive pending selection and refunds", func
   for (const voting of [false, true]) it(`accepted winner pays 50/50 with completion voting ${voting}`, async function () {
     const c = await fixture({ trancheBps: [5000, 5000], funderVoting: voting });
     const other = await sibling(c);
-    await other.escrow.connect(c.alice).deposit(300n);
+    await reviewedDeposit(other.escrow.connect(c.alice), 300n);
     await approve(c);
     await c.escrow.release(c.selectionId);
     expect(await c.escrow.totalReleased()).to.equal(500n);
@@ -140,6 +141,6 @@ describe("Main business workflow: exclusive pending selection and refunds", func
     await c.escrow.connect(close === "voidEscrow" ? c.admin : c.platform)[close](c.reason);
     expect(await c.registry.pendingProposalForPosting(c.postingId)).to.equal(c.ethers.ZeroHash);
     expect(await c.registry.isFundingInvalidated(other.proposalId, other.escrowAddress)).to.equal(false);
-    await other.escrow.connect(c.alice).deposit(1n);
+    await reviewedDeposit(other.escrow.connect(c.alice), 1n);
   });
 });

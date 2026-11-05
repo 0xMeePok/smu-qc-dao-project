@@ -1,12 +1,12 @@
 {
   "contractName": "EscrowAuditRegistry",
   "chainId": 421614,
-  "address": "0x8c12687843B3b40Ad2403946b6E29a93E2Fec6f5",
+  "address": "0xcBBb4a5d341De56650402F37842DE91e61a9fD2A",
   "entityIdScheme": 2,
   "deployment": {
-    "blockNumber": 319990437,
-    "transactionHash": "0x49ddd3d088cb6c44da35cb81bb8d9dddabc9190137f818f32656976a494d19b8",
-    "deployedAt": "2026-10-17T06:16:52.000Z"
+    "blockNumber": 326162352,
+    "transactionHash": "0x79ad083dd4b43322a03c35c6666c41905b16702eb03181a7128739be6f7cd6fe",
+    "deployedAt": "2026-11-05T02:41:36.000Z"
   },
   "abi": [
     {
@@ -1015,6 +1015,25 @@
       "type": "function"
     },
     {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "proposalId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "fundingContextDigest",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [],
       "name": "fundingFactory",
       "outputs": [
@@ -1690,7 +1709,7 @@
     }
   ],
   "escrow": {
-    "factoryAddress": "0x1B44201bF44Bc3d144994B5246F03bD4b536eaC0",
+    "factoryAddress": "0xb1a7CCFc97120B85CbA7595235608E407837010b",
     "tokens": [
       {
         "address": "0xC2FE292771719Ae948506bab3c156A622de9a415",
@@ -2598,6 +2617,16 @@
         "type": "error"
       },
       {
+        "inputs": [],
+        "name": "ReviewedContextChanged",
+        "type": "error"
+      },
+      {
+        "inputs": [],
+        "name": "ReviewedContextRequired",
+        "type": "error"
+      },
+      {
         "inputs": [
           {
             "internalType": "address",
@@ -3242,6 +3271,24 @@
           }
         ],
         "stateMutability": "view",
+        "type": "function"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "expectedContextDigest",
+            "type": "bytes32"
+          }
+        ],
+        "name": "depositReviewed",
+        "outputs": [],
+        "stateMutability": "nonpayable",
         "type": "function"
       },
       {
@@ -4591,6 +4638,21 @@
           {
             "internalType": "bytes32",
             "name": "proposalId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "expectedRevisionCount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "expectedProposalHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "expectedSolutionHash",
             "type": "bytes32"
           }
         ],

@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, fund, approve, at, assertAccounting, Behavior, State, Status } from "./helpers.js";
 
@@ -14,7 +15,7 @@ describe("FundingEscrow: checked transfers and re-entrancy guards", function () 
       await c.token.connect(c.alice).approve(c.escrowAddress, 100n);
       await c.token.configure(behavior, false);
       const before = await c.token.balanceOf(c.alice.address);
-      await expect(c.escrow.connect(c.alice).deposit(100n)).to.be.revertedWithCustomError(
+      await expect(reviewedDeposit(c.escrow.connect(c.alice), 100n)).to.be.revertedWithCustomError(
         behavior === Behavior.Reverting ? c.token : c.escrow, error,
       );
       expect(await c.token.balanceOf(c.alice.address)).to.equal(before);
@@ -65,7 +66,7 @@ describe("FundingEscrow: checked transfers and re-entrancy guards", function () 
         if (path.includes("release")) await approve(c); else await fund(c);
       }
       await c.token.configure(Behavior.Standard, true);
-      if (path === "deposit") await c.escrow.connect(c.alice).deposit(500n);
+      if (path === "deposit") await reviewedDeposit(c.escrow.connect(c.alice), 500n);
       else if (path.includes("release")) await c.escrow.release(c.selectionId);
       else { await at(c, c.expiresAt); await c.escrow.connect(c.alice).claimRefund(); }
       expect(await c.token.guardedCallbacks()).to.equal(path === "fee release" ? 2n : 1n);
@@ -76,8 +77,8 @@ describe("FundingEscrow: checked transfers and re-entrancy guards", function () 
 
   it("one blocked refund recipient does not prevent other depositors from claiming", async function () {
     const c = await fixture();
-    await c.escrow.connect(c.alice).deposit(400n);
-    await c.escrow.connect(c.bob).deposit(600n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 400n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 600n);
     await c.token.blockRecipient(c.alice.address);
     await at(c, c.expiresAt);
     await expect(c.escrow.connect(c.alice).claimRefund()).to.be.revertedWithCustomError(c.token, "TestTransferRejected");

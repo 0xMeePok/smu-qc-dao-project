@@ -5,16 +5,19 @@
   "type": "module",
   "description": "Audit registry contract for anchoring proposal and solution hashes on Arbitrum Sepolia",
   "scripts": {
-    "compile": "hardhat compile",
-    "test": "hardhat test mocha",
-    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
-    "verify:arbitrum-sepolia": "node scripts/verify-live.js"
+    "compile": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat compile",
+    "test": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat test mocha",
+    "deploy:arbitrum-sepolia": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
+    "verify:arbitrum-sepolia": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && node scripts/verify-live.js",
+    "postinstall": "node scripts/install-security.mjs",
+    "security:apply": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production ."
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "4.0.15",
     "@nomicfoundation/hardhat-ethers-chai-matchers": "3.0.11",
     "@nomicfoundation/hardhat-mocha": "3.1.0",
-    "@nomicfoundation/hardhat-verify": "3.0.22",
+    "@nomicfoundation/hardhat-verify": "3.1.4",
     "chai": "6.2.2",
     "dotenv": "17.4.2",
     "ethers": "6.17.0",
@@ -23,6 +26,17 @@
   },
   "overrides": {
     "diff": "8.0.4",
-    "serialize-javascript": "7.1.0"
+    "serialize-javascript": "7.1.4",
+    "adm-zip": "0.6.1",
+    "undici@^6.0.0": "6.29.1",
+    "mocha": {
+      "glob": "14.0.2",
+      "minimatch": "11.0.1"
+    },
+    "glob": {
+      "minimatch": "11.0.1"
+    },
+    "undici@^7.0.0": "7.30.1",
+    "js-yaml@^4.0.0": "4.3.2"
   }
 }

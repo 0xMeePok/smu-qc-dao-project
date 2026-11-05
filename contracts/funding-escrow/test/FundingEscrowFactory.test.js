@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, createProposal, scopedId, terms, at, approve, fund, assertAccounting, Status } from "./helpers.js";
 
@@ -84,7 +85,7 @@ describe("FundingEscrowFactory: configuration and proposal isolation", function 
       const escrow = await c.ethers.getContractAt("FundingEscrow", await c.factory.escrowForProposal(proposalId));
       await token.mint(c.alice.address, target);
       await token.connect(c.alice).approve(await escrow.getAddress(), target);
-      await escrow.connect(c.alice).deposit(target);
+      await reviewedDeposit(escrow.connect(c.alice), target);
       expect(await escrow.totalDeposited()).to.equal(target);
       expect(await escrow.token()).to.equal(await token.getAddress());
     }
@@ -97,8 +98,8 @@ describe("FundingEscrowFactory: configuration and proposal isolation", function 
     const secondAddress = await c.factory.escrowForProposal(secondId);
     const second = await c.ethers.getContractAt("FundingEscrow", secondAddress);
     await c.token.connect(c.alice).approve(secondAddress, 500n);
-    await second.connect(c.alice).deposit(75n);
-    await second.connect(c.alice).deposit(125n);
+    await reviewedDeposit(second.connect(c.alice), 75n);
+    await reviewedDeposit(second.connect(c.alice), 125n);
     await approve(c); await c.escrow.release(c.selectionId);
     expect(await c.token.balanceOf(secondAddress)).to.equal(200n);
     expect((await second.depositorSummary(c.alice.address)).depositCount).to.equal(2n);
@@ -136,15 +137,15 @@ describe("FundingEscrowFactory: configuration and proposal isolation", function 
 
   it("delisting blocks new escrows and top-ups; relisting restores funding without losing history", async function () {
     const c = await fixture();
-    await c.escrow.connect(c.alice).deposit(50n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 50n);
     await c.factory.connect(c.admin).setTokenAllowed(c.tokenAddress, false);
-    await expect(c.escrow.connect(c.alice).deposit(50n)).to.be.revertedWithCustomError(c.escrow, "TokenNotListed");
+    await expect(reviewedDeposit(c.escrow.connect(c.alice), 50n)).to.be.revertedWithCustomError(c.escrow, "TokenNotListed");
     await expect(createProposal(c, "next"))
       .to.be.revertedWithCustomError(c.factory, "UnsupportedToken");
     expect(await c.escrow.contributions(c.alice.address)).to.equal(50n);
     expect(await c.escrow.depositCounts(c.alice.address)).to.equal(1n);
     await c.factory.connect(c.admin).setTokenAllowed(c.tokenAddress, true);
-    await c.escrow.connect(c.alice).deposit(50n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 50n);
     expect(await c.escrow.contributions(c.alice.address)).to.equal(100n);
     expect(await c.escrow.depositCounts(c.alice.address)).to.equal(2n);
   });

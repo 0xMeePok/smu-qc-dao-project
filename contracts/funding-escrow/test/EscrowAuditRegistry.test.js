@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, createProposal, scopedId, terms, at, assertAccounting, State } from "./helpers.js";
 import { first, submit, approveLater } from "./milestoneHelpers.js";
@@ -62,7 +63,7 @@ describe("Atomic audit registry and escrow integration", function () {
     await c.registry.connect(c.solution).updateHashes(c.proposalId, c.reason, c.reason, 0);
     await expect(c.registry.connect(c.owner).updateOpportunity(c.postingId, c.reason, c.expiresAt + 1n))
       .to.be.revertedWithCustomError(c.registry, "FundingTermsFrozen");
-    await c.escrow.connect(c.alice).deposit(1n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 1n);
     await expect(c.registry.connect(c.solution).updateHashes(c.proposalId, c.reason, c.reason, 0))
       .to.be.revertedWithCustomError(c.registry, "FundingTermsFrozen");
     await expect(c.registry.connect(c.owner).updateOpportunity(c.postingId, c.reason, c.expiresAt))
@@ -74,14 +75,14 @@ describe("Atomic audit registry and escrow integration", function () {
   for (const kind of ["proposal", "posting"]) for (const phase of ["open", "active"]) {
     it(`${kind} withdrawal in ${phase} stops funding/payments and permits anyone to open refunds`, async function () {
       const c = await fixture({ trancheBps: [4000, 6000] });
-      if (phase === "active") await first(c); else await c.escrow.connect(c.alice).deposit(200n);
+      if (phase === "active") await first(c); else await reviewedDeposit(c.escrow.connect(c.alice), 200n);
       const args = phase === "active" ? await submit(c) : undefined;
       if (args) await approveLater(c, args);
       if (kind === "proposal") await c.registry.connect(c.solution).withdrawProposal(c.proposalId, c.reason);
       else await c.registry.connect(c.owner).withdrawOpportunity(c.postingId, c.reason);
       expect(await c.registry.isFundingActive(c.proposalId, c.escrowAddress)).to.equal(false);
       if (args) await expect(c.escrow.releaseMilestone(...args)).to.be.revertedWithCustomError(c.escrow, "WorkflowInactive");
-      else await expect(c.escrow.connect(c.alice).deposit(1n)).to.be.revertedWithCustomError(c.escrow, "WorkflowInactive");
+      else await expect(reviewedDeposit(c.escrow.connect(c.alice), 1n)).to.be.revertedWithCustomError(c.escrow, "WorkflowInactive");
       await c.escrow.connect(c.other).refundInvalidated();
       expect(await c.escrow.state()).to.equal(State.Voided);
       await expect(c.escrow.refundInvalidated()).to.be.revertedWithCustomError(c.escrow, "InvalidState");

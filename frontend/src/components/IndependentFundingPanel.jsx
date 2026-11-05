@@ -9,11 +9,12 @@ import { useWallet } from "../context/WalletContext.jsx";
 import { invalidateFundingDashboardSummaries } from "../lib/fundingDashboardCache.js";
 import { getIndependentFundingState, independentFundingAmount, independentFundingExplorer, independentFundingStatus,
   independentFundingDeploymentKey, independentFundingError, confirmIndependentFundingTransaction,
-  syncIndependentFunding, writeIndependentFundingAction } from "../lib/independentEscrow.js";
+  releaseIndependentFundingCompletion, syncIndependentFunding, writeIndependentFundingAction } from "../lib/independentEscrow.js";
 import { Field } from "./Field.jsx";
 import { escrowCustodyLock } from "../../../firebase/functions/escrowCustody.js";
 import { EscrowCustodyNotice } from "./EscrowCustodyNotice.jsx";
 import { formatInstant } from "../lib/datetime.js";
+import { INDEPENDENT_FUNDING_STATE } from "../config/workflowStatus.js";
 
 const pending = new Map();
 const pendingKey = (id, wallet) => `qcdao:independent-funding:v1:${independentFundingDeploymentKey()}:${id}:${wallet ?? ""}`;
@@ -32,7 +33,7 @@ const SUCCESS = {
   decline: "Funding declined. Every contribution is now refundable.",
   submitEvidence: "Delivery evidence submitted for the funder vote.",
   vote: "Your completion vote is recorded.",
-  releaseCompletion: "The final payment release is confirmed.",
+  releaseCompletion: "Final payment release submitted through the platform signer. The crowdfunding status updates once it confirms.",
   claimRefund: "Refund claimed. Your unpaid contribution has been returned to your wallet.",
 };
 
@@ -103,12 +104,13 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
         {button("submitEvidence", "Submit evidence for funder vote", { evidence: delivery })}
       </div>}
       {Number(summary.completionDeadline) > 0 && <p className="field-hint">Completion needs yes votes weighted by more than 50% of all deposited funds. Current yes weight: <ConvertedAmount text={money(summary.yesWeight)} /> of <ConvertedAmount text={money(summary.totalDeposited)} />.</p>}
-      {actions.vote && <div className="field-group"><h4>Funder completion vote</h4><p>Review the submitted evidence. Your vote is weighted by your deposited contribution. The yes vote that takes approval above 50% releases the final payment immediately.</p>
+      {actions.vote && <div className="field-group"><h4>Funder completion vote</h4><p>Review the submitted evidence. Your vote is weighted by your deposited contribution. Once yes votes exceed 50% of all deposits, an administrator reviews the evidence and releases the final payment through the platform signer.</p>
         {button("vote", "Vote yes for completion", { evidenceHash: summary.evidenceHash, approve: true })}
         {button("vote", "Vote no for completion", { evidenceHash: summary.evidenceHash, approve: false })}
       </div>}
       {wallet.hasVoted && <p className="field-hint">Your completion vote is recorded.</p>}
-      {actions.releaseCompletion && <div className="field-group"><p>The required funder majority has approved this evidence. Confirm the final payment to release the remaining 50%.</p>
+      {summary.completionApproved && !actions.releaseCompletion && summary.state === INDEPENDENT_FUNDING_STATE.ACCEPTED && <p className="field-hint" role="status">The funder majority has approved this evidence. An administrator reviews it and releases the final 50% through the platform signer.</p>}
+      {actions.releaseCompletion && <div className="field-group"><h4>Administrator release</h4><p>The required funder majority has approved this evidence. Review it, then release the remaining 50% to the researcher. The payment is sent by the platform signer, not your wallet.</p>
         {button("releaseCompletion", "Release final 50%")}</div>}
       {button("claimRefund", "Claim my refund")}
       <p className="field-hint">Platform fees apply only to researcher payouts. Refunds have no additional platform fee.</p>
@@ -175,8 +177,20 @@ export function IndependentFundingPanel({ proposal, onStateChange, onConfirmed, 
     if (busy || unresolved || (integrityBlocked && !["claimRefund", "expire"].includes(action))) return;
     if (!walletReady) { void signIn(); return; }
     setBusy(true); setError(""); setNotice("");
+    if (action === "releaseCompletion") {
+      // Administrator review: the platform signer pays, so there is no wallet transaction to track.
+      try {
+        setProgress({ status: "preparing", action });
+        const result = await releaseIndependentFundingCompletion({ proposalId: proposal.id,
+          expectedEvidenceVersion: snapshot?.summary?.evidenceVersion, expectedEvidenceHash: snapshot?.summary?.evidenceHash });
+        invalidateFundingDashboardSummaries(queryClient);
+        if (currentPanel()) { setNotice(result?.message || SUCCESS.releaseCompletion); await load(); }
+      } catch (err) { if (currentPanel()) setError(independentFundingError(err)); }
+      finally { if (currentPanel()) { setBusy(false); setProgress(null); } }
+      return;
+    }
     try {
-      const result = await writeIndependentFundingAction({ proposalId: proposal.id, action, account: address, ...extra,
+      const result = await writeIndependentFundingAction({ proposalId: proposal.id, proposal, action, account: address, ...extra,
         onChange: next => { if (currentPanel()) setProgress(next); if (next.status === "pending" && /^0x[0-9a-f]{64}$/i.test(next.transactionHash ?? "")) remember({ transactionHash: next.transactionHash, action: next.action });
           if (next.status === "confirmed" && ["approve", "resetAllowance"].includes(next.action)) remember(null); } });
       await sync(result.transactionHash, action);

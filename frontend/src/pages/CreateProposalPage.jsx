@@ -22,6 +22,7 @@ import {
 } from "../lib/proposals.js";
 import { anchorProposalBeforeWrite, receiptForWrite } from "../lib/proposalAudit.js";
 import { assertCurrentAuditRecord } from "../lib/opportunityAuditFlow.js";
+import { captureReviewedParentAudit, assertReviewedParentAudit } from "../lib/reviewedParentAudit.js";
 import { prewarmTransaction } from "../lib/prewarm.js";
 import { deleteAttachment } from "../lib/attachments.js";
 import { LeaveDraftPrompt } from "../components/LeaveDraftPrompt.jsx";
@@ -66,7 +67,7 @@ function abandonDraftAttachments(items, ownerId, proposalId) {
 }
 
 /** What "unchanged since the last save" means, for the leave prompt. */
-function snapshotOf(form, attachments) {
+function snapshotOf(form, attachments, reviewedParentAudit) {
   return JSON.stringify({
     ...Object.fromEntries(ALL_FIELDS.map(([key]) => [key, String(form[key] ?? "")])),
     aiAssisted: form.aiAssisted === true,
@@ -76,7 +77,31 @@ function snapshotOf(form, attachments) {
     reviewDays: form.reviewDays ?? "7",
     funderVoting: form.funderVoting ?? false,
     attachments: attachments.map((item) => item.id).sort(),
+    reviewedParentAudit,
   });
+}
+
+const sameParentVersion = (left, right) => Boolean(left && right)
+  && ["chainId", "contractAddress", "entityId", "contentHash", "revisionIndex", "revisionDigest"]
+    .every(key => left[key] === right[key]);
+
+function ParentTermsReview({ posting, revisionIndex, required, disabled, onAccept }) {
+  const funding = posting.opportunityType === OPEN_FUNDING_TYPE;
+  const fields = funding
+    ? [["fundingThesis", "Funding thesis"], ["eligibilityNotes", "Eligibility"], ["tags", "Tags"]]
+    : [["summary", "Summary"], ["businessContext", "Business context"], ["currentApproach", "Current approach"],
+      ["currentLimitations", "Current limitations"], ["expectedOutcome", "Expected outcome"],
+      ["successCriteria", "Success criteria"], ["dataAvailability", "Data availability"]];
+  return <details className="context-panel">
+    <summary>Review current opportunity terms · version {revisionIndex + 1}</summary>
+    <dl>{[["title", "Title"], ["ownerId", "Posted by"], ["organisation", "Organisation"], ...fields,
+      ["categories", "Categories"]].map(([key, label]) => <div key={key}><dt>{label}</dt><dd style={{ whiteSpace: "pre-wrap" }}>{Array.isArray(posting[key]) ? posting[key].join(", ") : posting[key] || "Not specified"}</dd></div>)}
+      <div><dt>Funding</dt><dd>{formatFundingAmount(posting.currency, posting.amount)}</dd></div>
+      <div><dt>Deadline</dt><dd>{formatInstant(posting.expiresAt)}</dd></div>
+      <div><dt>Supporting PDFs</dt><dd>{posting.attachments?.length ? posting.attachments.map(item => item.name).join(", ") : "None"}</dd></div>
+    </dl>
+    {required && <button className="secondary" type="button" disabled={disabled} onClick={onAccept}>Use this reviewed opportunity version</button>}
+  </details>;
 }
 
 /** Seeds the form from a stored record, so a resumed draft or an edit starts where it left off. */
@@ -111,6 +136,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmedAudit, setConfirmedAudit] = useState(null);
   const [posting, setPosting] = useState(null);
+  const [currentParentAudit, setCurrentParentAudit] = useState(null);
   const [proposalId, setProposalId] = useState(null);
   const [active, setActive] = useState(null);
   const [record, setRecord] = useState(null);
@@ -133,6 +159,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   const submitting = useRef(false);
   const formRef = useRef(null);
   const editing = record?.status === "submitted";
+  const parentReviewRequired = Boolean(posting && currentParentAudit && !sameParentVersion(posting.reviewedParentAudit, currentParentAudit));
 
   // Unsaved work, not "any work". Against a saved baseline this is a comparison,
   // so saving a draft - or resuming one and changing nothing - leaves the form
@@ -145,8 +172,8 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
         || (ESCROW_LINKED && ((form.reviewDays ?? "7") !== "7" || form.funderVoting === true))
         || attachments.length > 0;
     }
-    return snapshotOf(form, attachments) !== baseline;
-  }, [form, attachments, baseline]);
+    return snapshotOf(form, attachments, posting?.reviewedParentAudit) !== baseline;
+  }, [form, attachments, baseline, posting?.reviewedParentAudit]);
 
   // Not while editing a submitted proposal: there is no draft to offer, and the
   // record on screen is already the saved one.
@@ -184,11 +211,16 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       ]);
       return { posting: found, active: existing, record: draft, proposalId: draft?.id ?? newProposalId() };
     };
-    load().then((result) => {
+    load().then(async (result) => {
       if (cancelled) return;
       if (result.redirect) { onNavigate(result.redirect); return; }
       if (result.error) { setError(result.error); return; }
-      setPosting(result.posting);
+      const currentAudit = result.posting ? await captureReviewedParentAudit(result.posting) : null;
+      const reviewedParentAudit = result.record?.status === PROPOSAL_STATUS_DRAFT
+        ? result.record.reviewedParentAudit ?? currentAudit : currentAudit;
+      if (cancelled) return;
+      setCurrentParentAudit(currentAudit);
+      setPosting(result.posting ? { ...result.posting, reviewedParentAudit } : null);
       setActive(result.active ?? null);
       setRecord(result.record ?? null);
       setProposalId(result.proposalId);
@@ -201,7 +233,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
         if (result.record.status === PROPOSAL_STATUS_DRAFT) {
           setSavedAt(result.record.updatedAt);
           // Resuming and changing nothing is not unsaved work.
-          setBaseline(snapshotOf(loadedForm, loadedAttachments));
+          setBaseline(snapshotOf(loadedForm, loadedAttachments, reviewedParentAudit));
           savedAttachmentIds.current = new Set(loadedAttachments.map((item) => item.id));
         }
       }
@@ -233,7 +265,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       });
       setDraftExists(true);
       setSavedAt(saved?.updatedAt ?? new Date());
-      setBaseline(snapshotOf(form, attachments));
+      setBaseline(snapshotOf(form, attachments, posting.reviewedParentAudit));
       savedAttachmentIds.current = new Set(attachments.map((item) => item.id));
       return true;
     } catch (err) { setError(messageForProposalError(err)); return false; }
@@ -276,6 +308,10 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
   const submit = async (event) => {
     event.preventDefault();
     if (submitting.current || pending) return;
+    if (parentReviewRequired) {
+      setError("The opportunity changed after this draft was saved. Review all current opportunity terms and accept that version before signing.");
+      return;
+    }
     const validation = validateProposal(form, posting, { requireNewTarget: !editing });
     setErrors(validation);
     if (Object.keys(validation).length) {
@@ -299,6 +335,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
       const currentPosting = await findPosting(posting.id, { fromServer: true });
       if (!currentPosting) throw new Error("This posting is no longer available. Refresh before submitting.");
       await assertCurrentAuditRecord(currentPosting);
+      await assertReviewedParentAudit(currentPosting, posting.reviewedParentAudit);
       if (editing) {
         if (form.immutableFundingTerms) {
           const current = await findProposal(proposalId, { fromServer: true });
@@ -390,6 +427,12 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
         <SubmissionError message={error} />
         {!showForm ? <div className="empty"><h2>You already have an active proposal</h2><p>Withdraw it before submitting a replacement.</p><button className="primary" type="button" onClick={() => onNavigate(`proposal/${active.id}`)}>View my proposal</button></div> : <>
           {blocked && <p className="error-banner" role="alert">{blocked}</p>}
+          {parentReviewRequired && <p className="error-banner" role="status">This draft still refers to opportunity version {posting.reviewedParentAudit.revisionIndex + 1}. The opportunity has changed. Review the full current terms before using the new version.</p>}
+          <ParentTermsReview posting={posting} revisionIndex={currentParentAudit?.revisionIndex ?? 0} required={parentReviewRequired}
+            disabled={busy || savingDraft || Boolean(auditProgress?.transactionHash)} onAccept={() => {
+              setPosting(previous => ({ ...previous, reviewedParentAudit: currentParentAudit }));
+              setError("");
+            }} />
           {editing && <p className="field-hint" role="status">This proposal has been submitted but not yet evaluated. Saving your changes records the edit — the changed fields, your wallet and the time — and returns the proposal for wallet verification, which appends a revision on Arbitrum Sepolia beside the original.</p>}
           <div className="wizard-card">
             <WizardPanel index={stepIndex("approach")} current={wizard.current}>
@@ -425,6 +468,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
               </div>
               <ReviewRows onEdit={wizard.goTo} rows={[
                 { label: "Title", value: text("title"), step: stepIndex("approach") },
+                { label: "Opportunity", value: `${posting.title} · version ${(posting.reviewedParentAudit?.revisionIndex ?? 0) + 1}`, step: stepIndex("approach") },
                 { label: "Approach", value: text("summary"), step: stepIndex("approach") },
                 { label: "Category", value: PROPOSAL_CATEGORIES.find((item) => item.value === form.category)?.label ?? "", empty: "Not chosen", step: stepIndex("approach") },
                 ...(isOpenFunding ? [{ label: "Proposed problem", value: text("proposedProblem"), step: stepIndex("framing") }] : []),

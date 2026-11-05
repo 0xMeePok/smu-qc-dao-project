@@ -1006,6 +1006,25 @@
       "type": "function"
     },
     {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "proposalId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "fundingContextDigest",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [],
       "name": "fundingFactory",
       "outputs": [
@@ -2570,6 +2589,16 @@
       "type": "error"
     },
     {
+      "inputs": [],
+      "name": "ReviewedContextChanged",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ReviewedContextRequired",
+      "type": "error"
+    },
+    {
       "inputs": [
         {
           "internalType": "address",
@@ -3214,6 +3243,24 @@
         }
       ],
       "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "expectedContextDigest",
+          "type": "bytes32"
+        }
+      ],
+      "name": "depositReviewed",
+      "outputs": [],
+      "stateMutability": "nonpayable",
       "type": "function"
     },
     {
@@ -4563,6 +4610,21 @@
         {
           "internalType": "bytes32",
           "name": "proposalId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "expectedRevisionCount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "expectedProposalHash",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "expectedSolutionHash",
           "type": "bytes32"
         }
       ],

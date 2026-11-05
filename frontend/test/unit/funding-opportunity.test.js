@@ -157,12 +157,12 @@ describe("[QCDAO-51] AuditRegistry mapping", () => {
     });
     // Sorted, so the order they were uploaded in cannot change the hash.
     assert.deepEqual(withFiles.attachments.map((item) => item.id), ["aaa1", "bbb2"]);
-    // The digest is not part of the payload; the reference is.
-    assert.equal("sha256" in withFiles.attachments[0], false);
+    assert.equal(withFiles.attachments[0].sha256, `0x${"7".repeat(64)}`);
     const hashOf = (attachments) =>
       prepareFundingOpportunityAudit({ ...opportunity, attachments }).prepared.contentHash;
     assert.notEqual(hashOf([file("aaa1")]), withoutFiles && hashOf([]));
     assert.notEqual(hashOf([file("aaa1")]), hashOf([file("aaa1", 4096)]));
+    assert.notEqual(hashOf([file("aaa1")]), hashOf([{ ...file("aaa1"), sha256: `0x${"8".repeat(64)}` }]));
     assert.equal(hashOf([file("bbb2"), file("aaa1")]), hashOf([file("aaa1"), file("bbb2")]));
   });
 });

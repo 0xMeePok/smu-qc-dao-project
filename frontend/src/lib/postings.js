@@ -22,6 +22,7 @@ import { requireFirebase } from "./authFlow.js";
 import { deleteAttachment, toPostingRecord } from "./attachments.js";
 import { expiryDateFrom } from "../config/postingCategories.js";
 import { toDate } from "./datetime.js";
+import { materialFieldKeys } from "./opportunityEdit.js";
 
 /**
  * QCDAO-48 - funded business problem statements.
@@ -193,12 +194,26 @@ export async function findPosting(postingId, { fromServer = false } = {}) {
   // missing/inaccessible posting keeps its original result and error precedence.
   const metricsRead = getDoc(opportunityMetricsRef(postingId))
     .then(snapshot => ({ snapshot }), error => ({ error }));
+  const lockRead = (fromServer ? getDocFromServer : getDoc)(doc(db, "opportunityProposalLocks", postingId))
+    .then(snapshot => ({ snapshot }), error => ({ error }));
   const snapshot = await (fromServer ? getDocFromServer : getDoc)(postingRef(postingId));
   if (!snapshot.exists()) return null;
   const result = await metricsRead;
   if (result.error) throw result.error;
+  const lock = await lockRead;
+  if (lock.error) throw lock.error;
   const metrics = opportunityMetricsFromSnapshot(result.snapshot, snapshot.data());
-  return postingFromSnapshot(snapshot, metrics);
+  return { ...postingFromSnapshot(snapshot, metrics), proposalSubmissionLocked: lock.snapshot.exists() };
+}
+
+/** Recheck the monotonic first-proposal lock before an owner signs an edit. */
+export async function assertOpportunityMaterialEditAllowed(postingId, record) {
+  const current = await findPosting(postingId, { fromServer: true });
+  if (!current) throw new Error("This opportunity is no longer available.");
+  if ((current.proposalSubmissionLocked || current.proposalCount > 0)
+      && materialFieldKeys(current).some(key => JSON.stringify(current[key] ?? "") !== JSON.stringify(record[key] ?? ""))) {
+    throw new Error("A proposal has been received. The opportunity's terms are fixed; supporting PDFs can still be updated. Reload before editing.");
+  }
 }
 
 export const MARKETPLACE_PAGE_SIZE = 25;

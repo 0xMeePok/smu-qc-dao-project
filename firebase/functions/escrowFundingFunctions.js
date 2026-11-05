@@ -13,15 +13,18 @@ import { getEscrowAdminCancellation, startEscrowAdminCancellation, sweepEscrowAd
 
 export const escrowPlatformKey = defineSecret("ESCROW_PLATFORM_PRIVATE_KEY");
 
+/** The deployment's one platform signer. Read only inside callables that declare the secret. */
+export function platformWallet() {
+  const key = escrowPlatformKey.value()?.trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(key || "")) throw new HttpsError("failed-precondition", "Configure the deployment's platform signing secret before settlement.");
+  return createWalletClient({ account: privateKeyToAccount(key), chain: arbitrumSepolia,
+    transport: createArbitrumRpcTransport({ http, fallback,
+      primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
+      backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }) });
+}
+
 export function registerEscrowFundingFunctions({ db, client, batchedReadClient, config, requireMember, options, region, hot = {} }) {
-  const getWallet = () => {
-    const key = escrowPlatformKey.value()?.trim();
-    if (!/^0x[0-9a-fA-F]{64}$/.test(key || "")) throw new HttpsError("failed-precondition", "Configure the deployment's platform signing secret before settlement.");
-    return createWalletClient({ account: privateKeyToAccount(key), chain: arbitrumSepolia,
-      transport: createArbitrumRpcTransport({ http, fallback,
-        primaryUrl: process.env.ARBITRUM_SEPOLIA_RPC_URL,
-        backupUrls: process.env.ARBITRUM_SEPOLIA_RPC_BACKUP_URLS }) });
-  };
+  const getWallet = platformWallet;
   const shared = { db, client, config, getWallet };
   // Multicall batching makes each round of a request's read queue one RPC
   // request, so the queue may be wider without adding endpoint load.
@@ -39,7 +42,7 @@ export function registerEscrowFundingFunctions({ db, client, batchedReadClient, 
     const uid = await requireMember(request);
     try {
       return await service({ ...shared, uid, proposalId: request.data?.proposalId, problemId: request.data?.problemId,
-        amount: request.data?.amount, transactionHash: request.data?.transactionHash,
+        amount: request.data?.amount, reviewedContextDigest: request.data?.reviewedContextDigest, transactionHash: request.data?.transactionHash,
         reason: request.data?.reason, requestId: request.data?.requestId });
     } catch (error) {
       if (error instanceof HttpsError) throw error;

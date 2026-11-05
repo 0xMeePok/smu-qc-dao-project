@@ -1,9 +1,11 @@
+import "./securityDependencies/verify-installed.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { getAppCheck } from "firebase-admin/app-check";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
-import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { createPublicClient, fallback, http } from "viem";
@@ -24,6 +26,7 @@ import { assertSimilarityEnabled, retrieveAvailableSimilarProposals } from "./ai
 import { reserveRetrievalQuota, releaseAIQuota } from "./aiDraftQuota.js";
 import { AI_PROPOSAL_CATEGORIES } from "./aiDraftSchema.js";
 import { assertIndependentPublicationUnlocked } from "./independentFunding.js";
+import { registerDeliveryEvidenceFunctions } from "./deliveryEvidenceFunctions.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
   applyRoleChangeTransaction,
@@ -33,6 +36,7 @@ import {
   writeSessionCutoff,
 } from "./adminActions.js";
 import { sweepOrphanedAttachments } from "./attachmentSweeper.js";
+import { createProposalAttachmentHandler } from "./proposalAttachments.js";
 import { affectsMetrics, syncMetricContribution, refreshOpportunityMetrics } from "./opportunityMetrics.js";
 import { postingProgressChanged, refreshPostingEscrowProgress } from "./postingEscrowProgress.js";
 import { notifyEscrowWorkflowEvent } from "./escrowWorkflowNotifications.js";
@@ -50,7 +54,9 @@ import { recordProposalRevision } from "./proposalRevisions.js";
 import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
-import { verifyPublication } from "./publication.js";
+import { verifyPublication, requireReviewedParentPublication } from "./publication.js";
+import { readOpportunityProposalLockRepair } from "./opportunityProposalLocks.js";
+import { ATTACHED_SCHEMA_VALIDATION, hasAttachedPublicationSchema } from "./attachedProposalSchema.js";
 import { PUBLISH_VALIDATION, INDEPENDENT_PUBLISH_VALIDATION, isPublishableProblem, isPublishableIndependentProposal } from "./publicationValidation.js";
 import { requireNewProposalTargetPolicy, requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
@@ -73,8 +79,8 @@ import { matchesUploadReservation, reserveRecord, reserveUpload, releaseDeletedU
 
 initializeApp();
 
-// Independent crowdfunding is additive; the existing registry and factory stay
-// at their current addresses with their original configuration on disk.
+// Both funding modes use the active deployment manifests. Historical registry
+// configurations remain available separately for verifying older receipts.
 const auditRegistryConfig = { ...auditRegistryBaseConfig, independentFunding: independentFundingConfig };
 
 const db = getFirestore();
@@ -96,6 +102,7 @@ function attachmentMetadata(attachments) {
     name: item?.name ?? "",
     size: Number(item?.size ?? 0),
     contentType: item?.contentType || "application/pdf",
+    ...(item?.sha256 ? { sha256: item.sha256 } : {}),
   }));
 }
 
@@ -255,6 +262,19 @@ async function requireMember(request) {
 const MEMBER_CALL_OPTIONS = { region: REGION, maxInstances: 5,
   enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== "true" };
 
+export const downloadProposalAttachment = onRequest({
+  region: REGION, maxInstances: 5, invoker: "public", memory: "512MiB", concurrency: 4,
+},
+  createProposalAttachmentHandler({
+    db,
+    getBucket: () => getStorage().bucket(),
+    requireMember,
+    verifyIdToken: (token) => getAuth().verifyIdToken(token),
+    verifyAppCheckToken: (token) => getAppCheck().verifyToken(token),
+    emulator: process.env.FUNCTIONS_EMULATOR === "true",
+    allowedOrigins: ["https://qcdao-a0c7a.web.app", "https://qcdao-a0c7a.firebaseapp.com"],
+  }));
+
 /**
  * Warm-instance feature flag. OFF unless WARM_INSTANCES is set to a positive
  * number at deploy time.
@@ -324,8 +344,9 @@ export const { getOpenFundingSummary, prepareOpenFundingAction, syncOpenFunding,
   hot: HOT_CALL_OPTIONS,
 });
 
-export const { getIndependentFundingState, prepareIndependentFundingAction, syncIndependentFunding } = registerIndependentFundingFunctions({
-  db, client: publicClient, config: auditRegistryConfig, requireMember, options: MEMBER_CALL_OPTIONS, region: REGION,
+export const { getIndependentFundingState, prepareIndependentFundingAction, syncIndependentFunding,
+  releaseIndependentFundingCompletion } = registerIndependentFundingFunctions({
+  db, client: publicClient, config: auditRegistryConfig, requireMember, requireAdmin, options: MEMBER_CALL_OPTIONS, region: REGION,
 });
 
 export const { submitContentReport, listModerationQueue, getModerationContext, moderateContent,
@@ -516,6 +537,8 @@ export const reserveResource = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   return { reserved: true };
 });
 
+export const { saveDeliveryEvidence } = registerDeliveryEvidenceFunctions({ db, requireMember, options: MEMBER_CALL_OPTIONS });
+
 export const reserveAttachment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return reserveUpload({ db, uid, scope: request.data?.scope, id: request.data?.recordId,
@@ -571,6 +594,10 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
     throw new HttpsError("invalid-argument", "Invalid publication content.");
   }
   const record = { ...input, id: recordId };
+  if ((scope === "problems" || (scope === "proposals" && record.proposalKind === "independent"))
+      && record.audit?.digestVersion !== 1) {
+    throw new HttpsError("failed-precondition", "Re-anchor this publication with attachment digest protection.");
+  }
   if (record[scope === "problems" ? "ownerId" : "researcherId"] !== uid) {
     throw new HttpsError("permission-denied", "You can publish only your own records.");
   }
@@ -603,16 +630,26 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
       scope === "proposals" ? tx.get(db.collection("proposals").doc(recordId)) : Promise.resolve(null),
     ]);
     if (maintenance.data()?.active || reservation.data()?.retired) throw new HttpsError("failed-precondition", "Registry maintenance or retirement prevents publication.");
+    const lockRepair = await readOpportunityProposalLockRepair({ tx, db, scope, recordId,
+      storedRecord: existingProposal?.data(), now: Timestamp.now() });
+    let reviewedParentRecord;
     if (scope === "proposals") {
+      const parent = record.problemId && record.proposalKind !== "independent"
+        ? await tx.get(db.collection("problems").doc(record.problemId)) : null;
       try {
         requireProposalPublicationFundingPolicy(record);
         requireNewProposalTargetPolicy(record, { existingRecord: existingProposal?.data() });
+        requireReviewedParentPublication(record, { existingRecord: existingProposal?.data(), parent: parent?.data() });
+        if (record.proposalKind !== "independent" && (!existingProposal?.exists || existingProposal.data().status === "draft")) {
+          reviewedParentRecord = parent.data();
+        }
       }
       catch (error) { throw new HttpsError("failed-precondition", error.message); }
     }
     const attachments = record.attachments ?? [];
     const reservations = await Promise.all(attachments.map((item) =>
       tx.get(db.collection("uploadReservations").doc(uploadReservationKey(scope, recordId, item.id)))));
+    lockRepair();
     for (let index = 0; index < reservations.length; index += 1) {
       const reservation = reservations[index], item = attachments[index];
       if (!reservation.exists) continue; // Existing immutable attachments predate reservations.
@@ -638,6 +675,9 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
       : null;
     tx.set(proofRef, {
       uid, record: content, transactionHash: audit.transactionHash, verifiedAt: Timestamp.now(),
+      ...(reviewedParentRecord ? { reviewedParentRecord } : {}),
+      ...(scope === "proposals" && record.proposalKind !== "independent" && hasAttachedPublicationSchema(content)
+        ? { schemaValidation: ATTACHED_SCHEMA_VALIDATION } : {}),
       ...(validation ? { validation } : {}),
     });
   });
@@ -701,8 +741,15 @@ export const revokeOwnSessions = onCall({ region: REGION }, async (request) => {
   const userRef = db.collection("users").doc(uid);
   const revocationRef = db.collection(SESSION_REVOCATIONS_COLLECTION).doc(uid);
   const auditRef = db.collection("audits").doc();
-  await db.runTransaction(async (tx) => {
+  const existingCutoff = await db.runTransaction(async (tx) => {
     const user = await tx.get(userRef);
+    const revocation = await tx.get(revocationRef);
+    const cutoffs = [user.data()?.sessionsValidAfterEpoch, revocation.data()?.sessionsValidAfterEpoch];
+    if (isAuthTimeRevoked(request.auth.token?.auth_time ?? 0, ...cutoffs)) {
+      // A stale browser may finish signing out, but its old token must never
+      // revoke a newer sign-in, including through Firebase Auth below.
+      return Math.max(...cutoffs.filter((value) => typeof value === "number"));
+    }
     const changedAt = Timestamp.now();
     writeSessionCutoff(tx, revocationRef, revokedAfterEpoch, changedAt);
     if (user.exists) {
@@ -720,7 +767,12 @@ export const revokeOwnSessions = onCall({ region: REGION }, async (request) => {
       timestamp: changedAt,
       createdAt: changedAt,
     });
+    return null;
   });
+
+  if (existingCutoff !== null) {
+    return { success: true, scope: "all-devices", revokedAfterEpoch: existingCutoff };
+  }
 
   try {
     await getAuth().revokeRefreshTokens(uid);
@@ -998,12 +1050,17 @@ export const adminGetPlatformStatus = onCall({ region: REGION, maxInstances: 3, 
  * UTC date range. Grading stays outside the platform. The audit names the
  * administrator because the file leaves with participant data.
  */
-export const adminListExportProposals = onCall({ region: REGION, maxInstances: 3, timeoutSeconds: 60 }, async (request) => {
+const EXPORT_CALL_OPTIONS = {
+  ...MEMBER_CALL_OPTIONS, maxInstances: 3, timeoutSeconds: 60,
+  memory: "512MiB", concurrency: 4,
+};
+
+export const adminListExportProposals = onCall(EXPORT_CALL_OPTIONS, async (request) => {
   await requireAdmin(request);
   return listExportableProposals({ db });
 });
 
-export const adminExportSelectedProposals = onCall({ region: REGION, maxInstances: 3, timeoutSeconds: 60 }, async (request) => {
+export const adminExportSelectedProposals = onCall(EXPORT_CALL_OPTIONS, async (request) => {
   const { uid, adminUser } = await requireAdmin(request);
   return exportSelectedProposals({
     db,

@@ -9,21 +9,24 @@
     "node": "22"
   },
   "scripts": {
-    "serve": "firebase emulators:start --only functions,firestore,auth,storage",
-    "deploy": "firebase deploy --only functions",
-    "test": "firebase emulators:exec --config ../firebase.json --only functions,firestore,auth,storage --project qc-dao-demo \"node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs\"",
-    "test:attach": "node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs",
-    "seed": "node scripts/mock_data.mjs",
-    "reset": "node scripts/reset-dev-data.mjs"
+    "serve": "node securityDependencies/manage.mjs --verify --production . && firebase emulators:start --only functions,firestore,auth,storage",
+    "deploy": "node securityDependencies/manage.mjs --verify --production . && firebase deploy --only functions",
+    "test": "node securityDependencies/manage.mjs --verify --production . && firebase emulators:exec --config ../firebase.json --only functions,firestore,auth,storage --project qc-dao-demo \"node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs\"",
+    "test:attach": "node securityDependencies/manage.mjs --verify --production . && node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs",
+    "seed": "node securityDependencies/manage.mjs --verify --production . && node scripts/mock_data.mjs",
+    "reset": "node securityDependencies/manage.mjs --verify --production . && node scripts/reset-dev-data.mjs",
+    "postinstall": "node securityDependencies/manage.mjs --apply --production .",
+    "security:apply": "node securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node securityDependencies/manage.mjs --verify --production ."
   },
   "dependencies": {
     "@privy-io/node": "0.35.0",
-    "firebase-admin": "14.3.0",
-    "firebase-functions": "7.3.2",
+    "firebase-admin": "14.5.0",
+    "firebase-functions": "7.4.0",
     "viem": "2.55.19"
   },
   "devDependencies": {
-    "firebase-tools": "14.27.0"
+    "firebase-tools": "15.35.0"
   },
   "overrides": {
     "gaxios": {
@@ -31,6 +34,16 @@
     },
     "teeny-request": {
       "uuid": "11.1.1"
+    },
+    "firebase-tools": {
+      "glob": "14.0.3",
+      "@google-cloud/pubsub": "6.3.2"
+    },
+    "rimraf": {
+      "glob": "14.0.3"
+    },
+    "archiver-utils": {
+      "glob": "14.0.3"
     }
   }
 }

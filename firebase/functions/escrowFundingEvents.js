@@ -19,7 +19,19 @@ function decode(log, abi) {
 /** The registry digest is independently recomputed from the canonical escrow's
  * receipt logs. A submitted hash, amount, escrow address or "confirmed" flag is
  * never itself evidence. All values returned here came from that mined receipt. */
-export async function reconcileFundingReceipt({ client, config, expected, escrowAddress, transactionHash, safeBlock }) {
+export async function reconcileFundingReceipt(options) {
+  return (await reconcileFundingReceiptPage({ ...options, anchorOffset: 0, anchorLimit: Infinity })).events;
+}
+
+/** Validate the entire canonical receipt before returning a bounded projection
+ * page. In particular, an unpaired event beyond this page must still fail it.
+ * Receipt RPC responses are atomic; pages bound event writes, not RPC bytes. */
+export async function reconcileFundingReceiptPage({ client, config, expected, escrowAddress, transactionHash, safeBlock,
+  anchorOffset = 0, anchorLimit = 100 }) {
+  if (!Number.isSafeInteger(anchorOffset) || anchorOffset < 0
+      || !(anchorLimit === Infinity || Number.isSafeInteger(anchorLimit) && anchorLimit > 0)) {
+    throw new Error("Invalid escrow receipt page.");
+  }
   const receipt = await client.getTransactionReceipt({ hash: transactionHash });
   if (receipt.status !== "success" || !same(receipt.transactionHash, transactionHash)
       || typeof receipt.blockNumber !== "bigint" || receipt.blockNumber > safeBlock) {
@@ -32,18 +44,55 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
   const anchors = registryLogs.filter(log => log.eventName === "FundingEventAnchored"
     && same(log.args.proposalId, expected.entityId) && same(log.args.escrow, escrowAddress));
   if (!anchors.length) mismatch("transaction has no anchor for this proposal's canonical escrow");
-  if (anchors.length > 100) throw new Error("The transaction exceeds the bounded escrow reconciliation page.");
+  if (anchorOffset >= anchors.length) mismatch("saved receipt page is outside its anchors");
+  const endOffset = Math.min(anchors.length, anchorOffset + anchorLimit);
   const read = functionName => client.readContract({ address: escrowAddress, abi: config.escrow.escrowAbi,
     functionName, blockNumber: receipt.blockNumber });
   let stateReads;
   const state = () => stateReads ??= Promise.all([read("selectionId"), read("currentTranche"), read("expiresAt"), read("approvalDeadline")]);
-  const used = new Set(), output = [];
-  for (const anchor of anchors) {
+  const used = new Set(), output = [], byName = new Map(), candidateIndexes = new Map();
+  for (const log of escrowLogs) {
+    if (!byName.has(log.eventName)) byName.set(log.eventName, []);
+    byName.get(log.eventName).push(log);
+  }
+  // Dense deposits and votes must not recompute every log's digest for every
+  // anchor. Cache each event's independently encoded digest once per receipt.
+  const indexed = (name, build, digest, predicate = () => true) => {
+    if (!candidateIndexes.has(name)) {
+      const index = new Map();
+      for (const log of byName.get(name) || []) {
+        const entry = build(log);
+        if (!entry) continue;
+        const key = entry.digest.toLowerCase();
+        if (!index.has(key)) index.set(key, { rows: [], offset: 0 });
+        index.get(key).rows.push({ log, ...entry });
+      }
+      candidateIndexes.set(name, index);
+    }
+    const bucket = candidateIndexes.get(name).get(digest.toLowerCase());
+    if (!bucket) return [];
+    while (bucket.offset < bucket.rows.length && used.has(bucket.rows[bucket.offset].log.logIndex)) bucket.offset++;
+    for (let index = bucket.offset; index < bucket.rows.length; index++) {
+      const entry = bucket.rows[index];
+      if (!used.has(entry.log.logIndex) && predicate(entry.log)) return [entry];
+    }
+    return [];
+  };
+  const lastBefore = (rows, logIndex) => {
+    let low = 0, high = rows.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (rows[middle].logIndex < logIndex) low = middle + 1;
+      else high = middle;
+    }
+    return rows[low - 1] ?? null;
+  };
+  for (const [anchorIndex, anchor] of anchors.entries()) {
     const { eventType, digest, actor, timestamp } = anchor.args;
     if (BigInt(timestamp) !== block.timestamp) mismatch("anchor timestamp differs from the receipt block");
     let candidates = [], amount = null, counterparty = null, selected = null;
     const add = (log, types, values, extra = {}) => candidates.push({ log, digest: fundingDigest(types, values), ...extra });
-    const named = name => escrowLogs.filter(log => log.eventName === name && !used.has(log.logIndex));
+    const named = name => (byName.get(name) || []).filter(log => !used.has(log.logIndex));
     switch (Number(eventType)) {
       case 0:
         for (const log of registryLogs.filter(log => log.eventName === "ProposalEscrowLinked" && !used.has(log.logIndex)
@@ -54,39 +103,39 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
         if (!same(digest, expected.fundingTermsHash)) mismatch("created escrow terms differ from the proposal");
         break;
       case 1:
-        for (const log of named("Deposited")) {
+        candidates = indexed("Deposited", log => {
           const a = log.args;
           if (!same(a.postingId, expected.opportunityId) || !same(a.proposalId, expected.entityId)
-              || !same(a.token, expected.fundingTerms.token) || !same(a.depositor, actor)) continue;
-          add(log, ["address", "uint256", "uint256"], [a.depositor, a.amount, a.cumulativeAmount],
-            { amount: a.amount, counterparty: escrowAddress });
-        }
+              || !same(a.token, expected.fundingTerms.token)) return null;
+          return { digest: fundingDigest(["address", "uint256", "uint256"], [a.depositor, a.amount, a.cumulativeAmount]),
+            amount: a.amount, counterparty: escrowAddress };
+        }, digest, log => same(log.args.depositor, actor));
         break;
       case 2:
-        for (const log of named("SelectionLocked")) {
+        candidates = indexed("SelectionLocked", log => {
           const a = log.args;
-          if (!same(a.solutionOwner, expected.expectedResearcher)) continue;
-          add(log, ["bytes32", "address", "uint64"], [a.selectionId, a.solutionOwner, a.approvalDeadline]);
-        }
+          if (!same(a.solutionOwner, expected.expectedResearcher)) return null;
+          return { digest: fundingDigest(["bytes32", "address", "uint64"], [a.selectionId, a.solutionOwner, a.approvalDeadline]) };
+        }, digest);
         break;
       case 3:
-        for (const log of named("SelectionApproved")) {
+        candidates = indexed("SelectionApproved", log => {
           const a = log.args;
-          if (same(a.approver, actor)) add(log, ["bytes32", "uint256", "address"], [a.selectionId, 0n, actor], { tranche: 0 });
-        }
-        if (named("MilestoneApproved").length) {
+          return { digest: fundingDigest(["bytes32", "uint256", "address"], [a.selectionId, 0n, a.approver]), tranche: 0 };
+        }, digest, log => same(log.args.approver, actor));
+        if (byName.has("MilestoneApproved")) {
           const [selectionId] = await state();
-          for (const log of named("MilestoneApproved")) {
+          candidates.push(...indexed("MilestoneApproved", log => {
             const a = log.args;
-            if (same(a.approver, actor)) add(log, ["bytes32", "uint256", "bytes32", "address"], [selectionId, a.index, a.evidenceHash, actor], { tranche: Number(a.index) });
-          }
+            return { digest: fundingDigest(["bytes32", "uint256", "bytes32", "address"], [selectionId, a.index, a.evidenceHash, a.approver]), tranche: Number(a.index) };
+          }, digest, log => same(log.args.approver, actor)));
         }
         break;
       case 4:
-        for (const log of named("SelectionInvalidated")) add(log, ["bytes32", "bytes32"], [log.args.selectionId, log.args.reasonHash]);
+        candidates = indexed("SelectionInvalidated", log => ({ digest: fundingDigest(["bytes32", "bytes32"], [log.args.selectionId, log.args.reasonHash]) }), digest);
         break;
       case 5:
-        candidates = named("Cancelled").map(log => ({ log, digest: log.args.reasonHash }));
+        candidates = indexed("Cancelled", log => ({ digest: log.args.reasonHash }), digest);
         break;
       case 6: {
         const [, tranche, expiresAt, deadline] = await state();
@@ -119,46 +168,48 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
         break;
       }
       case 7:
-        for (const log of named("MilestoneSubmitted")) add(log, ["uint256", "bytes32"], [log.args.index, log.args.evidenceHash]);
+        candidates = indexed("MilestoneSubmitted", log => ({ digest: fundingDigest(["uint256", "bytes32"], [log.args.index, log.args.evidenceHash]) }), digest);
         break;
       case 8:
-        for (const log of named("TrancheReleased")) {
+        candidates = indexed("TrancheReleased", log => {
           const a = log.args;
           if (a.grossAmount !== a.fee + a.netAmount) mismatch("tranche fee and recipient amount do not add up");
-          add(log, ["uint256", "bytes32", "uint256", "uint256"], [a.index, a.evidenceHash, a.grossAmount, a.fee],
-            { amount: a.grossAmount, counterparty: expected.expectedResearcher, netAmount: a.netAmount, fee: a.fee, tranche: Number(a.index) });
-        }
+          return { digest: fundingDigest(["uint256", "bytes32", "uint256", "uint256"], [a.index, a.evidenceHash, a.grossAmount, a.fee]),
+            amount: a.grossAmount, counterparty: expected.expectedResearcher, netAmount: a.netAmount, fee: a.fee, tranche: Number(a.index) };
+        }, digest);
         break;
       case 9:
-        candidates = named("EscrowVoided").filter(log => same(log.args.admin, actor)).map(log => ({ log, digest: log.args.reasonHash }));
+        candidates = indexed("EscrowVoided", log => ({ digest: log.args.reasonHash }), digest, log => same(log.args.admin, actor));
         break;
       case 10:
-        for (const log of named("RefundClaimed")) {
+        candidates = indexed("RefundClaimed", log => {
           const a = log.args;
-          if (same(a.depositor, actor)) add(log, ["address", "uint256"], [a.depositor, a.amount], { amount: a.amount, counterparty: actor });
-        }
+          return { digest: fundingDigest(["address", "uint256"], [a.depositor, a.amount]), amount: a.amount, counterparty: a.depositor };
+        }, digest, log => same(log.args.depositor, actor));
         break;
       case 11:
-        for (const log of named("MilestoneVoted")) {
+        candidates = indexed("MilestoneVoted", log => {
           const a = log.args;
-          if (same(a.voter, actor)) add(log, ["uint256", "bytes32", "address", "bool", "uint256"], [a.index, a.evidenceHash, actor, a.approve, a.weight]);
-        }
+          return { digest: fundingDigest(["uint256", "bytes32", "address", "bool", "uint256"], [a.index, a.evidenceHash, a.voter, a.approve, a.weight]) };
+        }, digest, log => same(log.args.voter, actor));
         break;
       default: mismatch("unsupported funding event type");
     }
     selected = candidates.find(candidate => same(candidate.digest, digest));
     if (!selected) mismatch(`${FUNDING_EVENT_NAMES[Number(eventType)]} digest has no matching canonical escrow event`);
     used.add(selected.log.logIndex);
+    if (anchorIndex < anchorOffset || anchorIndex >= endOffset) continue;
     amount = selected.amount?.toString() ?? null;
     counterparty = selected.counterparty?.toLowerCase() ?? null;
     const name = FUNDING_EVENT_NAMES[Number(eventType)];
     const refund = ["SelectionInvalidated", "Cancelled", "Expired", "Voided"].includes(name)
-      ? escrowLogs.filter(log => log.eventName === "RefundsOpened" && log.logIndex < anchor.logIndex).at(-1) : null;
+      ? lastBefore(byName.get("RefundsOpened") || [], anchor.logIndex) : null;
     const reasonHash = selected.log.args.reasonHash?.toLowerCase() ?? null;
     const refundReason = selected.refundReason ?? (name === "SelectionInvalidated" ? "selection_declined"
       : name === "Cancelled" ? "cancelled" : name === "Voided" ? same(reasonHash, registryWithdrawal) ? "registry_invalidated" : "escrow_voided" : null);
-    const precedingAnchor = anchors.filter(item => item.logIndex < anchor.logIndex).at(-1)?.logIndex ?? -1;
-    const change = escrowLogs.filter(log => log.eventName === "StateChanged" && log.logIndex > precedingAnchor && log.logIndex < anchor.logIndex).at(-1);
+    const precedingAnchor = anchors[anchorIndex - 1]?.logIndex ?? -1;
+    const previousChange = lastBefore(byName.get("StateChanged") || [], anchor.logIndex);
+    const change = previousChange?.logIndex > precedingAnchor ? previousChange : null;
     output.push({ id: escrowEventId(config.chainId, config.address, transactionHash, anchor.logIndex),
       eventType: FUNDING_EVENT_NAMES[Number(eventType)], type: FUNDING_EVENT_NAMES[Number(eventType)],
       eventTypeCode: Number(eventType), digest: digest.toLowerCase(), actor: actor.toLowerCase(), counterparty,
@@ -177,7 +228,9 @@ export async function reconcileFundingReceipt({ client, config, expected, escrow
   const pairedEvents = new Set(["Deposited", "SelectionLocked", "SelectionApproved", "MilestoneApproved", "SelectionInvalidated",
     "Cancelled", "MilestoneSubmitted", "TrancheReleased", "EscrowVoided", "RefundClaimed", "MilestoneVoted"]);
   if (escrowLogs.some(log => pairedEvents.has(log.eventName) && !used.has(log.logIndex))) mismatch("an escrow event is missing its registry anchor");
-  return output;
+  return { events: output, anchorCount: anchors.length,
+    nextAnchorOffset: endOffset < anchors.length ? endOffset : null,
+    blockNumber: receipt.blockNumber, blockHash: receipt.blockHash };
 }
 
 export function milestoneValue(milestone, name, index) { return value(milestone, name, index); }

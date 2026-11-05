@@ -22,6 +22,7 @@ describe("opportunity edit policy", () => {
 
   it("locks material fields after the first proposal, and refuses edits once withdrawn", () => {
     assert.equal(materialFieldsLocked({ proposalCount: 1 }), true);
+    assert.equal(materialFieldsLocked({ proposalCount: 0, proposalSubmissionLocked: true }), true);
     assert.equal(canEditOpportunity({ ownerId: OWNER, status: "open", proposalCount: 2 }, OWNER), true);
     assert.equal(canEditOpportunity({ ownerId: OWNER, status: "cancelled", proposalCount: 0 }, OWNER), false);
     assert.equal(canEditOpportunity({ ownerId: OWNER, status: "submitted" }, `0x${"b".repeat(40)}`), false);

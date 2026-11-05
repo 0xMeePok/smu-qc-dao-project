@@ -60,3 +60,9 @@ d1d739fc3be94976467903fed51f2818f7ebe50f:contracts/funding-escrow/manifests/arbi
 # Local Privy agent skill. Sample curl auth in a file that is no longer in the
 # tree. .agents/ stays gitignored. Ignore only this historical finding.
 aa7a96941cdf99cb393ecaae7ace516b88754637:.agents/skills/privy/SKILL.md:curl-auth-user:47
+
+# Hardhat's public default test account key (derived from the "test ... junk"
+# mnemonic) appeared as a literal in one commit of the crowdfunding integration
+# test. It controls nothing outside a local Hardhat chain; the next commit derives
+# the account from the mnemonic instead. Fingerprint for the merge scan of main.
+9ce254544e6736491c8a3055a0e398dd344ca88d:contracts/funding-escrow/test/IndependentFundingService.test.js:generic-api-key:15
