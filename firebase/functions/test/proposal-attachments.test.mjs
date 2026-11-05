@@ -170,6 +170,68 @@ test("preflight, CORS, methods, emulator-only attestation bypass and path valida
   assert.equal(local.calls.app.length, 0);
 });
 
+test("CORS emits only the exact configured origin for downloads and preflight", async () => {
+  const origins = ["https://qcdao-a0c7a.web.app", "https://qcdao-a0c7a.firebaseapp.com", "https://qcdao-a0c7a--preview.example.test"];
+  for (const origin of origins) {
+    const f = transport({ allowedOrigins: origins });
+    const res = await invoke(f, { headers: { ...f.request().headers, origin } });
+    assert.equal(res.statusCode, 200); assert.deepEqual(res.body, PDF);
+    assert.equal(res.headers["access-control-allow-origin"], origin);
+    assert.equal(res.headers.vary, "Origin");
+    const preflight = transport({ allowedOrigins: origins });
+    const options = await invoke(preflight, { method: "OPTIONS", headers: { origin } });
+    assert.equal(options.statusCode, 204);
+    assert.equal(options.headers["access-control-allow-origin"], origin);
+    assert.equal(options.headers.vary, "Origin");
+    assert.equal(options.headers["access-control-allow-methods"], "GET");
+    assert.equal(options.headers["access-control-allow-headers"], "Authorization, X-Firebase-AppCheck");
+    assert.deepEqual(preflight.calls, { streams: [], members: [], app: [], auth: [] });
+  }
+});
+
+test("CORS rejects malformed and untrusted origins before auth or object reads", async () => {
+  const origins = ["https://attacker.test", "https://example.test.attacker.test", "https://example.test/", "null",
+    "http://localhost.attacker.test:5173", "https://localhost:5173", null, false, 0,
+    ["https://example.test"], ["http://localhost:5173"], { origin: "https://example.test" }];
+  for (const emulator of [false, true]) for (const origin of origins) {
+    const f = transport({ emulator });
+    const res = await invoke(f, { method: "OPTIONS", headers: { origin } });
+    assert.equal(res.statusCode, 403, JSON.stringify({ emulator, origin }));
+    assert.equal(res.headers["access-control-allow-origin"], undefined);
+    assert.equal(res.headers.vary, undefined);
+    assert.deepEqual(f.calls, { streams: [], members: [], app: [], auth: [] });
+  }
+});
+
+test("emulator CORS preserves loopback hosts and ports without bypassing identity", async () => {
+  for (const host of ["localhost", "127.0.0.1", "[::1]"]) for (const port of ["", ":5173", ":00080"]) {
+    const origin = `http://${host}${port}`, f = transport({ emulator: true });
+    const res = await invoke(f, { headers: { authorization: "Bearer identity", origin } });
+    assert.equal(res.statusCode, 200); assert.deepEqual(res.body, PDF);
+    assert.equal(res.headers["access-control-allow-origin"], origin);
+    assert.equal(res.headers.vary, "Origin");
+    assert.deepEqual(f.calls.auth, ["identity"]); assert.equal(f.calls.members.length, 1);
+    assert.deepEqual(f.calls.app, []);
+    const denied = transport();
+    assert.equal((await invoke(denied, { headers: { ...denied.request().headers, origin } })).statusCode, 403);
+    assert.deepEqual(denied.calls, { streams: [], members: [], app: [], auth: [] });
+    const unauthenticated = transport({ emulator: true });
+    assert.equal((await invoke(unauthenticated, { headers: { origin } })).statusCode, 401);
+    assert.deepEqual(unauthenticated.calls.streams, []);
+  }
+});
+
+test("requests without an Origin preserve authenticated downloads and preflight", async () => {
+  const f = transport(), headers = { ...f.request().headers }; delete headers.origin;
+  const res = await invoke(f, { headers });
+  assert.equal(res.statusCode, 200); assert.deepEqual(res.body, PDF);
+  assert.equal(res.headers["access-control-allow-origin"], undefined);
+  assert.equal(res.headers.vary, undefined);
+  const preflight = await invoke(transport(), { method: "OPTIONS", headers: {} });
+  assert.equal(preflight.statusCode, 204);
+  assert.equal(preflight.headers["access-control-allow-origin"], undefined);
+});
+
 test("missing object errors stay sanitized and never emit Storage metadata", async () => {
   const f = transport({ getBucket: () => ({ file() { return { getMetadata: async () => { throw { code: 404, message: "secret-path" }; } }; } }) });
   const res = await invoke(f); assert.equal(res.statusCode, 404); assert.equal(res.body.includes("secret-path"), false);

@@ -9,6 +9,9 @@ let env;
 before(async () => {
   env = await initializeTestEnvironment({ projectId: 'qc-dao-rules-test', firestore: { rules: fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8') } });
   await env.withSecurityRulesDisabled(async ctx => {
+    // Content corrections require the trusted proposal-lock backfill to have
+    // completed. Seed it here rather than relying on an earlier test suite.
+    await setDoc(doc(ctx.firestore(), 'maintenanceState', 'opportunityProposalLocksV1'), { ready: true, version: 1 });
     for (const address of [OWNER, AUTHOR]) await setDoc(doc(ctx.firestore(), 'users', address), { address, role: 0, suspended: false, organisation: 'University' });
   });
 });

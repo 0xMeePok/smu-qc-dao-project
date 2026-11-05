@@ -41,6 +41,17 @@ export async function authorizeProposalAttachment({ db, uid, authTime, proposalI
 const STATUS = { "invalid-argument": 400, unauthenticated: 401, "permission-denied": 403,
   "not-found": 404, "failed-precondition": 409, unavailable: 503 };
 
+/** Resolve an exact configured origin; only local emulators accept loopback origins. */
+function resolveAttachmentCorsOrigin(req, allowedOrigins, emulator) {
+  const requestedOrigin = req.headers.origin;
+  if (requestedOrigin === undefined || requestedOrigin === "") return undefined;
+  if (typeof requestedOrigin !== "string") return null;
+  const configuredOrigin = allowedOrigins.find((candidate) => candidate === requestedOrigin);
+  if (configuredOrigin !== undefined) return configuredOrigin;
+  if (emulator && /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(requestedOrigin)) return requestedOrigin;
+  return null;
+}
+
 /**
  * A bounded Buffer response keeps a full 10 MiB PDF out of callable JSON/base64
  * bodies and below the non-streaming response limit (32 MB). Do not pipe the
@@ -53,11 +64,10 @@ export function createProposalAttachmentHandler({ db, getBucket, requireMember, 
   return async (req, res) => {
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    const origin = req.headers.origin;
-    if (origin) {
-      const local = emulator && /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin);
-      if (!allowedOrigins.includes(origin) && !local) return res.status(403).json({ error: "Origin is not allowed." });
-      res.setHeader("Access-Control-Allow-Origin", origin);
+    const allowedOrigin = resolveAttachmentCorsOrigin(req, allowedOrigins, emulator);
+    if (allowedOrigin === null) return res.status(403).json({ error: "Origin is not allowed." });
+    if (allowedOrigin !== undefined) {
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
       res.setHeader("Vary", "Origin");
     }
     if (req.method === "OPTIONS") {
