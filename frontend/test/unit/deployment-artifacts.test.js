@@ -38,7 +38,16 @@ it("the shipped app defers pages, keeps wallet helpers loaded and exposes only p
   const entry = chunks.find(chunk => chunk.isEntry);
   assert.ok(entry.dynamicImports.length > 0, "Page code must be deferred until navigation");
   for (const chunk of chunks.filter(chunk => !chunk.isEntry)) {
-    assert.deepEqual(chunk.dynamicImports, [], `${chunk.fileName} must not fetch wallet helpers mid-operation`);
+    for (const fileName of chunk.dynamicImports) {
+      const target = chunks.find(candidate => candidate.fileName === fileName);
+      const modules = Object.keys(target?.modules ?? {});
+      // Missing optional SDK peers must stay lazy so their guarded import can
+      // reject. Installed wallet helpers must still be available immediately.
+      assert.ok(modules.length > 0 && modules.every(id =>
+        id.replace(/^\0+/, "").startsWith("__vite-optional-peer-dep:")),
+      `${chunk.fileName} must not fetch wallet helpers mid-operation`);
+      assert.deepEqual(target.imports, [], "An optional-peer stub must not defer installed helpers");
+    }
   }
   const initial = new Set();
   const visit = file => {
@@ -47,6 +56,11 @@ it("the shipped app defers pages, keeps wallet helpers loaded and exposes only p
     chunks.find(chunk => chunk.fileName === file)?.imports.forEach(visit);
   };
   visit(entry.fileName);
+  for (const chunk of chunks.filter(chunk => initial.has(chunk.fileName))) {
+    assert.equal(Object.keys(chunk.modules).some(id =>
+      id.replace(/^\0+/, "").startsWith("__vite-optional-peer-dep:")), false,
+    "A missing optional peer must not execute during application startup");
+  }
   for (const page of ["AdminPage.jsx", "ProposalDetailPage.jsx", "CreateProposalPage.jsx", "RoleViews.jsx"]) {
     const chunk = chunks.find(chunk => Object.keys(chunk.modules).some(id => id.endsWith(`/${page}`)));
     assert.ok(chunk && !initial.has(chunk.fileName), `${page} must not be in the initial download`);

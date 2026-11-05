@@ -4,9 +4,10 @@ await manageDependencies([fileURLToPath(new URL("./", import.meta.url)), fileURL
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { publicPrivyEnvironment } from "./scripts/privy-build-config.mjs";
+import { optionalPeerStartupGuard } from "./scripts/optional-peer-startup-guard.mjs";
 
 export default defineConfig({
-  plugins: [publicPrivyEnvironment(), react()],
+  plugins: [publicPrivyEnvironment(), optionalPeerStartupGuard(), react()],
   resolve: {
     alias: [
       // Privy bundles a fiat on-ramp screen this app never shows, and Stripe's
@@ -41,10 +42,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          // Optional peer dependencies Privy never loads in this app (Farcaster
-          // mini-app wallets) resolve to Vite stubs outside node_modules. Kept
-          // with the vendor graph so no dependency is ever fetched lazily.
-          if (id.includes("/node_modules/") || id.startsWith("__vite-optional-peer-dep:")) return "vendor";
+          // Keep installed wallet helpers together, but leave Vite's missing
+          // optional-peer stubs lazy. Privy catches their import failures only
+          // when the optional feature is used; eagerly bundling a throwing stub
+          // into vendor would crash every page before React can mount.
+          if (id.includes("/node_modules/")) return "vendor";
           if (/\/src\/lib\/(escrow|independentEscrow)\.js$/.test(id)) return "wallet-actions";
         },
       },
