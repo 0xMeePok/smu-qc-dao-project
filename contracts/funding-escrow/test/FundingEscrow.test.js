@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, fund, lock, approve, at, mineAt, assertAccounting, State, Status } from "./helpers.js";
 
@@ -21,10 +22,10 @@ describe("FundingEscrow: deposits and dashboard history", function () {
   it("preserves every top-up and cumulative contribution per depositor", async function () {
     const c = await fixture();
     for (const [amount, cumulative, number] of [[125n, 125n, 1n], [75n, 200n, 2n], [1n, 201n, 3n]]) {
-      await expect(c.escrow.connect(c.alice).deposit(amount)).to.emit(c.escrow, "Deposited")
+      await expect(reviewedDeposit(c.escrow.connect(c.alice), amount)).to.emit(c.escrow, "Deposited")
         .withArgs(c.postingId, c.proposalId, c.alice.address, c.tokenAddress, amount, cumulative, number);
     }
-    await c.escrow.connect(c.bob).deposit(299n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 299n);
     const alice = await c.escrow.depositorSummary(c.alice.address);
     expect([...alice]).to.deep.equal([201n, 3n, 0n, 0n, 0n, Status.Locked]);
     expect(await c.escrow.contributions(c.bob.address)).to.equal(299n);
@@ -43,8 +44,8 @@ describe("FundingEscrow: deposits and dashboard history", function () {
   for (const decimals of [6, 18]) {
     it(`uses exact base units for a ${decimals}-decimal token`, async function () {
       const c = await fixture({ decimals, target: 3n * 10n ** BigInt(decimals) });
-      await c.escrow.connect(c.alice).deposit(101n * 10n ** BigInt(decimals - 2));
-      await c.escrow.connect(c.alice).deposit(199n * 10n ** BigInt(decimals - 2));
+      await reviewedDeposit(c.escrow.connect(c.alice), 101n * 10n ** BigInt(decimals - 2));
+      await reviewedDeposit(c.escrow.connect(c.alice), 199n * 10n ** BigInt(decimals - 2));
       expect(await c.escrow.totalDeposited()).to.equal(c.target);
       await assertAccounting(c);
     });
@@ -52,16 +53,22 @@ describe("FundingEscrow: deposits and dashboard history", function () {
 
   it("rejects zero deposits without creating history", async function () {
     const c = await fixture();
-    await expect(c.escrow.connect(c.alice).deposit(0)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
+    await expect(reviewedDeposit(c.escrow.connect(c.alice), 0)).to.be.revertedWithCustomError(c.escrow, "InvalidInput");
     expect(await c.escrow.totalDepositCount()).to.equal(0n);
   });
 
   it("requires sufficient allowance and balance, with atomic rollback", async function () {
     const c = await fixture();
     await c.token.connect(c.alice).approve(c.escrowAddress, 99n);
-    await expect(c.escrow.connect(c.alice).deposit(100n)).to.be.revertedWithCustomError(c.token, "ERC20InsufficientAllowance");
+    await expect(reviewedDeposit(c.escrow.connect(c.alice), 100n)).to.be.revertedWithCustomError(
+      c.token,
+      "ERC20InsufficientAllowance"
+    );
     await c.token.connect(c.owner).approve(c.escrowAddress, 100n);
-    await expect(c.escrow.connect(c.owner).deposit(100n)).to.be.revertedWithCustomError(c.token, "ERC20InsufficientBalance");
+    await expect(reviewedDeposit(c.escrow.connect(c.owner), 100n)).to.be.revertedWithCustomError(
+      c.token,
+      "ERC20InsufficientBalance"
+    );
     expect(await c.escrow.totalDeposited()).to.equal(0n);
     expect(await c.escrow.depositCounts(c.alice.address)).to.equal(0n);
     expect(await c.token.allowance(c.alice.address, c.escrowAddress)).to.equal(99n);
@@ -69,20 +76,20 @@ describe("FundingEscrow: deposits and dashboard history", function () {
 
   it("rejects over-funding rather than silently taking a smaller amount", async function () {
     const c = await fixture();
-    await c.escrow.connect(c.alice).deposit(750n);
-    await expect(c.escrow.connect(c.bob).deposit(251n)).to.be.revertedWithCustomError(c.escrow, "FundingTargetExceeded").withArgs(250n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 750n);
+    await expect(reviewedDeposit(c.escrow.connect(c.bob), 251n)).to.be.revertedWithCustomError(c.escrow, "FundingTargetExceeded").withArgs(250n);
     expect(await c.escrow.contributions(c.bob.address)).to.equal(0n);
-    await c.escrow.connect(c.bob).deposit(250n);
-    await expect(c.escrow.connect(c.alice).deposit(1)).to.be.revertedWithCustomError(c.escrow, "FundingTargetExceeded").withArgs(0n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 250n);
+    await expect(reviewedDeposit(c.escrow.connect(c.alice), 1)).to.be.revertedWithCustomError(c.escrow, "FundingTargetExceeded").withArgs(0n);
     await assertAccounting(c);
   });
 
   it("accepts just before expiry and rejects at the exact expiry timestamp", async function () {
     const c = await fixture();
     await at(c, c.expiresAt - 1n);
-    await c.escrow.connect(c.alice).deposit(10n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 10n);
     await at(c, c.expiresAt);
-    await expect(c.escrow.connect(c.alice).deposit(10n)).to.be.revertedWithCustomError(c.escrow, "WindowClosed");
+    await expect(reviewedDeposit(c.escrow.connect(c.alice), 10n)).to.be.revertedWithCustomError(c.escrow, "WindowClosed");
   });
 
   for (const closed of ["locked", "cancelled", "expired", "released", "refunded"]) {
@@ -93,7 +100,7 @@ describe("FundingEscrow: deposits and dashboard history", function () {
       if (closed === "expired") { await at(c, c.expiresAt); await c.escrow.expire(); }
       if (closed === "released") { await approve(c); await c.escrow.release(c.selectionId); }
       if (closed === "refunded") { await fund(c); await at(c, c.expiresAt); await c.escrow.connect(c.alice).claimRefund(); }
-      await expect(c.escrow.connect(c.bob).deposit(1)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
+      await expect(reviewedDeposit(c.escrow.connect(c.bob), 1)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     });
   }
 
@@ -107,7 +114,7 @@ describe("FundingEscrow: selection and dual approval", function () {
   it("cannot lock empty or partially funded proposals", async function () {
     const c = await fixture();
     await expect(c.escrow.lockSelection(c.selectionId, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "FundingIncomplete");
-    await c.escrow.connect(c.alice).deposit(999n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 999n);
     await expect(c.escrow.lockSelection(c.selectionId, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "FundingIncomplete");
   });
 
@@ -236,8 +243,8 @@ describe("FundingEscrow: selection and dual approval", function () {
 describe("FundingEscrow: cancellation, expiry and pull refunds", function () {
   it("locks partially funded custody against direct wallet claims until the exact posting expiry", async function () {
     const c = await fixture();
-    await c.escrow.connect(c.alice).deposit(250n);
-    await c.escrow.connect(c.bob).deposit(75n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 250n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 75n);
     const aliceBalance = await c.token.balanceOf(c.alice.address);
     await at(c, c.expiresAt - 1n);
     await expect(c.escrow.connect(c.alice).claimRefund()).to.be.revertedWithCustomError(c.escrow, "WindowStillOpen");
@@ -303,9 +310,9 @@ describe("FundingEscrow: cancellation, expiry and pull refunds", function () {
   for (const phase of ["open", "locked", "expired", "cancelled"]) {
     it(`refunds exact pooled top-ups from ${phase}, retaining dashboard history`, async function () {
       const c = await fixture();
-      await c.escrow.connect(c.alice).deposit(100n);
-      await c.escrow.connect(c.alice).deposit(200n);
-      await c.escrow.connect(c.bob).deposit(phase === "locked" ? 700n : 400n);
+      await reviewedDeposit(c.escrow.connect(c.alice), 100n);
+      await reviewedDeposit(c.escrow.connect(c.alice), 200n);
+      await reviewedDeposit(c.escrow.connect(c.bob), phase === "locked" ? 700n : 400n);
       if (phase === "locked") await c.escrow.lockSelection(c.selectionId, c.solution.address);
       if (phase === "cancelled") await c.escrow.cancel(c.reason);
       await mineAt(c, c.expiresAt);

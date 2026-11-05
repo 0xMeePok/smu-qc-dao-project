@@ -13,6 +13,7 @@ import { assertIndependentPublicationUnlocked, getIndependentFundingState, hashI
   reconcileIndependentFunding, releaseIndependentFundingCompletion, syncIndependentFunding } from "../independentFunding.js";
 import { enqueueIndependentFundingCancellation } from "../independentFundingModeration.js";
 import { reconcileModerationVoids } from "../escrowFunding.js";
+import { registerIndependentFundingFunctions } from "../independentFundingFunctions.js";
 
 const address = digit => `0x${digit.repeat(40)}`, hash = digit => `0x${digit.repeat(64)}`;
 const researcher = address("a"), funder = address("b"), outsider = address("c"), platform = address("d");
@@ -45,6 +46,7 @@ function fixture({ activated = true, requestedAmount = 2 } = {}) {
     hasVoted: false, votedApprove: false, active: true, depositsOpen: true, canAccept: false, canDecline: false,
     canSubmitEvidence: false, canVote: false, canReleaseCompletion: false };
   const db = memoryDb({ [`proposals/${record.id}`]: record,
+    "maintenanceState/evidenceQuotasV1": { ready: true, version: 1 },
     [`users/${researcher}`]: { role: 0 }, [`users/${funder}`]: { role: 3 },
     [`users/${outsider}`]: { role: 2 }, [`users/${platform}`]: { role: 1 } });
   const originalCollection = db.collection;
@@ -186,6 +188,42 @@ describe("independent funding backend authorization and preparation", () => {
     assert.deepEqual(vote.args, ["2", evidenceHash, true]);
     await assert.rejects(prepareIndependentFundingAction({ ...f.options(funder), action: "vote", evidenceHash: hash("2"), approve: true }), /current evidence/);
     await assert.rejects(prepareIndependentFundingAction({ ...f.options(researcher), action: "submitEvidence", evidence: { ...evidence, url: "javascript:alert(1)" }, evidenceHash }), /HTTPS/);
+  });
+
+  it("bounds unbroadcast evidence and retains charges after simulation failure", async () => {
+    const f = fixture(); Object.assign(f.state, { state: 1, canSubmitEvidence: true, depositsOpen: false });
+    const stage = i => { const evidence = { summary: `Unbroadcast results ${i}`, url: "https://example.org/results" };
+      return prepareIndependentFundingAction({ ...f.options(researcher), action: "submitEvidence", evidence, evidenceHash: hashIndependentFundingEvidence(evidence) }); };
+    await stage(0);
+    const before = new Map(f.db.records);
+    await stage(0);
+    assert.deepEqual(f.db.records, before, "an exact staged retry does not alter accounting or timestamps");
+    f.client.simulateContract = async () => { throw new Error("simulation rejected"); };
+    await assert.rejects(stage(1), /simulation rejected/);
+    assert.equal(f.db.records.get("evidenceQuotas/global").count, 2, "persisted content stays charged after failure");
+    f.client.simulateContract = async () => ({});
+    for (let i = 2; i < 30; i++) await stage(i);
+    await assert.rejects(stage(30), error => error.code === "resource-exhausted");
+    assert.equal([...f.db.records.keys()].filter(path => path.includes("/independentFundingEvidence/")).length, 30);
+    f.state.evidenceHash = hashIndependentFundingEvidence({ summary: "Unbroadcast results 0", url: "https://example.org/results" });
+    await assert.rejects(stage(0), /Submit new evidence/);
+  });
+
+  it("forwards fresh authentication and rechecks revocation after independent preparation reads", async () => {
+    const f = fixture(); Object.assign(f.state, { state: 1, canSubmitEvidence: true, depositsOpen: false });
+    f.db.records.set(`users/${researcher}`, { role: 0, sessionsValidAfterEpoch: 100 });
+    const functions = registerIndependentFundingFunctions({ ...f.options(researcher),
+      requireMember: async request => request.auth.uid, requireAdmin: async () => ({}), options: {} });
+    const evidence = { summary: "Freshly authenticated delivery", url: "https://example.org/results" };
+    const request = { auth: { uid: researcher, token: { auth_time: 101 } }, data: {
+      proposalId: f.record.id, action: "submitEvidence", evidence, evidenceHash: hashIndependentFundingEvidence(evidence) } };
+    await functions.prepareIndependentFundingAction.run(request);
+    const transaction = f.db.runTransaction.bind(f.db);
+    f.db.runTransaction = callback => {
+      f.db.records.set(`sessionRevocations/${researcher}`, { sessionsValidAfterEpoch: 101 });
+      return transaction(callback);
+    };
+    await assert.rejects(functions.prepareIndependentFundingAction.run(request), error => error.code === "permission-denied");
   });
 
   it("requires a readable decline reason and locks a changed publication even before the cache projection exists", async () => {

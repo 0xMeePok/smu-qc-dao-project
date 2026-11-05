@@ -42,6 +42,49 @@ function clientFor(record) {
   };
 }
 
+describe("reviewed opportunity binding", () => {
+  function boundRecord() {
+    const record = fixture();
+    const parentId = prepareStoredProposal(record).opportunityId;
+    return { ...record, reviewedParentAudit: { chainId: registry.chainId,
+      contractAddress: registry.address.toLowerCase(), entityId: parentId,
+      contentHash: AUDIT_REVISION_DIGEST, revisionIndex: 2, revisionDigest: AUDIT_REVISION_DIGEST } };
+  }
+  it("retains the reviewed revision in the wallet operation and binds it into both hashes", () => {
+    const record = boundRecord();
+    const operation = prepareStoredProposal(record);
+    assert.equal(operation.expectedOpportunityRevisionIndex, 2);
+    assert.notEqual(operation.proposalHash, prepareStoredProposal(fixture()).proposalHash);
+    assert.notEqual(operation.solutionHash, prepareStoredProposal(fixture()).solutionHash);
+  });
+  it("rejects a receipt binding the same proposal hashes to an unreviewed revision", async () => {
+    const record = boundRecord();
+    const client = clientFor(record);
+    const operation = prepareStoredProposal(record);
+    client.getTransactionReceipt = async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: hash,
+      logs: [auditEvent({ config: registry, functionName: "commitProposal", args: [...operation.args.slice(0, 4), 3], actor: researcher })] });
+    client.readContract = async () => ({ researcher, opportunityId: operation.opportunityId,
+      opportunityRevisionIndex: 3, opportunityRevisionDigest: AUDIT_REVISION_DIGEST,
+      proposalHash: operation.proposalHash, solutionHash: operation.solutionHash });
+    await assert.rejects(verifyMinedProposal(record, client), /mismatch/i);
+  });
+  it("attests a legitimate bound receipt without adopting the latest parent revision", async () => {
+    const record = boundRecord(), operation = prepareStoredProposal(record), client = clientFor(record);
+    client.readContract = async ({ functionName }) => functionName === "opportunityRevisionAt"
+      ? { contentHash: AUDIT_REVISION_DIGEST }
+      : { researcher, opportunityId: operation.opportunityId, opportunityRevisionIndex: 2,
+        opportunityRevisionDigest: AUDIT_REVISION_DIGEST, proposalHash: operation.proposalHash, solutionHash: operation.solutionHash };
+    assert.equal((await verifyMinedProposal(record, client)).status, "confirmed");
+  });
+  it("rejects a receipt with an unreviewed parent digest even when its revision number matches", async () => {
+    const record = boundRecord(), operation = prepareStoredProposal(record), client = clientFor(record);
+    client.getTransactionReceipt = async () => ({ status: "success", blockNumber: 88n, blockHash, transactionHash: hash,
+      logs: [auditEvent({ config: registry, functionName: "commitProposal", args: operation.args, actor: researcher,
+        opportunityRevisionDigest: `0x${"9".repeat(64)}` })] });
+    await assert.rejects(verifyMinedProposal(record, client), /mismatch/i);
+  });
+});
+
 // Minimal transactional store to exercise durable recovery without RPC or wallet.
 function store(record) {
   const records = new Map([[`proposals/${record.id}`, record]]);

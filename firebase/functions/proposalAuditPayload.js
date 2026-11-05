@@ -3,6 +3,7 @@ import { asEscrowProposal, prepareOpportunityCommit, prepareProposalCommit } fro
 import { isEscrowRegistry } from "./escrowAudit.js";
 import { auditAttachments } from "./opportunityAuditPayload.js";
 import { fundingAmountText, validateStoredFundingTerms } from "./escrowProposalTerms.js";
+import { validReviewedParentAudit } from "./publicationValidation.js";
 import {
   INDEPENDENT_PROPOSAL_HASH_SCHEME,
   INDEPENDENT_PROPOSAL_KIND,
@@ -21,9 +22,9 @@ const trimmed = (value) => String(value ?? "").trim();
 
 export function proposalAuditPayload(record) {
   if (isIndependentProposal(record)) return independentProposalAuditPayload(record);
-  return Object.fromEntries(FIELDS.map((key) => [key,
+  return { ...Object.fromEntries(FIELDS.map((key) => [key,
     key === "amount" ? String(record.amount ?? "") : record[key] ?? "",
-  ]));
+  ])), ...(record.reviewedParentAudit !== undefined ? { reviewedParentAudit: record.reviewedParentAudit } : {}) };
 }
 
 /**
@@ -83,12 +84,18 @@ export function prepareStoredProposal(record, { registryConfig = registry } = {}
     throw new TypeError("Attached proposals use canonical audit hash scheme 1.");
   }
   const proposal = proposalAuditPayload(record);
+  const reviewed = record.reviewedParentAudit;
+  if (reviewed !== undefined && (!validReviewedParentAudit(reviewed)
+      || reviewed.chainId !== registryConfig.chainId
+      || reviewed.contractAddress !== registryConfig.address.toLowerCase())) {
+    throw new Error("Mismatch detected: the reviewed opportunity deployment is invalid.");
+  }
   const prepared = prepareProposalCommit({
     recordId: record.id,
     actor: registryConfig.entityIdScheme === 2 ? record.researcherId : undefined,
     opportunityActor: registryConfig.entityIdScheme === 2 ? record.postingOwnerId : undefined,
     opportunityRecordId: record.problemId,
-    expectedOpportunityRevisionIndex: 0,
+    expectedOpportunityRevisionIndex: reviewed?.revisionIndex ?? 0,
     hashScheme,
     proposalPayload: proposal,
     // The whole record plus its files, mirroring the opportunity's single
@@ -102,7 +109,11 @@ export function prepareStoredProposal(record, { registryConfig = registry } = {}
       attachments: [...(record.attachments ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
     },
   });
-  return isEscrowRegistry(registryConfig) ? asEscrowProposal(prepared, validateStoredFundingTerms(record, registryConfig)) : prepared;
+  if (reviewed && reviewed.entityId !== prepared.opportunityId) {
+    throw new Error("Mismatch detected: the reviewed opportunity identity differs.");
+  }
+  const bound = reviewed ? { ...prepared, reviewedParentAudit: reviewed } : prepared;
+  return isEscrowRegistry(registryConfig) ? asEscrowProposal(bound, validateStoredFundingTerms(record, registryConfig)) : bound;
 }
 
 /**

@@ -23,7 +23,7 @@ export const MATERIAL_FUNDING_FIELDS = [
 export const NON_MATERIAL_OPPORTUNITY_FIELDS = ["attachments"];
 
 export function opportunityHasProposals(posting) {
-  return Number(posting?.proposalCount ?? 0) > 0;
+  return posting?.proposalSubmissionLocked === true || Number(posting?.proposalCount ?? 0) > 0;
 }
 
 export function materialFieldsLocked(posting) {

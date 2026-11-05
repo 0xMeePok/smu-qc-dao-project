@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, createProposal, scopedId, fund, lock, approve, at, assertAccounting, State } from "./helpers.js";
 import { first, payLater } from "./milestoneHelpers.js";
@@ -40,7 +41,7 @@ describe("Posting acceptance and canonical escrow funding", function () {
       await first(c);
       expect(await c.registry.isFundingActive(other.proposalId, other.escrowAddress)).to.equal(false);
       if (phase === "open") {
-        await expect(other.escrow.connect(c.alice).deposit(1n)).to.be.revertedWithCustomError(other.escrow, "WorkflowInactive");
+        await expect(reviewedDeposit(other.escrow.connect(c.alice), 1n)).to.be.revertedWithCustomError(other.escrow, "WorkflowInactive");
         await expect(other.escrow.lockSelection(other.selectionId, c.solution.address))
           .to.be.revertedWithCustomError(other.escrow, "WorkflowInactive");
       } else {
@@ -148,20 +149,20 @@ describe("Reversible posting funding moderation", function () {
 
   it("pauses deposits and new proposals without allowing irreversible invalidation refunds", async function () {
     const c = await fixture();
-    await c.escrow.connect(c.alice).deposit(200n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 200n);
     await c.registry.setPostingFundingPaused(c.postingId, true);
     expect(await c.registry.isFundingActive(c.proposalId, c.escrowAddress)).to.equal(false);
     expect(await c.registry.isFundingInvalidated(c.proposalId, c.escrowAddress)).to.equal(false);
     expect(await c.registry.isFundingInvalidated(c.proposalId, c.other.address)).to.equal(false);
     expect(await c.registry.isFundingInvalidated(c.proposalId, c.ethers.ZeroAddress)).to.equal(false);
-    await expect(c.escrow.connect(c.bob).deposit(100n)).to.be.revertedWithCustomError(c.escrow, "WorkflowInactive");
+    await expect(reviewedDeposit(c.escrow.connect(c.bob), 100n)).to.be.revertedWithCustomError(c.escrow, "WorkflowInactive");
     await expect(createProposal(c, "paused-proposal")).to.be.revertedWithCustomError(c.registry, "InvalidState");
     await expect(c.escrow.refundInvalidated()).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     await expect(c.escrow.connect(c.alice).claimRefund()).to.be.revertedWithCustomError(c.escrow, "WindowStillOpen");
     expect(await c.escrow.state()).to.equal(State.Open);
     await c.registry.setPostingFundingPaused(c.postingId, false);
     expect(await c.registry.isFundingActive(c.proposalId, c.escrowAddress)).to.equal(true);
-    await c.escrow.connect(c.bob).deposit(100n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 100n);
     await createProposal(c, "restored-proposal");
     expect(await c.escrow.totalDeposited()).to.equal(300n);
   });
@@ -193,7 +194,7 @@ describe("Reversible posting funding moderation", function () {
   for (const trigger of ["withdrawal", "expiry"]) {
     it(`retains existing ${trigger} refunds while a posting is paused`, async function () {
       const c = await fixture();
-      await c.escrow.connect(c.alice).deposit(200n);
+      await reviewedDeposit(c.escrow.connect(c.alice), 200n);
       await c.registry.setPostingFundingPaused(c.postingId, true);
       if (trigger === "withdrawal") {
         await c.registry.connect(c.owner).withdrawOpportunity(c.postingId, c.reason);

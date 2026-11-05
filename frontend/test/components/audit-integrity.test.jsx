@@ -56,8 +56,8 @@ function adaptersFor(prepared) {
 
 beforeEach(() => {
   mocks.server = { ...base };
-  mocks.getServer.mockReset().mockImplementation(async ({ id }) => ({
-    id, exists: () => Boolean(mocks.server), data: () => mocks.server,
+  mocks.getServer.mockReset().mockImplementation(async ({ id, collection }) => ({
+    id, exists: () => ["problems", "proposals"].includes(collection) && Boolean(mocks.server), data: () => mocks.server,
   }));
   mocks.getCached.mockReset().mockImplementation(async ({ id, collection }) => ({
     id, exists: () => collection !== "opportunityMetrics", data: () => base,
@@ -83,9 +83,10 @@ for (const flow of cases) {
       expect(screen.getAllByText(flow.prepare(mocks.server).contentHash).length).toBeGreaterThan(0);
       // Proposal reads also fetch the parent problem's matching state. Each
       // verification must still fetch the audited document itself from server.
-      expect(mocks.getServer.mock.calls.filter(([ref]) => ref.id === base.id)).toHaveLength(2);
+      expect(mocks.getServer.mock.calls.filter(([ref]) => ref.id === base.id
+        && ref.collection === (flow.name === "proposal" ? "proposals" : "problems"))).toHaveLength(2);
       if (flow.name === "proposal") {
-        expect(mocks.getServer.mock.calls.filter(([ref]) => ref.id === base.problemId)).toHaveLength(2);
+        expect(mocks.getServer.mock.calls.filter(([ref]) => ref.id === base.problemId && ref.collection === "problems")).toHaveLength(2);
       }
       expect(mocks.getCached.mock.calls.every(([ref]) => ref.collection === "opportunityMetrics")).toBe(true);
       expect(adapters.writeContract).not.toHaveBeenCalled();

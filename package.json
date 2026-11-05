@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "axe-core": "^4.10.3"
+  },
+  "scripts": {
+    "security:test": "node --test scripts/patch-zod-security.test.mjs scripts/dependency-discovery.test.mjs scripts/install-contract-security.test.mjs"
   }
 }

@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { PrivyClient, verifyAccessToken } from "@privy-io/node";
 import { parseTransaction, recoverTransactionAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+
+test("Functions entry retains Firebase's synchronous Node 22 loading contract", () => {
+  execFileSync(process.execPath, ["-e", "const f = require('./index.js'); if (typeof f.adminExportSelectedProposals !== 'function') throw new Error('Missing export');"], {
+    cwd: fileURLToPath(new URL("../", import.meta.url)),
+    stdio: ["ignore", "pipe", "pipe"], timeout: 30_000, maxBuffer: 64 * 1024,
+  });
+});
 
 // Public, deterministic test key; the expected transaction was independently
 // serialized and signed with ethers 6.17.0, not calculated by the code under test.

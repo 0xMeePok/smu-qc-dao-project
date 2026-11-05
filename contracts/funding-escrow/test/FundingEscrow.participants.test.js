@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, assertAccounting, State, Behavior } from "./helpers.js";
 
@@ -20,7 +21,7 @@ describe("Uncapped participation and individual refund claims", function () {
     let deposited = 0n;
     let maxDepositGas = 0n;
     async function contribute(funder, amount) {
-      const receipt = await (await c.escrow.connect(funder.signer).deposit(amount)).wait();
+      const receipt = await (await reviewedDeposit(c.escrow.connect(funder.signer), amount)).wait();
       maxDepositGas = receipt.gasUsed > maxDepositGas ? receipt.gasUsed : maxDepositGas;
       funder.amount += amount;
       deposited += amount;
@@ -88,21 +89,21 @@ describe("Uncapped participation and individual refund claims", function () {
   it("rolls back failed first deposits and top-ups without altering cumulative shares", async function () {
     const c = await fixture();
     const funders = [c.alice, c.bob, c.other].map((signer, i) => ({ signer, amount: BigInt(i + 1) * 100n }));
-    for (const funder of funders) await c.escrow.connect(funder.signer).deposit(funder.amount);
+    for (const funder of funders) await reviewedDeposit(c.escrow.connect(funder.signer), funder.amount);
     await c.token.mint(c.admin.address, 100n);
     await c.token.connect(c.admin).approve(c.escrowAddress, 100n);
     const anchors = await c.registry.fundingAnchorCount(c.proposalId);
     await c.token.configure(Behavior.RecipientFee, false);
     for (const signer of [c.admin, c.alice]) {
-      await expect(c.escrow.connect(signer).deposit(20n)).to.be.revertedWithCustomError(c.escrow, "UnsupportedTokenBehavior");
+      await expect(reviewedDeposit(c.escrow.connect(signer), 20n)).to.be.revertedWithCustomError(c.escrow, "UnsupportedTokenBehavior");
       await checkPrefixes(c, funders);
       expect(await c.escrow.fundingPrefixEnd(c.admin.address)).to.equal(0n);
       expect(await c.registry.fundingAnchorCount(c.proposalId)).to.equal(anchors);
     }
     await c.token.configure(Behavior.Standard, false);
-    await c.escrow.connect(c.admin).deposit(100n);
+    await reviewedDeposit(c.escrow.connect(c.admin), 100n);
     funders.push({ signer: c.admin, amount: 100n });
-    await c.escrow.connect(c.alice).deposit(300n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 300n);
     funders[0].amount += 300n;
     await checkPrefixes(c, funders);
     await c.escrow.connect(c.admin).voidEscrow(c.reason);
@@ -113,13 +114,13 @@ describe("Uncapped participation and individual refund claims", function () {
 
   it("keeps cumulative shares fixed across selection rejection and full refunds", async function () {
     const c = await fixture({ trancheBps: [5000, 5000] });
-    await c.escrow.connect(c.alice).deposit(100n);
-    await c.escrow.connect(c.bob).deposit(400n);
-    await c.escrow.connect(c.alice).deposit(500n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 100n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 400n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 500n);
     const funders = [{ signer: c.alice, amount: 600n }, { signer: c.bob, amount: 400n }];
     await c.escrow.lockSelection(c.selectionId, c.solution.address);
     await c.escrow.invalidateSelection(c.selectionId, c.reason);
-    await expect(c.escrow.connect(c.other).deposit(1n)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
+    await expect(reviewedDeposit(c.escrow.connect(c.other), 1n)).to.be.revertedWithCustomError(c.escrow, "InvalidState");
     await checkPrefixes(c, funders);
     const next = c.ethers.id("replacement-selection");
     await expect(c.escrow.lockSelection(next, c.solution.address)).to.be.revertedWithCustomError(c.escrow, "InvalidState");

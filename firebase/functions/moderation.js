@@ -508,6 +508,9 @@ export async function listReportableComments({ db, uid, problemId, proposalId, c
   }
   return db.runTransaction(async (tx) => {
     const profile = await activeProfile(tx, db, uid);
+    // Reply threads belong to proposals. The ACL must cover that typed parent,
+    // even when an unrelated problem happens to have the same document id.
+    if (threadId && parentType !== "proposal") fail("invalid-argument", "Choose a proposal discussion to read replies.");
     const parent = await tx.get(db.collection(TYPES[parentType]).doc(parentId));
     if (!parent.exists || !await canReadContent(tx, db, parentType, parent.data(), uid, profile)) fail("permission-denied", "This discussion is not available.");
     if (proposalId && problemId && parent.data().problemId !== problemId) fail("permission-denied", "This proposal does not belong to that problem.");

@@ -34,52 +34,48 @@ before(async () => {
 });
 after(async () => env?.cleanup());
 
-test('delivery evidence is created by the proposal author and readable by authorized proposal viewers', async () => {
+async function seedEvidence(id, patch = {}, hash = HASH) {
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'proposals', id, 'deliveryEvidence', hash), evidence(patch)));
+}
+
+test('trusted delivery evidence remains readable by authorized proposal viewers', async () => {
   const id = await seed();
-  await assertSucceeds(setDoc(evidenceRef(AUTHOR, id), evidence()));
+  await seedEvidence(id);
   for (const uid of [AUTHOR, OWNER, MEMBER, ADMIN]) await assertSucceeds(getDoc(evidenceRef(uid, id)));
   for (const uid of [null, SUSPENDED, NO_PROFILE]) await assertFails(getDoc(evidenceRef(uid, id)));
 });
 
-test('only the active author of a published escrow proposal may create delivery evidence', async () => {
+test('every direct delivery create is denied, including eligible authors, batches and arbitrary valid hash IDs', async () => {
   const id = await seed();
-  for (const uid of [OWNER, MEMBER, ADMIN, SUSPENDED, NO_PROFILE, null]) {
+  for (const uid of [AUTHOR, OWNER, MEMBER, ADMIN, SUSPENDED, NO_PROFILE, null]) {
     await assertFails(setDoc(evidenceRef(uid, id), evidence({ ownerId: uid || AUTHOR })));
   }
-  for (const patch of [{ status: 'draft' }, { fundingTerms: undefined }, { researcherId: SUSPENDED }, { researcherId: NO_PROFILE }]) {
-    const adjusted = { ...patch };
-    if (Object.hasOwn(adjusted, 'fundingTerms')) delete adjusted.fundingTerms;
-    const parentId = await seed(adjusted);
-    if (Object.hasOwn(patch, 'fundingTerms')) {
-      await env.withSecurityRulesDisabled(async ctx => {
-        const ref = doc(ctx.firestore(), 'proposals', parentId);
-        const data = (await getDoc(ref)).data(); delete data.fundingTerms;
-        await setDoc(ref, data);
-      });
-    }
-    const uid = patch.researcherId || AUTHOR;
-    await assertFails(setDoc(evidenceRef(uid, parentId), evidence({ ownerId: uid })));
+  for (let i = 0; i < 35; i++) {
+    await assertFails(setDoc(evidenceRef(AUTHOR, id, `0x${i.toString(16).padStart(64, '0')}`), evidence()));
   }
-  await assertFails(setDoc(evidenceRef(AUTHOR, 'no-parent'), evidence()));
+  for (const patch of [{ status: 'draft' }, { status: 'withdrawn' }]) {
+    await assertFails(setDoc(evidenceRef(AUTHOR, await seed(patch)), evidence()));
+  }
 });
 
-test('delivery evidence enforces exact fields, owner, digest format, content bounds, HTTPS, and server creation time', async () => {
-  const id = await seed();
-  for (const patch of [
-    { summary: 'x' }, { summary: 'x'.repeat(4001) }, { summary: 7 }, { url: '' },
-    { url: 'http://example.org' }, { url: 'javascript:alert(1)' }, { url: 'https://example.org/has space' },
-    { url: `https://example.org/${'x'.repeat(2048)}` }, { ownerId: OWNER },
-    { createdAt: new Date(0) }, { unexpected: true },
-  ]) await assertFails(setDoc(evidenceRef(AUTHOR, id), evidence(patch)));
-  const missing = evidence(); delete missing.url;
-  await assertFails(setDoc(evidenceRef(AUTHOR, id), missing));
-  await assertFails(setDoc(evidenceRef(AUTHOR, id, 'not-a-digest'), evidence()));
-  await assertSucceeds(setDoc(evidenceRef(AUTHOR, id), evidence({ summary: 'OK' })));
+test('independent evidence, charge ledgers, quota counters and migration state are server-owned', async () => {
+  const id = await seed({ proposalKind: 'independent' });
+  for (const uid of [AUTHOR, ADMIN, MEMBER]) {
+    for (const parts of [
+      ['proposals', id, 'independentFundingEvidence', HASH],
+      ['evidenceCharges', 'forged'], ['evidenceQuotas', 'global'], ['maintenanceState', 'evidenceQuotasV1'],
+    ]) {
+      const ref = doc(dbFor(uid), ...parts);
+      await assertFails(setDoc(ref, evidence()));
+      await assertFails(getDoc(ref));
+      await assertFails(deleteDoc(ref));
+    }
+  }
 });
 
 test('delivery evidence cannot be replaced, edited, or deleted even by its author or an administrator', async () => {
   const id = await seed();
-  await assertSucceeds(setDoc(evidenceRef(AUTHOR, id), evidence()));
+  await seedEvidence(id);
   for (const uid of [AUTHOR, ADMIN]) {
     await assertFails(setDoc(evidenceRef(uid, id), evidence()));
     await assertFails(updateDoc(evidenceRef(uid, id), { summary: 'Changed after delivery.' }));
@@ -89,7 +85,7 @@ test('delivery evidence cannot be replaced, edited, or deleted even by its autho
 
 test('hidden proposal evidence follows parent access including revoked sponsor visibility', async () => {
   const id = await seed({ moderationStatus: 'hidden', postingOwnerId: null });
-  await assertSucceeds(setDoc(evidenceRef(AUTHOR, id), evidence()));
+  await seedEvidence(id);
   for (const uid of [AUTHOR, ADMIN]) await assertSucceeds(getDoc(evidenceRef(uid, id)));
   for (const uid of [OWNER, MEMBER]) await assertFails(getDoc(evidenceRef(uid, id)));
 });
@@ -97,13 +93,13 @@ test('hidden proposal evidence follows parent access including revoked sponsor v
 test('evidence access follows parent opportunity visibility while preserving author and owner access', async () => {
   for (const problemPatch of [{ status: 'draft' }, { moderationStatus: 'hidden' }]) {
     const id = await seed({}, problemPatch);
-    await assertSucceeds(setDoc(evidenceRef(AUTHOR, id), evidence()));
+    await seedEvidence(id);
     for (const uid of [AUTHOR, OWNER, ADMIN]) await assertSucceeds(getDoc(evidenceRef(uid, id)));
     await assertFails(getDoc(evidenceRef(MEMBER, id)));
   }
   for (const status of ['cancelled', 'expired']) {
     const id = await seed({}, { status });
-    await assertSucceeds(setDoc(evidenceRef(AUTHOR, id), evidence()));
+    await seedEvidence(id);
     await assertSucceeds(getDoc(evidenceRef(MEMBER, id)));
   }
 });

@@ -5,9 +5,12 @@
   "type": "module",
   "description": "Fixed-supply QFT ERC-20 for Arbitrum Sepolia",
   "scripts": {
-    "compile": "hardhat compile",
-    "test": "hardhat test mocha",
-    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia"
+    "compile": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat compile",
+    "test": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat test mocha",
+    "deploy:arbitrum-sepolia": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
+    "postinstall": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:apply": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production ."
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "4.0.15",

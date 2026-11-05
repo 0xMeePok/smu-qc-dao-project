@@ -1,0 +1,355 @@
+{
+  "3.25.76": {
+    "v3/types.js": {
+      "before": "9763a2938f0e7f983363ef4bf6530e7583e3f2d54f8a4a6684efad58febc6e8e",
+      "after": "a01e9f0a07ddfd522312cf0d8ee10caf9b21ea677cbc8431f731b84c6d778ff3",
+      "edits": [
+        {
+          "offset": 64836,
+          "before": "",
+          "after": "                if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 65742,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        },
+        {
+          "offset": 99916,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        }
+      ]
+    },
+    "v3/types.cjs": {
+      "before": "06487cc05ed45c5dd29789bf0aa75734d1ce06592a7f2665ba4ca90a68e8a3e1",
+      "after": "258b6d818e30b794157fe3a4cd53064f2abf8a1e4e91faa699249df59fb5a58c",
+      "edits": [
+        {
+          "offset": 70125,
+          "before": "",
+          "after": "                if (tooBig) return parseUtil_js_1.INVALID;\n"
+        },
+        {
+          "offset": 71099,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_js_1.INVALID;\n"
+        },
+        {
+          "offset": 106812,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_js_1.INVALID;\n"
+        }
+      ]
+    },
+    "src/v3/types.ts": {
+      "before": "70309a0877c35d036842e291fe7c8a4439d5db49411d233f8a22bf8a59c41419",
+      "after": "ad115a1c20a5e7592177e725dce996bbb3df2f6af2a5ec55d34339b30e11bc72",
+      "edits": [
+        {
+          "offset": 73470,
+          "before": "",
+          "after": "        if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 74178,
+          "before": "        status.dirty();\n",
+          "after": "        return INVALID;\n"
+        },
+        {
+          "offset": 117526,
+          "before": "        status.dirty();\n",
+          "after": "        return INVALID;\n"
+        }
+      ]
+    },
+    "v4/core/schemas.js": {
+      "before": "d466582c022b08a3f9eb1a65d5970d8ca25064d73a5a838d76414ae36440a76b",
+      "after": "9ebfa9a7781da37272ce56231b4ca842670ee8340688978914a28ed8b0ad841e",
+      "edits": [
+        {
+          "offset": 279,
+          "before": "",
+          "after": "// Local security backport of upstream a0ebf970: size caps precede element parsing.\nconst sizeCappedPayloads = new WeakMap();\nfunction capContainerSize(inst, payload, ctx, size) {\n    if (ctx?.skipChecks || ctx?.direction === \"backward\") return false;\n    for (const ch of inst._zod.def.checks ?? []) {\n        const d = ch._zod.def;\n        // Preserve check ordering: any earlier non-size check may rewrite the value.\n        if (!/_(length|size)$|_equals$/.test(d.check)) break;\n        const maximum = d.maximum ?? d.length ?? d.size;\n        if (maximum >= 0 && size > maximum && (!d.when || d.when(payload))) {\n            const start = payload.issues.length;\n            ch._zod.check(payload);\n            if (payload.issues.length > start) {\n                payload.issues[start].continue = false;\n                sizeCappedPayloads.set(payload, payload.issues[start]);\n                return true;\n            }\n        }\n    }\n    return false;\n}\n"
+        },
+        {
+          "offset": 1201,
+          "before": "",
+          "after": "            const capIssue = sizeCappedPayloads.get(payload);\n            if (capIssue) {\n                if (payload.issues.includes(capIssue)) return payload;\n                sizeCappedPayloads.delete(payload);\n            }\n"
+        },
+        {
+          "offset": 21928,
+          "before": "",
+          "after": "        if (capContainerSize(inst, payload, ctx, input.length)) return payload;\n"
+        },
+        {
+          "offset": 44704,
+          "before": "",
+          "after": "        if (capContainerSize(inst, payload, ctx, input.size)) return payload;\n"
+        },
+        {
+          "offset": 47092,
+          "before": "",
+          "after": "        if (capContainerSize(inst, payload, ctx, input.size)) return payload;\n"
+        }
+      ]
+    },
+    "v4/core/schemas.cjs": {
+      "before": "f5d17a7db487c943c9d07cc624010ebb6d93683eabd14339846f4912cc88b51f",
+      "after": "504634ff4fb20a3cd2274f6188513ac4ba505fdd37393682a1846ee309bc4f50",
+      "edits": [
+        {
+          "offset": 3038,
+          "before": "",
+          "after": "// Local security backport of upstream a0ebf970: size caps precede element parsing.\nconst sizeCappedPayloads = new WeakMap();\nfunction capContainerSize(inst, payload, ctx, size) {\n    if (ctx?.skipChecks || ctx?.direction === \"backward\") return false;\n    for (const ch of inst._zod.def.checks ?? []) {\n        const d = ch._zod.def;\n        // Preserve check ordering: any earlier non-size check may rewrite the value.\n        if (!/_(length|size)$|_equals$/.test(d.check)) break;\n        const maximum = d.maximum ?? d.length ?? d.size;\n        if (maximum >= 0 && size > maximum && (!d.when || d.when(payload))) {\n            const start = payload.issues.length;\n            ch._zod.check(payload);\n            if (payload.issues.length > start) {\n                payload.issues[start].continue = false;\n                sizeCappedPayloads.set(payload, payload.issues[start]);\n                return true;\n            }\n        }\n    }\n    return false;\n}\n"
+        },
+        {
+          "offset": 3955,
+          "before": "",
+          "after": "            const capIssue = sizeCappedPayloads.get(payload);\n            if (capIssue) {\n                if (payload.issues.includes(capIssue)) return payload;\n                sizeCappedPayloads.delete(payload);\n            }\n"
+        },
+        {
+          "offset": 24366,
+          "before": "",
+          "after": "        if (capContainerSize(inst, payload, ctx, input.length)) return payload;\n"
+        },
+        {
+          "offset": 47096,
+          "before": "",
+          "after": "        if (capContainerSize(inst, payload, ctx, input.size)) return payload;\n"
+        },
+        {
+          "offset": 49473,
+          "before": "",
+          "after": "        if (capContainerSize(inst, payload, ctx, input.size)) return payload;\n"
+        }
+      ]
+    },
+    "src/v4/core/schemas.ts": {
+      "before": "5910d2a181b6570189730578df0ff7c90bd7b2cda6ae1064026d236a47fb687d",
+      "after": "a8078f78858521c6a3e7431e4d4714aee32f87c3b93ca6f819e516fbdceb5816",
+      "edits": [
+        {
+          "offset": 5191,
+          "before": "",
+          "after": "// Local security backport of upstream a0ebf970: size caps precede element parsing.\nconst sizeCappedPayloads = new WeakMap<object, errors.$ZodRawIssue>();\nfunction capContainerSize(inst: any, payload: ParsePayload, ctx: any, size: number) {\n    if (ctx?.skipChecks || ctx?.direction === \"backward\") return false;\n    for (const ch of inst._zod.def.checks ?? []) {\n        const d = ch._zod.def;\n        // Preserve check ordering: any earlier non-size check may rewrite the value.\n        if (!/_(length|size)$|_equals$/.test(d.check)) break;\n        const maximum = d.maximum ?? d.length ?? d.size;\n        if (maximum >= 0 && size > maximum && (!d.when || d.when(payload))) {\n            const start = payload.issues.length;\n            ch._zod.check(payload);\n            if (payload.issues.length > start) {\n                payload.issues[start].continue = false;\n                sizeCappedPayloads.set(payload, payload.issues[start]);\n                return true;\n            }\n        }\n    }\n    return false;\n}\n"
+        },
+        {
+          "offset": 6172,
+          "before": "",
+          "after": "      const capIssue = sizeCappedPayloads.get(payload);\n      if (capIssue) {\n        if (payload.issues.includes(capIssue)) return payload;\n        sizeCappedPayloads.delete(payload);\n      }\n"
+        },
+        {
+          "offset": 44804,
+          "before": "",
+          "after": "    if (capContainerSize(inst, payload, ctx, input.length)) return payload;\n"
+        },
+        {
+          "offset": 78481,
+          "before": "",
+          "after": "    if (capContainerSize(inst, payload, ctx, input.size)) return payload;\n"
+        },
+        {
+          "offset": 81568,
+          "before": "",
+          "after": "    if (capContainerSize(inst, payload, ctx, input.size)) return payload;\n"
+        }
+      ]
+    }
+  },
+  "3.22.4": {
+    "lib/types.js": {
+      "before": "a6d505f69c7206366c02c5a219060eaa31c068753456d5cc00048dbd871ea937",
+      "after": "c58ddb53e5d73a42455dd38e12079a00438aa9a77302f0d9a671d7af7a9d9011",
+      "edits": [
+        {
+          "offset": 58995,
+          "before": "",
+          "after": "                if (tooBig) return parseUtil_1.INVALID;\n"
+        },
+        {
+          "offset": 59957,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_1.INVALID;\n"
+        },
+        {
+          "offset": 94937,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_1.INVALID;\n"
+        }
+      ]
+    },
+    "lib/index.mjs": {
+      "before": "261f684c8d43538f73fd03d02fb063e10c5a378ed4c5ec654377b9d3bf2eb159",
+      "after": "16ddd033ca9b0d78653fc0a85c9c2cb54c00753207fde94b43d3ec0b193c1684",
+      "edits": [
+        {
+          "offset": 71712,
+          "before": "",
+          "after": "                if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 72618,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        },
+        {
+          "offset": 106272,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        }
+      ]
+    },
+    "lib/index.umd.js": {
+      "before": "091773df10e773fcf5eee91628e8664cb6d447022e594b678624254300aee4cf",
+      "after": "356ec35f13e5e2b0cf7f735f34292c9a47c221ac8ee0e969114c166f95e44c0e",
+      "edits": [
+        {
+          "offset": 80386,
+          "before": "",
+          "after": "                    if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 81392,
+          "before": "                    status.dirty();\n",
+          "after": "                    return INVALID;\n"
+        },
+        {
+          "offset": 119226,
+          "before": "                    status.dirty();\n",
+          "after": "                    return INVALID;\n"
+        }
+      ]
+    }
+  },
+  "4.6.6": {
+    "v3/types.js": {
+      "before": "d7214e1dacf9e6e70c9ca80247717b4be13b240510428fef132b7da3260d1a32",
+      "after": "b2c791458213a767c3e6563f87d5cd6da975557b2cb901828e0413679769f2cc",
+      "edits": [
+        {
+          "offset": 64891,
+          "before": "",
+          "after": "                if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 65797,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        },
+        {
+          "offset": 100142,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        }
+      ]
+    },
+    "v3/types.cjs": {
+      "before": "7a2f06d88e280bdd198c60e0d292ed7f1e3993e877be4415de07e6abc7746dd1",
+      "after": "1519a2130f8dd24d614fbbb0cea1f5e21c71e18e9e0c3e3fc3c31c03e5a2aaaf",
+      "edits": [
+        {
+          "offset": 70180,
+          "before": "",
+          "after": "                if (tooBig) return parseUtil_js_1.INVALID;\n"
+        },
+        {
+          "offset": 71154,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_js_1.INVALID;\n"
+        },
+        {
+          "offset": 107038,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_js_1.INVALID;\n"
+        }
+      ]
+    },
+    "src/v3/types.ts": {
+      "before": "73b9529564a34fc028a5a62c17e09148747b737039b78b124e84254cb886411a",
+      "after": "fcd32b425226d4d7cf5736a8d51e708a37e9e4c17352c4566e6bd56c1902335c",
+      "edits": [
+        {
+          "offset": 73511,
+          "before": "",
+          "after": "        if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 74219,
+          "before": "        status.dirty();\n",
+          "after": "        return INVALID;\n"
+        },
+        {
+          "offset": 117692,
+          "before": "        status.dirty();\n",
+          "after": "        return INVALID;\n"
+        }
+      ]
+    }
+  },
+  "4.6.7": {
+    "v3/types.js": {
+      "before": "d7214e1dacf9e6e70c9ca80247717b4be13b240510428fef132b7da3260d1a32",
+      "after": "b2c791458213a767c3e6563f87d5cd6da975557b2cb901828e0413679769f2cc",
+      "edits": [
+        {
+          "offset": 64891,
+          "before": "",
+          "after": "                if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 65797,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        },
+        {
+          "offset": 100142,
+          "before": "                status.dirty();\n",
+          "after": "                return INVALID;\n"
+        }
+      ]
+    },
+    "v3/types.cjs": {
+      "before": "7a2f06d88e280bdd198c60e0d292ed7f1e3993e877be4415de07e6abc7746dd1",
+      "after": "1519a2130f8dd24d614fbbb0cea1f5e21c71e18e9e0c3e3fc3c31c03e5a2aaaf",
+      "edits": [
+        {
+          "offset": 70180,
+          "before": "",
+          "after": "                if (tooBig) return parseUtil_js_1.INVALID;\n"
+        },
+        {
+          "offset": 71154,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_js_1.INVALID;\n"
+        },
+        {
+          "offset": 107038,
+          "before": "                status.dirty();\n",
+          "after": "                return parseUtil_js_1.INVALID;\n"
+        }
+      ]
+    },
+    "src/v3/types.ts": {
+      "before": "73b9529564a34fc028a5a62c17e09148747b737039b78b124e84254cb886411a",
+      "after": "fcd32b425226d4d7cf5736a8d51e708a37e9e4c17352c4566e6bd56c1902335c",
+      "edits": [
+        {
+          "offset": 73511,
+          "before": "",
+          "after": "        if (tooBig) return INVALID;\n"
+        },
+        {
+          "offset": 74219,
+          "before": "        status.dirty();\n",
+          "after": "        return INVALID;\n"
+        },
+        {
+          "offset": 117692,
+          "before": "        status.dirty();\n",
+          "after": "        return INVALID;\n"
+        }
+      ]
+    }
+  }
+}

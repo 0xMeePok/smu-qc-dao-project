@@ -30,6 +30,7 @@ vi.mock("../../src/context/SessionContext.jsx", () => ({
 vi.mock("../../src/lib/postings.js", () => ({
   newPostingId: () => "posting1",
   findPosting: async () => mocks.posting,
+  assertOpportunityMaterialEditAllowed: async () => {},
   buildPostingDocument: ({ form, attachments, status, expiresAt }) => ({
     ownerId: account,
     organisation: "Singapore Management University",

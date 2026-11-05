@@ -6,13 +6,16 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "node ../../../firebase/functions/securityDependencies/manage.mjs --verify --production . && vite",
+    "build": "node ../../../firebase/functions/securityDependencies/manage.mjs --verify --production . && tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint .",
-    "test:server": "tsc -p tsconfig.server.json",
-    "test:unit": "vitest run",
-    "test": "npm run lint && npm run test:server && npm run test:unit && npm run build"
+    "lint": "node ../../../firebase/functions/securityDependencies/manage.mjs --verify --production . && eslint .",
+    "test:server": "node ../../../firebase/functions/securityDependencies/manage.mjs --verify --production . && tsc -p tsconfig.server.json",
+    "test:unit": "node ../../../firebase/functions/securityDependencies/manage.mjs --verify --production . && vitest run",
+    "test": "node ../../../firebase/functions/securityDependencies/manage.mjs --verify --production . && npm run lint && npm run test:server && npm run test:unit && npm run build",
+    "postinstall": "node ../../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:apply": "node ../../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node ../../../firebase/functions/securityDependencies/manage.mjs --verify --production ."
   },
   "dependencies": {
     "ethers": "^6.17.0"

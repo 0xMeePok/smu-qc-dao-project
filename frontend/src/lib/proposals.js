@@ -19,6 +19,7 @@ import { toDate } from "./datetime.js";
 import { AUDIT_REGISTRY_CONFIG } from "../config/auditRegistry.js";
 import { isEscrowRegistry } from "../../../firebase/functions/escrowAudit.js";
 import { HALF_UPFRONT_PERCENTAGES, proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
+import { assertReviewedParentDocument } from "./reviewedParentAudit.js";
 
 export { isIndependentProposal, INDEPENDENT_PROPOSAL_KIND };
 
@@ -89,6 +90,7 @@ export function buildProposalDocument({ researcherId, posting, form, attachments
     researcherId: researcherId.toLowerCase(),
     ...(form.aiAssisted === true ? { aiAssisted: true } : {}),
     problemId: posting.id,
+    ...(posting.reviewedParentAudit ? { reviewedParentAudit: posting.reviewedParentAudit } : {}),
     opportunityType: posting.opportunityType || "business-problem",
     category: String(form.category ?? ""),
     amount: amountOf(form.amount),
@@ -246,9 +248,12 @@ export async function submitProposal({ proposalId, researcherId, posting, form, 
     const current = parent.exists() ? { id: parent.id, ...parent.data() } : null;
     const reason = proposalBlockReason(current, undefined, { researcherId: uid });
     if (reason) throw new Error(reason);
+    assertReviewedParentDocument(current, prepared.reviewedParentAudit);
     if (current.currency !== posting.currency) throw new Error("The funding currency changed. Reload the opportunity before submitting.");
     if (Object.keys(validateProposal(form, current)).length) throw new Error("Complete all required proposal fields.");
     const slot = await transaction.get(authorRef(posting.id, uid));
+    const lockRef = doc(db, "opportunityProposalLocks", posting.id);
+    const lock = await transaction.get(lockRef);
     if (slot.exists() && slot.data().proposalId !== proposalId) {
       const previous = await transaction.get(proposalRef(slot.data().proposalId));
       if (!previous.exists() || !releasesProposalSlot(previous.data())) throw new Error("You already have an active proposal for this opportunity. View it in My Proposals.");
@@ -263,6 +268,7 @@ export async function submitProposal({ proposalId, researcherId, posting, form, 
       transaction.set(proposalRef(proposalId), record);
     }
     transaction.set(authorRef(posting.id, uid), { proposalId });
+    if (!lock.exists()) transaction.set(lockRef, { proposalId, researcherId: uid, createdAt: serverTimestamp() });
   });
   // A successful commit is success even if the optional read-back is interrupted.
   return { id: proposalId };

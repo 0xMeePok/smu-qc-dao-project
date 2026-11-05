@@ -17,6 +17,7 @@ import { assertActiveAuditDeployment, isActiveAuditDeployment, resolveAuditDeplo
 import { beginEscrowDisplay } from "./escrowDisplay.js";
 import { prepareRemovedProposalClaim } from "./escrowFunding.js";
 import { escrowCustodyLock, escrowSelectionGate } from "../../../firebase/functions/escrowCustody.js";
+import { readFundingContext, supportsReviewedFunding } from "../../../firebase/functions/escrowFundingContext.js";
 
 export const ESCROW_STATE = Object.freeze({ Open: 0, Locked: 1, Released: 2, Refunded: 3, Cancelled: 4, Expired: 5, Active: 6, Voided: 7 });
 const ZERO_HASH = `0x${"0".repeat(64)}`;
@@ -114,7 +115,7 @@ function reviewEligibility({ snapshot, account, active, timestamp, currentMilest
 
 // Verify the complete canonical record, then fetch only the current action's guards.
 // Dashboard accounting, refunds and unrelated wallet reads must not delay a signature.
-async function readUserAction({ proposal, account, action, adapters, config }) {
+async function readUserAction({ proposal, account, action, adapters, config, reviewedContextDigest }) {
   deployment(config);
   const expected = isIndependentProposal(proposal)
     ? prepareIndependentEscrowCommit(proposal, { registryConfig: config })
@@ -155,6 +156,13 @@ async function readUserAction({ proposal, account, action, adapters, config }) {
     readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] }),
   ]);
   assertProposalContent(registered, expected);
+  if (action === "deposit") {
+    if (!supportsReviewedFunding(config)) throw new Error("This escrow deployment does not support reviewed deposits. Use the current deployment.");
+    const currentDigest = await readFundingContext({ config, expected, proposal: registered, readContract });
+    if (!/^0x[0-9a-fA-F]{64}$/.test(reviewedContextDigest ?? "") || !same(reviewedContextDigest, currentDigest)) {
+      throw new Error("The reviewed proposal or parent revision changed. Refresh and review it before funding.");
+    }
+  }
   const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
   const [values, active, depositValues, contributionSummary] = await actionReads(canonical.address);
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
@@ -162,7 +170,7 @@ async function readUserAction({ proposal, account, action, adapters, config }) {
     const [tokenDecimals, tokenListed, balance, allowance] = depositValues;
     const decimals = Number(snapshot.tokenDecimals);
     const remaining = BigInt(snapshot.fundingTarget) - BigInt(snapshot.totalDeposited);
-    return { ...canonical, decimals, remaining, token: expected.fundingTerms.token,
+    return { ...canonical, decimals, remaining, token: expected.fundingTerms.token, reviewedContextDigest,
       symbol: config.escrow.tokens.find(token => same(token.address, expected.fundingTerms.token))?.symbol ?? proposal.currency,
       wallet: { balance: BigInt(balance), allowance: BigInt(allowance) },
       can: { deposit: Boolean(account && proposal.opportunityType !== "open-funding" && Number(snapshot.state) === ESCROW_STATE.Open
@@ -216,6 +224,13 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
   const pinned = await escrowBlockReader(adapters, config, block);
   block = pinned.block;
   const { readContract } = pinned;
+  const fundingContextRead = supportsReviewedFunding(config)
+    ? readContract({ address: config.address, abi: config.abi, functionName: "getProposal", args: [expected.entityId] })
+      .then(registered => same(field(registered, "proposalHash", 4), expected.proposalHash)
+        && same(field(registered, "solutionHash", 5), expected.solutionHash)
+        ? readFundingContext({ config, expected, proposal: registered, readContract }) : null)
+    : Promise.resolve(null);
+  fundingContextRead.catch(() => {});
   const canonical = await (allowImmutableCache ? loadEscrowVerification : verifyProposalEscrow)({ expected, config, readContract, allowImmutableCache });
   const read = (functionName, args = []) => readContract({ address: canonical.address, abi: config.escrow.escrowAbi, functionName, args });
   const names = ["state", "platformSigner", "problemOwner", "proposalOwner", "fundingTarget", "tokenDecimals", "funderVoting",
@@ -244,7 +259,9 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
     tokenRead("balanceOf", [canonical.address]),
     Promise.all(expected.fundingTerms.trancheBps.map((_, index) => read("milestoneAt", [BigInt(index)]).then(milestone))),
   ]);
-  assertProposalContent(registered, expected);
+  const contentMatches = same(field(registered, "proposalHash", 4), expected.proposalHash)
+    && same(field(registered, "solutionHash", 5), expected.solutionHash);
+  const reviewedContextDigest = await fundingContextRead;
   const snapshot = Object.fromEntries(names.map((name, index) => [name, values[index]]));
   let grantEscrow = false;
   if (proposal.opportunityType === "open-funding" && config.escrow.openFundingPoolAbi?.length
@@ -286,7 +303,7 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
   const custodyLock = escrowCustodyLock({ ...snapshot, timestamp: block.timestamp,
     upfrontRefundUsesApprovalDeadline: grantEscrow || supportsSelectionRejection });
   const can = {
-    deposit: Boolean(walletAddress && open && active && tokenListed && tokenPrecisionValid && block.timestamp < snapshot.expiresAt && remaining > 0n && wallet.balance > 0n),
+    deposit: Boolean(reviewedContextDigest && walletAddress && open && active && tokenListed && tokenPrecisionValid && block.timestamp < snapshot.expiresAt && remaining > 0n && wallet.balance > 0n),
     lockSelection: roles.platform && selectionGate.canSelect,
     ...reviewEligibility({ snapshot, account: walletAddress, active, timestamp: block.timestamp, currentMilestone,
       contribution: wallet.contribution, hasVoted: wallet.hasVoted }),
@@ -298,13 +315,17 @@ async function readEscrowSnapshot({ proposal, account, adapters, config, isHisto
       && !(grantEscrow && open) && block.timestamp >= (final || ((grantEscrow || supportsSelectionRejection) && upfront) ? snapshot.approvalDeadline : snapshot.expiresAt)),
     refundInvalidated: Boolean(walletAddress && (supportsInvalidation ? invalidated : !active) && ![ESCROW_STATE.Released, ESCROW_STATE.Refunded, ESCROW_STATE.Voided].includes(snapshot.state)),
   };
+  if (!contentMatches || (supportsReviewedFunding(config) && !reviewedContextDigest)) {
+    for (const action of ["deposit", "lockSelection", "approveSelection", "submitMilestone", "approveMilestone", "voteMilestone", "release", "releaseMilestone"]) can[action] = false;
+  }
   if (isHistorical) for (const action of ["deposit", "lockSelection", "approveSelection", "rejectSelection", "submitMilestone", "approveMilestone", "voteMilestone", "release", "releaseMilestone"]) can[action] = false;
   // Grant funding comes from its owner's pool after researcher acceptance.
   if (proposal.opportunityType === "open-funding") { can.deposit = false; can.lockSelection = false; }
   return { ...canonical, ...snapshot, isGrant: proposal.opportunityType === "open-funding", chainId: config.chainId, token: expected.fundingTerms.token, decimals,
     symbol: config.escrow.tokens.find(token => same(token.address, expected.fundingTerms.token))?.symbol ?? proposal.currency,
     entityId: expected.entityId, blockNumber: block.number, timestamp: block.timestamp, workflowActive: active, workflowPaused: paused, workflowInvalidated: supportsInvalidation ? invalidated : !active, tokenListed, tokenPrecisionValid,
-    remaining, milestones, currentMilestone, wallet, roles, can, isHistorical, supportsSelectionRejection, pendingProposalId,
+    remaining, milestones, currentMilestone, wallet, roles, can, isHistorical, supportsSelectionRejection, pendingProposalId, reviewedContextDigest, contentMatches,
+    reviewedDepositsSupported: supportsReviewedFunding(config),
     custodyBalance: BigInt(custodyBalance), custodyLock, selectionGate, fundingRequirementMet: selectionGate.fundingMet,
     blockedBySelection: !same(pendingProposalId, ZERO_HASH) && !same(pendingProposalId, expected.entityId) };
 }
@@ -421,7 +442,7 @@ export async function claimRemovedProposalFunds({ proposalId, account }) {
 }
 
 /** Called only from a user action. Never retries a write or signs with a server key. */
-export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve, reason,
+export async function writeEscrowAction({ proposal, account, action, amount, evidence, evidenceHash, selectionId, approve, reason, reviewedContextDigest,
   onProgress, beforeWalletRequest, adapters = createWalletEscrowAdapters(), config = AUDIT_REGISTRY_CONFIG }) {
   onProgress?.({ status: "preparing", action });
   const usingConfiguredDeployment = config === AUDIT_REGISTRY_CONFIG;
@@ -432,7 +453,7 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
   const isHistorical = usingConfiguredDeployment && !isActiveAuditDeployment(config, AUDIT_REGISTRY_CONFIG);
   const walletAddress = requireAddress(account, "Connected wallet");
   const snapshot = await (VERIFIED_USER_ACTIONS.has(action) ? readUserAction : readEscrowSnapshot)({
-    proposal, account: walletAddress, action, adapters, config, isHistorical,
+    proposal, account: walletAddress, action, adapters, config, isHistorical, reviewedContextDigest,
   });
   if (!Object.hasOwn(snapshot.can, action) || !snapshot.can[action]) throw new Error("This escrow action is not available to the connected wallet in the current state. Refresh and try again.");
   // A caller's own pre-signature check (for example server eligibility) may run
@@ -472,7 +493,7 @@ export async function writeEscrowAction({ proposal, account, action, amount, evi
       if (snapshot.wallet.allowance > 0n) await send("approve", [snapshot.address, 0n], { address: snapshot.token, abi: erc20Abi, label: "resetAllowance" });
       await send("approve", [snapshot.address, units], { address: snapshot.token, abi: erc20Abi });
     }
-    return send("deposit", [units]);
+    return send("depositReviewed", [units, snapshot.reviewedContextDigest], { label: "deposit" });
   }
   if (action === "lockSelection") {
     const selected = assertBytes32(selectionId, "Selection id");

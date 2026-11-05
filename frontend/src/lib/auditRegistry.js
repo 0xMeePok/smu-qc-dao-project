@@ -545,6 +545,7 @@ const VERIFICATION_DIFFERENCES = {
   expiresAt: ["Expiry", "The expiry differs from the expiry recorded on Arbitrum Sepolia."],
   opportunityId: ["Linked opportunity", "The proposal is linked to a different opportunity on Arbitrum Sepolia."],
   opportunityRevisionIndex: ["Linked opportunity revision", "The proposal is linked to a different opportunity revision on Arbitrum Sepolia."],
+  opportunityRevisionDigest: ["Reviewed opportunity content", "The proposal is linked to opportunity content the researcher did not review."],
   anchor: ["Publication anchor", "No matching publication anchor was found in the checked Arbitrum Sepolia history."],
   escrow: ["Proposal escrow", "The escrow link or funding terms differ from this proposal."],
 };
@@ -618,6 +619,21 @@ export async function readOpportunityRevisionIndex(opportunityId, options = {}) 
   return Number(count - 1n);
 }
 
+/** Read the version that the editor is displaying; never replace its expected hash. */
+export async function readReviewedOpportunity(prepared, options = {}) {
+  const [revisionIndex, actual] = await Promise.all([
+    readOpportunityRevisionIndex(prepared.entityId, options),
+    readWithRetries("getOpportunity", [prepared.entityId], options),
+  ]);
+  const revision = await readWithRetries("opportunityRevisionAt", [prepared.entityId, BigInt(revisionIndex)], options);
+  const revisionDigest = String(tupleField(revision, "contentHash", 0));
+  if (!sameHex(tupleField(actual, "contentHash", 2), prepared.contentHash)
+      || !sameHex(revisionDigest, prepared.contentHash)) {
+    throw new Error("The opportunity changed since this version was loaded. Reload it and review the new terms before signing.");
+  }
+  return { revisionIndex, revisionDigest: revisionDigest.toLowerCase() };
+}
+
 async function findMatchingAnchor(entityId, expectedHash, options) {
   if (options.verifyAnchor === false) return null;
   const count = BigInt(await readWithRetries("anchorCount", [entityId], options));
@@ -674,7 +690,7 @@ export async function verifyProposalAudit(input, options = {}) {
   // scheduled with linkage and identity; a miss keeps this check on its own.
   const joined = options.allowImmutableCache ? await claimDisplayAudit(expected.entityId) : null;
   const actual = joined?.proposal ?? await readWithRetries("getProposal", [expected.entityId], options);
-  if (options.useRecordedOpportunityRevision === true) {
+  if (options.useRecordedOpportunityRevision === true && !expected.reviewedParentAudit) {
     // Saved proposal documents do not carry the committed parent revision.
     // Use the proposal's own chain binding, never the parent's latest revision.
     // Explicit revision checks remain the default for prepared operations.
@@ -691,6 +707,10 @@ export async function verifyProposalAudit(input, options = {}) {
     tupleField(actual, "opportunityId", 1), sameHex);
   mismatch(mismatches, "opportunityRevisionIndex", expected.expectedOpportunityRevisionIndex,
     Number(tupleField(actual, "opportunityRevisionIndex", 2)));
+  if (expected.reviewedParentAudit) {
+    mismatch(mismatches, "opportunityRevisionDigest", expected.reviewedParentAudit.revisionDigest,
+      tupleField(actual, "opportunityRevisionDigest", 3), sameHex);
+  }
   mismatch(mismatches, "proposalHash", expected.proposalHash,
     tupleField(actual, "proposalHash", 4), sameHex);
   mismatch(mismatches, "solutionHash", expected.solutionHash,

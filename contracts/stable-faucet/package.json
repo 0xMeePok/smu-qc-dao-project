@@ -5,9 +5,12 @@
   "type": "module",
   "description": "Mock faucet token contracts for Arbitrum Sepolia",
   "scripts": {
-    "compile": "hardhat compile",
-    "test": "hardhat test mocha",
-    "deploy:faucet": "hardhat run scripts/deploy-faucet.js --build-profile production --network arbitrumSepolia"
+    "compile": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat compile",
+    "test": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat test mocha",
+    "deploy:faucet": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat run scripts/deploy-faucet.js --build-profile production --network arbitrumSepolia",
+    "postinstall": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:apply": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production ."
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "4.0.15",

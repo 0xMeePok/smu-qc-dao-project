@@ -1,5 +1,6 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { auth, db } from "./firebase.js";
+import { doc, getDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "./firebase.js";
 import { requireFirebase } from "./authFlow.js";
 import { hashEscrowEvidence } from "./escrow.js";
 
@@ -31,13 +32,14 @@ export async function saveEscrowEvidence({ proposalId, ownerId, evidence, eviden
   }
   const normalized = normalizeEvidence(evidence);
   if (hashEscrowEvidence(normalized) !== evidenceHash) throw new Error("The evidence differs from its delivery hash.");
-  const ref = evidenceRef(proposalId, evidenceHash);
+  // Validate the legacy-compatible reference before contacting the trusted writer.
+  evidenceRef(proposalId, evidenceHash);
   try {
-    await setDoc(ref, { ...normalized, ownerId: owner, createdAt: serverTimestamp() });
+    await httpsCallable(functions, "saveDeliveryEvidence")({ proposalId, evidence: normalized, evidenceHash });
   } catch (error) {
     // Immutable evidence may already exist after a wallet retry or a successful
     // write whose response was lost. Never overwrite it to refresh its timestamp.
-    const existing = await getDoc(ref).catch(() => null);
+    const existing = await getDoc(evidenceRef(proposalId, evidenceHash)).catch(() => null);
     const saved = existing?.exists() ? existing.data() : null;
     if (!saved || saved.ownerId !== owner || saved.summary !== normalized.summary || saved.url !== normalized.url) throw error;
   }

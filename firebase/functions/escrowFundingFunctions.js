@@ -42,7 +42,7 @@ export function registerEscrowFundingFunctions({ db, client, batchedReadClient, 
     const uid = await requireMember(request);
     try {
       return await service({ ...shared, uid, proposalId: request.data?.proposalId, problemId: request.data?.problemId,
-        amount: request.data?.amount, transactionHash: request.data?.transactionHash,
+        amount: request.data?.amount, reviewedContextDigest: request.data?.reviewedContextDigest, transactionHash: request.data?.transactionHash,
         reason: request.data?.reason, requestId: request.data?.requestId });
     } catch (error) {
       if (error instanceof HttpsError) throw error;

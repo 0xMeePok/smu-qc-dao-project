@@ -334,16 +334,32 @@ service cloud.firestore {
     }
 
     function hasProposalSchema(data) {
-      // Validate the one new optional key separately, preserving the original
-      // explicit allowlist and keeping large atomic publications under the cap.
-      return data.keys().removeAll(['aiAssisted']).hasOnly([
+      // Set subtraction preserves the exact allowlist without repeatedly
+      // comparing every draft field against every allowed key.
+      return data.keys().toSet().difference([
         'researcherId', 'problemId', 'title', 'summary', 'amount',
         'status', 'audit', 'createdAt', 'updatedAt',
         'postingOwnerId', 'opportunityType', 'category', 'currency', 'attachments',
         'methodology', 'suitability', 'expectedOutcomes', 'successCriteria',
         'timeline', 'milestones', 'team', 'proposedProblem', 'relevance', 'thesisFit',
-        'withdrawalReason', 'fundingPlan', 'fundingTerms'
-      ]) && data.get('aiAssisted', false) is bool; // Required fields are checked by value below and in the write rules.
+        'withdrawalReason', 'fundingPlan', 'fundingTerms', 'aiAssisted', 'reviewedParentAudit'
+      ].toSet()).size() == 0 && data.get('aiAssisted', false) is bool
+        // Submitted content is validated by the exact server publication proof.
+        // Drafts have no proof, so validate their optional captured tuple here.
+        && (data.status == 'submitted' || !('reviewedParentAudit' in data)
+          || validReviewedParentAudit(data.reviewedParentAudit));
+    }
+
+    function validReviewedParentAudit(value) {
+      return value is map
+        && value.size() == 6
+        && value.chainId is int && value.chainId > 0 && value.chainId <= 9007199254740991
+        && value.contractAddress.matches('^0x[0-9a-f]{40}$')
+        && value.contractAddress != '0x0000000000000000000000000000000000000000'
+        && value.entityId.matches('^0x[0-9a-f]{64}$')
+        && value.contentHash.matches('^0x[0-9a-f]{64}$')
+        && value.revisionDigest == value.contentHash
+        && value.revisionIndex is int && value.revisionIndex >= 0 && value.revisionIndex <= 4294967295;
     }
 
     function hasIndependentProposalSchema(data) {
@@ -359,10 +375,10 @@ service cloud.firestore {
     function hasEvaluationSchema(data) {
       return data.keys().hasOnly([
         'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
-        'createdAt', 'updatedAt'
+        'createdAt', 'updatedAt', 'expiryAccepted'
       ]) && data.keys().hasAll([
         'evaluatorId', 'proposalId', 'title', 'score', 'feedback', 'status',
-        'createdAt', 'updatedAt'
+        'createdAt', 'updatedAt', 'expiryAccepted'
       ]);
     }
 
@@ -792,17 +808,16 @@ service cloud.firestore {
     // Content edits after the first proposal may only touch supporting files.
     // The funded ask (title, amount, expiry, body text) is what researchers
     // already responded to. Workflow writes (withdraw, receipt) are not edits.
-    function opportunityProposalCount(problemId) {
-      return exists(/databases/$(database)/documents/opportunityMetrics/$(problemId))
-        ? get(/databases/$(database)/documents/opportunityMetrics/$(problemId)).data.get('proposalCount', 0)
-        : 0;
+    function opportunityTermsAreUnlocked(problemId) {
+      return get(/databases/$(database)/documents/maintenanceState/opportunityProposalLocksV1).data.ready == true
+        && !existsAfter(/databases/$(database)/documents/opportunityProposalLocks/$(problemId));
     }
 
     function opportunityEditIsAllowed(before, after, problemId) {
       return after.diff(before).affectedKeys()
           .hasOnly(['status', 'audit', 'updatedAt', 'withdrawalReason'])
         || after.diff(before).affectedKeys().hasOnly(['attachments', 'audit', 'updatedAt'])
-        || opportunityProposalCount(problemId) == 0;
+        || opportunityTermsAreUnlocked(problemId);
     }
 
     // Draft writes only. A draft has no audience - nothing has been proposed
@@ -877,7 +892,7 @@ service cloud.firestore {
             // Supporting files stay editable after the first proposal; the funded
             // ask that researchers already responded to does not.
             && (content.hasOnly(['attachments', 'audit', 'updatedAt'])
-              || opportunityProposalCount(problemId) == 0)
+              || opportunityTermsAreUnlocked(problemId))
             && editedOpportunityIsValid(content, after)));
     }
 
@@ -928,7 +943,7 @@ service cloud.firestore {
     // without a per-author slot or an open parent. Existing values may stay
     // so a submitted receipt or withdrawal cannot drop or swap the linkage.
     function trustedPostingOwner(data) {
-      return !data.keys().hasAny(['postingOwnerId'])
+      return !('postingOwnerId' in data)
         || (isWalletAddress(data.postingOwnerId)
           && (data.status == 'submitted'
             || (resource != null
@@ -956,7 +971,7 @@ service cloud.firestore {
     // correctionTouchesOnlyContent deliberately never permits changing them.
     function draftFundingPlanIsBounded(data) {
       let plan = data.get('fundingPlan', {});
-      return !data.keys().hasAny(['fundingTerms'])
+      return !('fundingTerms' in data)
         && (plan == {} || (plan is map && plan.keys().hasOnly(['tranchePercentages', 'reviewDays', 'funderVoting'])
           && boundedText(plan.tranchePercentages, 80) && boundedText(plan.reviewDays, 40)
           && plan.funderVoting is bool));
@@ -1033,12 +1048,30 @@ service cloud.firestore {
           && optionalString(data, 'withdrawalReason', 1000));
     }
 
+    // The create branch has already proved an attached draft, its author wallet
+    // and author equality. Reusing the general legacy/independent validator
+    // spends the tuple + two-PDF draft budget proving those same facts again.
+    function validAttachedDraftCreate(data) {
+      return hasProposalSchema(data)
+        && hasValidAudit(data)
+        && isNonEmptyString(data.problemId, 128)
+        && draftProposalTextIsBounded(data)
+        && draftFundingPlanIsBounded(data)
+        && validAmount(data.get('amount', 0))
+        && trustedPostingOwner(data)
+        && optionalString(data, 'withdrawalReason', 1000);
+    }
+
     function validProposalSubmission(data, proposalId) {
+      let proof = get(/databases/$(database)/documents/publicationProofs/$('proposals_' + proposalId)).data;
       // matches rejects nonstrings. The minimum matches two code points OR one
       // supplementary code point (two UTF-16 units), preserving String.size() > 1.
       // (?s) includes newlines; the upper bounds still use String.size() exactly.
       // Avoiding helper/type checks keeps receipt + two PDFs below 1000 expressions.
-      return hasProposalSchema(data)
+      // Only the key allowlist and optional metadata shape are prevalidated.
+      // The exact proof is already required by publicationWriteAllowed; bounds,
+      // receipts, attachments and live parent constraints remain below.
+      return proof.schemaValidation == 'attached-proposal-schema-v1'
         && hasValidAudit(data)
         // Fixed escrow halves also apply to a delayed write using an old proof.
         // Historical registry records without escrow terms retain their schema.
@@ -1051,7 +1084,7 @@ service cloud.firestore {
         && data.amount is number && data.amount <= 1000000000
         && optionalString(data, 'withdrawalReason', 1000)
         && validAttachments(data, true)
-        && validSubmittedProposal(data, proposalId);
+        && validSubmittedProposal(data, proposalId, proof);
     }
 
     // QCDAO-59/60: the parent is checked at commit time, including when a
@@ -1067,7 +1100,7 @@ service cloud.firestore {
         && !(parent.get('moderationStatus', '') in ['hidden', 'removed']);
     }
 
-    function validSubmittedProposal(data, proposalId) {
+    function validSubmittedProposal(data, proposalId, proof) {
       let parent = get(/databases/$(database)/documents/problems/$(data.problemId)).data;
       let slot = getAfter(/databases/$(database)/documents/problems/$(data.problemId)/proposalAuthors/$(request.auth.uid)).data;
       let methodology = data.methodology;
@@ -1077,7 +1110,16 @@ service cloud.firestore {
       let timeline = data.timeline;
       let milestones = data.milestones;
       let team = data.team;
-      return acceptsProposals(parent)
+      return existsAfter(/databases/$(database)/documents/opportunityProposalLocks/$(data.problemId))
+        && acceptsProposals(parent)
+        // The server validated tuple shape and its canonical hash against this
+        // exact parent snapshot. Client-writable receipt metadata is not proof
+        // that the current parent still has the terms reviewed before signing.
+        && data.reviewedParentAudit is map
+        && parent.diff(proof.reviewedParentRecord).affectedKeys().hasOnly([
+          'createdAt', 'updatedAt', 'audit', 'status', 'matching',
+          'moderationStatus', 'moderation', 'problemBrowsable'
+        ])
         && data.postingOwnerId == parent.ownerId
         && data.opportunityType == opportunityType(parent)
         && data.currency == parent.currency
@@ -1268,7 +1310,8 @@ service cloud.firestore {
         && isNonEmptyString(data.title, 160)
         && data.score is number && data.score >= 0 && data.score <= 100
         && data.feedback is string && data.feedback.size() <= 4000
-        && validEvaluationStatus(data.status);
+        && validEvaluationStatus(data.status)
+        && data.expiryAccepted == (data.status == 'accepted');
     }
 
     function validFundingStatus(status) {
@@ -1598,9 +1641,10 @@ service cloud.firestore {
         && resource.data.get('audit', {}).get('transactionHash', '') == '';
       function readableDraftParent(problemId) {
         let parent = get(/databases/$(database)/documents/problems/$(problemId)).data;
-        return parent.ownerId == request.auth.uid || isModerationAdmin(request.auth.uid)
+        return parent.ownerId == request.auth.uid
           || (parent.status in ['submitted', 'open', 'cancelled', 'expired']
-            && !(parent.get('moderationStatus', 'visible') in ['hidden', 'removed']));
+            && !(parent.get('moderationStatus', 'visible') in ['hidden', 'removed']))
+          || isModerationAdmin(request.auth.uid);
       }
       function proposalCreateIsAllowed() {
         let data = request.resource.data;
@@ -1623,7 +1667,7 @@ service cloud.firestore {
             : (data.status == 'submitted'
               && attestedIndependentPublish(proposalId, data)))
           : (data.status == 'draft'
-            ? (validProposal(data)
+            ? (validAttachedDraftCreate(data)
               && validAttachments(data, false)
               && readableDraftParent(data.problemId))
             : (data.status == 'submitted'
@@ -1706,21 +1750,17 @@ service cloud.firestore {
       }
       allow read: if proposalOwnedByViewer(parentProposal())
         || (isActiveUser(request.auth.uid) && submittedProposalVisibleToMembers(parentProposal()));
-      allow create: if isActiveUser(request.auth.uid)
-        && hasCompletedProfile(request.auth.uid)
-        && parentProposal().researcherId == request.auth.uid
-        && parentProposal().status != 'draft'
-        && 'fundingTerms' in parentProposal()
-        && evidenceHash.matches('^0x[0-9a-f]{64}$')
-        && request.resource.data.keys().hasOnly(['summary', 'url', 'ownerId', 'createdAt'])
-        && request.resource.data.keys().hasAll(['summary', 'url', 'ownerId', 'createdAt'])
-        && request.resource.data.ownerId == request.auth.uid
-        && isNonEmptyString(request.resource.data.summary, 4000)
-        && request.resource.data.url is string && request.resource.data.url.size() <= 2048
-        && request.resource.data.url.matches('^https://[^\\s]+$')
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      // Both evidence stores are created by one atomic, quota-accounted server
+      // writer. Offline/old clients cannot bypass its immutable content checks.
+      allow create, update, delete: if false;
     }
+
+    match /proposals/{proposalId}/independentFundingEvidence/{evidenceHash} {
+      // Readable, hash-checked evidence is returned by independent funding state.
+      allow read, write: if false;
+    }
+    match /evidenceQuotas/{id} { allow read, write: if false; }
+    match /evidenceCharges/{id} { allow read, write: if false; }
 
     match /proposals/{proposalId}/revisions/{revisionId} {
       // Copied parties support scoped queries. A sponsor must retain access to
@@ -1742,6 +1782,51 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Immutable evidence of the first attached submission. It shares the parent
+    // get ACL, and can only be created with an author-owned submitted child.
+    match /opportunityProposalLocks/{problemId} {
+      function readableLockParent() {
+        let parent = get(/databases/$(database)/documents/problems/$(problemId)).data;
+        return parent.ownerId == request.auth.uid || isModerationAdmin(request.auth.uid)
+          || (hasCompletedProfile(request.auth.uid)
+            && parent.status in ['submitted', 'open', 'cancelled', 'expired']
+            && !(parent.get('moderationStatus', 'visible') in ['hidden', 'removed']));
+      }
+      function validFirstSubmission() {
+        let data = request.resource.data;
+        let child = getAfter(/databases/$(database)/documents/proposals/$(data.proposalId)).data;
+        return data.keys().hasOnly(['proposalId', 'researcherId', 'createdAt'])
+          && data.researcherId == request.auth.uid
+          && data.createdAt == request.time
+          && child.researcherId == request.auth.uid
+          && child.problemId == problemId
+          && child.status == 'submitted'
+          && child.updatedAt == request.time;
+      }
+      allow get: if isActiveUser(request.auth.uid) && readableLockParent();
+      allow create: if isActiveUser(request.auth.uid) && validFirstSubmission();
+      allow list, update, delete: if false;
+    }
+
+    match /evaluationSlots/{slotId} {
+      function validEvaluationSlot() {
+        let data = request.resource.data;
+        let child = getAfter(/databases/$(database)/documents/evaluations/$(data.evaluationId)).data;
+        return data.keys().hasOnly(['proposalId', 'evaluatorId', 'evaluationId', 'createdAt'])
+          && data.evaluatorId == request.auth.uid
+          && slotId == data.proposalId + '_' + request.auth.uid
+          && data.createdAt == request.time
+          && child.proposalId == data.proposalId
+          && child.evaluatorId == request.auth.uid
+          && child.createdAt == request.time;
+      }
+      allow get: if isActiveUser(request.auth.uid)
+        && (resource == null || resource.data.evaluatorId == request.auth.uid);
+      allow create: if isActiveUser(request.auth.uid) && isWalletAddress(request.auth.uid)
+        && validEvaluationSlot();
+      allow list, update, delete: if false;
+    }
+
     match /evaluations/{evaluationId} {
       function proposalAvailableForEvaluation() {
         return exists(/databases/$(database)/documents/proposals/$(request.resource.data.proposalId))
@@ -1758,6 +1843,8 @@ service cloud.firestore {
         && request.resource.data.status == 'draft'
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
+        && !exists(/databases/$(database)/documents/evaluationSlots/$(request.resource.data.proposalId + '_' + request.auth.uid))
+        && getAfter(/databases/$(database)/documents/evaluationSlots/$(request.resource.data.proposalId + '_' + request.auth.uid)).data.evaluationId == evaluationId
         && proposalAvailableForEvaluation()
         && proposalAllowsTimeBoundActions(request.resource.data.proposalId);
       allow update: if isActiveUser(request.auth.uid)

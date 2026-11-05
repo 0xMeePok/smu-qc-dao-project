@@ -9,6 +9,7 @@ const AUTHOR = `0x${"81".repeat(20)}`;
 const SPONSOR = `0x${"91".repeat(20)}`;
 const OUTSIDER = `0x${"71".repeat(20)}`;
 const ADMIN = `0x${"61".repeat(20)}`;
+const REVIEWED_PARENT = { chainId: 421614, contractAddress: `0x${"7".repeat(40)}`, entityId: `0x${"8".repeat(64)}`, contentHash: `0x${"9".repeat(64)}`, revisionIndex: 0, revisionDigest: `0x${"9".repeat(64)}` };
 const ATTACHMENT_DIGEST = `0x${"4".repeat(64)}`;
 let env;
 async function setDoc(reference, data, ...options) {
@@ -31,24 +32,62 @@ before(async () => {
 after(async () => { await env?.cleanup(); });
 async function parent(overrides = {}) {
   const id = `proposal-parent-${++serial}`;
-  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), { ownerId: SPONSOR, status: "submitted", currency: "USDC", expiresAt: new Date("2099-01-01"), ...overrides }));
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", id), { ownerId: SPONSOR, status: "submitted", currency: "USDC", expiresAt: new Date("2099-01-01"), audit: REVIEWED_PARENT, ...overrides }));
   return id;
 }
 function record(problemId, overrides = {}) {
-  return { researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId, opportunityType: "business-problem", title: "Annealing routing", summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare annealing against a classical baseline", suitability: "A combinatorial routing problem", expectedOutcomes: "Improved routing", successCriteria: "10 percent less travel", timeline: "12 weeks", milestones: "Baseline, prototype, validation", team: "Operations research team", amount: 1500, currency: "USDC", status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides };
+  return { reviewedParentAudit: REVIEWED_PARENT, researcherId: AUTHOR, postingOwnerId: SPONSOR, problemId, opportunityType: "business-problem", title: "Annealing routing", summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare annealing against a classical baseline", suitability: "A combinatorial routing problem", expectedOutcomes: "Improved routing", successCriteria: "10 percent less travel", timeline: "12 weeks", milestones: "Baseline, prototype, validation", team: "Operations research team", amount: 1500, currency: "USDC", status: "submitted", attachments: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...overrides };
 }
 function attachedReceipt(extra = {}) {
   return { schemaVersion: 1, chainId: 421614, entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`,
     status: "pending", transactionHash: `0x${"3".repeat(64)}`, blockNumber: 0, attemptCount: 1, lastError: "", ...extra };
+}
+async function pairProposalLock(batch, db, problemId, proposalId) {
+  const ref = doc(db, "opportunityProposalLocks", problemId);
+  if (!(await getDoc(ref)).exists()) batch.set(ref, { proposalId, researcherId: AUTHOR, createdAt: serverTimestamp() });
 }
 async function submit(db, id, data, withSlot = true) {
   await seedPublicationFixture(env, doc(db, "proposals", id), data);
   const batch = writeBatch(db);
   batch.set(doc(db, "proposals", id), data);
   if (withSlot) batch.set(doc(db, "problems", data.problemId, "proposalAuthors", AUTHOR), { proposalId: id });
+  await pairProposalLock(batch, db, data.problemId, id);
   return batch.commit();
 }
 describe("QCDAO-59/60 submitted proposals", () => {
+  it("requires an atomic immutable first-submission lock before projections exist", async () => {
+    const problemId = await parent(), db = env.authenticatedContext(AUTHOR).firestore();
+    const proposalId = "paired-first-submission", data = record(problemId, { audit: attachedReceipt() });
+    await seedPublicationFixture(env, doc(db, "proposals", proposalId), data);
+    const withoutLock = writeBatch(db);
+    withoutLock.set(doc(db, "proposals", proposalId), data);
+    withoutLock.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+    await assertFails(withoutLock.commit());
+    await assertSucceeds(submit(db, proposalId, data));
+    const ref = doc(db, "opportunityProposalLocks", problemId);
+    assert.equal((await getDoc(ref)).data().proposalId, proposalId);
+    await assertFails(rawUpdateDoc(ref, { proposalId: "forged" }));
+    await assertFails(deleteDoc(ref));
+    await assertFails(rawSetDoc(doc(db, "opportunityProposalLocks", "unrelated-parent"), {
+      proposalId, researcherId: AUTHOR, createdAt: serverTimestamp(),
+    }));
+    const standalone = doc(db, "opportunityProposalLocks", "no-child-parent");
+    await assertFails(rawSetDoc(standalone, { proposalId: "absent", researcherId: AUTHOR, createdAt: serverTimestamp() }));
+  });
+
+  it("rejects parent terms changed after attestation even when receipt hashes are spoofed", async () => {
+    const problemId = await parent(), db = env.authenticatedContext(AUTHOR).firestore();
+    const id = "stale-reviewed-parent", data = record(problemId, { audit: attachedReceipt() });
+    await seedPublicationFixture(env, doc(db, "proposals", id), data);
+    await env.withSecurityRulesDisabled(ctx => rawUpdateDoc(doc(ctx.firestore(), "problems", problemId), {
+      title: "Material terms changed after the child was attested", audit: REVIEWED_PARENT,
+    }));
+    const batch = writeBatch(db);
+    batch.set(doc(db, "proposals", id), data);
+    batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId: id });
+    await pairProposalLock(batch, db, problemId, id);
+    await assertFails(batch.commit());
+  });
   it("refuses new attached drafts pointing to another member's private or moderated parent", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     for (const extra of [{ status: "draft" }, { status: "moderated_removed" },
@@ -123,6 +162,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
         if (promoteDraft) batch.update(ref, patch);
         else batch.set(ref, patch);
         batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+        await pairProposalLock(batch, db, problemId, proposalId);
         await assertFails(batch.commit());
       }
     }
@@ -180,6 +220,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
     const batch = writeBatch(db);
     batch.update(doc(db, "proposals", "escrow-plan-draft"), patch);
     batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "escrow-plan-draft" });
+    await pairProposalLock(batch, db, id, "escrow-plan-draft");
     await assertSucceeds(batch.commit());
   });
 
@@ -219,6 +260,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
         const batch = writeBatch(db);
         batch.update(reference, patch);
         batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+        await pairProposalLock(batch, db, problemId, proposalId);
         await assertSucceeds(batch.commit());
       }
       const reference = doc(db, "proposals", proposalId);
@@ -420,6 +462,7 @@ describe("QCDAO-59/60 submitted proposals", () => {
       const batch = writeBatch(db);
       batch.update(doc(db, "proposals", "proposal-draft-digest"), { status: "submitted", postingOwnerId: SPONSOR, attachments, updatedAt: serverTimestamp() });
       batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "proposal-draft-digest" });
+      await pairProposalLock(batch, db, id, "proposal-draft-digest");
       return batch.commit();
     };
     await assertFails(publish([attachment]));
@@ -541,6 +584,7 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     const batch = db.batch ? db.batch() : writeBatch(db);
     batch.update(doc(db, "proposals", "partial-draft"), correction(id));
     batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: "partial-draft" });
+    await pairProposalLock(batch, db, id, "partial-draft");
     await assertSucceeds(batch.commit());
   });
 
@@ -621,11 +665,12 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
         // Use the real nonempty attested hash, then bypass fixture wrappers:
         // omitting the receipt must fail, and the author slot must stay absent.
         await seedPublicationFixture(env, ref, patch, promoteDraft);
-        const commit = (payload) => {
+        const commit = async (payload) => {
           const batch = writeBatch(db);
           if (promoteDraft) batch.update(ref, payload);
           else batch.set(ref, payload);
           batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId });
+          await pairProposalLock(batch, db, problemId, proposalId);
           return batch.commit();
         };
         const { audit, ...withoutReceipt } = patch;

@@ -9,7 +9,7 @@ export function registerIndependentFundingFunctions({ db, client, config, requir
   const callable = service => onCall({ ...options, timeoutSeconds: 180 }, async request => {
     const uid = await requireMember(request);
     const { proposalId, action, amount, evidence, evidenceHash, approve, reason, reasonHash, transactionHash } = request.data ?? {};
-    try { return await service({ ...shared, uid, proposalId, action, amount, evidence,
+    try { return await service({ ...shared, uid, authTime: request.auth.token.auth_time ?? 0, proposalId, action, amount, evidence,
       evidenceHash, approve, reason, reasonHash, transactionHash }); }
     catch (error) {
       if (error instanceof HttpsError) throw error;

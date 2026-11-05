@@ -478,30 +478,37 @@ function visibleProposal(row, uid, isAdmin) {
   return Boolean(row.status) && !BLOCKED.has(row.moderationStatus);
 }
 
+function cachedReader() {
+  const reads = new Map();
+  return {
+    get(ref) {
+      if (!reads.has(ref.path)) reads.set(ref.path, ref.get());
+      return reads.get(ref.path);
+    },
+    prime(ref, snapshot) { reads.set(ref.path, Promise.resolve(snapshot)); },
+  };
+}
+
 async function loadScope(db, uid, profile, filters) {
   const isAdmin = profile.role === 1;
+  const tx = cachedReader();
   if (!filters.entityType) {
     if (!isAdmin) fail("permission-denied", "This audit trail is not available.");
-    return { isAdmin, problem: null, proposal: null };
+    return { isAdmin, problem: null, proposal: null, tx };
   }
   // Reads are shared by path, so the parent canReadContent loads for a
   // proposal is not fetched a second time below.
-  const reads = new Map();
-  const tx = { get: (ref) => {
-    if (!reads.has(ref.path)) reads.set(ref.path, ref.get());
-    return reads.get(ref.path);
-  } };
   if (filters.entityType === "problem") {
-    const snap = await db.collection("problems").doc(filters.entityId).get();
+    const snap = await tx.get(db.collection("problems").doc(filters.entityId));
     if (!snap.exists) {
       fail(isAdmin ? "not-found" : "permission-denied", isAdmin ? "That record was not found." : "This audit trail is not available.");
     }
     if (!await canReadContent(tx, db, "problem", snap.data(), uid, profile)) {
       fail("permission-denied", "This audit trail is not available.");
     }
-    return { isAdmin, problem: { id: snap.id, ...snap.data() }, proposal: null };
+    return { isAdmin, problem: { id: snap.id, ...snap.data() }, proposal: null, tx };
   }
-  const snap = await db.collection("proposals").doc(filters.entityId).get();
+  const snap = await tx.get(db.collection("proposals").doc(filters.entityId));
   if (!snap.exists) {
     fail(isAdmin ? "not-found" : "permission-denied", isAdmin ? "That record was not found." : "This audit trail is not available.");
   }
@@ -514,10 +521,10 @@ async function loadScope(db, uid, profile, filters) {
     const parent = await tx.get(db.collection("problems").doc(problemId));
     if (parent.exists) problem = { id: parent.id, ...parent.data() };
   }
-  return { isAdmin, problem, proposal: { id: snap.id, ...snap.data() } };
+  return { isAdmin, problem, proposal: { id: snap.id, ...snap.data() }, tx };
 }
 
-async function collect(db, scope, filters, uid) {
+async function collect(db, scope, filters, uid, profile) {
   const { start, end } = filters;
   const jobs = [];
   const track = { truncated: false };
@@ -557,6 +564,13 @@ async function collect(db, scope, filters, uid) {
     }
   }
   const batches = await Promise.all(jobs);
+  const tx = scope.tx;
+  const readable = new Map();
+  const canRead = (type, id, data) => {
+    const key = `${type}/${id}`;
+    if (!readable.has(key)) readable.set(key, canReadContent(tx, db, type, data, uid, profile));
+    return readable.get(key);
+  };
   const titles = {
     problem: new Map(scope.problem ? [[scope.problem.id, scope.problem.title || "Opportunity"]] : []),
     proposal: new Map(scope.proposal ? [[scope.proposal.id, scope.proposal.title || "Proposal"]] : []),
@@ -573,13 +587,15 @@ async function collect(db, scope, filters, uid) {
     if (row.researcherId && row.status && visibleProposal(row, uid, scope.isAdmin)) proposals.set(row.id, row);
     if (row.title && row.ownerId && !row.researcherId) titles.problem.set(row.id, row.title);
   }
-  const missingTitles = [...proposalIds].filter((id) => id && !titles.proposal.has(id)).slice(0, 40);
-  // One batched read instead of up to 40 separate round trips.
+  // Authorize every child referenced by these already-capped sources. A title
+  // hydration cap is not an authorization boundary for recommendation rows.
+  const missingTitles = [...proposalIds].filter((id) => id && !proposals.has(id));
   const titleRefs = missingTitles.map((id) => db.collection("proposals").doc(id));
   const titleSnaps = !titleRefs.length ? []
-    : typeof db.getAll === "function" ? await db.getAll(...titleRefs) : await Promise.all(titleRefs.map((ref) => ref.get()));
+    : typeof db.getAll === "function" ? await db.getAll(...titleRefs) : await Promise.all(titleRefs.map((ref) => tx.get(ref)));
   const loadedTitles = titleSnaps.map((snap, index) => {
     const id = missingTitles[index];
+    tx.prime(titleRefs[index], snap);
     if (!snap.exists) return null;
     const data = snap.data();
     if (!visibleProposal(data, uid, scope.isAdmin)) return null;
@@ -587,6 +603,12 @@ async function collect(db, scope, filters, uid) {
     return [id, data.title || "Proposal"];
   });
   for (const entry of loadedTitles) if (entry) titles.proposal.set(entry[0], entry[1]);
+  for (const [id, proposal] of proposals) {
+    if (!await canRead("proposal", id, proposal)) {
+      proposals.delete(id);
+      titles.proposal.delete(id);
+    }
+  }
   const events = [];
   const seen = new Set();
   const push = (event) => {
@@ -600,10 +622,9 @@ async function collect(db, scope, filters, uid) {
   for (const row of batches.flat()) {
     if (row.type && MATCH_TYPES[row.type]) push(matchingEvent(row, { isAdmin: scope.isAdmin, titles }));
     else if (row.recommendation) {
-      const hidden = BLOCKED.has(row.moderationStatus);
-      if (!row.deletedAt && (!hidden || scope.isAdmin || row.authorId === uid)) push(recommendationEvent(row));
+      if (!row.deletedAt && await canRead("comment", row.id, row)) push(recommendationEvent(row));
     } else if (row.researcherId && row.status) {
-      if (visibleProposal(row, uid, scope.isAdmin)) push(submissionEvent(row));
+      if (visibleProposal(row, uid, scope.isAdmin) && await canRead("proposal", row.id, row)) push(submissionEvent(row));
     } else if (row.contentType && row.action) {
       if (scope.isAdmin || (row.authorId && row.authorId === uid)) push(moderationEvent(row));
     }
@@ -645,7 +666,7 @@ export async function readAuditTrail({ db, uid, profile, input }) {
   if (!uid || !profile || profile.suspended) fail("permission-denied", "Complete your active member profile first.");
   const filters = parseFilters(input);
   const scope = await loadScope(db, uid, profile, filters);
-  const { events, truncated } = await collect(db, scope, filters, uid);
+  const { events, truncated } = await collect(db, scope, filters, uid, profile);
   const page = paginate(events.filter((event) => matches(event, filters)), filters.cursor);
   return { ...page, truncated };
 }

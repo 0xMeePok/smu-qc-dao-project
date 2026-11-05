@@ -11,7 +11,7 @@ import config from "../../../firebase/functions/auditRegistry.contract.json" wit
 import { GAS_RETURN_STEP, TOKEN_RETURN_STEP, assertCleanupJournal, returnUnusedGas } from "./smoke-cleanup.js";
 
 // Explicit opt-in: this creates labelled testnet records and temporarily uses
-// one mock USDC. It never writes Firestore or deploys a frontend/backend.
+// three mock USDC. It never writes Firestore or deploys a frontend/backend.
 const provider = new JsonRpcProvider(process.env.ARBITRUM_SEPOLIA_RPC_URL, 421614, { staticNetwork: true });
 let report, reportFile, step = "preflight";
 const save = () => fs.writeFile(reportFile, JSON.stringify(report, null, 2) + "\n");
@@ -65,13 +65,13 @@ async function verifyCompletedSmoke({ owner, child, registry, factory, token, me
   for (const [field, expected] of Object.entries({ postingId: report.postingId, proposalId: report.proposalId,
     problemOwner: owner.address, proposalOwner: child.address, token: metadata.address,
     auditRegistry: config.address, tokenRegistry: config.escrow.factoryAddress })) same(await escrow[field](), expected);
-  for (const [field, expected] of Object.entries({ state: 2n, fundingTarget: 1_000_000n,
-    totalDeposited: 1_000_000n, totalReleased: 1_000_000n, totalRefunded: 0n, outstandingBalance: 0n,
-    feePaid: 1_000n, totalDepositCount: 3n })) assert.equal(await escrow[field](), expected, field);
+  for (const [field, expected] of Object.entries({ state: 2n, fundingTarget: 3_000_000n,
+    totalDeposited: 3_000_000n, totalReleased: 3_000_000n, totalRefunded: 0n, outstandingBalance: 0n,
+    feePaid: 3_000n, totalDepositCount: 3n })) assert.equal(await escrow[field](), expected, field);
   assert.equal(await token.balanceOf(child.address), 0n);
   assert.equal(await token.balanceOf(report.escrow), 0n);
-  assert.equal(await escrow.contributions(owner.address), 600_000n);
-  assert.equal(await escrow.contributions(child.address), 400_000n);
+  assert.equal(await escrow.contributions(owner.address), 2_000_000n);
+  assert.equal(await escrow.contributions(child.address), 1_000_000n);
   const safeBlock = BigInt(await provider.send("eth_blockNumber", [])) - 1n, reconciled = [];
   const childSteps = new Set(["Create proposal and escrow atomically", "Approve second deposit",
     "Second depositor completes funding", "Proposal owner approves first payment", "Submit milestone evidence",
@@ -94,7 +94,7 @@ async function verifyCompletedSmoke({ owner, child, registry, factory, token, me
       const returned = token.interface.parseTransaction({ data: tx.data });
       assert.equal(returned.name, "transfer");
       same(returned.args[0], owner.address);
-      assert.equal(returned.args[1], 999_000n);
+      assert.equal(returned.args[1], 2_997_000n);
     }
     const hasAnchor = receipt.logs.some(log => {
       if (log.address.toLowerCase() !== config.address.toLowerCase()) return false;
@@ -107,7 +107,7 @@ async function verifyCompletedSmoke({ owner, child, registry, factory, token, me
   assert.equal(reconciled.filter(event => event.eventType === "Deposit").length, 3);
   const releases = reconciled.filter(event => event.eventType === "TrancheReleased");
   assert.equal(releases.length, 2);
-  for (const release of releases) { assert.equal(release.amountBaseUnits, "500000"); assert.equal(release.feeBaseUnits, "500"); }
+  for (const release of releases) { assert.equal(release.amountBaseUnits, "1500000"); assert.equal(release.feeBaseUnits, "1500"); }
   assert.deepEqual(reconciled.map(event => event.id), report.fundingAuditReconciliation.eventIds);
   assert.equal((await verifyMinedProposal(report.proposalRecord, client)).status, "confirmed");
   const noWrite = () => { throw new Error("Cleanup validation cannot request a business transaction."); };
@@ -123,7 +123,7 @@ async function completeSmoke(child) {
   report.failedStep = GAS_RETURN_STEP;
   await save();
   await returnUnusedGas({ provider, wallet: child, report, save });
-  Object.assign(report, { status: "passed", grossReleasedBaseUnits: "1000000", feeBaseUnits: "1000",
+  Object.assign(report, { status: "passed", grossReleasedBaseUnits: "3000000", feeBaseUnits: "3000",
     refundedBaseUnits: "0", escrowBalanceBaseUnits: "0", mockTokensReturned: true,
     remainingTestWalletGasWei: BigInt(await provider.send("eth_getBalance", [child.address, "latest"])).toString() });
   delete report.failedStep;
@@ -151,7 +151,7 @@ async function main() {
   const token = new Contract(metadata.address, ["function balanceOf(address) view returns(uint256)",
     "function approve(address,uint256) returns(bool)", "function transfer(address,uint256) returns(bool)"], ownerSigner);
   const initialTokens = await token.balanceOf(owner.address);
-  assert(initialTokens >= 1_000_000n);
+  assert(initialTokens >= 3_000_000n);
   assert.equal(await token.balanceOf(child.address), 0n, "Inspect a previous smoke run before reusing its test wallet.");
   const resume = process.env.ESCROW_SMOKE_RESUME;
   const saved = resume ? JSON.parse(await fs.readFile(resume, "utf8")) : null;
@@ -160,6 +160,7 @@ async function main() {
     assert.equal(saved.registry, config.address);
     assert.equal(saved.owner, owner.address);
     assert.equal(saved.testWallet, child.address);
+    assert.equal(saved.amountBaseUnits, "3000000", "A different smoke funding fixture requires manual recovery.");
     if (cleanupResume) assertCleanupJournal(saved, { config, owner: owner.address, testWallet: child.address, token: metadata.address });
     else {
       assert.equal(saved.failedStep, "Verify real frontend and Firebase proposal reads");
@@ -172,7 +173,7 @@ async function main() {
   reportFile = new URL(`../deployments/live-smoke-${stamp}.json`, import.meta.url);
   report = saved ?? { chainId: 421614, registry: config.address, factory: config.escrow.factoryAddress,
     owner: owner.address, testWallet: child.address, testWalletDerivation: "BIP32 seed = supplied deployer key bytes; m/44'/60'/0'/0/109",
-    token: metadata.address, amountBaseUnits: "1000000", status: "running", transactions: [] };
+    token: metadata.address, amountBaseUnits: "3000000", status: "running", transactions: [] };
   await save();
   if (cleanupResume) {
     step = GAS_RETURN_STEP;
@@ -187,14 +188,16 @@ async function main() {
   const postingId = `escrow-smoke-posting-${stamp}`, proposalId = `escrow-smoke-proposal-${stamp}`;
   const expiry = Number((await provider.getBlock("latest")).timestamp) + 7 * 86400;
   const posting = prepareOpportunityCommit({ recordId: postingId, actor: owner.address, kind: 0, expiresAt: expiry,
-    payload: { title: "Escrow deployment smoke test", amount: "1", currency: "USDC" } });
+    payload: { title: "Escrow deployment smoke test", amount: "3", currency: "USDC" } });
   await send("Create labelled test posting", () => registry.commitOpportunity(...posting.args));
   const record = { id: proposalId, problemId: postingId, postingOwnerId: owner.address, researcherId: child.address,
     opportunityType: "business-problem", status: "submitted", title: "Escrow deployment smoke test",
-    summary: "One mock USDC; top-ups, dual approval, 50/50 payments, completion evidence and funding audit events.",
-    amount: 1, currency: "USDC", milestones: "50% on dual approval, 50% after accepted delivery evidence and the configured funder vote.",
-    attachments: [], audit: { schemaVersion: 1, chainId: 421614, status: "pending", attemptCount: 1, blockNumber: 0, lastError: "" } };
-  record.fundingTerms = proposalFundingTerms({ form: { amount: "1", milestones: record.milestones,
+    summary: "Three mock USDC; top-ups, dual approval, 50/50 payments, completion evidence and funding audit events.",
+    amount: 3, currency: "USDC", milestones: "50% on dual approval, 50% after accepted delivery evidence and the configured funder vote.",
+    attachments: [], reviewedParentAudit: { chainId: config.chainId, contractAddress: config.address.toLowerCase(),
+      entityId: posting.entityId, contentHash: posting.contentHash, revisionIndex: 0, revisionDigest: posting.contentHash },
+    audit: { schemaVersion: 1, chainId: 421614, status: "pending", attemptCount: 1, blockNumber: 0, lastError: "" } };
+  record.fundingTerms = proposalFundingTerms({ form: { amount: "3", milestones: record.milestones,
     tranchePercentages: "50,50", reviewDays: "7", funderVoting: true }, currency: "USDC", config });
   const prepared = prepareStoredProposal(record);
   const created = await send("Create proposal and escrow atomically", () => registry.connect(childSigner).commitProposalWithEscrow(...prepared.args));
@@ -217,31 +220,32 @@ async function main() {
   assert.equal(frontendCheck.verified, true);
   report.firebaseVerification = true; report.frontendVerification = true;
   await save();
-  await send("Approve owner deposit", () => token.approve(escrowAddress, 600_000n));
-  await send("Initial owner deposit", () => escrow.deposit(300_000n));
-  await send("Owner deposit top-up", () => escrow.deposit(300_000n));
-  assert.equal(await escrow.contributions(owner.address), 600_000n);
+  const reviewedContextDigest = await registry.fundingContextDigest(prepared.entityId);
+  await send("Approve owner deposit", () => token.approve(escrowAddress, 2_000_000n));
+  await send("Initial owner deposit", () => escrow.depositReviewed(1_000_000n, reviewedContextDigest));
+  await send("Owner deposit top-up", () => escrow.deposit(1_000_000n));
+  assert.equal(await escrow.contributions(owner.address), 2_000_000n);
   assert.equal(await escrow.depositCounts(owner.address), 2n);
-  await send("Fund second depositor with mock USDC", () => token.transfer(child.address, 400_000n));
-  await send("Approve second deposit", () => token.connect(childSigner).approve(escrowAddress, 400_000n));
-  await send("Second depositor completes funding", () => escrow.connect(childSigner).deposit(400_000n));
+  await send("Fund second depositor with mock USDC", () => token.transfer(child.address, 1_000_000n));
+  await send("Approve second deposit", () => token.connect(childSigner).approve(escrowAddress, 1_000_000n));
+  await send("Second depositor completes funding", () => escrow.connect(childSigner).deposit(1_000_000n));
   const selection = id(`escrow-smoke-selection-${stamp}`);
   await send("Lock funded selection", () => escrow.lockSelection(selection, child.address));
   await send("Problem owner approves first payment", () => escrow.approveSelection(selection));
   await send("Proposal owner approves first payment", () => escrow.connect(childSigner).approveSelection(selection));
   await send("Release first tranche", () => escrow.release(selection));
-  assert.equal(await escrow.totalReleased(), 500_000n);
-  assert.equal(await escrow.feePaid(), 500n);
+  assert.equal(await escrow.totalReleased(), 1_500_000n);
+  assert.equal(await escrow.feePaid(), 1_500n);
   assert.equal(await registry.acceptedProposalForPosting(posting.entityId), prepared.entityId);
   const evidence = id(`escrow-smoke-evidence-${stamp}`);
   await send("Submit milestone evidence", () => escrow.connect(childSigner).submitMilestone(1, evidence));
   await send("Problem owner approves milestone", () => escrow.approveMilestone(selection, 1, evidence));
   await send("Proposal owner approves milestone", () => escrow.connect(childSigner).approveMilestone(selection, 1, evidence));
-  await send("60 percent funder majority vote", () => escrow.voteMilestone(1, evidence, true));
-  assert.equal(await escrow.yesWeight(), 600_000n);
+  await send("Two-thirds funder majority vote", () => escrow.voteMilestone(1, evidence, true));
+  assert.equal(await escrow.yesWeight(), 2_000_000n);
   await send("Release voted second tranche", () => escrow.releaseMilestone(selection, 1, evidence));
-  assert.equal(await escrow.totalReleased(), 1_000_000n);
-  assert.equal(await escrow.feePaid(), 1_000n);
+  assert.equal(await escrow.totalReleased(), 3_000_000n);
+  assert.equal(await escrow.feePaid(), 3_000n);
   assert.equal(await escrow.totalRefunded(), 0n);
   assert.equal(await escrow.outstandingBalance(), 0n);
   assert.equal(await token.balanceOf(escrowAddress), 0n);
@@ -264,7 +268,8 @@ async function main() {
   report.fundingAuditReconciliation = { status: "matched", events: reconciled.length,
     eventIds: reconciled.map(event => event.id) };
   await save();
-  const returnTokens = await token.balanceOf(child.address);
+  const returnTokens = 2_997_000n;
+  assert.equal(await token.balanceOf(child.address), returnTokens, "Only the completed fixture payout may be returned.");
   await send(TOKEN_RETURN_STEP, () => token.connect(childSigner).transfer(owner.address, returnTokens));
   assert.equal(await token.balanceOf(owner.address), initialTokens);
   await completeSmoke(child);

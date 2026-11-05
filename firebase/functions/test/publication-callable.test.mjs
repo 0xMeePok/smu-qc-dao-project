@@ -7,6 +7,8 @@ import registry from "../auditRegistry.contract.json" with { type: "json" };
 import { escrowClient, escrowConfig, escrowRecord } from "./fixtures/escrowAuditFixture.js";
 import { memoryDb } from "./memoryDb.mjs";
 import { answerEthCall } from "./answerEthCall.mjs";
+import { prepareOpportunityCommit } from "../auditCanonical.js";
+import { postingAuditPayload } from "../opportunityAuditPayload.js";
 
 function mockRpc(t, client) {
   return t.mock.method(globalThis, "fetch", async (_url, options) => {
@@ -49,8 +51,16 @@ it("attestPublication creates exact fixed-split proofs and refuses custom terms 
   try {
     for (const status of [undefined, "draft", "submitted"]) {
       const record = escrowRecord();
+      const parent = { ownerId: record.postingOwnerId, status: "open", title: "Cold-chain routing", amount: 1500,
+        currency: "USDC", expiresAt: new Date("2099-01-01"), attachments: [] };
+      if (status !== "submitted") {
+        const prepared = prepareOpportunityCommit({ recordId: record.problemId, actor: parent.ownerId,
+          payload: postingAuditPayload(parent), expiresAt: parent.expiresAt });
+        record.reviewedParentAudit = { chainId: escrowConfig.chainId, contractAddress: escrowConfig.address,
+          entityId: prepared.entityId, contentHash: prepared.contentHash, revisionDigest: prepared.contentHash, revisionIndex: 0 };
+      }
       const uid = record.researcherId;
-      const initial = { [`users/${uid}`]: { suspended: false } };
+      const initial = { [`users/${uid}`]: { suspended: false }, [`problems/${record.problemId}`]: parent };
       if (status) initial[`proposals/${record.id}`] = { ...record, status };
       const db = memoryDb(initial);
       t.mock.method(getFirestore(), "collection", db.collection.bind(db));
@@ -64,6 +74,9 @@ it("attestPublication creates exact fixed-split proofs and refuses custom terms 
       const proof = db.records.get(proofPath);
       assert.deepEqual(proof.record.fundingTerms.trancheBps, [5000, 5000]);
       assert.equal(proof.transactionHash, record.audit.transactionHash);
+      assert.equal(proof.schemaValidation, "attached-proposal-schema-v1");
+      if (status !== "submitted") assert.deepEqual(proof.reviewedParentRecord, parent);
+      else assert.equal(db.records.get(`opportunityProposalLocks/${record.problemId}`).proposalId, record.id);
       assert.ok(fetchMock.mock.callCount() > 0, "the real mined-transaction verification ran");
 
       db.records.delete(proofPath);

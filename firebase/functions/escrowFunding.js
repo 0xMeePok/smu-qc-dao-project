@@ -8,6 +8,7 @@ import { decodeFunctionData, encodeFunctionData, erc20Abi, keccak256, stringToHe
 import { prepareIndependentEscrowCommit, prepareStoredProposal } from "./proposalAuditPayload.js";
 import { opportunityEntityId } from "./auditCanonical.js";
 import { verifyProposalEscrow } from "./escrowAudit.js";
+import { readFundingContext, supportsReviewedFunding } from "./escrowFundingContext.js";
 import { canReadContent, memberNoticeFields } from "./moderation.js";
 import { ESCROW_STATES, milestoneValue, reconcileFundingReceiptPage, same } from "./escrowFundingEvents.js";
 import { VOID_JOBS, voidDecision, reconcileModerationVoidEnumerations } from "./escrowModerationVoid.js";
@@ -142,13 +143,21 @@ function manualExpiryBlockReason(parent) {
     ? "An administrator has force-expired this posting." : null;
 }
 
-export function fundingBlockReason(record, parent, chain, now = Date.now(), { deposit = false } = {}) {
+function paymentSigningBlockReason(record, parent) {
   if (["queued", "pending"].includes(record?.escrowAdminCancellation?.status)) return "An administrator cancellation is awaiting on-chain confirmation.";
   const expiryBlockReason = manualExpiryBlockReason(parent);
   if (expiryBlockReason) return expiryBlockReason;
   if (blocked(parent) || blocked(record)) return "Funding is paused while this content is moderated.";
   if (["draft", "withdrawn", "cancelled", "rejected"].includes(record.status)
-      || ["draft", "withdrawn", "cancelled"].includes(parent.status)) return "This posting or proposal is no longer eligible for funding.";
+      || ["draft", "withdrawn", "cancelled"].includes(parent.status)
+      || [record.status, parent.status].some(status => ["moderated_hidden", "moderated_removed"].includes(status))) return "This posting or proposal is no longer eligible for funding.";
+  return null;
+}
+
+export function fundingBlockReason(record, parent, chain, now = Date.now(), { deposit = false } = {}) {
+  if (chain?.contentMatches === false) return "The proposal or its parent changed. Review and anchor the current revision before funding.";
+  const paymentReason = paymentSigningBlockReason(record, parent);
+  if (paymentReason) return paymentReason;
   const accepted = isOpenFunding(record, parent) ? null : parent.acceptedProposalId || parent.escrowSelection?.proposalId;
   if (accepted && accepted !== record.id) return "A different proposal has been selected for this posting.";
   if (!isOpenFunding(record, parent) && parent.acceptedSolutionId && parent.acceptedSolutionId !== record.id) return "This posting already has an accepted solution.";
@@ -181,11 +190,15 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     verifyProposalEscrow({ expected, config, readContract: read, allowImmutableCache }),
   ]);
   if (!same(at(proposal, "researcher", 0), expected.expectedResearcher)
-      || !same(at(proposal, "opportunityId", 1), expected.opportunityId)
-      || !same(at(proposal, "proposalHash", 4), expected.proposalHash)
-      || !same(at(proposal, "solutionHash", 5), expected.solutionHash)) {
-    throw new Error("Escrow reconciliation mismatch: proposal content differs from its registry hashes.");
+      || !same(at(proposal, "opportunityId", 1), expected.opportunityId)) {
+    throw new Error("Escrow reconciliation mismatch: proposal identity differs from its registry record.");
   }
+  // Mutable content must stop new commitments without stranding immutable custody.
+  let contentMatches = same(at(proposal, "proposalHash", 4), expected.proposalHash)
+    && same(at(proposal, "solutionHash", 5), expected.solutionHash);
+  const reviewedContextDigest = contentMatches && supportsReviewedFunding(config)
+    ? await readFundingContext({ config, expected, proposal, readContract: read }) : null;
+  if (supportsReviewedFunding(config) && !reviewedContextDigest) contentMatches = false;
   const names = ["state", "totalDeposited", "totalReleased", "totalRefunded", "outstandingBalance", "currentTranche",
     "selectionId", "ownerApproved", "solutionApproved", "yesWeight", "approvalDeadline", "expiresAt", "platformSigner",
     "refundsEnabled", "refundAvailableAt"];
@@ -218,7 +231,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
     refundsEnabled: data.refundsEnabled === true, refundAvailableAt: String(data.refundAvailableAt),
     upfrontRefundUsesApprovalDeadline: isOpenFunding(record, parent) || hasRegistryFunction(config, "pendingProposalForPosting"),
     upfrontReleased: milestoneValue(milestones[0], "paid", 6) === true,
-    finalReleased: milestoneValue(milestones.at(-1), "paid", 6) === true, active, invalidated,
+    finalReleased: milestoneValue(milestones.at(-1), "paid", 6) === true, active, invalidated, contentMatches,
     proposalEntityId: expected.entityId, pendingProposalEntityId,
     fundingActivityVersion: Number(count),
     timestamp: Number(block.timestamp), blockNumber: Number(blockNumber), currentTranche: Number(data.currentTranche) };
@@ -232,7 +245,7 @@ export async function readVerifiedFunding({ client, config, record, parent, bloc
   if (summary.selectionBlockReason) summary.selectionGate.canSelect = false;
   summary.fundingRequirementMet = summary.selectionGate.fundingMet;
   summary.custodyLock = escrowCustodyLock(summary);
-  return { expected, escrow, data, summary, milestones, anchorCount: Number(count) };
+  return { expected, escrow, data, summary, milestones, anchorCount: Number(count), reviewedContextDigest };
 }
 
 export async function enqueueEscrowFunding({ db, config, record, now = Timestamp.now() }) {
@@ -345,7 +358,7 @@ export async function getEscrowFundingHistory({ db, config, uid, proposalId }) {
     settlement: publicSettlement(job.data()) };
 }
 
-export async function prepareEscrowDeposit({ db, client, config, uid, proposalId, amount, readConcurrency }) {
+export async function prepareEscrowDeposit({ db, client, config, uid, proposalId, amount, reviewedContextDigest, readConcurrency }) {
   // The chain check, the Firestore context and the head block are independent
   // reads. Start them together (the deposit runs immediately before a member's
   // signature), but settle them in the original order so every refusal and its
@@ -365,6 +378,11 @@ export async function prepareEscrowDeposit({ db, client, config, uid, proposalId
   if (isOpenFunding(context.record, context.parent)) fail("failed-precondition", "Open funding is deposited by its owner into the grant pool. Use the grant workflow for this proposal.");
   const blockNumber = await headRead;
   const verified = await readVerifiedFunding({ client, config, ...context, blockNumber, readConcurrency });
+  if (!supportsReviewedFunding(config)) fail("failed-precondition", "This escrow deployment does not support reviewed deposits. Use the current deployment.");
+  if (!/^0x[0-9a-fA-F]{64}$/.test(reviewedContextDigest ?? "")
+      || !same(reviewedContextDigest, verified.reviewedContextDigest)) {
+    fail("failed-precondition", "The reviewed proposal or parent revision changed. Refresh and review it before funding.");
+  }
   const reason = fundingBlockReason(context.record, context.parent, verified.summary, verified.summary.timestamp * 1000, { deposit: true });
   if (reason) fail("failed-precondition", reason);
   if (amount !== undefined) {
@@ -378,7 +396,7 @@ export async function prepareEscrowDeposit({ db, client, config, uid, proposalId
   }
   await enqueueEscrowFunding({ db, config, record: context.record });
   return { escrowAddress: verified.escrow.address, tokenAddress: verified.summary.tokenAddress, chainId: config.chainId,
-    postingId: verified.expected.opportunityId, postingOwner: context.parent.ownerId, terms: context.record.fundingTerms,
+    postingId: verified.expected.opportunityId, postingOwner: context.parent.ownerId, terms: context.record.fundingTerms, reviewedContextDigest,
     remainingBaseUnits: (BigInt(verified.summary.fundingTarget) - BigInt(verified.summary.totalDeposited)).toString() };
 }
 
@@ -391,8 +409,20 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
   if (paymentAction && !action.proposalId) fail("invalid-argument", "The escrow payment must identify its proposal.");
   const paymentBlockReason = async tx => {
     if (!paymentAction) return null;
-    const { parent } = await loadFundingContext({ db, proposalId: action.proposalId, readDocument: ref => tx.get(ref) });
-    return manualExpiryBlockReason(parent);
+    const { record, parent } = await loadFundingContext({ db, proposalId: action.proposalId, readDocument: ref => tx.get(ref) });
+    const reason = paymentSigningBlockReason(record, parent);
+    if (reason) return reason;
+    // Removal commits an irreversible refund intent. A later restore must not
+    // let a new payment overtake the pending enumeration or escrow void.
+    const [voidJobs, proposalRemoval, postingRemoval] = await Promise.all([
+      tx.get(db.collection(VOID_JOBS).where("proposalId", "==", action.proposalId).where("status", "==", "pending").limit(1)),
+      tx.get(db.collection("escrowModerationVoidEnumerations").where("contentType", "==", "proposal")
+        .where("contentId", "==", action.proposalId).where("status", "==", "pending").limit(1)),
+      tx.get(db.collection("escrowModerationVoidEnumerations").where("contentType", "==", "problem")
+        .where("contentId", "==", record.problemId).where("status", "==", "pending").limit(1)),
+    ]);
+    return [voidJobs, proposalRemoval, postingRemoval].some(rows => !rows.empty)
+      ? "A moderation refund is awaiting on-chain confirmation." : null;
   };
   const independentRelease = action.functionName === "releaseCompletion";
   if (independentRelease && !action.proposalId) fail("invalid-argument", "The independent release must identify its listing.");
@@ -403,13 +433,9 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
   };
   const claim = (resuming = false) => db.runTransaction(async tx => {
     const row = await tx.get(ref), old = row.data() || {};
-    if (await releaseBlocked(tx)) return { releaseBlocked: true };
-    const paymentBlocked = await paymentBlockReason(tx);
-    if (paymentBlocked) return { paymentBlocked };
-    if (paymentAction) {
-      const job = await tx.get(db.collection(FUNDING_JOBS).doc(jobKey(config, action.proposalId)));
-      if (job.data()?.adminCancellationId && !["complete", "blocked"].includes(job.data().adminCancellationStatus)) return { cancellationPending: true };
-    }
+    // Durable signed bytes are already committed. Always drain this exact
+    // transaction before considering eligibility for any newly signed action.
+    if (old.transactionHash) return { existing: old };
     if (action.pauseRevision) {
       const [pause, parent] = await Promise.all([
         tx.get(db.collection(PAUSE_JOBS).doc(jobKey(config, action.problemId))),
@@ -418,7 +444,13 @@ export async function submitPlatformAction({ db, client, config, getWallet, acti
       if (pause.data()?.revision !== action.pauseRevision || pause.data()?.status !== "pending"
           || !parent.exists || desiredPostingPause(parent.data()) !== action.args[1]) return { superseded: true };
     }
-    if (old.transactionHash) return { existing: old };
+    if (await releaseBlocked(tx)) return { releaseBlocked: true };
+    const paymentBlocked = await paymentBlockReason(tx);
+    if (paymentBlocked) return { paymentBlocked };
+    if (paymentAction) {
+      const job = await tx.get(db.collection(FUNDING_JOBS).doc(jobKey(config, action.proposalId)));
+      if (job.data()?.adminCancellationId && !["complete", "blocked"].includes(job.data().adminCancellationStatus)) return { cancellationPending: true };
+    }
     // Another caller may have completed this same action while we resumed the
     // previous transaction. Do not sign that already-confirmed payment again.
     if (resuming && old.lastActionKey === action.key && old.lastOutcome === "success") return { confirmed: old.lastTransactionHash };

@@ -93,6 +93,11 @@ function accessDenied(error) {
   return code === "permission-denied" || code.endsWith("/permission-denied");
 }
 
+function missingPosting(error) {
+  const code = String(error?.code || "");
+  return code === "not-found" || code.endsWith("/not-found");
+}
+
 function RemovedProblemView({ posting, onNavigate, viewerId }) {
   const ownsPosting = viewerId?.toLowerCase() === posting.ownerId?.toLowerCase();
   const label = moderationReasonLabel(posting.reason);
@@ -157,8 +162,9 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
   const [posting, setPosting] = useState(null);
   const readAudit = record => record?.opportunityType === OPEN_FUNDING_TYPE ? readFundingOpportunityAudit(record) : readPostingAudit(record);
   useAuditVerification(posting, readAudit);
-  const liveScope = `${postingId}:${user?.id || ""}`;
+  const liveScope = `${postingId}:${isAuthenticated}:${user?.id || ""}:${user?.isSuspended || false}:${user?.role || ""}:${(user?.roles ?? []).join(",")}`;
   const activeLiveScope = useRef(liveScope); activeLiveScope.current = liveScope;
+  const accessGeneration = useRef(0);
   useEffect(() => { activeLiveScope.current = liveScope; return () => { activeLiveScope.current = null; }; }, [liveScope]);
   const [matchingRefresh, setMatchingRefresh] = useState(0);
   const [tab, setActiveTab] = useState(initialTab);
@@ -198,6 +204,12 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
     setTab(initialTab);
     setOpenedTabs(new Set([initialTab]));
 
+    if (!isAuthenticated) {
+      setPosting(null);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
     findPosting(postingId)
       .then((found) => {
         if (cancelled) return;
@@ -205,10 +217,12 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
       })
       .catch(async (lookupError) => {
         if (cancelled) return;
+        if (missingPosting(lookupError)) { setPosting(null); return; }
         if (!accessDenied(lookupError)) {
           setError(messageForFirebaseError(lookupError));
           return;
         }
+        setPosting(null);
         try {
           const shell = await readRemovedProblem(postingId);
           if (!cancelled) setPosting(shell);
@@ -222,7 +236,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [postingId, initialTab]);
+  }, [postingId, initialTab, liveScope, isAuthenticated]);
 
   useEffect(() => {
     setPoster(null);
@@ -235,22 +249,51 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
   }, [posting?.ownerId]);
 
   const reloadPosting = async () => {
+    const generation = accessGeneration.current;
     try {
       const found = await findPosting(postingId, { fromServer: true });
-      if (activeLiveScope.current === liveScope) setPosting(found && isRemovedProblem(found) ? removedProblemShell(found) : found);
-    } catch { /* Keep the current record visible during a temporary read failure. */ }
+      if (activeLiveScope.current !== liveScope || accessGeneration.current !== generation) return;
+      if (!found) {
+        // A missing document revokes pending work just like an explicit denial.
+        accessGeneration.current += 1;
+      }
+      setPosting(found && isRemovedProblem(found) ? removedProblemShell(found) : found);
+    } catch (lookupError) {
+      if (activeLiveScope.current !== liveScope || accessGeneration.current !== generation) return;
+      if (!accessDenied(lookupError) && !missingPosting(lookupError)) return;
+      const revokedGeneration = ++accessGeneration.current;
+      // Permission loss is authoritative. Do not retain an old private brief
+      // while asking for the deliberately redacted moderation shell.
+      setPosting(null);
+      setPoster(null);
+      setAuditVerification(null);
+      setConfirm(false);
+      setReason("");
+      setReasonError("");
+      setAnchoredWithdrawal(null);
+      setTab(initialTab);
+      setOpenedTabs(new Set([initialTab]));
+      if (accessDenied(lookupError)) {
+        try {
+          const shell = await readRemovedProblem(postingId);
+          if (activeLiveScope.current === liveScope && accessGeneration.current === revokedGeneration) setPosting(shell);
+        } catch { /* The full record and any prior shell remain cleared. */ }
+      }
+    }
   };
   useLiveActivity({ problemId: postingId, channel: "all", identity: user?.id, onRefresh: reloadPosting,
     enabled: Boolean(posting), blocked: auditBusy || withdrawing });
 
   const download = async (attachment) => {
+    const generation = accessGeneration.current;
     setError(null);
     try {
-      saveBlobAs(await downloadAttachment({
+      const blob = await downloadAttachment({
         attachment, ownerId: posting.ownerId, problemId: posting.id,
-      }), attachment.name);
+      });
+      if (activeLiveScope.current === liveScope && accessGeneration.current === generation) saveBlobAs(blob, attachment.name);
     } catch (downloadError) {
-      setError(messageForStorageError(downloadError));
+      if (activeLiveScope.current === liveScope && accessGeneration.current === generation) setError(messageForStorageError(downloadError));
     }
   };
 
@@ -714,7 +757,9 @@ function IsolatedQuery({ children }) {
 }
 
 export default function PostingDetailPage(props) {
+  const { isAuthenticated, user } = useAuth();
+  const viewerKey = `${props.postingId}:${isAuthenticated}:${user?.id || ""}:${user?.isSuspended || false}:${user?.role || ""}:${(user?.roles ?? []).join(",")}`;
   const existing = useContext(QueryClientContext);
-  if (existing) return <PostingDetailBody {...props} />;
-  return <IsolatedQuery><PostingDetailBody {...props} /></IsolatedQuery>;
+  if (existing) return <PostingDetailBody key={viewerKey} {...props} />;
+  return <IsolatedQuery><PostingDetailBody key={viewerKey} {...props} /></IsolatedQuery>;
 }

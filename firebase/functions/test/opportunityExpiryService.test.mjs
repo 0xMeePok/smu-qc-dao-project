@@ -26,9 +26,15 @@ function compareKeys(left, right) {
 }
 
 // Supports the query shapes the service uses: chained where, orderBy, cursors, limit, select, sum.
-function memoryFirestore(entries = [], { beforeTransaction, failOnSetPath } = {}) {
+function memoryFirestore(entries = [], { beforeTransaction, failOnSetPath, migrationReady = true } = {}) {
   const store = new Map(entries.map(([path, value]) => [path, clone(value)]));
+  // Existing service fixtures represent a database after the controlled backfill.
+  for (const [path, value] of store) if (path.startsWith("evaluations/")) {
+    value.expiryAccepted = String(value.status ?? "").trim().toLowerCase() === "accepted";
+  }
+  if (migrationReady) store.set("maintenanceState/evaluationExpiryV1", { ready: true });
   const reads = [];
+  const queryReads = [];
   let autoId = 0;
   let transactions = 0;
 
@@ -90,6 +96,7 @@ function memoryFirestore(entries = [], { beforeTransaction, failOnSetPath } = {}
       async get() {
         reads.push(name);
         const docs = run();
+        queryReads.push({ name, filters: state.filters, limit: state.limit, returned: docs.length });
         return { docs, empty: docs.length === 0 };
       },
       aggregate: () => ({
@@ -141,7 +148,7 @@ function memoryFirestore(entries = [], { beforeTransaction, failOnSetPath } = {}
     },
   };
 
-  return { db, store, reads: () => [...reads], transactionCount: () => transactions };
+  return { db, store, reads: () => [...reads], queryReads, transactionCount: () => transactions };
 }
 
 function openProblem(overrides = {}) {
@@ -323,6 +330,30 @@ describe("opportunity expiry persistence", () => {
       db: database.db, problemId: "problem-1", now: NOW,
     });
     assert.equal(saved.reason, EXPIRY_REASONS.EVALUATION_NOT_COMPLETED);
+  });
+
+  it("uses a bounded indexed existence read even when one proposal has thousands of evaluations", async () => {
+    const database = memoryFirestore([
+      ...recordsForNormalExpiry(),
+      ...Array.from({ length: 3000 }, (_, index) => [`evaluations/accepted-${index}`, { proposalId: "proposal-1", status: " ACCEPTED " }]),
+      ["evaluations/missing-status", { proposalId: "proposal-1" }],
+    ]);
+    assert.equal((await expireOpportunity({ db: database.db, problemId: "problem-1", now: NOW })).reason,
+      EXPIRY_REASONS.EVALUATION_NOT_COMPLETED);
+    const queries = database.queryReads.filter(row => row.name === "evaluations");
+    assert.equal(queries.length, 1);
+    assert.equal(queries[0].limit, 1);
+    assert.equal(queries[0].returned, 1);
+    assert.ok(queries[0].filters.some(([field, op, value]) => field === "expiryAccepted" && op === "==" && value === false));
+    assert.ok(queries[0].filters.find(([field]) => field === "proposalId")[2].length <= 30);
+  });
+
+  it("fails closed until every legacy evaluation has been normalized", async () => {
+    const database = memoryFirestore(recordsForNormalExpiry(), { migrationReady: false });
+    await assert.rejects(expireOpportunity({ db: database.db, problemId: "problem-1", now: NOW }), /normalization is not ready/);
+    assert.equal(database.store.get("problems/problem-1").status, "open");
+    assert.equal(database.transactionCount(), 0);
+    assert.equal(database.reads().includes("evaluations"), false);
   });
 
   it("only lets an administrator force expiry with an exact prescribed reason", async () => {

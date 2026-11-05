@@ -5,11 +5,14 @@
   "type": "module",
   "description": "Firestore security rules and their tests",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore,storage --project qc-dao-rules-test \"node --test --test-concurrency=1 --test-reporter=../scripts/test-reporter.mjs test/*.test.mjs\"",
+    "test": "node functions/securityDependencies/manage.mjs --verify --production . && firebase emulators:exec --only firestore,storage --project qc-dao-rules-test \"node --test --test-concurrency=1 --test-reporter=../scripts/test-reporter.mjs test/*.test.mjs\"",
     "preemulate": "VITE_FIREBASE_USE_EMULATORS=true npm --prefix ../frontend run build && node scripts/local-hosting-config.mjs",
-    "emulate": "firebase emulators:start --config firebase.local.json --only hosting,functions,firestore,auth,storage",
-    "deploy:rules": "firebase deploy --only firestore:rules,storage",
-    "deploy:preview": "node scripts/preview-deploy.mjs"
+    "emulate": "node functions/securityDependencies/manage.mjs --verify --production . && firebase emulators:start --config firebase.local.json --only hosting,functions,firestore,auth,storage",
+    "deploy:rules": "node functions/securityDependencies/manage.mjs --verify --production . && firebase deploy --only firestore:rules,storage",
+    "deploy:preview": "node functions/securityDependencies/manage.mjs --verify --production . && node scripts/preview-deploy.mjs",
+    "postinstall": "node functions/securityDependencies/manage.mjs --apply --production .",
+    "security:apply": "node functions/securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node functions/securityDependencies/manage.mjs --verify --production ."
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",

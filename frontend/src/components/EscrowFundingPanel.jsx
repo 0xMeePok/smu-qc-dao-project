@@ -131,6 +131,7 @@ export function EscrowFundingView({ state, evidence, loading, error, busy, progr
     </p>}
     {state && <>
       {state.isHistorical && <p className="field-hint">This escrow belongs to an earlier contract deployment. Its original balances and available refunds remain visible. Create a new posting to use the current funding workflow.</p>}
+      {!state.isGrant && state.reviewedDepositsSupported === false && <p className="field-hint">This escrow uses an earlier funding workflow. New contributions are unavailable. Existing balances and refunds remain accessible.</p>}
       {state.workflowPaused && !terminal && <p className="field-hint">Funding and approvals are paused while this posting is under review. A temporary pause does not open refunds.</p>}
       {state.blockedBySelection && !state.isGrant && !terminal && <p className="field-hint">Funding and selection are paused while another proposal awaits both owners’ approval. If that selection is rejected or expires, eligible proposals reopen. Once the selected proposal’s upfront payment is processed, other proposals close and their contributions become refundable.</p>}
       <div className="escrow-status-summary">
@@ -422,6 +423,7 @@ function EscrowFundingPanelBody({ proposal, onStateChange, onConfirmed, refreshV
   const act = async (action, extra = {}) => {
     if (!walletReady || writing.current || unresolvedTransaction || (action === "deposit" && fundingBlockReason) || ((moderated || integrityBlocked) && !refundActions.has(action))) return;
     const requestedProposal = current.current.proposal;
+    const reviewedContextDigest = state?.reviewedContextDigest;
     writing.current = true; setBusy(true); setError(""); setSyncError(""); setProgress({ status: "preparing", action }); setNotice("");
     // A background payment-status check may be running; queue behind it rather than dropping the click.
     await waitForPassiveSync();
@@ -431,14 +433,14 @@ function EscrowFundingPanelBody({ proposal, onStateChange, onConfirmed, refreshV
     // signature. The server check runs alongside the escrow chain reads, and
     // writeEscrowAction opens no wallet request until it has passed.
     const eligibility = action === "deposit"
-      ? prepareEscrowDeposit({ proposalId: proposal.id, amount }).then(() => null, failure => failure) : null;
+      ? prepareEscrowDeposit({ proposalId: requestedProposal.id, amount, reviewedContextDigest }).then(() => null, failure => failure) : null;
     const ensureEligible = async () => {
       const failure = await eligibility;
       if (failure) throw failure;
       if (currentStorageKey.current !== storageKey) throw navigatedAway;
     };
     try {
-      const payload = { proposal: requestedProposal, account: address, action, selectionId: state?.selectionId, ...extra,
+      const payload = { proposal: requestedProposal, account: address, action, selectionId: state?.selectionId, reviewedContextDigest, ...extra,
         ...(eligibility ? { beforeWalletRequest: ensureEligible } : {}), onProgress: next => {
         if (next.status === "pending") remember(next.transactionHash);
         if (next.status === "confirmed") remember(null);

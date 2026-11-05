@@ -41,6 +41,8 @@ async function fixture({ problemMatching, proposalMatching } = {}) {
 
 function proposal(problemId) {
   return {
+    reviewedParentAudit: { chainId: 421614, contractAddress: `0x${"7".repeat(40)}`, entityId: `0x${"8".repeat(64)}`,
+      contentHash: `0x${"9".repeat(64)}`, revisionDigest: `0x${"9".repeat(64)}`, revisionIndex: 0 },
     researcherId: AUTHOR, postingOwnerId: OWNER, problemId, opportunityType: "business-problem", title: "Annealing routing",
     summary: "A measurable routing study", category: "quantum-annealing", methodology: "Compare with a classical baseline",
     suitability: "Combinatorial routing", expectedOutcomes: "Improved routing", successCriteria: "Lower travel distances",
@@ -114,6 +116,7 @@ describe("QCDAO-81..89 server-owned mock matching", () => {
       const batch = writeBatch(db);
       batch.set(ref, data);
       batch.set(doc(db, "problems", id, "proposalAuthors", AUTHOR), { proposalId: `${id}-new` });
+      batch.set(doc(db, "opportunityProposalLocks", id), { proposalId: `${id}-new`, researcherId: AUTHOR, createdAt: serverTimestamp() });
       if (status === "open") await assertSucceeds(batch.commit());
       else await assertFails(batch.commit());
     }

@@ -5,15 +5,18 @@
   "type": "module",
   "description": "Registry-linked per-proposal token escrow with milestones, dual approval, optional funder voting and partial refunds",
   "scripts": {
-    "compile": "hardhat compile",
-    "export:abis": "node scripts/export-abis.js",
-    "test": "hardhat test mocha && npm run test:scripts",
-    "test:scripts": "node --test test-scripts/*.test.mjs",
-    "test:verifier": "hardhat test mocha --no-compile test-verifier/*.test.js",
-    "coverage": "hardhat test mocha --coverage && npm run test:scripts",
-    "verify:arbitrum-sepolia": "node scripts/verify-live.js",
-    "verify:source": "hardhat run scripts/verify-source.js --build-profile production --network arbitrumSepolia",
-    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia"
+    "compile": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && hardhat compile",
+    "export:abis": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && node scripts/export-abis.js",
+    "test": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && hardhat test mocha && npm run test:scripts",
+    "test:scripts": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && node --test test-scripts/*.test.mjs",
+    "test:verifier": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && hardhat test mocha --no-compile test-verifier/*.test.js",
+    "coverage": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && hardhat test mocha --coverage && npm run test:scripts",
+    "verify:arbitrum-sepolia": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && node scripts/verify-live.js",
+    "verify:source": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && hardhat run scripts/verify-source.js --build-profile production --network arbitrumSepolia",
+    "deploy:arbitrum-sepolia": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . ../../firebase/functions && hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
+    "postinstall": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:apply": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production ."
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "4.0.15",

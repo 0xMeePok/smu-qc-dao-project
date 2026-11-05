@@ -14,6 +14,7 @@ import { submitPlatformAction, resumePlatformTransaction } from "./escrowFunding
 import { enqueueIndependentFundingCancellation, INDEPENDENT_FUNDING_CANCELLATIONS } from "./independentFundingModeration.js";
 import { memberCall } from "./memberCall.js";
 import { escrowCustodyLock } from "./escrowCustody.js";
+import { hashDeliveryEvidence, normalizeDeliveryEvidence, persistDeliveryEvidence } from "./deliveryEvidence.js";
 
 export { enqueueIndependentFundingCancellation, INDEPENDENT_FUNDING_CANCELLATIONS };
 export const INDEPENDENT_FUNDING_SUMMARIES = "independentFundingSummaries";
@@ -72,18 +73,10 @@ export function independentFundingReviewDays(record, config) {
 }
 
 export function normalizeIndependentFundingEvidence(evidence) {
-  const summary = String(evidence?.summary ?? "").trim().normalize("NFC");
-  const url = String(evidence?.url ?? "").trim();
-  let parsed;
-  try { parsed = new URL(url); } catch { /* rejected below */ }
-  if (summary.length < 2 || summary.length > 4000 || url.length > 2048
-      || !url.startsWith("https://") || parsed?.protocol !== "https:" || !parsed.hostname) {
-    fail("invalid-argument", "Describe the evidence in 2–4,000 characters and provide an HTTPS evidence link.");
-  }
-  return { summary, url };
+  return normalizeDeliveryEvidence(evidence);
 }
 export function hashIndependentFundingEvidence(evidence) {
-  return keccak256(stringToHex(JSON.stringify({ scheme: "qcdao.escrow.delivery.v1", ...normalizeIndependentFundingEvidence(evidence) })));
+  return hashDeliveryEvidence(evidence);
 }
 
 async function loadContext({ db, config, uid, proposalId }) {
@@ -287,14 +280,8 @@ export async function prepareIndependentFundingAction({ action, amount, evidence
   } else if (action === "submitEvidence") {
     const normalized = normalizeIndependentFundingEvidence(evidence), hash = hashIndependentFundingEvidence(normalized);
     if (!same(hash, evidenceHash) || same(hash, response.summary.evidenceHash)) fail("invalid-argument", "Submit new evidence matching its delivery hash.");
-    const ref = options.db.collection("proposals").doc(record.id).collection("independentFundingEvidence").doc(hash);
-    await options.db.runTransaction(async tx => {
-      const existing = await tx.get(ref);
-      if (existing.exists && (existing.data().ownerId !== options.uid || hashIndependentFundingEvidence(existing.data()) !== hash)) {
-        fail("failed-precondition", "The saved delivery evidence differs from this hash.");
-      }
-      if (!existing.exists) tx.set(ref, { ...normalized, ownerId: options.uid, createdAt: Timestamp.now() });
-    });
+    await persistDeliveryEvidence({ db: options.db, uid: options.uid, authTime: options.authTime,
+      proposalId: record.id, evidence: normalized, evidenceHash: hash, collection: "independentFundingEvidence" });
     functionName = "submitEvidence"; args = [hash];
   } else if (action === "vote") {
     if (typeof approve !== "boolean" || !same(evidenceHash, response.summary.evidenceHash)) fail("invalid-argument", "Review the current evidence and choose approve or reject.");

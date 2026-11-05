@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, deleteField, Timestamp } from "firebase/firestore";
 import { PUBLISH_VALIDATION, isPublishableProblem } from "../functions/publicationValidation.js";
+import { ATTACHED_SCHEMA_VALIDATION, hasAttachedPublicationSchema } from "../functions/attachedProposalSchema.js";
 
 // attestPublication stores expiresAt as a Timestamp; the validator only needs
 // toMillis(), which the client Timestamp provides too.
@@ -15,6 +16,9 @@ export async function seedPublicationFixture(env, reference, patch, update = fal
   if (extra || !["problems", "proposals"].includes(scope)) return;
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
+    // Ordinary publication tests run after the controlled legacy backfill.
+    // Dedicated migration-gate tests use raw writes and omit/delete this marker.
+    await setDoc(doc(db, "maintenanceState", "opportunityProposalLocksV1"), { ready: true, version: 1 });
     const existing = update ? await getDoc(doc(db, scope, id)) : null;
     const next = existing?.exists() ? existing.data() : {};
     for (const [key, value] of Object.entries(patch)) {
@@ -35,8 +39,12 @@ export async function seedPublicationFixture(env, reference, patch, update = fal
       { ...record, expiresAt: asTimestamp(record.expiresAt) },
       { uid, profileOrganisation: profile?.data()?.organisation },
     );
+    const parent = scope === "proposals" && record.problemId && record.status === "submitted"
+      ? await getDoc(doc(db, "problems", record.problemId)) : null;
     await setDoc(doc(db, "publicationProofs", `${scope}_${id}`), {
       uid, record, transactionHash: audit?.transactionHash ?? "",
+      ...(parent?.exists() ? { reviewedParentRecord: parent.data() } : {}),
+      ...(scope === "proposals" && hasAttachedPublicationSchema(record) ? { schemaValidation: ATTACHED_SCHEMA_VALIDATION } : {}),
       ...(publishable ? { validation: PUBLISH_VALIDATION } : {}),
     });
   });

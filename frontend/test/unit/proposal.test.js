@@ -93,6 +93,16 @@ describe("QCDAO-57 draft, edit and withdraw", () => {
     assert.ok(!("postingOwnerId" in draft));
     assert.equal(buildProposalDocument({ researcherId: "0xABC", posting, form }).postingOwnerId, posting.ownerId);
   });
+  it("retains the reviewed parent tuple in drafts and published records with both supporting PDFs", () => {
+    const reviewedParentAudit = { chainId: 421614, contractAddress: `0x${"a".repeat(40)}`,
+      entityId: `0x${"1".repeat(64)}`, contentHash: `0x${"2".repeat(64)}`, revisionIndex: 3, revisionDigest: `0x${"2".repeat(64)}` };
+    const attachments = ["support01", "support02"].map(id => ({ id, name: `${id}.pdf`, size: 100, contentType: "application/pdf", sha256: `0x${"3".repeat(64)}` }));
+    for (const status of ["draft", "submitted"]) {
+      const record = buildProposalDocument({ researcherId: "0xABC", posting: { ...posting, reviewedParentAudit }, form, status, attachments });
+      assert.deepEqual(record.reviewedParentAudit, reviewedParentAudit);
+      assert.equal(record.attachments.length, 2);
+    }
+  });
   it("holds a draft to the same validation as a submission once it is sent", () => {
     // Saving is unvalidated; submitting is not. The same form that saves fine as
     // a draft has to answer for every field on the way out.

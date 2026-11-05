@@ -58,7 +58,7 @@ describe("Independent crowdfunding, isolated from existing workflows", function 
     expect(await c.registry.proposalEscrow(c.listingId)).to.equal(c.ethers.ZeroAddress);
     expect(await c.registry.acceptedProposalForPosting(c.postingId)).to.equal(c.ethers.ZeroHash);
     await c.token.connect(c.alice).approve(await c.mainEscrow.getAddress(), c.target);
-    await c.mainEscrow.connect(c.alice).deposit(c.target);
+    await c.mainEscrow.connect(c.alice).depositReviewed(c.target, await c.registry.fundingContextDigest(await c.mainEscrow.proposalId()));
     const selection = c.ethers.id("main selection");
     await c.mainEscrow.connect(c.platform).lockSelection(selection, c.solution.address);
     await c.mainEscrow.connect(c.owner).approveSelection(selection);

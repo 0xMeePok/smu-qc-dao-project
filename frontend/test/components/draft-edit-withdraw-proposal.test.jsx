@@ -67,6 +67,10 @@ vi.mock("../../src/lib/proposalAudit.js", () => ({
 vi.mock("../../src/components/AttachmentUploader.jsx", () => ({
   AttachmentUploader: ({ disabled }) => <p>{disabled ? "Attachments locked" : "Attachments"}</p>,
 }));
+vi.mock("../../src/lib/reviewedParentAudit.js", () => ({
+  captureReviewedParentAudit: async () => ({ revisionIndex: 0, contentHash: "reviewed-parent" }),
+  assertReviewedParentAudit: async () => {},
+}));
 import CreateProposalPage from "../../src/pages/CreateProposalPage.jsx";
 import ProposalDetailPage from "../../src/pages/ProposalDetailPage.jsx";
 

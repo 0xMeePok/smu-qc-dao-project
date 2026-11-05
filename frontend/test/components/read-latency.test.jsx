@@ -16,11 +16,20 @@ vi.mock("../../src/lib/authFlow.js", () => ({ requireFirebase: () => {} }));
 vi.mock("../../src/lib/publication.js", () => ({ attestPublication: vi.fn(), reserveResource: vi.fn() }));
 vi.mock("../../src/lib/attachments.js", () => ({ deleteAttachment: vi.fn(), toPostingRecord: value => value }));
 vi.mock("../../src/lib/independentEscrow.js", () => ({ getIndependentFundingState: vi.fn(), independentFundingConfigured: () => false, independentFundingLocked: () => false }));
-import { findPosting } from "../../src/lib/postings.js";
+import { findPosting, assertOpportunityMaterialEditAllowed } from "../../src/lib/postings.js";
 import { listProposals } from "../../src/lib/proposals.js";
 
 const snapshot = (id, data) => ({ id, exists: () => Boolean(data), data: () => data });
 beforeEach(() => vi.resetAllMocks());
+
+it("locks material edits from the authoritative flag even while proposal metrics remain zero", async () => {
+  const parent = { title: "Reviewed problem", ownerId: "owner", proposalCount: 0, categories: [], attachments: [] };
+  mocks.getDoc.mockResolvedValue(snapshot("p1", { version: 2, proposalCount: 0 }));
+  mocks.getDocFromServer.mockImplementation(async ({ path }) => path.startsWith("opportunityProposalLocks/")
+    ? snapshot("p1", { proposalId: "first" }) : snapshot("p1", parent));
+  await expect(assertOpportunityMaterialEditAllowed("p1", { ...parent, title: "Changed terms" })).rejects.toThrow(/terms are fixed/);
+  await expect(assertOpportunityMaterialEditAllowed("p1", { ...parent, attachments: [{ id: "new-pdf" }] })).resolves.toBeUndefined();
+});
 
 it("starts metrics while the problem document is pending and preserves verified metric normalization", async () => {
   let finishPosting;
@@ -28,7 +37,7 @@ it("starts metrics while the problem document is pending and preserves verified 
     ? new Promise(resolve => { finishPosting = resolve; })
     : Promise.resolve(snapshot("p1", { version: 2, proposalCount: 4, fundedAmount: 20, fundingProgressPercent: 10 })));
   const request = findPosting("p1");
-  expect(mocks.getDoc.mock.calls.map(([ref]) => ref.path)).toEqual(["opportunityMetrics/p1", "problems/p1"]);
+  expect(mocks.getDoc.mock.calls.map(([ref]) => ref.path)).toEqual(["opportunityMetrics/p1", "opportunityProposalLocks/p1", "problems/p1"]);
   finishPosting(snapshot("p1", { title: "Research", proposalCount: 99, fundedAmount: 999 }));
   await expect(request).resolves.toMatchObject({ id: "p1", title: "Research", proposalCount: 4, fundedAmount: 20 });
 });

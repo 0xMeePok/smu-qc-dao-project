@@ -8,7 +8,7 @@ import { resetImmutableChainCache } from "../../../firebase/functions/immutableC
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
 import { resolveAuditDeployment } from "../../../firebase/functions/auditDeployments.js";
 import { escrowSnapshotQueryKey } from "../../src/lib/escrowReads.js";
-import { escrowAddress, escrowClient, escrowConfig, escrowRecord, owner, researcher, txHash } from "../../../firebase/functions/test/fixtures/escrowAuditFixture.js";
+import { escrowAddress, escrowClient, escrowConfig, escrowRecord, owner, researcher, txHash, reviewedFundingDigest } from "../../../firebase/functions/test/fixtures/escrowAuditFixture.js";
 import { AUDIT_REGISTRY_CONFIG } from "../../src/config/auditRegistry.js";
 import historicalRegistries from "../../../firebase/functions/auditRegistry.history.json" with { type: "json" };
 import { proposalFundingTerms } from "../../../firebase/functions/escrowProposalTerms.js";
@@ -76,7 +76,7 @@ function fixture(changes = {}) {
       return { status: "success", transactionHash: txHash, blockNumber: 101n };
     },
   };
-  return { proposal, adapters, config: escrowConfig, reads, writes, waits };
+  return { proposal, adapters, config: escrowConfig, reads, writes, waits, reviewedContextDigest: reviewedFundingDigest(proposal) };
 }
 
 function finalFixture(changes = {}) {
@@ -101,6 +101,36 @@ function legacySelectionFixture(changes = {}) {
 }
 
 describe("Canonical escrow wallet integration", () => {
+  it("rejects stale reviewed revision counters and parent attachments before wallet approval", async () => {
+    for (const changed of ["revisionCount", "opportunityRevisionCount"]) {
+      const f = fixture({ read: request => request.functionName === changed ? 2n : undefined });
+      await assert.rejects(writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" }), /revision changed/);
+      assert.equal(f.writes.length, 0);
+    }
+  });
+
+  it("retains the reviewed context unchanged when a proposal changes during allowance confirmation", async () => {
+    const f = fixture();
+    const originalWait = f.adapters.waitForTransactionReceipt;
+    f.adapters.waitForTransactionReceipt = async request => {
+      f.proposal.summary = "Changed after the reviewed wallet preflight";
+      return originalWait(request);
+    };
+    await writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1" });
+    assert.deepEqual(f.writes.at(-1).args, [1_000_000n, f.reviewedContextDigest]);
+  });
+
+  it("preserves refund and expiry exits when mutable proposal hashes no longer match", async () => {
+    const f = fixture({ state: { state: ESCROW_STATE.Expired, totalDeposited: 1_000_000n },
+      depositor: { deposited: 1_000_000n, claimable: 1_000_000n },
+      read: request => request.functionName === "getProposal" ? { proposalHash: zeroHash, solutionHash: zeroHash } : undefined });
+    const snapshot = await readEscrow({ ...f, account: funder });
+    assert.equal(snapshot.can.deposit, false);
+    assert.equal(snapshot.can.claimRefund, true);
+    await writeEscrowAction({ ...f, account: funder, action: "claimRefund" });
+    assert.equal(f.writes.at(-1).functionName, "claimRefund");
+  });
+
   it("derives lock deadlines from the verified block and blocks early refund requests before opening the wallet", async () => {
     const f = fixture({ timestamp: 1_999_999_999n, state: { totalDeposited: target / 2n },
       depositor: { deposited: target / 2n } });
@@ -212,7 +242,7 @@ describe("Canonical escrow wallet integration", () => {
         if (omitted.includes(request.functionName)) throw new Error(`Unrelated read: ${request.functionName}`);
       } });
       await writeEscrowAction({ ...f, account, action, ...input });
-      assert.equal(f.writes.at(-1).functionName, action);
+      assert.equal(f.writes.at(-1).functionName, action === "deposit" ? "depositReviewed" : action);
       assert(f.reads.every(request => request.blockNumber === 100n && request.chainId === 421614));
       assert(f.reads.length < full.reads.length);
       t.diagnostic(`${action}: ${f.reads.length} action reads versus ${full.reads.length} dashboard reads`);
@@ -267,7 +297,7 @@ describe("Canonical escrow wallet integration", () => {
       assert.equal(f.writes.length, 0);
       releaseRead(value);
       await promise;
-      assert.equal(f.writes.at(-1).functionName, action);
+      assert.equal(f.writes.at(-1).functionName, action === "deposit" ? "depositReviewed" : action);
     }
   });
 
@@ -341,7 +371,7 @@ describe("Canonical escrow wallet integration", () => {
     assert.equal(f.writes.length, 0);
     releaseState(ESCROW_STATE.Open);
     await action;
-    assert.deepEqual(f.writes.map(request => request.functionName), ["deposit"]);
+    assert.deepEqual(f.writes.map(request => request.functionName), ["depositReviewed"]);
   });
 
   it("runs chain checks alongside a caller's pre-signature check and opens no wallet until it passes", async () => {
@@ -354,7 +384,7 @@ describe("Canonical escrow wallet integration", () => {
     assert.equal(f.writes.length, 0);
     pass();
     await action;
-    assert.deepEqual(f.writes.map(request => request.functionName), ["deposit"]);
+    assert.deepEqual(f.writes.map(request => request.functionName), ["depositReviewed"]);
     const refused = fixture({ allowance: target });
     await assert.rejects(writeEscrowAction({ ...refused, account: funder, action: "deposit", amount: "1",
       beforeWalletRequest: async () => { throw new Error("The posting has been closed."); } }), /posting has been closed/);
@@ -456,7 +486,7 @@ describe("Canonical escrow wallet integration", () => {
     const f = fixture();
     const progress = [];
     const result = await writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "1.25", onProgress: update => progress.push(update) });
-    assert.deepEqual(f.writes.map(write => [write.functionName, write.args]), [["approve", [escrowAddress, 1_250_000n]], ["deposit", [1_250_000n]]]);
+    assert.deepEqual(f.writes.map(write => [write.functionName, write.args]), [["approve", [escrowAddress, 1_250_000n]], ["depositReviewed", [1_250_000n, f.reviewedContextDigest]]]);
     assert.equal(f.writes[0].address, f.proposal.fundingTerms.token);
     assert.equal(f.writes[1].address, escrowAddress);
     assert(f.writes.every(write => write.account === funder && write.chainId === 421614));
@@ -469,10 +499,10 @@ describe("Canonical escrow wallet integration", () => {
   it("clears an insufficient nonzero allowance and reuses sufficient allowance", async () => {
     const f = fixture({ allowance: 1n });
     await writeEscrowAction({ ...f, account: funder, action: "deposit", amount: "2" });
-    assert.deepEqual(f.writes.map(write => [write.functionName, write.args]), [["approve", [escrowAddress, 0n]], ["approve", [escrowAddress, 2_000_000n]], ["deposit", [2_000_000n]]]);
+    assert.deepEqual(f.writes.map(write => [write.functionName, write.args]), [["approve", [escrowAddress, 0n]], ["approve", [escrowAddress, 2_000_000n]], ["depositReviewed", [2_000_000n, f.reviewedContextDigest]]]);
     const sufficient = fixture({ allowance: 2_000_000n });
     await writeEscrowAction({ ...sufficient, account: funder, action: "deposit", amount: "2" });
-    assert.deepEqual(sufficient.writes.map(write => write.functionName), ["deposit"]);
+    assert.deepEqual(sufficient.writes.map(write => write.functionName), ["depositReviewed"]);
   });
 
   it("leaves a declined approval unconfirmed and retries the exact approval before depositing", async () => {
@@ -502,8 +532,8 @@ describe("Canonical escrow wallet integration", () => {
 
     const result = await deposit();
     assert.equal(result.transactionHash, txHash);
-    assert.deepEqual(f.writes.map(request => request.functionName), ["approve", "deposit"]);
-    assert.deepEqual(f.writes.map(request => request.args), [[escrowAddress, 2_500_000n], [2_500_000n]]);
+    assert.deepEqual(f.writes.map(request => request.functionName), ["approve", "depositReviewed"]);
+    assert.deepEqual(f.writes.map(request => request.args), [[escrowAddress, 2_500_000n], [2_500_000n, f.reviewedContextDigest]]);
     assert.ok(f.writes.every(request => request.account === funder && request.chainId === f.config.chainId));
     assert.deepEqual(progress.filter(update => update.status === "confirmed").map(update => update.action), ["approve", "deposit"]);
     assert.equal(f.waits.length, 2);
@@ -761,8 +791,8 @@ it("rejects fractional cents, small partial contributions and dusty remainders b
   for (const remaining of [250000n, 1n]) {
     const f = fixture({ state: { totalDeposited: target - remaining } });
     await writeEscrowAction({ ...f, account: funder, action: "deposit", amount: remaining === 1n ? "0.000001" : "0.25" });
-    assert.equal(f.writes.at(-1).functionName, "deposit");
-    assert.deepEqual(f.writes.at(-1).args, [remaining]);
+    assert.equal(f.writes.at(-1).functionName, "depositReviewed");
+    assert.deepEqual(f.writes.at(-1).args, [remaining, f.reviewedContextDigest]);
   }
 });
 function countWaves(inner) {

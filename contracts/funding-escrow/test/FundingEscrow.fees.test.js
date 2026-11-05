@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, createProposal, scopedId, approve, fund, at, assertAccounting, State } from "./helpers.js";
 
@@ -67,8 +68,8 @@ describe("FundingEscrow: owner fees in basis points", function () {
 
   it("refunds all top-ups without charging any fee even at 100%", async function () {
     const c = await fixture({ feeBps: 10000 });
-    await c.escrow.connect(c.alice).deposit(300n);
-    await c.escrow.connect(c.alice).deposit(200n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 300n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 200n);
     await c.escrow.cancel(c.reason);
     await at(c, c.expiresAt); await c.escrow.connect(c.alice).claimRefund();
     expect(await c.escrow.refundedAmounts(c.alice.address)).to.equal(500n);

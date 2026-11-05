@@ -28,6 +28,18 @@ import { isIndependentProposal, INDEPENDENT_PROPOSAL_KIND, PROPOSAL_MATURITY_VAL
 export const PUBLISH_VALIDATION = "problem-publish-v1";
 export const INDEPENDENT_PUBLISH_VALIDATION = "independent-proposal-publish-v1";
 
+/** Exact parent version reviewed by an attached proposal's author. */
+export function validReviewedParentAudit(value) {
+  const keys = ["chainId", "contractAddress", "entityId", "contentHash", "revisionIndex", "revisionDigest"];
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && keys.every(key => has(value, key))
+    && Number.isSafeInteger(value.chainId) && value.chainId > 0
+    && /^0x[0-9a-f]{40}$/.test(value.contractAddress) && !/^0x0{40}$/.test(value.contractAddress)
+    && [value.entityId, value.contentHash, value.revisionDigest].every(item => /^0x[0-9a-f]{64}$/.test(item))
+    && Number.isInteger(value.revisionIndex) && value.revisionIndex >= 0 && value.revisionIndex <= 4_294_967_295
+    && value.contentHash === value.revisionDigest;
+}
+
 const PROBLEM_KEYS = new Set([
   "ownerId", "organisation", "title", "summary", "amount", "status", "aiAssisted",
   "businessContext", "currentApproach", "currentLimitations",

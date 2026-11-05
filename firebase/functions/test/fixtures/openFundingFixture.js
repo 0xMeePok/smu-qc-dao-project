@@ -37,6 +37,9 @@ export function openFundingFixture() {
   });
   const expectedPosting = prepareOpportunityCommit({ recordId: posting.id, payload: fundingOpportunityAuditPayload(posting), kind: 1,
     expiresAt: posting.expiresAt, actor: config.entityIdScheme === 2 ? owner : undefined });
+  for (const row of proposals) row.reviewedParentAudit = { chainId: config.chainId,
+    contractAddress: config.address.toLowerCase(), entityId: expectedPosting.entityId,
+    contentHash: expectedPosting.contentHash, revisionIndex: 0, revisionDigest: expectedPosting.contentHash };
   const expected = proposals.map(record => prepareStoredProposal(record, { registryConfig: config }));
   const addresses = [escrowAddress, `0x${"e".repeat(40)}`], calls = [], simulations = [], offers = new Map(), receipts = new Map(), declines = new Map();
   const proposalClients = proposals.map(escrowClient);
@@ -78,7 +81,11 @@ export function openFundingFixture() {
       if (index < 0) index = 0;
       if (functionName === "proposalEscrow" || functionName === "escrowForProposal") return addresses[index];
       if (functionName === "revisionCount") return state.revisionCounts?.[index] ?? 1n;
+      if (functionName === "opportunityRevisionCount") return 1n;
+      if (functionName === "opportunityRevisionAt") return { contentHash: expectedPosting.contentHash };
       if (functionName === "getProposal") return { researcher: proposals[index].researcherId, opportunityId: expected[index].opportunityId,
+        opportunityRevisionIndex: proposals[index].reviewedParentAudit.revisionIndex,
+        opportunityRevisionDigest: proposals[index].reviewedParentAudit.revisionDigest,
         proposalHash: expected[index].proposalHash, solutionHash: expected[index].solutionHash };
       if (addresses.some(row => sameAddress(address, row))) {
         const values = { openFundingPool: poolAddress, totalDeposited: state.escrowDeposits[index], state: state.escrowDeposits[index] ? 1 : 0,

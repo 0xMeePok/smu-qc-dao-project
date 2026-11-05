@@ -1,3 +1,4 @@
+import "./securityDependencies/verify-installed.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -25,6 +26,7 @@ import { assertSimilarityEnabled, retrieveAvailableSimilarProposals } from "./ai
 import { reserveRetrievalQuota, releaseAIQuota } from "./aiDraftQuota.js";
 import { AI_PROPOSAL_CATEGORIES } from "./aiDraftSchema.js";
 import { assertIndependentPublicationUnlocked } from "./independentFunding.js";
+import { registerDeliveryEvidenceFunctions } from "./deliveryEvidenceFunctions.js";
 import {
   SESSION_REVOCATIONS_COLLECTION,
   applyRoleChangeTransaction,
@@ -52,7 +54,9 @@ import { recordProposalRevision } from "./proposalRevisions.js";
 import { recordOpportunityRevision } from "./opportunityRevisions.js";
 import { EXPIRY_REASONS } from "./opportunityExpiry.js";
 import { EXPIRY_SOURCES, expireOpportunity, lapseDueOpportunities } from "./opportunityExpiryService.js";
-import { verifyPublication } from "./publication.js";
+import { verifyPublication, requireReviewedParentPublication } from "./publication.js";
+import { readOpportunityProposalLockRepair } from "./opportunityProposalLocks.js";
+import { ATTACHED_SCHEMA_VALIDATION, hasAttachedPublicationSchema } from "./attachedProposalSchema.js";
 import { PUBLISH_VALIDATION, INDEPENDENT_PUBLISH_VALIDATION, isPublishableProblem, isPublishableIndependentProposal } from "./publicationValidation.js";
 import { requireNewProposalTargetPolicy, requireProposalPublicationFundingPolicy } from "./proposalPublicationPolicy.js";
 import { getMockMatching as readMockMatching, fundMockProposal as contributeMockFunding,
@@ -533,6 +537,8 @@ export const reserveResource = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   return { reserved: true };
 });
 
+export const { saveDeliveryEvidence } = registerDeliveryEvidenceFunctions({ db, requireMember, options: MEMBER_CALL_OPTIONS });
+
 export const reserveAttachment = onCall(MEMBER_CALL_OPTIONS, async (request) => {
   const uid = await requireMember(request);
   return reserveUpload({ db, uid, scope: request.data?.scope, id: request.data?.recordId,
@@ -624,16 +630,26 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
       scope === "proposals" ? tx.get(db.collection("proposals").doc(recordId)) : Promise.resolve(null),
     ]);
     if (maintenance.data()?.active || reservation.data()?.retired) throw new HttpsError("failed-precondition", "Registry maintenance or retirement prevents publication.");
+    const lockRepair = await readOpportunityProposalLockRepair({ tx, db, scope, recordId,
+      storedRecord: existingProposal?.data(), now: Timestamp.now() });
+    let reviewedParentRecord;
     if (scope === "proposals") {
+      const parent = record.problemId && record.proposalKind !== "independent"
+        ? await tx.get(db.collection("problems").doc(record.problemId)) : null;
       try {
         requireProposalPublicationFundingPolicy(record);
         requireNewProposalTargetPolicy(record, { existingRecord: existingProposal?.data() });
+        requireReviewedParentPublication(record, { existingRecord: existingProposal?.data(), parent: parent?.data() });
+        if (record.proposalKind !== "independent" && (!existingProposal?.exists || existingProposal.data().status === "draft")) {
+          reviewedParentRecord = parent.data();
+        }
       }
       catch (error) { throw new HttpsError("failed-precondition", error.message); }
     }
     const attachments = record.attachments ?? [];
     const reservations = await Promise.all(attachments.map((item) =>
       tx.get(db.collection("uploadReservations").doc(uploadReservationKey(scope, recordId, item.id)))));
+    lockRepair();
     for (let index = 0; index < reservations.length; index += 1) {
       const reservation = reservations[index], item = attachments[index];
       if (!reservation.exists) continue; // Existing immutable attachments predate reservations.
@@ -659,6 +675,9 @@ export const attestPublication = onCall(MEMBER_CALL_OPTIONS, async (request) => 
       : null;
     tx.set(proofRef, {
       uid, record: content, transactionHash: audit.transactionHash, verifiedAt: Timestamp.now(),
+      ...(reviewedParentRecord ? { reviewedParentRecord } : {}),
+      ...(scope === "proposals" && record.proposalKind !== "independent" && hasAttachedPublicationSchema(content)
+        ? { schemaValidation: ATTACHED_SCHEMA_VALIDATION } : {}),
       ...(validation ? { validation } : {}),
     });
   });

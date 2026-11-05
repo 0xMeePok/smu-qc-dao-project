@@ -3,6 +3,7 @@ import { before, after, describe, it } from "node:test";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
 import { collection, doc, getDoc, getDocs, query, where, limit, setDoc, updateDoc, deleteField, serverTimestamp, writeBatch, Timestamp } from "firebase/firestore";
 import { PUBLISH_VALIDATION, isPublishableProblem } from "../functions/publicationValidation.js";
+import { ATTACHED_SCHEMA_VALIDATION, hasAttachedPublicationSchema } from "../functions/attachedProposalSchema.js";
 import { ref, uploadBytes } from "firebase/storage";
 
 const OWNER = `0x${"d7".repeat(20)}`;
@@ -15,6 +16,7 @@ before(async () => {
     firestore: { rules: fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8") },
     storage: { rules: fs.readFileSync(new URL("../storage.rules", import.meta.url), "utf8") } });
   await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "maintenanceState", "opportunityProposalLocksV1"), { ready: true, version: 1 });
     for (const address of [OWNER, AUTHOR]) await setDoc(doc(ctx.firestore(), "users", address), {
       address, role: 0, fullName: "Security Test", organisation: "University", walletVerified: true,
       termsAcceptedAt: new Date(), termsVersion: "2026-08-24", suspended: false,
@@ -48,8 +50,12 @@ async function trusted(scope, id, data, proof = true) {
         { ...record, expiresAt: record.expiresAt instanceof Date ? Timestamp.fromDate(record.expiresAt) : record.expiresAt },
         { uid, profileOrganisation: profile?.data()?.organisation },
       );
+      const parent = scope === "proposals" && record.problemId
+        ? await getDoc(doc(ctx.firestore(), "problems", record.problemId)) : null;
       await setDoc(doc(ctx.firestore(), "publicationProofs", `${scope}_${id}`), {
         uid, record, transactionHash: audit?.transactionHash ?? "",
+        ...(parent?.exists() ? { reviewedParentRecord: parent.data() } : {}),
+        ...(scope === "proposals" && hasAttachedPublicationSchema(record) ? { schemaValidation: ATTACHED_SCHEMA_VALIDATION } : {}),
         ...(publishable ? { validation: PUBLISH_VALIDATION } : {}),
       });
     }
@@ -148,6 +154,8 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
   it("requires proof for an otherwise valid atomic proposal submission", async () => {
     const db = env.authenticatedContext(AUTHOR).firestore();
     const data = { researcherId: AUTHOR, postingOwnerId: OWNER, problemId: "security-published", opportunityType: "business-problem",
+      reviewedParentAudit: { chainId: 421614, contractAddress: `0x${"7".repeat(40)}`, entityId: `0x${"8".repeat(64)}`,
+        contentHash: `0x${"9".repeat(64)}`, revisionIndex: 0, revisionDigest: `0x${"9".repeat(64)}` },
       title: "Quantum routing", summary: "A measurable study", category: "quantum-annealing", methodology: "Compare baselines",
       suitability: "Combinatorial routing", expectedOutcomes: "Improved routing", successCriteria: "Ten percent", timeline: "12 weeks",
       milestones: "Baseline, prototype, validation", team: "Research team", amount: 500, currency: "USDC", status: "submitted",
@@ -155,6 +163,7 @@ describe("QCDAO-131/132/133/134 raw client bypasses", () => {
     const commit = () => { const batch = writeBatch(db);
       batch.set(doc(db, "proposals", "security-proposal"), data);
       batch.set(doc(db, "problems", data.problemId, "proposalAuthors", AUTHOR), { proposalId: "security-proposal" });
+      batch.set(doc(db, "opportunityProposalLocks", data.problemId), { proposalId: "security-proposal", researcherId: AUTHOR, createdAt: serverTimestamp() });
       return batch.commit(); };
     await trusted("proposals", "security-proposal", data, false);
     await assertFails(commit());

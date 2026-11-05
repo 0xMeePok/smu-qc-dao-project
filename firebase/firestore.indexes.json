@@ -1223,7 +1223,10 @@
     },
     {"collectionGroup": "escrowModerationVoidEnumerations", "queryScope": "COLLECTION", "fields": [{"fieldPath": "status", "order": "ASCENDING"}, {"fieldPath": "nextAttemptAt", "order": "ASCENDING"}]},
     {"collectionGroup": "comments", "queryScope": "COLLECTION", "fields": [{"fieldPath": "proposalId", "order": "ASCENDING"}, {"fieldPath": "authorId", "order": "ASCENDING"}, {"fieldPath": "recommendation", "order": "ASCENDING"}]},
-    {"collectionGroup": "comments", "queryScope": "COLLECTION", "fields": [{"fieldPath": "proposalId", "order": "ASCENDING"}, {"fieldPath": "authorId", "order": "ASCENDING"}, {"fieldPath": "qualifying", "order": "ASCENDING"}, {"fieldPath": "recommendation", "order": "ASCENDING"}]}
+    {"collectionGroup": "comments", "queryScope": "COLLECTION", "fields": [{"fieldPath": "proposalId", "order": "ASCENDING"}, {"fieldPath": "authorId", "order": "ASCENDING"}, {"fieldPath": "qualifying", "order": "ASCENDING"}, {"fieldPath": "recommendation", "order": "ASCENDING"}]},
+    {"collectionGroup": "evaluations", "queryScope": "COLLECTION", "fields": [{"fieldPath": "proposalId", "order": "ASCENDING"}, {"fieldPath": "expiryAccepted", "order": "ASCENDING"}]},
+    {"collectionGroup": "escrowModerationVoidJobs", "queryScope": "COLLECTION", "fields": [{"fieldPath": "proposalId", "order": "ASCENDING"}, {"fieldPath": "status", "order": "ASCENDING"}]},
+    {"collectionGroup": "escrowModerationVoidEnumerations", "queryScope": "COLLECTION", "fields": [{"fieldPath": "contentType", "order": "ASCENDING"}, {"fieldPath": "contentId", "order": "ASCENDING"}, {"fieldPath": "status", "order": "ASCENDING"}]}
   ],
   "fieldOverrides": [
     {

@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, createProposal, scopedId, approve, lock, fund, at, mineAt, assertAccounting, State, Status, Behavior } from "./helpers.js";
 
@@ -140,8 +141,8 @@ describe("Optional funder voting: additional to dual approval", function () {
   for (const [target, yes, passes] of [[1000n, 499n, false], [1000n, 500n, false], [1000n, 501n, true], [999n, 499n, false], [999n, 500n, true]]) {
     it(`requires >50% of all funding: ${yes}/${target} ${passes ? "passes" : "fails"}`, async function () {
       const c = await fixture({ target, trancheBps: [5000, 5000], funderVoting: true });
-      await c.escrow.connect(c.alice).deposit(1n); await c.escrow.connect(c.alice).deposit(yes - 1n);
-      await c.escrow.connect(c.bob).deposit(target - yes);
+      await reviewedDeposit(c.escrow.connect(c.alice), 1n); await reviewedDeposit(c.escrow.connect(c.alice), yes - 1n);
+      await reviewedDeposit(c.escrow.connect(c.bob), target - yes);
       await c.escrow.lockSelection(c.selectionId, c.solution.address);
       await c.escrow.connect(c.owner).approveSelection(c.selectionId); await c.escrow.connect(c.solution).approveSelection(c.selectionId);
       await c.escrow.release(c.selectionId); const args = await submit(c);

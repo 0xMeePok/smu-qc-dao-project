@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, assertAccounting } from "./helpers.js";
 
@@ -113,7 +114,7 @@ describe("QCDAO-90 private moderation audit commitments", function () {
 
   it("keeps moderation commitments separate from proposal revisions, funding state and custody", async function () {
     const c = await fixture(); const d = decision(c);
-    await c.escrow.connect(c.alice).deposit(100n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 100n);
     const proposal = await c.registry.getProposal(c.proposalId);
     const opportunity = await c.registry.getOpportunity(c.postingId);
     const auditCount = await c.registry.anchorCount(c.proposalId);

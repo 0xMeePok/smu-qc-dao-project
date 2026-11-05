@@ -9,12 +9,15 @@
     "node": "22"
   },
   "scripts": {
-    "serve": "firebase emulators:start --only functions,firestore,auth,storage",
-    "deploy": "firebase deploy --only functions",
-    "test": "firebase emulators:exec --config ../firebase.json --only functions,firestore,auth,storage --project qc-dao-demo \"node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs\"",
-    "test:attach": "node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs",
-    "seed": "node scripts/mock_data.mjs",
-    "reset": "node scripts/reset-dev-data.mjs"
+    "serve": "node securityDependencies/manage.mjs --verify --production . && firebase emulators:start --only functions,firestore,auth,storage",
+    "deploy": "node securityDependencies/manage.mjs --verify --production . && firebase deploy --only functions",
+    "test": "node securityDependencies/manage.mjs --verify --production . && firebase emulators:exec --config ../firebase.json --only functions,firestore,auth,storage --project qc-dao-demo \"node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs\"",
+    "test:attach": "node securityDependencies/manage.mjs --verify --production . && node --test --test-concurrency=1 --test-reporter=../../scripts/test-reporter.mjs test/*.test.mjs",
+    "seed": "node securityDependencies/manage.mjs --verify --production . && node scripts/mock_data.mjs",
+    "reset": "node securityDependencies/manage.mjs --verify --production . && node scripts/reset-dev-data.mjs",
+    "postinstall": "node securityDependencies/manage.mjs --apply --production .",
+    "security:apply": "node securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node securityDependencies/manage.mjs --verify --production ."
   },
   "dependencies": {
     "@privy-io/node": "0.35.0",

@@ -1,4 +1,5 @@
 import { seedPublicationFixture } from "./publication-fixture.mjs";
+import { createEvaluationInEmulator } from "../../frontend/test/firestoreEvaluationEmulator.mjs";
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
@@ -77,6 +78,7 @@ function baseProposal(overrides = {}) {
 
 function baseEvaluation(overrides = {}) {
   return {
+    expiryAccepted: false,
     evaluatorId: ADDRESS,
     proposalId: "prop1",
     title: "Technical evaluation",
@@ -1219,9 +1221,38 @@ describe("proposals/{proposalId}", () => {
 });
 
 describe("evaluations/{evaluationId}", () => {
+  it("enforces a permanent paired quota while preserving arbitrary IDs and legacy updates", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore(), proposalId = "evaluation-quota-parent";
+    await env.withSecurityRulesDisabled(async ctx => {
+      const original = await getDoc(doc(ctx.firestore(), "proposals", "prop1"));
+      await rawSetDoc(doc(ctx.firestore(), "proposals", proposalId), original.data());
+    });
+    const id = "arbitrary.legacy-compatible-id", data = baseEvaluation({ proposalId });
+    await assertFails(rawSetDoc(doc(db, "evaluations", id), data));
+    const slot = doc(db, "evaluationSlots", `${proposalId}_${ADDRESS}`);
+    await assertSucceeds(createEvaluationInEmulator({ uid: ADDRESS, projectId: "qc-dao-rules-test", evaluationId: id, record: data }));
+    await assertFails(rawSetDoc(doc(db, "evaluations", "second-arbitrary-id"), data));
+    await assertFails(rawUpdateDoc(slot, { evaluationId: "second-arbitrary-id" }));
+    await assertFails(deleteDoc(slot));
+    await assertFails(rawUpdateDoc(doc(db, "evaluations", id), { expiryAccepted: true, updatedAt: serverTimestamp() }));
+    await assertSucceeds(rawUpdateDoc(doc(db, "evaluations", id), { status: "submitted", expiryAccepted: false, updatedAt: serverTimestamp() }));
+    await assertFails(rawUpdateDoc(doc(db, "evaluations", id), { status: "accepted", expiryAccepted: false, updatedAt: serverTimestamp() }));
+    await assertSucceeds(rawUpdateDoc(doc(db, "evaluations", id), { status: "accepted", expiryAccepted: true, updatedAt: serverTimestamp() }));
+    await assertSucceeds(deleteDoc(doc(db, "evaluations", id)));
+    await assertFails(rawSetDoc(doc(db, "evaluations", id), data));
+    const legacyId = "legacy-without-slot";
+    await env.withSecurityRulesDisabled(ctx => rawSetDoc(doc(ctx.firestore(), "evaluations", legacyId), {
+      ...baseEvaluation({ proposalId }), createdAt: new Date(), updatedAt: new Date(),
+    }));
+    await assertSucceeds(rawUpdateDoc(doc(db, "evaluations", legacyId), { feedback: "Legacy feedback remains editable", expiryAccepted: false, updatedAt: serverTimestamp() }));
+  });
+
   it("[BIT-AAR-82] [QCDAO43] allows access to the evaluator", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "evaluations", "e1"), baseEvaluation()));
+    const batch = writeBatch(db);
+    batch.set(doc(db, "evaluations", "e1"), baseEvaluation());
+    batch.set(doc(db, "evaluationSlots", `prop1_${ADDRESS}`), { proposalId: "prop1", evaluatorId: ADDRESS, evaluationId: "e1", createdAt: serverTimestamp() });
+    await assertSucceeds(batch.commit());
     await assertSucceeds(getDoc(doc(db, "evaluations", "e1")));
   });
 
@@ -1261,7 +1292,14 @@ describe("evaluations/{evaluationId}", () => {
 
   it("[QCDAO-127] enforces evaluation status transitions", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
-    await assertSucceeds(setDoc(doc(db, "evaluations", "e_tr"), baseEvaluation()));
+    await env.withSecurityRulesDisabled(async ctx => {
+      const original = await getDoc(doc(ctx.firestore(), "proposals", "prop1"));
+      await setDoc(doc(ctx.firestore(), "proposals", "prop-e-tr"), original.data());
+    });
+    const batch = writeBatch(db);
+    batch.set(doc(db, "evaluations", "e_tr"), baseEvaluation({ proposalId: "prop-e-tr" }));
+    batch.set(doc(db, "evaluationSlots", `prop-e-tr_${ADDRESS}`), { proposalId: "prop-e-tr", evaluatorId: ADDRESS, evaluationId: "e_tr", createdAt: serverTimestamp() });
+    await assertSucceeds(batch.commit());
     await assertFails(updateDoc(doc(db, "evaluations", "e_tr"), {
       status: "accepted",
       updatedAt: serverTimestamp(),
@@ -1663,7 +1701,7 @@ describe("problems/{problemId} funded posting", () => {
     // A one-day deadline is below the documented minimum, so it is seeded directly.
     await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "problems", "q49_extend"), submitted({ expiresAt: initial })));
     await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "opportunityMetrics", "q49_extend"), { proposalCount: 1 });
+      await setDoc(doc(ctx.firestore(), "opportunityProposalLocks", "q49_extend"), { proposalId: "legacy-child", researcherId: ADDRESS, createdAt: new Date() });
     });
     await assertSucceeds(updateDoc(doc(db, "problems", "q49_extend"), {
       expiresAt: extended,
@@ -1696,7 +1734,7 @@ describe("problems/{problemId} funded posting", () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     const initial = new Date(Math.floor(Date.now() / 1000) * 1000 + 40 * DAY);
     await assertSucceeds(setDoc(doc(db, "problems", "q49_locked"), submitted({ expiresAt: initial })));
-    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "opportunityMetrics", "q49_locked"), { proposalCount: 1 }));
+    await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), "opportunityProposalLocks", "q49_locked"), { proposalId: "legacy-child", researcherId: ADDRESS, createdAt: new Date() }));
     const extended = new Date(initial.getTime() + 60 * DAY);
     await assertFails(updateDoc(doc(db, "problems", "q49_locked"), {
       title: "Changed after a proposal", expiresAt: extended, updatedAt: serverTimestamp(),
@@ -1775,7 +1813,7 @@ describe("problems/{problemId} funded posting", () => {
         status: "matched",
         expiresAt: elapsed,
       }));
-      await setDoc(doc(ctx.firestore(), "opportunityMetrics", "q49_matched_elapsed"), { proposalCount: 1 });
+      await setDoc(doc(ctx.firestore(), "opportunityProposalLocks", "q49_matched_elapsed"), { proposalId: "legacy-child", researcherId: ADDRESS, createdAt: new Date() });
       await setDoc(doc(ctx.firestore(), "problems", "q49_review_live"), submitted({
         status: "in_review",
       }));
@@ -2434,6 +2472,21 @@ describe("problems/{problemId} drafts", () => {
     await assertFails(setDoc(doc(owner, "problems", "d57_trail", "revisions", "r_forged"), { ownerId: ADDRESS }));
   });
 
+  it("fails material edits closed before the legacy first-lock backfill is ready", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore(), id = "first-lock-migration-gate";
+    await assertSucceeds(setDoc(doc(db, "problems", id), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", id), { ...completeFields(), status: "submitted", updatedAt: serverTimestamp() }));
+    // Seed the exact content proof first, then remove readiness immediately
+    // before the raw write so the publication fixture cannot restore it.
+    const patch = { title: "Blocked until legacy locks exist", updatedAt: serverTimestamp() };
+    await seedPublicationFixture(env, doc(db, "problems", id), patch, true);
+    await env.withSecurityRulesDisabled(ctx => deleteDoc(doc(ctx.firestore(), "maintenanceState", "opportunityProposalLocksV1")));
+    await assertFails(rawUpdateDoc(doc(db, "problems", id), patch));
+    await assertSucceeds(rawUpdateDoc(doc(db, "problems", id), { attachments: [], updatedAt: serverTimestamp() }));
+    await env.withSecurityRulesDisabled(ctx => rawSetDoc(doc(ctx.firestore(), "maintenanceState", "opportunityProposalLocksV1"), { ready: true, version: 1 }));
+    await assertSucceeds(rawUpdateDoc(doc(db, "problems", id), patch));
+  });
+
   it("locks material fields after the first proposal and still allows attachment edits", async () => {
     const db = env.authenticatedContext(ADDRESS).firestore();
     await assertSucceeds(setDoc(doc(db, "problems", "d57_edit"), emptyDraft()));
@@ -2444,6 +2497,7 @@ describe("problems/{problemId} drafts", () => {
       title: "Corrected before any proposal", updatedAt: serverTimestamp(),
     }));
     await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "opportunityProposalLocks", "d57_edit"), { proposalId: "legacy-child", researcherId: ADDRESS, createdAt: new Date() });
       await setDoc(doc(ctx.firestore(), "opportunityMetrics", "d57_edit"), {
         problemId: "d57_edit",
         proposalCount: 1,
@@ -2458,6 +2512,29 @@ describe("problems/{problemId} drafts", () => {
     await assertSucceeds(updateDoc(doc(db, "problems", "d57_edit"), {
       attachments: [], updatedAt: serverTimestamp(),
     }));
+  });
+
+  it("blocks a same-batch material edit alongside the first paired proposal", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore(), id = "first-lock-same-batch", proposalId = "first-lock-child";
+    await assertSucceeds(setDoc(doc(db, "problems", id), emptyDraft()));
+    await assertSucceeds(updateDoc(doc(db, "problems", id), { ...completeFields(), status: "submitted", updatedAt: serverTimestamp() }));
+    const change = { title: "Terms changed while the first proposal arrives", updatedAt: serverTimestamp() };
+    const child = { ...baseProposal({ problemId: id }), status: "submitted", postingOwnerId: ADDRESS,
+      opportunityType: "business-problem", category: "quantum-annealing", currency: "USDC",
+      methodology: "Classical and quantum baselines", suitability: "Combinatorial routing", expectedOutcomes: "Better routes",
+      successCriteria: "Ten percent", timeline: "Twelve weeks", milestones: "Baseline and pilot", team: "Research team", attachments: [],
+      reviewedParentAudit: { chainId: 421614, contractAddress: `0x${"7".repeat(40)}`, entityId: `0x${"8".repeat(64)}`,
+        contentHash: `0x${"9".repeat(64)}`, revisionDigest: `0x${"9".repeat(64)}`, revisionIndex: 0 },
+      audit: baseAudit({ transactionHash: `0x${"4".repeat(64)}`, status: "pending", attemptCount: 1 }),
+    };
+    await seedPublicationFixture(env, doc(db, "problems", id), change, true);
+    await seedPublicationFixture(env, doc(db, "proposals", proposalId), child);
+    const batch = writeBatch(db);
+    batch.update(doc(db, "problems", id), change);
+    batch.set(doc(db, "proposals", proposalId), child);
+    batch.set(doc(db, "problems", id, "proposalAuthors", ADDRESS), { proposalId });
+    batch.set(doc(db, "opportunityProposalLocks", id), { proposalId, researcherId: ADDRESS, createdAt: serverTimestamp() });
+    await assertFails(batch.commit());
   });
 });
 

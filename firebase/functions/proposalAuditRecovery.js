@@ -7,6 +7,7 @@ import { isEscrowRegistry, verifyProposalEscrow } from "./escrowAudit.js";
 import registry from "./auditRegistry.contract.json" with { type: "json" };
 import { isActiveAuditDeployment, resolveAuditDeployment } from "./auditDeployments.js";
 import { opportunityReceiptEvent, proposalReceiptEvent } from "./auditReceipt.js";
+import { readOpportunityProposalLockRepair } from "./opportunityProposalLocks.js";
 
 export const AUDIT_JOBS = "proposalAuditJobs";
 export const RETRY_LIMIT = 3;
@@ -89,7 +90,22 @@ export async function verifyMinedProposal(record, client, { readAttachment = rea
   if (!event) {
     throw new Error("Mismatch detected: the stored proposal differs from the submitted transaction.");
   }
-  if (!independent) expected = withOpportunityRevisionIndex(expected, Number(event.args.opportunityRevisionIndex));
+  if (!independent && expected.reviewedParentAudit) {
+    const reviewed = expected.reviewedParentAudit;
+    if (Number(event.args.opportunityRevisionIndex) !== reviewed.revisionIndex
+        || !same(event.args.opportunityRevisionDigest, reviewed.revisionDigest)) {
+      throw new Error("Mismatch detected: the transaction used an opportunity revision the researcher did not review.");
+    }
+    const revision = await client.readContract({ address, abi: registryConfig.abi,
+      functionName: "opportunityRevisionAt", args: [expected.opportunityId, BigInt(reviewed.revisionIndex)] });
+    if (!same(revision.contentHash ?? revision[0], reviewed.contentHash)) {
+      throw new Error("Mismatch detected: the reviewed opportunity content differs from AuditRegistry.");
+    }
+  } else if (!independent) {
+    // Legacy documents did not retain their viewed parent. Preserve read and
+    // recovery compatibility without extending that fallback to bound records.
+    expected = withOpportunityRevisionIndex(expected, Number(event.args.opportunityRevisionIndex));
+  }
   await verifyAttachmentBytes(record, readAttachment, { independent });
   const actual = await client.readContract({ address, abi: registryConfig.abi,
     functionName: independent ? "getOpportunity" : "getProposal", args: [expected.entityId] });
@@ -196,7 +212,11 @@ export async function recoverProposalAudit({ db, client, proposalId, now, Timest
       tx.update(jobRef, { status: "failed", lastError: "The record changed during verification. Refresh and retry.", leaseUntil: now });
       return false;
     }
-    if (audit) tx.update(recordRef, { audit, updatedAt: now });
+    if (audit) {
+      const repairLock = await readOpportunityProposalLockRepair({ tx, db, recordId: proposalId, storedRecord: latest.data(), now });
+      repairLock();
+      tx.update(recordRef, { audit, updatedAt: now });
+    }
     const retry = failure?.transient && job.attemptCount < RETRY_LIMIT;
     if (failure && latest.data().audit?.status !== "confirmed") {
       tx.update(recordRef, { "audit.status": retry ? "pending" : "failed", "audit.lastError": failure.message, updatedAt: now });

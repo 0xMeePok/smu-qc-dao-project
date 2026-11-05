@@ -5,10 +5,13 @@
   "type": "module",
   "description": "Audit registry contract for anchoring proposal and solution hashes on Arbitrum Sepolia",
   "scripts": {
-    "compile": "hardhat compile",
-    "test": "hardhat test mocha",
-    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
-    "verify:arbitrum-sepolia": "node scripts/verify-live.js"
+    "compile": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat compile",
+    "test": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat test mocha",
+    "deploy:arbitrum-sepolia": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && hardhat run scripts/deploy.js --build-profile production --network arbitrumSepolia",
+    "verify:arbitrum-sepolia": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production . && node scripts/verify-live.js",
+    "postinstall": "node scripts/install-security.mjs",
+    "security:apply": "node ../../firebase/functions/securityDependencies/manage.mjs --apply --production .",
+    "security:verify": "node ../../firebase/functions/securityDependencies/manage.mjs --verify --production ."
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "4.0.15",

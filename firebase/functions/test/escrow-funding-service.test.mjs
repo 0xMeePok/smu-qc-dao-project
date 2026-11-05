@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Timestamp } from "firebase-admin/firestore";
 import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256 } from "viem";
-import { escrowClient, escrowConfig, escrowRecord, escrowAddress, owner, researcher, txHash } from "./fixtures/escrowAuditFixture.js";
+import { escrowClient, escrowConfig, escrowRecord, escrowAddress, owner, researcher, txHash, reviewedFundingDigest } from "./fixtures/escrowAuditFixture.js";
 import { memoryDb } from "./memoryDb.mjs";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
 import { fundingDigest } from "../escrowFundingEvents.js";
@@ -79,7 +79,7 @@ function fixture({ release = false } = {}) {
       fee: 0n, paid: release && Number(request.args[0]) === 0 };
     return result;
   };
-  return { db, client, config, record, parent, expected, state, receipts, anchors, reads, ranges, add, eventLog, now };
+  return { db, client, config, record, parent, expected, state, receipts, anchors, reads, ranges, add, eventLog, now, reviewedContextDigest: reviewedFundingDigest(record, config) };
 }
 
 const currentMainConfig = { ...config, abi: [...config.abi.filter(item => item.name !== "pendingProposalForPosting"),
@@ -114,6 +114,18 @@ function denseDeposits(f, count, depositsPerReceipt) {
 const indexedEvents = f => [...f.db.records].filter(([path]) => path.startsWith("escrowFundingEvents/")).map(([, event]) => event);
 
 describe("escrow funding service", () => {
+  it("rejects missing or stale reviewed deposit context before creating any funding intent", async () => {
+    for (const change of ["missing", "proposal-revision", "parent-revision"]) {
+      const f = fixture(); f.state.totalDeposited = 10n;
+      const read = f.client.readContract;
+      f.client.readContract = request => request.functionName === (change === "proposal-revision" ? "revisionCount" : "opportunityRevisionCount")
+        && change !== "missing" ? 2n : read(request);
+      await assert.rejects(prepareEscrowDeposit({ ...f, uid: owner, proposalId: f.record.id,
+        reviewedContextDigest: change === "missing" ? undefined : f.reviewedContextDigest }), /revision changed/);
+      assert(!f.db.records.has(`escrowFundingJobs/${key(f.record.id)}`));
+    }
+  });
+
   it("resumes a dense receipt within the confirmed head and only settles after every anchor is indexed", async () => {
     const f = fixture(), payments = [], signedBytes = "0x2345";
     denseDeposits(f, 101, 101);
@@ -490,12 +502,14 @@ describe("escrow funding service", () => {
     assert.equal(result.items.length, 1); assert.equal(result.unavailableItems, 0);
   });
 
-  it("rejects mismatched proposal content and never saves a confirmed projection on failed reconciliation", async () => {
+  it("reconciles immutable custody but blocks new funding when proposal content differs", async () => {
     const f = fixture(), read = f.client.readContract;
     f.client.readContract = async request => request.functionName === "getProposal"
       ? { ...await read(request), proposalHash: zero } : read(request);
-    await assert.rejects(syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner }), /mismatch/);
-    assert(!f.db.records.has(`escrowFundingSummaries/${key(f.record.id)}`));
+    const result = await syncEscrowFunding({ ...f, proposalId: f.record.id, uid: owner });
+    assert.equal(result.summary.contentMatches, false);
+    assert.match(result.summary.fundingBlockReason, /changed/);
+    assert.equal(result.summary.selectionGate.canSelect, false);
   });
 
   it("does not index a historical deployment as the active one", async () => {

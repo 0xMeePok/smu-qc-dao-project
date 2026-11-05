@@ -7,6 +7,7 @@ import { seedDashboardSnapshots } from "./fixtures/dashboardSnapshots.js";
 import { getFunderDashboard } from "../funderDashboard.js";
 import { readVerifiedFunding } from "../escrowFunding.js";
 import { prepareStoredProposal } from "../proposalAuditPayload.js";
+import { opportunityEntityId } from "../auditCanonical.js";
 import { Timestamp } from "firebase-admin/firestore";
 import { fundMockProposal, selectMockProposal, confirmMockProposal } from "../matching.js";
 import { openFundingFixture, owner, researcher, otherResearcher, poolAddress, zeroAddress } from "./fixtures/openFundingFixture.js";
@@ -280,6 +281,8 @@ describe("funder dashboard saved accounting", () => {
     f.config.escrow.tokens = [...f.config.escrow.tokens, { address: tokenAddress, symbol: "XSGD", decimals: 6 }];
     const row = f.proposals[1];
     row.opportunityType = "business-problem"; row.problemId = "xsgd-main"; row.currency = "XSGD";
+    row.reviewedParentAudit = { ...row.reviewedParentAudit,
+      entityId: opportunityEntityId(row.problemId, { actor: f.config.entityIdScheme === 2 ? owner : undefined }) };
     row.fundingTerms = { ...row.fundingTerms, token: tokenAddress };
     f.expected[1] = prepareStoredProposal(row, { registryConfig: f.config });
     f.db.records.set("problems/xsgd-main", { ownerId: owner, opportunityType: "business-problem", title: "XSGD challenge", status: "submitted" });

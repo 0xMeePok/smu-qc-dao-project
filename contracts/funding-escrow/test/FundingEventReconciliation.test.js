@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, terms, at, assertAccounting, State } from "./helpers.js";
 import { reconcileFundingReceipt } from "../../../firebase/functions/escrowFundingEvents.js";
@@ -44,9 +45,9 @@ describe("Production event reconciliation against mined escrow transactions", fu
     const c = await fixture({ ...plan, target: 1000n, feeBps: 100 });
     const transactions = [c.creation];
     const send = async promise => { const tx = await promise; await tx.wait(); transactions.push(tx); };
-    await send(c.escrow.connect(c.alice).deposit(400n));
-    await send(c.escrow.connect(c.bob).deposit(100n));
-    await send(c.escrow.connect(c.alice).deposit(500n));
+    await send(reviewedDeposit(c.escrow.connect(c.alice), 400n));
+    await send(reviewedDeposit(c.escrow.connect(c.bob), 100n));
+    await send(reviewedDeposit(c.escrow.connect(c.alice), 500n));
     await send(c.escrow.lockSelection(c.selectionId, c.solution.address));
     await send(c.escrow.connect(c.owner).approveSelection(c.selectionId));
     await send(c.escrow.connect(c.solution).approveSelection(c.selectionId));
@@ -73,7 +74,7 @@ describe("Production event reconciliation against mined escrow transactions", fu
 
   it("reconciles a cancelled escrow followed by a refund after its posting lock expires", async function () {
     const plan = { trancheBps: [5000, 5000] }, c = await fixture(plan), transactions = [c.creation];
-    transactions.push(await c.escrow.connect(c.alice).deposit(400n));
+    transactions.push(await reviewedDeposit(c.escrow.connect(c.alice), 400n));
     transactions.push(await c.escrow.cancel(c.reason));
     await at(c, c.expiresAt);
     transactions.push(await c.escrow.connect(c.alice).claimRefund());
@@ -89,7 +90,7 @@ describe("Production event reconciliation against mined escrow transactions", fu
     const plan = { trancheBps: [5000, 5000], reviewWindows: [86400, 86400] };
     const c = await fixture(plan), transactions = [c.creation];
     const send = async promise => { const tx = await promise; await tx.wait(); transactions.push(tx); };
-    await send(c.escrow.connect(c.alice).deposit(c.target));
+    await send(reviewedDeposit(c.escrow.connect(c.alice), c.target));
     await send(c.escrow.lockSelection(c.selectionId, c.solution.address));
     await send(c.escrow.connect(c.owner).approveSelection(c.selectionId));
     await send(c.escrow.connect(c.solution).approveSelection(c.selectionId));

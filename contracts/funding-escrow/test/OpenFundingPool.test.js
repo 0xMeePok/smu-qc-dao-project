@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { id as declineReason } from "ethers";
 import { at, fixture, scopedId, terms, State, Behavior } from "./helpers.js";
@@ -69,7 +70,7 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     const c = await grantFixture();
     const businessPostingId = await c.escrow.postingId();
     const businessProposalId = await c.escrow.proposalId();
-    await c.escrow.connect(c.alice).deposit(c.target);
+    await reviewedDeposit(c.escrow.connect(c.alice), c.target);
     await c.escrow.connect(c.platform).lockSelection(c.selectionId, c.solution.address);
     const first = await proposal(c, "parallel-grant-one");
     const second = await proposal(c, "parallel-grant-two", c.bob);
@@ -126,7 +127,7 @@ describe("OpenFundingPool: prefunded single-owner grants", function () {
     await expect(proposal(c, "unfunded")).to.be.revertedWithCustomError(c.factory, "InvalidInput");
     await c.pool.connect(c.owner).deposit(GRANT);
     const p = await proposal(c, "funded");
-    await expect(p.escrow.connect(c.alice).deposit(1)).to.be.revertedWithCustomError(p.escrow, "AccessDenied");
+    await expect(reviewedDeposit(p.escrow.connect(c.alice), 1)).to.be.revertedWithCustomError(p.escrow, "AccessDenied");
     await expect(p.escrow.connect(c.platform).lockSelection(c.selectionId, c.solution.address))
       .to.be.revertedWithCustomError(p.escrow, "AccessDenied");
     await expect(p.escrow.connect(c.owner).rejectSelection(p.id, c.reason))

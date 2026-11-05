@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { encodeFunctionData } from "viem";
 import { Timestamp } from "firebase-admin/firestore";
 import { createHash } from "node:crypto";
-import { verifyPublication } from "../publication.js";
+import { verifyPublication, requireReviewedParentPublication } from "../publication.js";
 import { prepareOpportunityCommit, prepareProposalCommit, opportunityEntityId } from "../auditCanonical.js";
 import { postingAuditPayload, fundingOpportunityAuditPayload } from "../opportunityAuditPayload.js";
 import registry from "../auditRegistry.contract.json" with { type: "json" };
@@ -32,6 +32,25 @@ function clientFor(record, update = false, legacy = false) {
   };
 }
 describe("QCDAO-131 trusted publication boundary", () => {
+  it("requires the exact current reviewed parent for new submissions and draft promotion", () => {
+    for (const funding of [false, true]) {
+      const parent = fixture(funding);
+      const expected = prepareOpportunityCommit({ recordId: parent.id,
+        actor: registry.entityIdScheme === 2 ? parent.ownerId : undefined,
+        payload: funding ? fundingOpportunityAuditPayload(parent) : postingAuditPayload(parent),
+        kind: funding ? 1 : 0, expiresAt: parent.expiresAt });
+      const record = { problemId: parent.id, reviewedParentAudit: {
+        chainId: registry.chainId, contractAddress: registry.address.toLowerCase(), entityId: expected.entityId,
+        contentHash: expected.contentHash, revisionDigest: expected.contentHash, revisionIndex: 0,
+      } };
+      for (const existingRecord of [undefined, { status: "draft" }]) {
+        assert.doesNotThrow(() => requireReviewedParentPublication(record, { parent, existingRecord }));
+        assert.throws(() => requireReviewedParentPublication({ ...record, reviewedParentAudit: undefined }, { parent, existingRecord }), /Review the current/);
+        assert.throws(() => requireReviewedParentPublication(record, { parent: { ...parent, amount: parent.amount + 1 }, existingRecord }), /changed since/);
+      }
+      assert.doesNotThrow(() => requireReviewedParentPublication({ problemId: parent.id }, { existingRecord: { status: "submitted" } }));
+    }
+  });
   for (const funding of [false, true]) for (const update of [false, true]) it(`verifies ${funding ? "funding" : "problem"} ${update ? "correction" : "publication"}`, async () => {
     const record = fixture(funding);
     assert.equal((await verifyPublication({ scope: "problems", record, client: clientFor(record, update) })).status, "confirmed");

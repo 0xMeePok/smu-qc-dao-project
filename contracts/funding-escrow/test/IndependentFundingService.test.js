@@ -46,6 +46,7 @@ async function fixture() {
   record.audit = { schemaVersion: 2, chainId: 421614, status: "pending", transactionHash: anchor.hash,
     entityId: expected.entityId, contentHash: expected.contentHash };
   const db = memoryDb({ [`proposals/${record.id}`]: record,
+    "maintenanceState/evidenceQuotasV1": { ready: true, version: 1 },
     ...Object.fromEntries([admin, researcher, alice, bob].map(signer => [`users/${uid(signer)}`, { role: signer === admin ? 1 : 0 }])) });
   const originalCollection = db.collection;
   db.collection = name => {

@@ -172,6 +172,9 @@ try {
       suitability: "Fits the grant thesis", expectedOutcomes: "A working prototype", successCriteria: "Published benchmarks",
       timeline: "Eight weeks", milestones: "Baseline, prototype, validation", team: "Local test researcher",
       amount: index === 2 ? 10000 : 50000, currency: "USDC", status: "submitted", attachments: [] };
+    record.reviewedParentAudit = { chainId: config.chainId, contractAddress: lower(config.address),
+      entityId: preparedPosting.entityId, contentHash: preparedPosting.contentHash,
+      revisionIndex: 0, revisionDigest: preparedPosting.contentHash };
     record.fundingTerms = proposalFundingTerms({ form: { ...record, amount: String(record.amount), reviewDays: "7, 30", funderVoting: false }, currency: record.currency, config });
     const prepared = prepareStoredProposal(record, { registryConfig: config });
     const tx = await confirm(registry.connect(signer)[prepared.functionName](...prepared.args));
@@ -279,7 +282,10 @@ try {
   const shortPoolAddress = (await summary(owner.address, shortId)).poolAddress;
   await confirm(token.connect(owner).approve(shortPoolAddress, ethers.MaxUint256));
   await action(owner, "deposit", { problemId: shortId, amountBaseUnits: units(1000).toString() });
-  const shortRecord = { ...proposals[0].record, id: shortProposalId, problemId: shortId, amount: 1000, status: "submitted" };
+  const shortRecord = { ...proposals[0].record, id: shortProposalId, problemId: shortId, amount: 1000, status: "submitted",
+    reviewedParentAudit: { chainId: config.chainId, contractAddress: lower(config.address),
+      entityId: shortCommit.entityId, contentHash: shortCommit.contentHash,
+      revisionIndex: 0, revisionDigest: shortCommit.contentHash } };
   shortRecord.fundingTerms = proposalFundingTerms({ form: { ...shortRecord, amount: "1000", reviewDays: "7, 30", funderVoting: false }, currency: "USDC", config });
   const shortPrepared = prepareStoredProposal(shortRecord, { registryConfig: config });
   const shortProposalTx = await confirm(registry.connect(researcherA)[shortPrepared.functionName](...shortPrepared.args));

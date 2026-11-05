@@ -45,6 +45,7 @@ import {
   receiptForWrite,
 } from "../lib/fundingOpportunityAudit.js";
 import { canEditOpportunity, isExpiredOpportunity, materialFieldsLocked } from "../lib/opportunityEdit.js";
+import { assertOpportunityMaterialEditAllowed } from "../lib/postings.js";
 import { getMockMatching, problemMatchingLocked } from "../lib/matching.js";
 import { auditErrorMessage, messageForFirebaseError, messageForPublicationSaveError } from "../lib/errors.js";
 
@@ -387,6 +388,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         } : {}),
       });
       pendingRecordRef.current = record;
+
+      if (editing) await assertOpportunityMaterialEditAllowed(opportunityId, record);
 
       const audit = await anchorFundingOpportunityAudit({
         id: opportunityId,

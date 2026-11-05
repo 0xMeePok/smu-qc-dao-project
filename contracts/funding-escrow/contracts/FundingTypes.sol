@@ -43,6 +43,7 @@ interface IFundingFactory {
 }
 
 interface IEscrowAuditRegistry {
+    function fundingContextDigest(bytes32 proposalId) external view returns (bytes32);
     function isFundingActive(bytes32 proposalId, address escrow) external view returns (bool);
     function isFundingInvalidated(bytes32 proposalId, address escrow) external view returns (bool);
     function recordFundingEvent(bytes32 proposalId, FundingEvent eventType, bytes32 digest, address actor) external;

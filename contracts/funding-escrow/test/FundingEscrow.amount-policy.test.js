@@ -1,3 +1,4 @@
+import { reviewedDeposit } from "./helpers.js";
 import { expect } from "chai";
 import { fixture, createProposal } from "./helpers.js";
 import { fundingPolicyCases } from "./fundingPolicyCases.js";
@@ -15,8 +16,8 @@ describe("FundingEscrow: contribution amount policy", function () {
 describe("Funding amount policy preserves six-decimal settlement", function () {
   it("retains sub-cent milestone fees and funder-approved final payments", async function () {
     const c = await fixture({ decimals: 6, target: 10_010_000n, feeBps: 25, trancheBps: [5000, 5000], funderVoting: true });
-    await c.escrow.connect(c.alice).deposit(6_010_000n);
-    await c.escrow.connect(c.bob).deposit(4_000_000n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 6_010_000n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 4_000_000n);
     await c.escrow.lockSelection(c.selectionId, c.solution.address);
     await c.escrow.connect(c.owner).approveSelection(c.selectionId);
     await c.escrow.connect(c.solution).approveSelection(c.selectionId);
@@ -36,8 +37,8 @@ describe("Funding amount policy preserves six-decimal settlement", function () {
   });
   it("returns every unpaid base unit without charging a refund fee", async function () {
     const c = await fixture({ decimals: 6, target: 10_010_000n, feeBps: 25, trancheBps: [5000, 5000] });
-    await c.escrow.connect(c.alice).deposit(6_010_000n);
-    await c.escrow.connect(c.bob).deposit(4_000_000n);
+    await reviewedDeposit(c.escrow.connect(c.alice), 6_010_000n);
+    await reviewedDeposit(c.escrow.connect(c.bob), 4_000_000n);
     await c.escrow.lockSelection(c.selectionId, c.solution.address);
     await c.escrow.connect(c.owner).approveSelection(c.selectionId);
     await c.escrow.connect(c.solution).approveSelection(c.selectionId);
