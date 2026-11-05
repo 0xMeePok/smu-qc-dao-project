@@ -55,6 +55,30 @@ async function submit(db, id, data, withSlot = true) {
   return batch.commit();
 }
 describe("QCDAO-59/60 submitted proposals", () => {
+  it("denies a fresh submission that carries server-owned matching, moderation or browsability fields", async () => {
+    // The proof marker vouches for the attested payload, not for the document the
+    // client then writes. A publish must reproduce that payload exactly; the wider
+    // tolerance exists only for corrections of records the server already stamped.
+    const problemId = await parent(), db = env.authenticatedContext(AUTHOR).firestore();
+    const clean = record(problemId, { audit: attachedReceipt() });
+    const seeded = [
+      { matching: { status: "awaiting_confirmation", proposalId: "forged", fundedMinor: 100000, evaluationComplete: true } },
+      { moderation: { lastAction: "restore", moderatorId: AUTHOR, reason: "self-restored" } },
+      { moderationStatus: "visible" },
+      { problemBrowsable: true },
+    ];
+    for (const [index, extra] of seeded.entries()) {
+      const id = `seeded-projection-${serial}-${index}`;
+      await seedPublicationFixture(env, doc(db, "proposals", id), clean);
+      const batch = writeBatch(db);
+      batch.set(doc(db, "proposals", id), { ...clean, ...extra });
+      batch.set(doc(db, "problems", problemId, "proposalAuthors", AUTHOR), { proposalId: id });
+      await pairProposalLock(batch, db, problemId, id);
+      await assertFails(batch.commit());
+    }
+    await assertSucceeds(submit(db, `seeded-projection-${serial}-clean`, clean));
+  });
+
   it("requires an atomic immutable first-submission lock before projections exist", async () => {
     const problemId = await parent(), db = env.authenticatedContext(AUTHOR).firestore();
     const proposalId = "paired-first-submission", data = record(problemId, { audit: attachedReceipt() });

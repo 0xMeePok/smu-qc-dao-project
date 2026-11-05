@@ -1398,7 +1398,13 @@ service cloud.firestore {
         // has the server-stamped flag, which the proof omits, so the second
         // list has to allow it.
         && (data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit'])
-          || data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit', 'problemBrowsable', 'matching', 'moderationStatus', 'moderation']));
+          // Only a correction of a record the server has already stamped may
+          // differ in these server-owned maps. A fresh publish (create, or a
+          // draft being submitted) has nothing stamped yet, so it must match
+          // the proof exactly; otherwise the client could seed matching,
+          // moderation or browsability state the server never derived.
+          || (resource != null && resource.data.status != 'draft'
+            && data.diff(proof.record).affectedKeys().hasOnly(['createdAt', 'updatedAt', 'audit', 'problemBrowsable', 'matching', 'moderationStatus', 'moderation'])));
     }
 
     // A posting becoming marketplace-visible (create as submitted, or a draft being
