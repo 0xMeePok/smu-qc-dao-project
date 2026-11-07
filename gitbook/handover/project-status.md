@@ -1,6 +1,6 @@
 # Project status
 
-As of 27 October 2026, Sprints 1 to 5 are complete and Sprint 6 (26 October to 8 November 2026) is underway. The core workflow, the on-chain audit layer, the escrow lifecycle and Privy email sign-in are live on testnet. The selected-proposal export is in the admin workspace. The remaining scope is local-currency display, the funding entry points for email wallets, and final stabilisation and UAT.
+As of 7 November 2026, `main` (`a634f09c`) matches a backlog in which every issue is Done. The core workflow, the on-chain audit layer, the escrow lifecycle, Privy email sign-in, in-app test stablecoins, the selected-proposal export, Google FX local-currency display, the mocked on-ramp and AI drafting are on testnet. Final documentation, UAT evidence and the demo still have no tickets.
 
 The backlog is the Jira project [`QCDAO`](https://qc-dao-fyp.atlassian.net/browse/QCDAO).
 
@@ -9,7 +9,7 @@ The backlog is the Jira project [`QCDAO`](https://qc-dao-fyp.atlassian.net/brows
 | Epic | Name | Jira status | Done items |
 | --- | --- | --- | --- |
 | [QCDAO-27](https://qc-dao-fyp.atlassian.net/browse/QCDAO-27) | Account, Authentication and Role Access | Done | 7 |
-| [QCDAO-28](https://qc-dao-fyp.atlassian.net/browse/QCDAO-28) | Opportunity Posting and Discovery | In Progress | 11 |
+| [QCDAO-28](https://qc-dao-fyp.atlassian.net/browse/QCDAO-28) | Opportunity Posting and Discovery | Done | 12 |
 | [QCDAO-29](https://qc-dao-fyp.atlassian.net/browse/QCDAO-29) | Solution Proposal and Evaluator Recommendations | Done | 9 |
 | [QCDAO-30](https://qc-dao-fyp.atlassian.net/browse/QCDAO-30) | Structured Commenting and Rule-Based Grading | Done | 2 |
 | [QCDAO-31](https://qc-dao-fyp.atlassian.net/browse/QCDAO-31) | Blockchain Audit and Verification Layer | Done | 7 |
@@ -17,16 +17,16 @@ The backlog is the Jira project [`QCDAO`](https://qc-dao-fyp.atlassian.net/brows
 | [QCDAO-33](https://qc-dao-fyp.atlassian.net/browse/QCDAO-33) | Administrator Content Moderation | Done | 4 |
 | [QCDAO-34](https://qc-dao-fyp.atlassian.net/browse/QCDAO-34) | Role-Based Dashboards and Consolidated Audit Trail | Done | 8 |
 | [QCDAO-35](https://qc-dao-fyp.atlassian.net/browse/QCDAO-35) | Researcher-Led Proposals and Funding Approach | Done | 5 |
-| [QCDAO-36](https://qc-dao-fyp.atlassian.net/browse/QCDAO-36) | QFT Token Creation and Simulation | In Progress | 1 |
+| [QCDAO-36](https://qc-dao-fyp.atlassian.net/browse/QCDAO-36) | QFT Token Creation and Simulation | Done | 2 |
 | [QCDAO-37](https://qc-dao-fyp.atlassian.net/browse/QCDAO-37) | Testnet Funding Escrow Simulation | Done | 10 |
-| [QCDAO-39](https://qc-dao-fyp.atlassian.net/browse/QCDAO-39) | Secondary X-Factors and Platform Polish | In Progress | 2 |
-| [QCDAO-153](https://qc-dao-fyp.atlassian.net/browse/QCDAO-153) | Integrating Privy Wallet, Dropping Metamask | In Progress | 8 |
+| [QCDAO-39](https://qc-dao-fyp.atlassian.net/browse/QCDAO-39) | Secondary X-Factors and Platform Polish | Done | 4 |
+| [QCDAO-153](https://qc-dao-fyp.atlassian.net/browse/QCDAO-153) | Integrating Privy Wallet, Dropping Metamask | Done | 10 |
 
-Three Done items have no epic: two security fixes (QCDAO-121, QCDAO-132) and a frontend refactor with UI tests (QCDAO-130).
+Six Done items have no epic: QCDAO-121, QCDAO-130, QCDAO-132, QCDAO-158, QCDAO-159 and QCDAO-160.
 
 ## Epic descriptions
 
-Copied word for word from the Jira epics on 26 October 2026.
+Copied word for word from the Jira epics on 26 October 2026. Where this text disagrees with the code, use [Where the build differs from older documents](#where-the-build-differs-from-older-documents).
 
 ### QCDAO-27 Account, Authentication and Role Access
 
@@ -125,7 +125,7 @@ Done Jira items per sprint, including bugs and tasks:
 | 3 | to 27 Sep 2026 | Proposals, evaluator recommendations, commenting, owner selection and dual approval | 20 |
 | 4 | to 11 Oct 2026 | Moderation, dashboards, audit trail, researcher-led proposals, escrow payments | 23 |
 | 5 | to 25 Oct 2026 | Privy email sign-in and gas sponsorship, the full escrow lifecycle | 14 |
-| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, funding entry points, stabilisation and UAT | 2 built, 5 open |
+| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, in-app test stablecoins, mocked on-ramp, AI drafting, CI, UI polish and the security scan | Done |
 
 The final demo and handover is planned for 15 November 2026 (Week 13).
 
@@ -138,5 +138,8 @@ The project proposal and some older repository text describe earlier designs. Wh
 | The proposal says the embedded wallet signs a sign-in challenge | No signature is used at sign-in. The server verifies Privy's access token and reads the wallet from Privy |
 | `firebase/MOCK_MATCHING.md` describes an off-chain mock matching flow | Still in the code, but every proposal under the current registry uses on-chain escrow |
 | Early README text says QFT is not deployed | Jira marks QCDAO-103 Done, but no deployment address is recorded in the repository. Confirm with the team before relying on it |
+| QCDAO-39's epic text names a Chainlink price feed | QCDAO-118 is Done. `getFxRates` reads Google Finance. Amounts stay in test tokens. Nothing converts on-chain |
+| The 27 October handover said AI drafting was not started | QCDAO-157 is Done. `draftWithAI` and `findSimilarProposals` run in Cloud Functions. The author reviews every suggestion before anything is saved |
+| A member wallet could release the last half of independent crowdfunding | Funders holding more than half of the deposits vote yes, then an administrator calls `releaseIndependentFundingCompletion`. The platform signer sends the payment |
 
 Some ticket numbers are missing because descoped stories were deleted rather than closed: QCDAO-42, 65, 71, 72, 73 and 120. They included the evaluation-completion gate and the comment-grading model.

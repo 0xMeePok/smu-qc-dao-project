@@ -46,8 +46,8 @@ Privy and the Firebase session.
 
 | Layer | Technology | Description |
 |---|---|---|
-| Frontend | React 18, Vite 6, Vanilla CSS | Single-page application with role-based routing and zero UI framework dependencies. |
-| Backend / Off-chain Data | Firebase (Firestore, Auth, Storage, App Check, Hosting), Cloud Functions on Node 22 | Off-chain records, attachments, 93 Cloud Functions for sign-in, verification, escrow settlement, moderation and scheduled jobs. |
+| Frontend | React 18, Vite 7, Vanilla CSS | Single-page application with role-based routing and zero UI framework dependencies. |
+| Backend / Off-chain Data | Firebase (Firestore, Auth, Storage, App Check, Hosting), Cloud Functions on Node 22 | Off-chain records, attachments, 103 Cloud Functions for sign-in, verification, escrow settlement, moderation, local-currency quotes, AI drafting and scheduled jobs. |
 | Smart Contracts | Solidity (0.8.28), Arbitrum Sepolia | Verifiable audit log and hash anchoring (Chain ID: `421614`). |
 | Contract Tooling | Hardhat, Etherscan API v2 | Local testing, deployment pipelines, and automated Arbiscan verification. |
 | Wallet Integration | Privy (email login + embedded wallets) / viem | Email sign-in, embedded-wallet signing and on-chain audit transactions. |

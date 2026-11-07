@@ -44,7 +44,7 @@ gcloud services enable \
 | API | Why |
 | --- | --- |
 | Cloud Functions, Cloud Run, Cloud Build, Artifact Registry | Build and run second-generation functions |
-| Eventarc | Deliver Firestore events to the 17 triggered functions |
+| Eventarc | Deliver Firestore events to the 18 triggered functions |
 | Cloud Scheduler | Run the seven scheduled functions. A deploy with scheduled functions fails without it |
 | Secret Manager | `PRIVY_SECRET` and `ESCROW_PLATFORM_PRIVATE_KEY` |
 | IAM Service Account Credentials | Lets the Admin SDK sign custom tokens without a key file |

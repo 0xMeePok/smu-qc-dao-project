@@ -32,7 +32,7 @@ Ask the current owners for these before the handover meeting. The [handover chec
 | Git | Any recent | Clone and branch |
 | Node.js and npm | 22.13 or newer | Functions run on Node 22, `contracts/funding-escrow` needs 22.13 or newer and the frontend needs 20.19 or newer, so 22.13 or newer covers all of them |
 | Java | 17 or newer | Firestore emulator and the rules tests |
-| Firebase CLI | Use the copy in `firebase/node_modules` through `npx firebase` | Emulators and deploys. Pinned to 14.27.0 |
+| Firebase CLI | Use the copy in `firebase/node_modules` through `npx firebase` | Emulators and deploys. Pinned to 15.35.0 |
 | Google Cloud CLI (`gcloud`) | Any recent | Storage CORS and lifecycle, preview channels, IAM |
 | A Chromium browser | Any recent | Privy's modal and DevTools for CSP checks |
 

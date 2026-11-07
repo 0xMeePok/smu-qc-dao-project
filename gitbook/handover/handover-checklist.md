@@ -34,7 +34,7 @@ Use this list in the handover meeting. Fill in the owner columns together, then 
 | Item | Done |
 | --- | --- |
 | All work merged to `main`, no long-lived branches left that matter | [ ] |
-| Jira statuses match the code, including QCDAO-147, 151 and 155 | [ ] |
+| Jira matches the code: every issue is Done | [ ] |
 | This book and the repository docs updated for the final release | [ ] |
 | Final release tagged in Git | [ ] |
 | UAT evidence and the final demo recording stored where the sponsor can reach them | [ ] |

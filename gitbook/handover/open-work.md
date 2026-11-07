@@ -1,22 +1,23 @@
 # Open work and known gaps
 
-## Sprint 6 stories
+Checked against the Jira project `QCDAO` and `main` at `a634f09c` on 7 November 2026. Every issue is Done.
 
-[QCDAO-107](https://qc-dao-fyp.atlassian.net/browse/QCDAO-107) is built. An administrator exports an accepted posting, or every accepted posting in a date range, from **Proposal export**. See [Export selected proposals](../operations/proposal-export.md).
+## Done on main, previously listed as open
 
-[QCDAO-158](https://qc-dao-fyp.atlassian.net/browse/QCDAO-158) is built. `deploy.yml`, `funding-escrow.yml`, `gitleaks.yml` and `semgrep.yml` are jobs in `.github/workflows/ci.yml`, with shared setup in `.github/actions/setup-workspace`. Each area runs only when its files change, and **CI** is the required check. See [CI/CD and quality checks](../repository/ci-cd.md).
+| Story | What `main` does |
+| --- | --- |
+| [QCDAO-107](https://qc-dao-fyp.atlassian.net/browse/QCDAO-107) Export proposals and commenters | **Proposal export** writes JSON and CSV for one accepted posting, chosen proposals, or a UTC date range. See [Export selected proposals](../operations/proposal-export.md) |
+| [QCDAO-118](https://qc-dao-fyp.atlassian.net/browse/QCDAO-118) Local currency | Indicative Google Finance quotes through `getFxRates`. A profile preference selects the currency. Token amounts stay the settlement unit. No Chainlink feed and no on-chain conversion. See `docs/fx-rates.md` |
+| [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147) Get test stablecoins into an embedded wallet from inside QC DAO | The account menu **Faucet** calls `claimWalletTokens`. An email member mints XSGD, USDT or USDC and sees the balance without leaving QC DAO. See [Test-token faucet](../setup/test-token-faucet.md) |
+| [QCDAO-151](https://qc-dao-fyp.atlassian.net/browse/QCDAO-151) Mocked on-ramp | **Add funds** on the account menu and the escrow panel. `dueSandbox` returns a labelled testnet simulation and does not call Due or move tokens. See [Due sandbox on/off-ramp](../setup/due-on-off-ramp.md) |
+| [QCDAO-155](https://qc-dao-fyp.atlassian.net/browse/QCDAO-155) Role promotion | **Users & access**, **Change role** calls `adminChangeRole` with a reason. Access levels are 0 (member), 1 (administrator) and 2 (evaluator). An administrator cannot change their own role |
+| [QCDAO-156](https://qc-dao-fyp.atlassian.net/browse/QCDAO-156) Wallet actions | The account menu shows email, address and XSGD, USDT and USDC balances, and can send tokens or claim from the faucet |
+| [QCDAO-157](https://qc-dao-fyp.atlassian.net/browse/QCDAO-157) AI drafting | `draftWithAI` fills empty text fields. `findSimilarProposals` warns about existing proposals. Amounts, currency, expiry and dates stay with the author. See `docs/ai-assistance.md` |
+| [QCDAO-158](https://qc-dao-fyp.atlassian.net/browse/QCDAO-158) CI/CD | Checks and deploy are jobs in `.github/workflows/ci.yml`. Each area runs when its files change. See [CI/CD and quality checks](../repository/ci-cd.md) |
+| [QCDAO-159](https://qc-dao-fyp.atlassian.net/browse/QCDAO-159) UI polish | Done in Jira. Shared styling, spacing and states across the screens added in later sprints |
+| [QCDAO-160](https://qc-dao-fyp.atlassian.net/browse/QCDAO-160) Security scan | Done in Jira. Semgrep and Gitleaks still run in CI. Risks the repository still records are in the table below |
 
-Five stories are still open.
-
-| Story | What is asked | State of the code | Suggested next step |
-| --- | --- | --- | --- |
-| [QCDAO-118](https://qc-dao-fyp.atlassian.net/browse/QCDAO-118) Local currency through a Chainlink price feed | Show an indicative local-currency value beside token amounts, with a profile preference and graceful fallback | Not started | Confirm which Chainlink feeds exist on Arbitrum Sepolia before committing. Read the feed through the existing RPC client. Marked nice-to-have |
-| [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147) Get test stablecoins inside QC DAO | A faucet action on the escrow funding panel and in the account menu | Partly built. The account menu has **Faucet**, backed by `claimWalletTokens` (pull request #120). The funding panel has no entry point yet | Add the action to `EscrowFundingPanel`, then run the acceptance criteria and close the story |
-| [QCDAO-151](https://qc-dao-fyp.atlassian.net/browse/QCDAO-151) Add funds through Privy's on-ramp, mocked on testnet | An **Add funds** button on the escrow panel and in the account menu. The flow is labelled as a testnet simulation and cannot start a payment | Built. Both buttons open the same simulated buy and sell screens. No Due account or API key is used. See [Due sandbox on/off-ramp](../setup/due-on-off-ramp.md) | Walk through a buy and a sale, confirm the balance is unchanged, and close the story |
-| [QCDAO-155](https://qc-dao-fyp.atlassian.net/browse/QCDAO-155) Administrator and evaluator promotion | Promote members to administrator or evaluator from the user directory | Built. **Users & access**, **Change role** calls `adminChangeRole` with a reason | Run the acceptance criteria with Privy accounts and close the story |
-| [QCDAO-157](https://qc-dao-fyp.atlassian.net/browse/QCDAO-157) Draft a posting or proposal from its title with AI | Generate editable drafts for every text field, never amounts or dates, with rate limits | Not started | Needs a model provider key in Secret Manager and a new callable. Keep it server-side so no key reaches the browser |
-
-The proposal's Sprint 6 milestone also includes final documentation, UAT evidence and the demo, which have no tickets.
+Final documentation, UAT evidence and the demo still have no tickets.
 
 ## Known gaps and risks
 
