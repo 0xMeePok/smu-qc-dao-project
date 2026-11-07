@@ -1,6 +1,6 @@
 # QC DAO handover guide
 
-QC DAO is a working testnet platform. A new team can take it over by getting access to the accounts in the [handover checklist](handover/handover-checklist.md), following [Set up the platforms](setup/before-you-start.md), and then reading the [open work](handover/open-work.md). The backlog is Done except QCDAO-147, which was moved back to the product backlog.
+QC DAO is a working testnet platform. A new team can take it over by getting access to the accounts in the [handover checklist](handover/handover-checklist.md), following [Set up the platforms](setup/before-you-start.md), and then reading the [open work](handover/open-work.md). The backlog is Done.
 
 This book explains how the repository is organised, which technologies it uses and why, how to set up Firebase, Google Cloud and Privy, and how to test, deploy and operate the platform.
 

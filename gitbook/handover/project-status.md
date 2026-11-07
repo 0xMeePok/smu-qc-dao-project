@@ -1,6 +1,6 @@
 # Project status
 
-As of 7 November 2026, `main` (`a634f09c`) matches a backlog in which every epic is Done. The core workflow, the on-chain audit layer, the escrow lifecycle, Privy email sign-in, the selected-proposal export, Google FX local-currency display, the mocked on-ramp and AI drafting are on testnet. The only issue that is not Done is [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147), which was moved back to the product backlog. Final documentation, UAT evidence and the demo still have no tickets.
+As of 7 November 2026, `main` (`a634f09c`) matches a backlog in which every issue is Done. The core workflow, the on-chain audit layer, the escrow lifecycle, Privy email sign-in, in-app test stablecoins, the selected-proposal export, Google FX local-currency display, the mocked on-ramp and AI drafting are on testnet. Final documentation, UAT evidence and the demo still have no tickets.
 
 The backlog is the Jira project [`QCDAO`](https://qc-dao-fyp.atlassian.net/browse/QCDAO).
 
@@ -20,9 +20,9 @@ The backlog is the Jira project [`QCDAO`](https://qc-dao-fyp.atlassian.net/brows
 | [QCDAO-36](https://qc-dao-fyp.atlassian.net/browse/QCDAO-36) | QFT Token Creation and Simulation | Done | 2 |
 | [QCDAO-37](https://qc-dao-fyp.atlassian.net/browse/QCDAO-37) | Testnet Funding Escrow Simulation | Done | 10 |
 | [QCDAO-39](https://qc-dao-fyp.atlassian.net/browse/QCDAO-39) | Secondary X-Factors and Platform Polish | Done | 4 |
-| [QCDAO-153](https://qc-dao-fyp.atlassian.net/browse/QCDAO-153) | Integrating Privy Wallet, Dropping Metamask | Done | 9 |
+| [QCDAO-153](https://qc-dao-fyp.atlassian.net/browse/QCDAO-153) | Integrating Privy Wallet, Dropping Metamask | Done | 10 |
 
-QCDAO-153 also contains [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147), which is not Done. Six Done items have no epic: QCDAO-121, QCDAO-130, QCDAO-132, QCDAO-158, QCDAO-159 and QCDAO-160.
+Six Done items have no epic: QCDAO-121, QCDAO-130, QCDAO-132, QCDAO-158, QCDAO-159 and QCDAO-160.
 
 ## Epic descriptions
 
@@ -125,7 +125,7 @@ Done Jira items per sprint, including bugs and tasks:
 | 3 | to 27 Sep 2026 | Proposals, evaluator recommendations, commenting, owner selection and dual approval | 20 |
 | 4 | to 11 Oct 2026 | Moderation, dashboards, audit trail, researcher-led proposals, escrow payments | 23 |
 | 5 | to 25 Oct 2026 | Privy email sign-in and gas sponsorship, the full escrow lifecycle | 14 |
-| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, mocked on-ramp, AI drafting, CI, UI polish and the security scan | Done, except QCDAO-147, which was moved back to the backlog |
+| 6 | 26 Oct to 8 Nov 2026 | Export, local currency, in-app test stablecoins, mocked on-ramp, AI drafting, CI, UI polish and the security scan | Done |
 
 The final demo and handover is planned for 15 November 2026 (Week 13).
 

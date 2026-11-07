@@ -1,6 +1,6 @@
 # Open work and known gaps
 
-Checked against the Jira project `QCDAO` and `main` at `a634f09c` on 7 November 2026. Every epic is Done. The only issue that is not Done is [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147).
+Checked against the Jira project `QCDAO` and `main` at `a634f09c` on 7 November 2026. Every issue is Done.
 
 ## Done on main, previously listed as open
 
@@ -8,6 +8,7 @@ Checked against the Jira project `QCDAO` and `main` at `a634f09c` on 7 November 
 | --- | --- |
 | [QCDAO-107](https://qc-dao-fyp.atlassian.net/browse/QCDAO-107) Export proposals and commenters | **Proposal export** writes JSON and CSV for one accepted posting, chosen proposals, or a UTC date range. See [Export selected proposals](../operations/proposal-export.md) |
 | [QCDAO-118](https://qc-dao-fyp.atlassian.net/browse/QCDAO-118) Local currency | Indicative Google Finance quotes through `getFxRates`. A profile preference selects the currency. Token amounts stay the settlement unit. No Chainlink feed and no on-chain conversion. See `docs/fx-rates.md` |
+| [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147) Get test stablecoins into an embedded wallet from inside QC DAO | The account menu **Faucet** calls `claimWalletTokens`. An email member mints XSGD, USDT or USDC and sees the balance without leaving QC DAO. See [Test-token faucet](../setup/test-token-faucet.md) |
 | [QCDAO-151](https://qc-dao-fyp.atlassian.net/browse/QCDAO-151) Mocked on-ramp | **Add funds** on the account menu and the escrow panel. `dueSandbox` returns a labelled testnet simulation and does not call Due or move tokens. See [Due sandbox on/off-ramp](../setup/due-on-off-ramp.md) |
 | [QCDAO-155](https://qc-dao-fyp.atlassian.net/browse/QCDAO-155) Role promotion | **Users & access**, **Change role** calls `adminChangeRole` with a reason. Access levels are 0 (member), 1 (administrator) and 2 (evaluator). An administrator cannot change their own role |
 | [QCDAO-156](https://qc-dao-fyp.atlassian.net/browse/QCDAO-156) Wallet actions | The account menu shows email, address and XSGD, USDT and USDC balances, and can send tokens or claim from the faucet |
@@ -15,12 +16,6 @@ Checked against the Jira project `QCDAO` and `main` at `a634f09c` on 7 November 
 | [QCDAO-158](https://qc-dao-fyp.atlassian.net/browse/QCDAO-158) CI/CD | Checks and deploy are jobs in `.github/workflows/ci.yml`. Each area runs when its files change. See [CI/CD and quality checks](../repository/ci-cd.md) |
 | [QCDAO-159](https://qc-dao-fyp.atlassian.net/browse/QCDAO-159) UI polish | Done in Jira. Shared styling, spacing and states across the screens added in later sprints |
 | [QCDAO-160](https://qc-dao-fyp.atlassian.net/browse/QCDAO-160) Security scan | Done in Jira. Semgrep and Gitleaks still run in CI. Risks the repository still records are in the table below |
-
-## Still not Done
-
-| Story | What is asked | State of the code | Suggested next step |
-| --- | --- | --- | --- |
-| [QCDAO-147](https://qc-dao-fyp.atlassian.net/browse/QCDAO-147) Get test stablecoins inside QC DAO | A faucet action on the escrow funding panel and in the account menu | Moved back to the product backlog. The account menu **Faucet** calls `claimWalletTokens`. The escrow panel has **Add funds**, which is the QCDAO-151 simulation, and no faucet action | Leave it on the backlog. QCDAO-151's scope keeps minting on the standalone faucet. Reopen only if the escrow panel must mint tokens too |
 
 Final documentation, UAT evidence and the demo still have no tickets.
 
