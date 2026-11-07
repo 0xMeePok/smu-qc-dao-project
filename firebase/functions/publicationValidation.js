@@ -150,7 +150,9 @@ function validOpenFunding(record, profileOrganisation) {
     && nonEmpty(record.eligibilityNotes, 4000)
     && validCategories(record.categories)
     && validFundingTags(record.tags)
-    && validAmount(record.amount) && record.amount > 0
+    // Kept for compatibility with existing audit payloads; available funding is
+    // the grant pool's on-chain balance, so a new call starts at zero.
+    && validAmount(record.amount)
     && CURRENCIES.has(record.currency)
     && isString(record.organisation) && record.organisation === profileOrganisation;
 }

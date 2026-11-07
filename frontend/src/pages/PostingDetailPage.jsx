@@ -1,7 +1,9 @@
+import { formatUnits } from "viem";
+import { formatFundingAmount, fundingUnits } from "../lib/fundingDisplay.js";
 import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { proposalBlockReason } from "../lib/proposalValidation.js";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { QueryClient, QueryClientContext, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { fetchAuditVerification, useAuditVerification } from "../lib/escrowReads.js";
 import { flushSync } from "react-dom";
@@ -163,6 +165,8 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
   const readAudit = record => record?.opportunityType === OPEN_FUNDING_TYPE ? readFundingOpportunityAudit(record) : readPostingAudit(record);
   useAuditVerification(posting, readAudit);
   const liveScope = `${postingId}:${isAuthenticated}:${user?.id || ""}:${user?.isSuspended || false}:${user?.role || ""}:${(user?.roles ?? []).join(",")}`;
+  const [grantBalance, setGrantBalance] = useState(null);
+  const updateGrantBalance = useCallback(summary => setGrantBalance({ scope: liveScope, summary }), [liveScope]);
   const activeLiveScope = useRef(liveScope); activeLiveScope.current = liveScope;
   const accessGeneration = useRef(0);
   useEffect(() => { activeLiveScope.current = liveScope; return () => { activeLiveScope.current = null; }; }, [liveScope]);
@@ -452,6 +456,12 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
     ? `${posting.currency} ${requestedAmount.toLocaleString()}`
     : "—";
 
+  const pool = grantBalance?.scope === liveScope ? grantBalance.summary : null;
+  const available = pool?.supported ? fundingUnits(pool.available) : null;
+  const fundingLabel = available !== null && Number.isInteger(pool.tokenDecimals) && pool.tokenDecimals >= 0 && pool.tokenDecimals <= 77
+    ? formatFundingAmount(pool.tokenSymbol, formatUnits(available, pool.tokenDecimals))
+    : "Balance unavailable";
+
   const showCollaboration = posting.status !== "draft" && !isModerated(posting);
   const tabs = [
     ["overview", "Overview"],
@@ -611,7 +621,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
 
           {showCollaboration && (
             <div className={panel("funding")} role="tabpanel" id="posting-panel-funding" aria-labelledby="posting-tab-funding">
-              {isOpenFunding ? <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} postingOwnerId={posting.ownerId} onNavigate={onNavigate} onChange={reloadPosting} /> : <>
+              {isOpenFunding ? <OpenFundingPanel key={liveScope} onSummaryChange={updateGrantBalance} integrityBlocked={auditVerification?.kind === "mismatch"} problemId={posting.id} postingOwnerId={posting.ownerId} onNavigate={onNavigate} onChange={reloadPosting} /> : <>
                 <p className="field-hint posting-tab-note">Contributions fund individual proposals. Each proposal shows its own funding target and progress.</p>
                 {openedTabs.has("funding") && <PostingEscrowFunding problemId={posting.id} active={activeTab === "funding"} onNavigate={onNavigate} />}
                 <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={matchingRefresh} problemId={posting.id} onNavigate={onNavigate} onChange={(next) => setPosting((current) => ({ ...current, matching: { ...current.matching, ...next.matching } }))} />
@@ -643,7 +653,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
 
         <aside className="context-panel">
           <span className="eyebrow">{isOpenFunding ? "Funding available" : "Indicative proposal budget"}</span>
-          <strong><ConvertedAmount text={requestedLabel} /></strong>
+          <strong><ConvertedAmount text={isOpenFunding ? fundingLabel : requestedLabel} /></strong>
           <dl>
             <PosterIdentity
               ownerId={posting.ownerId}

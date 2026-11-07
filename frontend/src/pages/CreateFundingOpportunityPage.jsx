@@ -1,6 +1,5 @@
 import { useAIDrafting } from "../hooks/useAIDrafting.js";
 import { AIDraftFieldTools, AIDraftPanel, AIDraftScope } from "../components/AIDraftPanel.jsx";
-import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "../context/WalletContext.jsx";
 import { AttachmentUploader } from "../components/AttachmentUploader.jsx";
@@ -54,7 +53,7 @@ const EMPTY_FORM = {
   fundingThesis: "",
   eligibilityNotes: "",
   categories: [],
-  amount: "",
+  amount: 0,
   currency: CURRENCIES[0],
   expiryDays: DEFAULT_EXPIRY_DAYS,
   expiryExtensionDays: "",
@@ -64,7 +63,7 @@ const EMPTY_FORM = {
 const FUNDING_STEPS = [
   { label: "Funding direction", fields: ["title", "fundingThesis", "eligibilityNotes"] },
   { label: "Technology areas", fields: ["categories"] },
-  { label: "Funding & timeline", fields: ["amount", "currency", "expiryDays", "expiryExtensionDays"] },
+  { label: "Funding & timeline", fields: ["currency", "expiryDays", "expiryExtensionDays"] },
   { label: "Review", fields: [] },
 ];
 
@@ -118,7 +117,7 @@ function snapshotOf(form, attachments) {
   });
 }
 
-function formFromOpportunity(opportunity) {
+function formFromOpportunity(opportunity, editing = false) {
   return {
     ...EMPTY_FORM,
     ...(opportunity.aiAssisted === true ? { aiAssisted: true } : {}),
@@ -126,7 +125,8 @@ function formFromOpportunity(opportunity) {
     fundingThesis: opportunity.fundingThesis ?? "",
     eligibilityNotes: opportunity.eligibilityNotes ?? "",
     categories: Array.isArray(opportunity.categories) ? opportunity.categories : [],
-    amount: opportunity.amount ? String(opportunity.amount) : "",
+    // Preserve legacy audit terms when editing; drafts start without advertised funding.
+    amount: editing ? (opportunity.amount ?? 0) : 0,
     currency: opportunity.currency ?? EMPTY_FORM.currency,
     expiryDays: expiryWindowFor(opportunity.expiresAt, opportunity.createdAt) ?? EMPTY_FORM.expiryDays,
     expiryExtensionDays: "",
@@ -209,7 +209,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           setEditBlocked("This funding opportunity is already published. Open it from My Problems to edit.");
           return;
         }
-        const loaded = formFromOpportunity(opportunity);
+        const loaded = formFromOpportunity(opportunity, Boolean(editOpportunityId));
         const loadedAttachments = opportunity.attachments ?? [];
         setForm(loaded);
         setAttachments(loadedAttachments);
@@ -228,7 +228,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
   // clean and the prompt stays out of the way.
   const isDirty = useMemo(() => {
     if (baseline === null) {
-      return ["title", "fundingThesis", "eligibilityNotes", "amount"]
+      return ["title", "fundingThesis", "eligibilityNotes"]
         .some((key) => String(form[key] ?? "").trim().length > 0)
         || form.categories.length > 0
         || attachments.length > 0;
@@ -317,13 +317,6 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
     setForm((current) => ({ ...current, [name]: value }));
     setSubmitError(null);
     clearFieldError(name);
-  };
-
-  const updateAmount = (event) => {
-    const amount = event.target.value.replace(/[^0-9]/g, "");
-    setForm((current) => ({ ...current, amount }));
-    setSubmitError(null);
-    clearFieldError("amount");
   };
 
   const toggleCategory = (value) => {
@@ -486,8 +479,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
             <div><dt>Reference</dt><dd><code>{published.id}</code></dd></div>
             <div><dt>Organisation</dt><dd>{published.organisation}</dd></div>
             <div>
-              <dt>Indicative funding</dt>
-              <dd><ConvertedAmount text={`${published.currency} ${Number(published.amount).toLocaleString()}`} /></dd>
+              <dt>Grant funding</dt>
+              <dd>Create and fund the grant pool to make funding available in {published.currency}.</dd>
             </div>
             <div><dt>Submitted</dt><dd>{formatInstant(published.createdAt)}</dd></div>
             <div><dt>Closes</dt><dd><ExpiryCountdown expiresAt={published.expiresAt} /></dd></div>
@@ -532,7 +525,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
         <p>
           {editing
             ? (materialLocked
-              ? "A proposal has already been received, so the funding thesis, amount and eligibility are locked. You can still replace supporting documents."
+              ? "A proposal has already been received, so the funding thesis, token and eligibility are locked. You can still replace supporting documents."
               : "Correct the call while it is still open and no proposal has been received. Your wallet signs updateOpportunity first; Firestore is updated after that transaction is mined.")
             : "Share what you want to fund without prescribing a problem statement. Researchers can respond with both the problem they would tackle and a solution."}
         </p>
@@ -632,19 +625,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           </WizardPanel>
 
           <WizardPanel index={2} current={wizard.current}>
-          <Section step="4" legend="Funding and timing" hint="Budget, deadline and supporting documents." disabled={materialLocked}>
+          <Section step="4" legend="Funding and timing" hint="Choose the pool token and deadline. After publishing, create your grant pool and deposit funds. Funding available is read from the pool’s balance." disabled={materialLocked}>
             <div className="funding-row">
-              <TextField
-                id="amount"
-                label="Indicative funding amount"
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                value={form.amount}
-                onChange={updateAmount}
-                error={errors.amount}
-                placeholder="250000"
-              />
               <div className={`field ${errors.currency ? "field-invalid" : ""}`}>
                 <label htmlFor="currency">Currency</label>
                 <TokenSelect id="currency" name="currency" value={form.currency} onChange={update}
@@ -708,7 +690,7 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
                 { label: "Funding thesis", value: form.fundingThesis.trim(), step: 0 },
                 { label: "Eligibility", value: form.eligibilityNotes.trim(), step: 0 },
                 { label: "Technology areas", value: form.categories.map(categoryLabel).join(", "), empty: "None selected", step: 1 },
-                { label: "Funding", value: form.amount ? `${form.currency} ${Number(form.amount).toLocaleString()}` : "", empty: "Not set", step: 2 },
+                { label: "Grant pool token", value: form.currency, empty: "Not set", step: 2 },
                 { label: editing ? "Deadline" : "Open until", value: expiryPreview, empty: "Not set", step: 2 },
                 { label: "Attachments", value: attachments.length ? `${attachments.length} PDF(s)` : "", empty: "None", step: 2 },
               ]}
@@ -788,8 +770,8 @@ export default function CreateFundingOpportunityPage({ resumeId = null, editOppo
           titleFallback="Untitled funding opportunity"
           description={form.fundingThesis}
           descriptionFallback="Your funding thesis appears here as you type."
-          fundingLabel="Indicative funding"
-          funding={form.amount ? `${form.currency} ${Number(form.amount).toLocaleString()}` : ""}
+          fundingLabel="Grant funding"
+          funding={`Deposit ${form.currency} after publishing`}
           until={expiryPreview}
           tags={form.categories.map(categoryLabel)}
         />

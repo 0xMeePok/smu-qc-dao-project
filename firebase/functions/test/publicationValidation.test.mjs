@@ -157,6 +157,7 @@ describe("isPublishableProblem - open funding", () => {
   it("accepts a complete open-funding call", () => {
     assert.equal(isPublishableProblem(funding(), ctx), true);
     assert.equal(isPublishableProblem(funding({ categories: [] }), ctx), true);
+    assert.equal(isPublishableProblem(funding({ amount: 0 }), ctx), true);
   });
 
   it("rejects problem-statement fields and unknown keys (validOpenFunding hasOnly)", () => {
@@ -171,7 +172,9 @@ describe("isPublishableProblem - open funding", () => {
     }
     assert.equal(isPublishableProblem(funding({ tags: [] }), ctx), false);
     assert.equal(isPublishableProblem(funding({ tags: ["x".repeat(41)] }), ctx), false);
-    assert.equal(isPublishableProblem(funding({ amount: 0 }), ctx), false);
+    for (const amount of [-1, 1_000_000_001, "0", Number.NaN]) {
+      assert.equal(isPublishableProblem(funding({ amount }), ctx), false, String(amount));
+    }
     assert.equal(isPublishableProblem(funding({ organisation: "Other" }), ctx), false);
     assert.equal(isPublishableProblem(funding({ attachments: [pdf(0, { contentType: "text/plain" })] }), ctx), false);
   });

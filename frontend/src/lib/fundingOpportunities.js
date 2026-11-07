@@ -57,7 +57,8 @@ export function buildFundingOpportunityDocument({
     eligibilityNotes: trimmed(form.eligibilityNotes),
     categories: [...form.categories],
     tags: fundingTagsFromCategories(form.categories),
-    amount: Number(form.amount),
+    // Kept for the canonical audit schema; live funding comes from the grant pool.
+    amount: Number(form.amount ?? 0),
     currency: form.currency,
     expiresAt: Timestamp.fromDate(storedExpiry),
     status,

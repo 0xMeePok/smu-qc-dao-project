@@ -139,7 +139,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
         {[["Deposited", "totalDeposited"], ["Available", "available"], ["Reserved", "totalReserved"], ["Awarded to proposals", "totalAllocated"]].map(([label, key]) => <div key={key}><dt>{label}</dt><dd><ConvertedAmount text={money(data[key])} /></dd></div>)}
       </dl></div>
       {data.poolAddress ? <a href={escrowExplorer("address", data.poolAddress)} target="_blank" rel="noreferrer">View grant pool contract</a>
-        : <p className="field-hint">The owner must create this pool, then deposit funds. The advertised budget is not a deposit.</p>}
+        : <p className="field-hint">The owner must create this pool, then deposit funds to make funding available.</p>}
       {!walletReady && <button type="button" className="secondary small" onClick={onConnect}>Sign in to use your wallet</button>}
       {data.canCreate && !data.poolAddress && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("create")}>Create grant pool</button>}
       {data.canDeposit && data.poolAddress && <div className="field-group grant-pool-topup">
@@ -164,7 +164,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
   </section>;
 }
 
-export function OpenFundingPanel({ problemId, postingOwnerId, proposalId, reviewedProposalRecord, onNavigate, onChange, integrityBlocked = false }) {
+export function OpenFundingPanel({ problemId, postingOwnerId, proposalId, reviewedProposalRecord, onNavigate, onChange, onSummaryChange, integrityBlocked = false }) {
   const reviewedProposal = useMemo(() => {
     try { return reviewedProposalRecord ? prepareStoredProposal(reviewedProposalRecord, { registryConfig: AUDIT_REGISTRY_CONFIG }) : null; }
     catch { return null; }
@@ -173,6 +173,7 @@ export function OpenFundingPanel({ problemId, postingOwnerId, proposalId, review
   const queryClient = useContext(QueryClientContext);
   const { address, isConnected } = useWallet();
   const [data, setData] = useState(null), [error, setError] = useState("");
+  useEffect(() => { onSummaryChange?.(data); }, [data, onSummaryChange]);
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [amount, setAmountState] = useState(""), [notice, setNotice] = useState("");
   const [withdrawalAmount, setWithdrawalState] = useState("");

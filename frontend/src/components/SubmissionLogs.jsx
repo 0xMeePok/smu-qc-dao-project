@@ -126,7 +126,7 @@ const VARIANTS = {
     empty: "No open funding submissions found for the selected filter.",
     loading: "Loading open funding logs…",
     error: "Failed to load open funding logs.",
-    fundingLabel: "Indicative funding",
+    fundingLabel: "Grant pool",
     eventLabel: "Open funding opportunity submitted",
     actorRole: "Funder",
     entityLabel: "Funding opportunity",
@@ -300,7 +300,7 @@ function SubmissionLogs({ kind }) {
           <div className="submission-log-meta">
             <span><strong>Organisation:</strong> {selected.organisation || "—"}</span>
             <span><strong>Owner:</strong> <code>{shortenAddress(selected.ownerId)}</code></span>
-            <span><strong>{variant.fundingLabel}:</strong> <ConvertedAmount text={formatAmount(selected.amount, selected.currency)} /></span>
+            <span><strong>{variant.fundingLabel}:</strong> {kind === "funding" ? <a href={`#/posting/${selected.id}?tab=funding`}>View grant pool</a> : <ConvertedAmount text={formatAmount(selected.amount, selected.currency)} />}</span>
             <span><strong>Attachments:</strong> {selected.attachments?.length || 0}</span>
             {kind === "posting" && selected.categories?.length > 0 && (
               <span><strong>Categories:</strong> {selected.categories.map(categoryLabel).join(", ")}</span>

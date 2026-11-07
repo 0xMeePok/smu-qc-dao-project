@@ -107,7 +107,6 @@ function fillForm() {
     target: { value: "Universities and research organisations may apply." },
   });
   fireEvent.click(screen.getByRole("checkbox", { name: /Quantum/i }));
-  fireEvent.change(document.getElementById("amount"), { target: { value: "250000" } });
 }
 
 beforeEach(() => {
@@ -163,6 +162,8 @@ describe("[QCDAO-51] create open funding", () => {
 
     expect(await screen.findByText("Funding opportunity submitted")).toBeTruthy();
     expect(mocks.events).toEqual(["audit", "firestore"]);
+    expect(mocks.publications.at(-1).record.amount).toBe(0);
+    expect(screen.queryByLabelText("Indicative funding amount")).toBeNull();
     expect(mocks.publications.at(-1).audit.transactionHash).toBe(`0x${"3".repeat(64)}`);
     expect(screen.getAllByText("Open funding opportunity submitted")).toHaveLength(2);
     expect(screen.getByText("Funder")).toBeTruthy();
@@ -203,7 +204,7 @@ describe("[QCDAO-51] create open funding", () => {
     expect(mocks.events).toEqual(["audit"]);
     expect(document.getElementById("title").value).toBe("Resilient supply chains");
     expect(document.getElementById("fundingThesis").value).toBe("Fund research into resilient supply chains.");
-    expect(document.getElementById("amount").value).toBe("250000");
+    expect(document.getElementById("amount")).toBeNull();
     expect(screen.getByRole("checkbox", { name: /Quantum/i }).checked).toBe(true);
 
     mocks.auditError = null;
@@ -212,7 +213,7 @@ describe("[QCDAO-51] create open funding", () => {
     expect(await screen.findByText("Funding opportunity submitted")).toBeTruthy();
     expect(mocks.events).toEqual(["audit", "audit", "firestore"]);
     expect(mocks.publications).toHaveLength(1);
-    expect(mocks.publications[0].record).toMatchObject({ title: "Resilient supply chains", amount: 250000, categories: ["quantum"] });
+    expect(mocks.publications[0].record).toMatchObject({ title: "Resilient supply chains", amount: 0, categories: ["quantum"] });
     expect(screen.queryByText(/wallet transaction was declined/i)).toBeNull();
   });
 });
@@ -291,8 +292,25 @@ describe("QCDAO-57 open-funding drafts", () => {
     await start({ resumeId: "funding-draft-1" });
     await waitFor(() => expect(screen.getByLabelText("Title").value).toBe("Open call, first pass"));
     expect(screen.getByText(/Draft saved/)).toBeTruthy();
+    expect(screen.queryByLabelText("Indicative funding amount")).toBeNull();
     // Resuming and changing nothing is not unsaved work.
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(screen.queryByText(/save this as a draft/i)).toBeNull();
   });
+});
+
+
+it("publishes a legacy draft without carrying forward its advertised balance", async () => {
+  mocks.resumed = {
+    id: "funding-draft-1", opportunityType: "open-funding", status: "draft",
+    title: "Open call, first pass", fundingThesis: "Fund resilient supply chains.",
+    eligibilityNotes: "Universities may apply.", categories: ["quantum"],
+    amount: 250000, currency: "USDC", updatedAt: new Date("2026-09-08T10:00:00Z"),
+  };
+  render(<CreateFundingOpportunityPage resumeId="funding-draft-1" onNavigate={() => {}} />);
+  await waitFor(() => expect(screen.getByLabelText("Title").value).toBe("Open call, first pass"));
+  fireEvent.submit(document.querySelector("form"));
+  await screen.findByText("Funding opportunity submitted");
+  expect(mocks.publications[0].opportunityId).toBe("funding-draft-1");
+  expect(mocks.publications[0].record.amount).toBe(0);
 });

@@ -223,6 +223,7 @@ describe("editing a published funding opportunity", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign and save changes" }));
     await waitFor(() => expect(mocks.fundingAudit).toHaveBeenCalled());
     await waitFor(() => expect(mocks.updateFunding).toHaveBeenCalled());
+    expect(mocks.updateFunding.mock.calls[0][0].record.amount).toBe(funding.amount);
     expect(mocks.fundingAudit.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.updateFunding.mock.invocationCallOrder[0]);
     expect(await screen.findByText("Funding opportunity updated")).toBeTruthy();
