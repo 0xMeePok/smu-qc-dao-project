@@ -1,6 +1,6 @@
 # QC DAO handover guide
 
-QC DAO is a working testnet platform. A new team can take it over by getting access to the accounts in the [handover checklist](handover/handover-checklist.md), following [Set up the platforms](setup/before-you-start.md), and then starting on the [open work](handover/open-work.md) left after Sprint 6.
+QC DAO is a working testnet platform. A new team can take it over by getting access to the accounts in the [handover checklist](handover/handover-checklist.md), following [Set up the platforms](setup/before-you-start.md), and then reading the [open work](handover/open-work.md). The backlog is Done except QCDAO-147, which was moved back to the product backlog.
 
 This book explains how the repository is organised, which technologies it uses and why, how to set up Firebase, Google Cloud and Privy, and how to test, deploy and operate the platform.
 
@@ -12,7 +12,7 @@ QC DAO is a blockchain-enabled open innovation platform. Problem owners post fun
 
 | Item | Value |
 | --- | --- |
-| Code described | `main` at commit `7d3907b`, 25 October 2026 |
+| Code described | `main` at commit `a634f09c`, 7 November 2026 |
 | Repository | [github.com/0xMeePok/smu-qc-dao-project](https://github.com/0xMeePok/smu-qc-dao-project) |
 | Live site | [qcdao-a0c7a.web.app](https://qcdao-a0c7a.web.app) |
 | Firebase project | `qcdao-a0c7a`, region `asia-southeast1` |

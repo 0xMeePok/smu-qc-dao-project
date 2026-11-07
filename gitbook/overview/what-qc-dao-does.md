@@ -48,7 +48,13 @@ Each member has an **Action Needed** tab listing what waits on them, plus role v
 
 ### Account wallet
 
-The account menu shows the member's email, wallet address and test-token balances. It can send test tokens, claim tokens from the test-token faucet, and open **Add funds**. Add funds is a labelled testnet simulation of a fiat on-ramp and an off-ramp. It does not move money. The same button is on the escrow funding panel.
+The account menu shows the member's email, wallet address and test-token balances. It can send test tokens, claim tokens from the test-token faucet, and open **Add funds**. Add funds is a labelled testnet simulation of a fiat on-ramp and an off-ramp. It does not move money. The same button is on the escrow funding panel. The escrow panel does not mint test tokens; that remains the account-menu faucet and the standalone faucet site.
+
+### Local currency and drafting
+
+A header control and the private profile can show funding amounts as an indicative local-currency estimate. `getFxRates` reads Google Finance. The estimate is cached, labelled as indicative, and never submitted as a payment. Token amounts stay the settlement unit.
+
+Problem, open-funding and proposal forms can **Draft with AI**. `draftWithAI` fills only empty text fields, and `findSimilarProposals` points at existing proposals before publish. Amounts, currency, expiry and dates stay with the author. A published record can be marked AI-assisted. See `docs/fx-rates.md` and `docs/ai-assistance.md`.
 
 ## What lives where
 

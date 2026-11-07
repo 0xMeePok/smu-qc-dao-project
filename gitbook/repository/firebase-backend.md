@@ -7,8 +7,8 @@ Everything deployed to the Firebase project lives in `firebase/`: security rules
 | File | What it controls |
 | --- | --- |
 | `firebase.json` | Rules and index files, the Storage bucket, the functions source, Hosting headers and rewrites, and emulator ports |
-| `firestore.rules` | Who may read or write each Firestore document (about 1,800 lines) |
-| `firestore.indexes.json` | 83 composite indexes and one field override |
+| `firestore.rules` | Who may read or write each Firestore document (about 1,900 lines) |
+| `firestore.indexes.json` | 89 composite indexes and four field overrides |
 | `storage.rules` | Attachment uploads and downloads |
 | `storage.cors.json` | Origins allowed to call the bucket from a browser. Production origins only, no `localhost` |
 | `storage.lifecycle.json` | Aborts incomplete uploads after one day |
@@ -35,15 +35,16 @@ The `Content-Security-Policy` header is strict. It lists each Google endpoint, t
 
 ## Cloud Functions
 
-The source is `firebase/functions/`, an ES module package on Node 22. `index.js` creates the Admin SDK app and exports all 94 functions. Larger areas register their functions from their own module, for example `registerEscrowFundingFunctions()` in `escrowFundingFunctions.js`.
+The source is `firebase/functions/`, an ES module package on Node 22. `index.js` creates the Admin SDK app and exports all 103 functions. Larger areas register their functions from their own module, for example `registerEscrowFundingFunctions()` in `escrowFundingFunctions.js`.
 
 | Type | Count | Notes |
 | --- | --- | --- |
-| Callable (`onCall`) | 70 | Called from the browser with `httpsCallable`. Most use `MEMBER_CALL_OPTIONS`: region `asia-southeast1`, at most five instances, and App Check enforced outside the emulator |
-| Firestore triggers | 17 | Projections, audit queues, edit trails, moderation screening and notifications |
+| Callable (`onCall`) | 77 | Called from the browser with `httpsCallable`. Most use `MEMBER_CALL_OPTIONS`: region `asia-southeast1`, at most five instances, and App Check enforced outside the emulator |
+| Firestore triggers | 18 | Projections, audit queues, edit trails, moderation screening and notifications |
 | Scheduled | 7 | See [Scheduled jobs](#scheduled-jobs) |
+| HTTPS (`onRequest`) | 1 | `downloadProposalAttachment`. The invoker is public; the handler checks the member |
 
-Every callable checks the caller itself. `requireMember` refuses callers who are signed out, not yet onboarded, suspended or signed in before a session revocation, and refuses everyone while a registry cutover is in progress. Admin callables also require access level 1.
+Member callables check the caller themselves. `requireMember` refuses callers who are signed out, not yet onboarded, suspended or signed in before a session revocation, and refuses everyone while a registry cutover is in progress. Admin callables also require access level 1. `getFxRates` is the exception: it is a public quote and checks only that the currency is one of the supported codes.
 
 ### Functions by area
 
@@ -51,15 +52,19 @@ Every callable checks the caller itself. `requireMember` refuses callers who are
 | --- | --- | --- |
 | Sign-in and accounts | `privySession.js`, `privyAccount.js`, `adminActions.js` | `exchangePrivySession`, `stampPrivyIdentity`, `revokeOwnSessions`, `adminListUsers`, `adminChangeRole`, `adminSetSuspended` |
 | Publication and on-chain audit | `publication.js`, `auditCanonical.js`, `opportunityAuditPayload.js`, `proposalAuditPayload.js`, `proposalAuditQueue.js`, `proposalAuditRecovery.js`, `auditReceipt.js`, `auditDeployments.js`, `auditTrail.js` | `attestPublication`, `queueProposalAudit`, `confirmProposalAudit`, `retryPendingProposalAudits`, `recordProposalEdit`, `recordOpportunityEdit`, `listAuditTrail`, `adminListProposalAudits`, `adminVerifyProposalAudit`, `adminRetryProposalAudit` |
-| Postings, expiry and attachments | `opportunityExpiry.js`, `opportunityExpiryService.js`, `opportunityMetrics.js`, `resourceQuotas.js`, `attachmentSweeper.js` | `lapseExpiredOpportunities`, `adminForceExpireOpportunity`, three `sync*Metrics` triggers, `reserveResource`, `reserveAttachment`, `removeAttachment`, `sweepAttachments` |
+| Postings, expiry and attachments | `opportunityExpiry.js`, `opportunityExpiryService.js`, `opportunityMetrics.js`, `resourceQuotas.js`, `attachmentSweeper.js`, `proposalAttachments.js` | `lapseExpiredOpportunities`, `adminForceExpireOpportunity`, three `sync*Metrics` triggers, `reserveResource`, `reserveAttachment`, `removeAttachment`, `downloadProposalAttachment`, `sweepAttachments` |
 | Proposals, reviews and comments | `proposalQueues.js`, `proposalComparison.js`, `ownerReviews.js`, `comments.js`, `independentProposalCatalog.js`, `ownerDashboard.js` | `listMyProposalQueue`, `listEvaluatorQueue`, `listActionItems`, `listOwnerDashboard`, `getProposalComparison`, `listIndependentListings`, `recordOwnerReview`, `listOwnerReviews`, `createComment`, `editComment`, `deleteComment` |
 | Funding approaches | `fundingApproach.js`, `fundingApproachAnchor.js` | `createFundingApproach`, `listFundingApproaches`, `getFundingApproach`, `decideFundingApproach`, `recordFundingApproachAnchor`, `recordFundingApproachDecisionAnchors` |
 | Proposal escrow | `escrowFunding*.js`, `escrowCustody.js`, `escrowAudit.js`, `escrowAdminCancellation.js`, `escrowModerationVoid.js`, `escrowProposalTerms.js`, `escrowRefund*.js`, `fundingSnapshots.js`, `postingEscrowProgress.js` | `prepareEscrowDeposit`, `syncEscrowFunding`, `startEscrowSettlement`, `startEscrowAdminCancellation`, `reconcileEscrowFunding` and eleven more |
 | Open funding grants | `openFunding.js`, `openFundingFunctions.js`, `funderDashboard.js` | `getOpenFundingSummary`, `prepareOpenFundingAction`, `syncOpenFunding`, `getFunderDashboard` |
-| Independent crowdfunding | `independentFunding*.js` | `getIndependentFundingState`, `prepareIndependentFundingAction`, `syncIndependentFunding`, `releaseIndependentFundingCompletion` (administrators; platform-signed) |
+| Independent crowdfunding | `independentFunding*.js`, `independentFundingNotifications.js` | `getIndependentFundingState`, `prepareIndependentFundingAction`, `syncIndependentFunding`, `releaseIndependentFundingCompletion` (administrators; platform-signed), `notifyIndependentEvidence` |
 | Moderation | `moderation.js`, `moderationFunctions.js`, `moderationAnchor.js` | Eight callables including `submitContentReport` and `moderateContent`, three `screen*Content` triggers, `listRemovedProblems`, `readRemovedProblem`, `listPostedProposals` |
 | Mock matching and notices | `matching.js`, `matchingNotifications.js` | Eight mock matching callables, `expireMockMatchingWindows`, `notifyMatchingEvent`, `resumeMatchingNotificationDelivery`, `remindNearingApprovalWindows` |
-| Admin overview | `adminActivity.js`, `platformStatus.js`, `proposalExport.js` | `adminGetActivitySummary`, `adminGetPlatformStatus`, `adminExportSelectedProposals` |
+| Admin overview | `adminActivity.js`, `platformStatus.js`, `proposalExport.js` | `adminGetActivitySummary`, `adminGetPlatformStatus`, `adminListExportProposals`, `adminExportSelectedProposals` |
+| Local currency | `fxRates.js` | `getFxRates`, a public read of Google Finance quotes |
+| AI drafting | `aiDraftSchema.js`, `aiRetrieval.js` and the drafting callables in `index.js` | `draftWithAI`, `findSimilarProposals` |
+| Delivery evidence | `deliveryEvidence.js`, `deliveryEvidenceFunctions.js` | `saveDeliveryEvidence` |
+| Testnet ramp | `dueSandboxFunctions.js` | `dueSandbox`, which returns the simulation and does not call Due |
 | Wallet | `walletFaucetFunctions.js` | `claimWalletTokens`, which relays a signed faucet request to the Vercel faucet |
 
 The full list with one line per function is in [Cloud Functions](../reference/cloud-functions.md).

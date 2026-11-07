@@ -1,6 +1,6 @@
 # Repository docs
 
-The repository has its own Markdown docs next to the code. This page lists them with their state at `main` @ `7d3907b` on 25 October 2026, so you know which to trust.
+The repository has its own Markdown docs next to the code. This page lists them with their state at `main` @ `a634f09c` on 7 November 2026, so you know which to trust.
 
 When two sources disagree, trust them in this order: the code, then this book, then the older docs.
 
@@ -29,6 +29,17 @@ These were checked against the code and corrected in the same change that added 
 | Document | What it covers |
 | --- | --- |
 | `docs/schemas/selected-proposal-export.schema.json` | JSON Schema for the administrator export, including the CSV column order. See [Export selected proposals](../operations/proposal-export.md) |
+
+## Added with later Sprint 6 work
+
+| Document | What it covers |
+| --- | --- |
+| `docs/ai-assistance.md` | QCDAO-157 drafting, the quantity gate, similar-proposal retrieval, limits and the OpenAI key |
+| `docs/fx-rates.md` | QCDAO-118. `getFxRates` reads Google Finance. Estimates are indicative and are not settlement prices |
+| `docs/security/evaluation-and-proposal-lock-migration.md` | Server-owned evaluation and proposal-lock fields that clients cannot set |
+| `docs/security/evidence-storage-quotas.md` | Quotas for delivery-evidence storage |
+| `docs/security/zod-backport.md` | The pinned security patch for the functions' Zod dependency |
+| [Due sandbox on/off-ramp](../setup/due-on-off-ramp.md) | QCDAO-151. The **Add funds** simulation does not call Due |
 
 ## Not reviewed in this handover
 
