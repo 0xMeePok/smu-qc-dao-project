@@ -113,7 +113,7 @@ export function IndependentFundingView({ snapshot, loading, error, busy, progres
       {actions.releaseCompletion && <div className="field-group"><h4>Administrator release</h4><p>The required funder majority has approved this evidence. Review it, then release the remaining 50% to the researcher. The payment is sent by the platform signer, not your wallet.</p>
         {button("releaseCompletion", "Release final 50%")}</div>}
       {button("claimRefund", "Claim my refund")}
-      <p className="field-hint">Platform fees apply only to researcher payouts. Refunds have no additional platform fee.</p>
+      <p className="field-hint funding-fee-note">Platform fees apply only to researcher payouts. Refunds have no additional platform fee.</p>
     </>}
   </section>;
 }

@@ -218,7 +218,6 @@ export function validateFundingOpportunity(form) {
     // Tags are generated from categories, so any tag/configuration problem belongs
     // on the single control the user can act on instead of a hidden field.
     categories: categoriesError || generatedTagsError,
-    amount: validateFundingAmount(form.amount),
     currency: validateCurrency(form.currency),
     expiryDays: validateExpiry(form.expiryDays),
     expiryExtensionDays: validateExpiryExtension(form.expiryExtensionDays),

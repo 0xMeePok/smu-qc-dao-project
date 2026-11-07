@@ -713,7 +713,8 @@ service cloud.firestore {
         && isNonEmptyString(data.eligibilityNotes, 4000)
         && validCategories(data.categories)
         && validFundingTags(data.tags)
-        && validAmount(data.amount) && data.amount > 0
+        // Compatibility field: new calls start at zero; the pool holds funds.
+        && validAmount(data.amount)
         && validCurrency(data.currency)
         && data.expiresAt is timestamp
         && data.organisation
@@ -853,7 +854,8 @@ service cloud.firestore {
         && (!changed.hasAny(['categories'])
           || (validCategories(after.get('categories', []))
             && after.get('categories', []).size() >= 1))
-        && (!changed.hasAny(['amount']) || (validAmount(after.amount) && after.amount > 0))
+        && (!changed.hasAny(['amount']) || (validAmount(after.amount)
+          && (opportunityType(after) == 'open-funding' || after.amount > 0)))
         && (!changed.hasAny(['currency']) || validCurrency(after.currency))
         && (!changed.hasAny(['expiresAt']) || after.expiresAt is timestamp)
         && (!changed.hasAny(['attachments']) || validAttachments(after, false))

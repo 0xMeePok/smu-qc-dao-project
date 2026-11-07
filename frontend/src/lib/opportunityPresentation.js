@@ -9,6 +9,7 @@ export function opportunityTypeLabel(opportunity) {
 }
 
 export function toOpportunityListItem(opportunity) {
+  const openFunding = opportunity.opportunityType === OPEN_FUNDING_TYPE;
   const amountValue = Number(opportunity.amount);
   const progress = Number(opportunity.fundingProgressPercent ?? 0);
   const proposalCount = Number(opportunity.proposalCount ?? 0);
@@ -17,8 +18,9 @@ export function toOpportunityListItem(opportunity) {
     route: "posting",
     owner: opportunity.organisation,
     type: opportunityTypeLabel(opportunity),
-    amountValue: Number.isFinite(amountValue) ? amountValue : 0,
-    amount: `${opportunity.currency} ${Number.isFinite(amountValue) ? amountValue.toLocaleString() : "—"}`,
+    // The saved open-funding amount is historical metadata, not a pool balance.
+    amountValue: openFunding ? null : Number.isFinite(amountValue) ? amountValue : 0,
+    amount: openFunding ? "View grant pool" : `${opportunity.currency} ${Number.isFinite(amountValue) ? amountValue.toLocaleString() : "—"}`,
     deadline: formatInstantDate(opportunity.expiresAt),
     categoryLabels: (opportunity.categories ?? []).map(categoryLabel),
     proposalCount: Number.isFinite(proposalCount) && proposalCount >= 0 ? proposalCount : 0,

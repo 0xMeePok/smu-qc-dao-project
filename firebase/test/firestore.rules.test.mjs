@@ -1945,6 +1945,17 @@ describe("problems/{problemId} open funding opportunity", () => {
     await assertSucceeds(setDoc(doc(db, "problems", "q51_ok"), openFunding()));
   });
 
+  it("accepts an unfunded call at zero while keeping invalid amounts blocked", async () => {
+    const db = env.authenticatedContext(ADDRESS).firestore();
+    await assertSucceeds(setDoc(doc(db, "problems", "q51_zero"), openFunding({ amount: 0 })));
+    await assertSucceeds(updateDoc(doc(db, "problems", "q51_zero"), {
+      title: "Updated unfunded research call", updatedAt: serverTimestamp(),
+    }));
+    for (const [index, amount] of [-1, "0", 1_000_000_001].entries()) {
+      await assertFails(setDoc(doc(db, "problems", `q51_bad_amount_${index}`), openFunding({ amount })));
+    }
+  });
+
   it("[QCDAO-57] refuses a non-owner the funding edit and withdraw write shapes", async () => {
     // updateFundingOpportunity and withdrawPosting key the write on the document
     // id alone; canEditOpportunity is UX. These are the exact payloads they send.

@@ -60,7 +60,7 @@ describe("[QCDAO-51] open-funding form model", () => {
     });
     for (const field of [
       "title", "fundingThesis", "eligibilityNotes", "categories",
-      "amount", "currency", "expiryDays",
+      "currency", "expiryDays",
     ]) assert.ok(errors[field], `${field} should have a field-level message`);
 
     assert.match(
@@ -68,6 +68,13 @@ describe("[QCDAO-51] open-funding form model", () => {
       /no more than/,
     );
     assert.match(validateFundingTags("x".repeat(41)), /40 characters/);
+  });
+
+  it("allows publishing without an advertised amount and stores a zero audit placeholder", () => {
+    const form = completeForm();
+    delete form.amount;
+    assert.deepEqual(validateFundingOpportunity(form), {});
+    assert.equal(buildFundingOpportunityDocument({ ownerId: OWNER, form }).amount, 0);
   });
 
   it("builds a distinct open-funding document without fixed-problem fields", () => {

@@ -96,7 +96,7 @@ function ParentTermsReview({ posting, revisionIndex, required, disabled, onAccep
     <summary>Review current opportunity terms · version {revisionIndex + 1}</summary>
     <dl>{[["title", "Title"], ["ownerId", "Posted by"], ["organisation", "Organisation"], ...fields,
       ["categories", "Categories"]].map(([key, label]) => <div key={key}><dt>{label}</dt><dd style={{ whiteSpace: "pre-wrap" }}>{Array.isArray(posting[key]) ? posting[key].join(", ") : posting[key] || "Not specified"}</dd></div>)}
-      <div><dt>Funding</dt><dd>{formatFundingAmount(posting.currency, posting.amount)}</dd></div>
+      <div><dt>{funding ? "Grant pool token" : "Funding"}</dt><dd>{funding ? posting.currency : formatFundingAmount(posting.currency, posting.amount)}</dd></div>
       <div><dt>Deadline</dt><dd>{formatInstant(posting.expiresAt)}</dd></div>
       <div><dt>Supporting PDFs</dt><dd>{posting.attachments?.length ? posting.attachments.map(item => item.name).join(", ") : "None"}</dd></div>
     </dl>
@@ -509,7 +509,7 @@ export default function CreateProposalPage({ postingId, proposalId: editProposal
           />
         )}
       </form></AIDraftScope>
-      {assistant.open ? <AIDraftPanel assistant={assistant} /> : (<aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong><ConvertedAmount text={formatFundingAmount(posting.currency, posting.amount)} /></strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>)}
+      {assistant.open ? <AIDraftPanel assistant={assistant} /> : (<aside className="context-panel"><span className="eyebrow">Responding to</span><h2>{posting.title}</h2><p>{posting.fundingThesis || posting.summary}</p><strong>{isOpenFunding ? <button type="button" className="text-button" onClick={() => onNavigate(`posting/${posting.id}?tab=funding`)}>View grant pool</button> : <ConvertedAmount text={formatFundingAmount(posting.currency, posting.amount)} />}</strong><p>{posting.organisation}</p><ExpiryCountdown expiresAt={posting.expiresAt} status={posting.status} />{isOpenFunding && <><h3>Eligibility</h3><p>{posting.eligibilityNotes}</p><p>The funder acts as the problem owner for selection.</p></>}</aside>)}
     </div>
   </section>;
 }

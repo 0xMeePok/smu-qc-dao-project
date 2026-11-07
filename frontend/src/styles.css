@@ -4246,6 +4246,8 @@ footer.footer { background: transparent; }
 .escrow-funding h4,
 .escrow-plan > legend { margin: 0 0 8px; font-family: Newsreader, "Iowan Old Style", Palatino, serif; font-size: 20px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ink); }
 .escrow-funding .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+/* Standalone fee copy follows the action block, not an individual input. */
+.escrow-funding > .funding-fee-note { margin: 20px 0 0; line-height: 1.6; }
 .escrow-detail { display: grid; gap: 24px; min-width: 0; }
 .escrow-detail > p, .escrow-detail .table-header p { margin: 0; line-height: 1.6; }
 .escrow-detail .table-header { align-items: flex-start; }
