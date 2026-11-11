@@ -55,7 +55,7 @@ A skipped job was not selected for that event. It is not a failure, and on `main
 | Gitleaks | Every push, whatever the paths | New commits, with Gitleaks 8.30.1, `.gitleaks.toml` and `.gitleaksignore` |
 | CI | Always | Passes when no selected job failed. This is the required status check |
 | Deploy rules and functions | Push to `main` that is not only `gitbook/**`, after **CI** | Firestore rules, indexes, Storage rules, then functions. Functions retry up to three times |
-| Deploy hosting | After the backend deploy | Builds the web app and checks the live Content-Security-Policy |
+| Deploy hosting | After the backend deploy | Installs `frontend`, `firebase` and the production function dependencies, because Hosting's `predeploy` hook verifies the functions security backport. Then builds the web app and checks the live Content-Security-Policy |
 
 Changing `.github/workflows/ci.yml` or `.github/actions/**` selects every test area, so a bad filter is caught by the next run. Node and Java setup is shared through `.github/actions/setup-workspace`, and npm installs use the lockfile cache.
 

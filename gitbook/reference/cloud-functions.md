@@ -1,6 +1,6 @@
 # Cloud Functions
 
-All 94 functions exported from `firebase/functions/index.js`, in region `asia-southeast1`. Types: **callable** (`onCall`), **trigger** (Firestore `onDocumentCreated`, `onDocumentUpdated` or `onDocumentWritten`) and **scheduled** (`onSchedule`).
+All 103 functions exported from `firebase/functions/index.js`, in region `asia-southeast1`: 77 **callable** (`onCall`), 18 **triggers** (Firestore `onDocumentCreated`, `onDocumentUpdated` or `onDocumentWritten`), 7 **scheduled** (`onSchedule`) and 1 **HTTPS** function (`onRequest`).
 
 Unless noted, callables require an onboarded, active member and enforce App Check outside the emulator. "Admin" means access level 1 is also required.
 
@@ -23,6 +23,7 @@ Unless noted, callables require an onboarded, active member and enforce App Chec
 | `reserveResource` | callable | Reserves a record id against the member's quota before creation |
 | `reserveAttachment` | callable | Reserves an attachment upload with its size and SHA-256 |
 | `removeAttachment` | callable | Deletes an unpublished attachment and releases its reservation |
+| `downloadProposalAttachment` | HTTPS | Streams a proposal PDF after checking the member's ID token, App Check and the same visibility rules as the record. The Cloud Run invoker is public; the handler refuses everyone else |
 | `queueProposalAudit` | trigger, `proposals` written | Queues a proposal audit job |
 | `confirmProposalAudit` | callable | Author asks the server to confirm a proposal's audit receipt |
 | `retryPendingProposalAudits` | scheduled, every minute | Retries pending proposal audit jobs |
@@ -58,6 +59,9 @@ Unless noted, callables require an onboarded, active member and enforce App Chec
 | `recordOwnerReview` | callable | Owner's interim review on a proposal |
 | `listOwnerReviews` | callable | Review history for the author, owner or administrators |
 | `createComment`, `editComment`, `deleteComment` | callable | Threaded comments and evaluator recommendations |
+| `draftWithAI` | callable | Drafts empty text fields from a title. Does not write Firestore, and never fills amounts, currency, expiry or dates |
+| `findSimilarProposals` | callable | Returns similar existing proposals while the author is still editing |
+| `saveDeliveryEvidence` | callable | Stores delivery evidence for an escrow milestone. The caller cannot choose the evidence namespace or the owner |
 
 ## Funding approaches
 
@@ -84,6 +88,7 @@ Unless noted, callables require an onboarded, active member and enforce App Chec
 | `reconcileEscrowFunding` | scheduled, every minute | Sends queued platform transactions, reconciles events, handles independent funding and cancellations |
 | `syncEscrowMarketplaceProgress`, `syncEscrowMarketplaceProposal`, `syncEscrowMarketplacePosting` | triggers | Keep confirmed funding progress on postings and listings current |
 | `notifyEscrowWorkflow` | trigger, escrow event created | Notifies researchers and owners of selection, rejection and cancellation |
+| `notifyIndependentEvidence` | trigger, `independentFundingEvents` created | Notifies the parties when independent crowdfunding evidence is submitted |
 
 ## Open funding grants and independent crowdfunding
 
@@ -126,5 +131,8 @@ Unless noted, callables require an onboarded, active member and enforce App Chec
 | --- | --- | --- |
 | `adminGetActivitySummary` | callable, admin | What is happening on the platform now |
 | `adminGetPlatformStatus` | callable, admin | Health of the RPC, registry, audit queue and Firestore |
-| `adminExportSelectedProposals` | callable, admin | JSON and CSV for one accepted posting, or every accepted posting in a UTC date range. Writes an audit record |
+| `adminListExportProposals` | callable, admin | Lists the proposals an administrator can include in an export |
+| `adminExportSelectedProposals` | callable, admin | JSON and CSV for one accepted posting, chosen proposals, or every accepted posting in a UTC date range. Writes an audit record |
+| `getFxRates` | callable, public | Indicative Google Finance quotes for one supported local currency. No API key. Fails closed and is not a settlement price |
 | `claimWalletTokens` | callable | Relays a signed faucet claim to the Vercel faucet for the caller's own address |
+| `dueSandbox` | callable | Returns the labelled testnet on-ramp and off-ramp simulation. Does not call Due and does not move tokens |

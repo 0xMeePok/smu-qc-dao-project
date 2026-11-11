@@ -15,7 +15,7 @@ smu-qc-dao-project/
 │   ├── scripts/              CSP checks, preview deploys, Privy deploy preflight
 │   ├── maintenance/          Lock-down rules used during a registry cutover
 │   ├── firestore.rules       Database authorisation
-│   ├── firestore.indexes.json  83 composite indexes
+│   ├── firestore.indexes.json  89 composite indexes
 │   ├── storage.rules         Attachment authorisation
 │   ├── storage.cors.json     Bucket CORS allow-list
 │   ├── storage.lifecycle.json  Aborts stale uploads after a day
