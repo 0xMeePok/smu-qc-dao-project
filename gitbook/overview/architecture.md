@@ -24,8 +24,8 @@ flowchart TB
     fauth["Firebase Auth + App Check<br/>uid = wallet address"]
     storage[("Cloud Storage<br/>PDF attachments")]
     scheduler["Cloud Scheduler<br/>7 timed jobs"]
-    secrets["Secret Manager<br/>PRIVY_SECRET,<br/>ESCROW_PLATFORM_PRIVATE_KEY"]
-    functions["Cloud Functions v2, Node 22<br/>70 callable, 17 triggers,<br/>7 scheduled"]
+    secrets["Secret Manager<br/>PRIVY_SECRET,<br/>ESCROW_PLATFORM_PRIVATE_KEY,<br/>OPENAI_API_KEY"]
+    functions["Cloud Functions v2, Node 22<br/>77 callable, 18 triggers,<br/>7 scheduled, 1 HTTPS"]
     firestore[("Cloud Firestore<br/>application records")]
   end
 
@@ -80,10 +80,10 @@ PNG and SVG exports of this page's diagrams are in `docs/architecture/` for slid
 | Firebase Hosting | Serves the build from `firebase/public` with a strict Content-Security-Policy | `firebase/firebase.json` |
 | Firebase Auth | Holds sessions minted from custom tokens. The uid is the lowercase wallet address | `firebase/functions/privySession.js` |
 | App Check | Attests the web app with reCAPTCHA Enterprise. Callable functions refuse calls without it outside the emulator | `frontend/src/lib/firebase.js` |
-| Cloud Functions | 94 functions: sign-in, privileged reads, publication checks, audit confirmation, escrow settlement, moderation, the selected-proposal export, scheduled jobs | `firebase/functions/` |
+| Cloud Functions | 103 functions: sign-in, privileged reads, publication checks, audit confirmation, escrow settlement, moderation, the selected-proposal export, local-currency quotes, AI drafting, the proposal-PDF download, the testnet ramp simulation and scheduled jobs | `firebase/functions/` |
 | Cloud Firestore | Application records, guarded by security rules | `firebase/firestore.rules` |
 | Cloud Storage | PDF attachments for postings and proposals, guarded by storage rules | `firebase/storage.rules` |
-| Secret Manager | `PRIVY_SECRET` and `ESCROW_PLATFORM_PRIVATE_KEY`, bound to the functions that need them | Google Cloud |
+| Secret Manager | `PRIVY_SECRET`, `ESCROW_PLATFORM_PRIVATE_KEY` and `OPENAI_API_KEY`, bound to the functions that need them | Google Cloud |
 | Cloud Scheduler | Runs the seven scheduled functions | Created by the functions deploy |
 | Privy | Email one-time-code login, embedded EVM wallets in a trusted execution environment, gas sponsorship | Privy dashboard |
 | Smart contracts | Record hashes, audit events, per-proposal escrows, grant pools and independent listing escrows | `contracts/` |

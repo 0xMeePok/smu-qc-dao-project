@@ -14,23 +14,23 @@ firebase/
 ├── firebase.json                # Hosting headers and rewrites, emulator ports, deploy targets
 ├── firebase.maintenance.json    # Locked-down config used only during a registry cutover
 ├── firestore.rules              # Server-side authorisation for every collection
-├── firestore.indexes.json       # 83 composite indexes
+├── firestore.indexes.json       # 89 composite indexes
 ├── storage.rules                # Authorisation for posting and proposal attachments
 ├── storage.cors.json            # Bucket CORS allow-list - see "Posting attachments"
 ├── storage.lifecycle.json       # Aborts incomplete uploads after a day
 ├── .firebaserc.example          # Copy to .firebaserc and fill in the project id
 ├── maintenance/                 # Maintenance rules for firebase.maintenance.json
 ├── scripts/                     # CSP checks, preview deploys, Privy deploy preflight
-├── test/                        # Firestore and Storage rules tests (20 files)
+├── test/                        # Rules, hosting and CSP checks (22 files)
 └── functions/
-    ├── index.js                 # Exports all 94 functions (70 callable, 17 triggers, 7 scheduled)
+    ├── index.js                 # Exports all 103 functions (77 callable, 18 triggers, 7 scheduled, 1 HTTPS)
     ├── *.js                     # One module per area: sign-in, publication and audit,
     │                            #   escrow, open funding, independent funding,
     │                            #   moderation, matching, expiry, admin
     ├── *.contract.json          # Active contract manifests, synced from contracts/
     ├── auditRegistry.history.json # Earlier registries kept for verification
     ├── scripts/                 # Seed, reset, backfill and registry retirement scripts
-    └── test/                    # Functions tests (70 files)
+    └── test/                    # Functions tests (85 test files)
 ```
 
 The handover guide's [Firebase backend](../gitbook/repository/firebase-backend.md)

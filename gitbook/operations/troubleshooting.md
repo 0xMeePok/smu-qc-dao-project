@@ -49,6 +49,8 @@ Find the symptom, then check the likely cause before changing anything. Several 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | **CI** passes on `main` but both deploy jobs are skipped | A deploy job's `if:` lost `!cancelled()`, so a skipped area job skipped the deploy | Restore it. Re-running the jobs does not help. Run **CI** by hand from **Actions**, **Run workflow**, on `main` to deploy now |
+| Hosting deploy fails while verifying security dependencies | `firebase/` or `firebase/functions` was not installed. The Hosting `predeploy` hook runs `functions/securityDependencies/manage.mjs --verify --production` | Install both workspaces before `firebase deploy --only hosting`. **Deploy hosting** in CI already does this |
+| Production build fails because an optional peer stub is in a startup chunk | Vite pulled a missing optional peer into the first page load. That used to ship a blank site | Keep that import dynamic. `frontend/scripts/optional-peer-startup-guard.mjs` fails the build instead |
 | Deploy job fails with `PERMISSION_DENIED` | The deploy service account lacks a role | Add the role named in the error and re-run the job |
 | Functions deploy reports `Deadline Exceeded` | Cloud Run was still finishing | The workflow retries three times. Re-run the job if all fail |
 | A scheduled function fails to deploy | Cloud Scheduler API disabled | `gcloud services enable cloudscheduler.googleapis.com` |

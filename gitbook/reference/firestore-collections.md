@@ -24,7 +24,7 @@
 | `proposals/{id}/deliveryEvidence/{hash}` | Immutable delivery evidence for escrow milestones | Author creates. Parties to the proposal read. No update or delete |
 | `proposals/{id}/ownerReviews`, `ownerReviewLatest` | Owner interim reviews | Callable only |
 | `proposals/{id}/activity/latest` | Content-free change signal | Members who can see the proposal |
-| `opportunityMetrics/{problemId}` | Public-safe proposal counts and funding progress | Get when the posting can be browsed. No list or writes |
+| `opportunityMetrics/{problemId}` | Public-safe proposal counts and funding progress for a business problem. An open funding call's saved amount is not its pool balance | Get when the posting can be browsed. No list or writes |
 | `comments/{id}` | Comments, replies and evaluator recommendations | Callable only |
 | `proposalFeedbackSummaries/{id}` | Evaluator feedback summaries | Callable only |
 | `publicationProofs/{scope_id}` | Server proof that a record's anchor was mined | None. Rules read it |
@@ -36,7 +36,7 @@
 | `escrowFundingEvents`, `escrowFundingSummaries`, `escrowFundingPositions` | Reconciled on-chain escrow events, totals and per-wallet positions | Callable only |
 | `escrowFundingJobs`, `escrowAdminCancellationJobs`, `escrowPostingPauseJobs`, `escrowModerationVoidJobs`, `escrowModerationAnchorJobs`, `escrowRefundNotificationJobs`, `escrowRefundTriggers` | Server work queues | None |
 | `escrowPlatformOutbox` | The platform signer's transaction outbox, so a settlement is sent once | None |
-| `openFundingSummaries`, `openFundingSelections`, `openFundingDeclines` | Grant pool projections, selections and declined grant offers | Callable only |
+| `openFundingSummaries`, `openFundingSelections`, `openFundingDeclines` | Grant pool projections reconciled from `OpenFundingPool`, plus selections and declined offers. The funding tab reads balances through `getOpenFundingSummary` | Callable only |
 | `independentFundingSummaries`, `independentFundingEvents`, `independentFundingPositions` | Independent crowdfunding totals, reconciled events and per-wallet positions | Callable only |
 | `independentFundingEvidence`, `independentFundingJobs`, `independentFundingCancellationJobs` | Independent crowdfunding evidence and work queues | None |
 | `fundingApproaches`, `fundingApproachSlots` | Funding approaches to independent proposals | Callable only |

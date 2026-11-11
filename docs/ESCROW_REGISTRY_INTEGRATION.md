@@ -6,7 +6,7 @@ registry/factory provides accepted-proposal binding and reversible moderation pa
 
 ## Current deployment (17 October 2026)
 
-Checked against `main` at `7d3907b` on 25 October 2026. The active deployment was
+Checked against `main` at `7d3907b` on 25 October 2026. The function count below was corrected against `main` at `a634f09c` and rechecked on 11 November 2026. The active deployment was
 confirmed on Arbitrum Sepolia (chain 421614) on 17 October 2026, and read-only
 runtime-bytecode and wiring verification passed the same day. Explorer source
 publication was not requested. The owner, platform signer, mock tokens and 10 BPS
@@ -49,7 +49,7 @@ and its adjacent `.deployment.json` file.
 ## Historical: 29 September 2026 rollout
 
 This section is kept as a record of the first escrow-linked rollout. Its registry
-and factory were later replaced, and the backend now exports 93 Functions rather
+and factory were later replaced, and the backend now exports 103 Functions rather
 than 66.
 
 Rollout completed on 2026-09-29. Firebase deployment updated or created all 66
