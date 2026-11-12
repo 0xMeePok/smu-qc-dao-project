@@ -45,6 +45,16 @@ function ActionCount({ read }) {
 }
 
 describe("wallet escrow funding panel", () => {
+  it("shows a paid grant's payment status before optional balances without a wallet top-up action", async () => {
+    mocks.read.mockResolvedValue(model({ isGrant: true, state: 2, totalDeposited: 1000000000n, totalReleased: 1000000000n }));
+    render(<EscrowFundingPanel proposal={{ ...proposal, opportunityType: "open-funding" }} />);
+
+    const paid = await screen.findByText("Fully paid");
+    expect(paid.closest("details")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add funds" })).toBeNull();
+    expect(screen.getByText("Balances and refund details").closest("details").open).toBe(false);
+    expect(screen.getByText("Transaction history").closest("details").open).toBe(false);
+  });
   it("opens the testnet add-funds simulation from the escrow panel", () => {
     render(<EscrowFundingView state={model()} walletReady amount="" delivery={{ summary: "", url: "" }} rampAddress={account} rampEmail="funder@example.com" />);
     fireEvent.click(screen.getByRole("button", { name: "Add funds" }));

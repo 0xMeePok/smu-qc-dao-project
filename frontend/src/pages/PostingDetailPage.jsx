@@ -426,8 +426,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
     // them away from something they can reach in one click.
     if (!isAuthenticated) {
       return (
-        <section className="page empty">
-          <span className="http-status">Sign in required</span>
+        <section className="page empty posting-sign-in">
           <h1>Sign in to view this posting.</h1>
           <p>Research opportunities are shared with platform members.</p>
           <button
