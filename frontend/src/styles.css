@@ -3829,9 +3829,12 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--brand); }
 :is(.detail-main, .posting-tab) > .proposal-comparison { padding: 12px 0 0; background: transparent; }
 .proposal-comparison > h2 { margin: 0; font-size: clamp(28px, 4vw, 36px); font-weight: 700; letter-spacing: -0.03em; }
 .proposal-comparison > .field-hint { max-width: 40em; margin: 8px 0 0; font-size: 16px; line-height: 1.45; }
-.comparison-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin: 24px 0 16px; }
-.comparison-controls > .segmented { flex-wrap: wrap; gap: 4px; overflow: visible; }
-.comparison-controls > .segmented > button { white-space: normal; }
+.comparison-controls { display: grid; gap: 12px; margin: 24px 0 16px; container-type: inline-size; }
+.comparison-controls > .segmented { display: grid; grid-template-columns: repeat(4, auto); gap: 4px; padding: 4px; overflow: visible; }
+.comparison-controls > .segmented > button { min-height: 44px; padding: 6px 8px; font-size: 13px; line-height: 1.3; white-space: normal; }
+@container (max-width: 510px) {
+  .comparison-controls > .segmented { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .comparison-controls-end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
 .comparison-count { color: var(--muted); font-size: 14px; }
 .comparison-sort { min-width: 0; max-width: 100%; }
@@ -4312,6 +4315,34 @@ footer.footer { background: transparent; }
 .open-funding-panel .grant-pool-topup { display: grid; gap: 16px; padding-top: 24px; border-top: 1px solid var(--line); }
 .open-funding-panel .grant-pool-topup > h4, .open-funding-panel .grant-pool-topup > .field-hint { margin: 0; line-height: 1.6; }
 .open-funding-panel .grant-pool-topup .field { gap: 10px; }
+.grant-section-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--segmented-bg);
+}
+.grant-section-picker button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+.grant-section-picker button:hover { background: var(--surface-hover); }
+.grant-section-picker button[aria-pressed="true"] {
+  border-color: var(--line-strong);
+  background: var(--segmented-on);
+}
+.grant-funding-details { margin-top: 24px; border-top: 1px solid var(--line); }
+.grant-funding-details > summary { padding: 12px 0; color: var(--ink); cursor: pointer; }
+.grant-funding-details > .escrow-history { margin-top: 12px; }
 @media (max-width: 680px) {
   .open-funding-panel .grant-offer-row { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 20px; }
   .open-funding-panel .table-row-actions { width: 100%; justify-content: stretch; }
@@ -4690,6 +4721,14 @@ h1, h2, h3 { font-weight: 500; }
 .discover-page .opportunity-table-link { font-family: Newsreader, "Iowan Old Style", Palatino, serif; font-size: 22px; font-weight: 500; }
 
 .blotter-posting { padding-top: 40px; }
+.posting-sign-in h1 {
+  font-size: clamp(28px, 4vw, 36px);
+  font-weight: 500;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+}
+.posting-sign-in p { max-width: 36ch; margin: 12px auto 0; font-size: 17px; line-height: 1.55; }
+.posting-sign-in .primary { margin-top: 20px; }
 .blotter-posting .back { margin-bottom: 40px; color: var(--muted); }
 .blotter-posting .detail-layout { gap: 72px; }
 .proposal-detail-page .detail-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 260px); gap: 40px; }
@@ -5173,6 +5212,13 @@ h1, h2, h3 { font-weight: 500; }
 .escrow-card-progress { min-width: 10rem; max-width: 17rem; margin-top: 10px; line-height: 1.5; }
 .posting-funding-total { display: block; font-weight: 600; color: var(--ink); }
 .escrow-card-progress .posting-funding-verified { font-size: 11px; }
+.posting-proposals { display: grid; gap: 12px; overflow: visible; }
+.posting-proposals > .table-row {
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background-color: var(--surface-solid);
+}
+.posting-proposals > .table-row:is(:hover, :focus-within) { border-color: var(--muted); }
 .proposal-funding-row { gap: 24px; align-items: center; }
 .proposal-funding-copy { flex: 1; min-width: 0; }
 .proposal-row-funding { margin-top: 20px; max-width: 30rem; }

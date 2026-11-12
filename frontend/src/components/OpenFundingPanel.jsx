@@ -68,23 +68,31 @@ const DECLINE_MIN = 10, DECLINE_MAX = 2000;
 const declineLength = reason => String(reason ?? "").trim().normalize("NFC").length;
 
 export function OpenFundingView({ data, loading, error, notice, busy, progress, walletReady, pending, amount, setAmount,
-  withdrawalAmount = "", setWithdrawalAmount, onAction, onRefresh, onConfirm, onConnect, proposalId, onNavigate, integrityBlocked = false,
+  withdrawalAmount = "", setWithdrawalAmount, onAction, onRefresh, onConfirm, onConnect, problemId, proposalId, onNavigate, integrityBlocked = false,
   decline = null, onDeclineChange, reviewedProposal = null }) {
   // A background pool read neither disables nor remounts controls; every action is
   // re-prepared and verified by the server before the wallet opens.
   const disabled = busy || !walletReady || Boolean(pending);
   const money = value => escrowFundingAmount(value, data?.tokenDecimals, data?.tokenSymbol);
   const selected = (data?.selections ?? []).filter(item => !proposalId || item.proposalId === proposalId);
-  const canWithdraw = Boolean(data?.canWithdraw && data.closed && data.poolAddress && BigInt(data.available ?? 0) > 0n);
+  const available = BigInt(data?.available ?? 0);
+  const canWithdraw = Boolean(!proposalId && data?.canWithdraw && data.closed && data.poolAddress && available > 0n);
+  const poolPostingId = problemId ?? data?.problemId;
+  const openPool = () => onNavigate(`posting/${poolPostingId}?tab=funding`);
+  const canOpenPool = Boolean(onNavigate && poolPostingId);
+  const needsPoolSetup = proposalId && data?.canCreate && !data.poolAddress;
+  const canUseOfferWallet = selected.some(item => item.canAccept || item.canDecline || item.canVoid
+    || (item.status === "none" && data.canSelect && item.canSelect !== false));
   let withdrawalError = "";
   if (canWithdraw && withdrawalAmount.trim()) {
     try {
       if (fundingAmountUnits(withdrawalAmount, data.tokenDecimals) > BigInt(data.available)) withdrawalError = "The amount exceeds the unreserved funds available.";
     } catch (err) { withdrawalError = err.message; }
   }
-  return <section id="proposal-funding" className="card escrow-funding open-funding-panel" aria-label="Open funding grant pool">
-    <div className="table-header"><div><h3>{proposalId ? "Grant for this proposal" : "Open funding grant pool"}</h3><p>Offer a grant → Researcher accepts → Proposal escrow is funded</p></div>
-      <button type="button" className="secondary small" disabled={busy || loading} onClick={onRefresh}>Refresh grant pool</button></div>
+  return <section id="proposal-funding" className="card escrow-funding open-funding-panel" aria-label={proposalId ? "Grant offer" : "Open funding grant pool"}>
+    <div className="table-header"><div><h3>{proposalId ? "Grant offer" : "Open funding grant pool"}</h3>
+      {!proposalId && <p>Offers reserve funds until researchers accept.</p>}</div>
+      <button type="button" className="secondary small" disabled={busy || loading} onClick={onRefresh}>{proposalId ? "Refresh offer" : "Refresh grant pool"}</button></div>
     {loading && !data && <p role="status">Reading the grant pool…</p>}
     {busy && progress && !error && <p role="status">{progressMessage(progress)}</p>}
     {error && <p role="alert" className="error-banner">{error}</p>}
@@ -94,8 +102,10 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
       <div className="grant-offers">
       {selected.map(item => {
         const expired = item.status === "expired";
-        const eligible = item.status === "none" && data.canSelect && item.canSelect !== false && BigInt(item.amountBaseUnits ?? 0) > 0n
-          && BigInt(item.amountBaseUnits) <= BigInt(data.available ?? 0);
+        const requested = BigInt(item.amountBaseUnits ?? 0);
+        const needsPoolFunds = Boolean(proposalId && item.status === "none" && data.canDeposit
+          && data.poolAddress && !data.closed && !integrityBlocked && requested > available);
+        const eligible = item.status === "none" && data.canSelect && item.canSelect !== false && requested > 0n && requested <= available;
         const matchesReview = reviewedProposal && item.reviewedProposal
           && ["entityId", "proposalHash", "solutionHash"].every(key => same(reviewedProposal[key], item.reviewedProposal[key]));
         const canSelect = eligible && matchesReview;
@@ -103,15 +113,17 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
         const reasonId = `grant-decline-reason-${item.proposalId}`, reasonLength = declining ? declineLength(decline.reason) : 0;
         const reasonError = declining && reasonLength > 0 && reasonLength < DECLINE_MIN ? `Enter at least ${DECLINE_MIN} characters.` : "";
         const status = grantFundingLabel(item);
-        return <div className="table-row grant-offer-row" key={item.proposalId}><div><strong>{item.title || "Proposal"}</strong>
-          <small className="table-row-meta">Requested <ConvertedAmount text={money(item.amountBaseUnits)} /> · {status}</small>
-          {canSelect && <p className="grant-offer-explanation"><ConvertedAmount text={money(data.available)} /> available in the pool. Offering this grant reserves <ConvertedAmount text={money(item.amountBaseUnits)} /> for seven days. The researcher must accept before it moves into this proposal’s escrow.</p>}
+        const amountLabel = item.status === "accepted" ? "Awarded" : item.status === "none" ? "Requested" : "Offer amount";
+        return <div className="table-row grant-offer-row" key={item.proposalId}><div><strong>{proposalId ? status ?? "Offer status unavailable" : item.title || "Proposal"}</strong>
+          <small className="table-row-meta">{proposalId ? amountLabel : "Requested"} <ConvertedAmount text={money(item.amountBaseUnits)} />{!proposalId && status && <> · {status}</>}</small>
+          {canSelect && <p className="grant-offer-explanation">This reserves the grant for seven days. The researcher must accept before it moves into this proposal’s escrow.</p>}
           {eligible && reviewedProposal && !matchesReview && <p role="status">This proposal changed since you opened it. Refresh the page to review its latest version.</p>}
           {Number(item.acceptanceDeadline) > 0 && ["pending", "expired"].includes(item.status) && <small className="table-row-meta">Accept before {formatInstant(new Date(Number(item.acceptanceDeadline) * 1000))}</small>}
           {item.declined && item.declineReason && <small className="table-row-meta">Researcher’s reason: {item.declineReason}</small>}
           {item.canDecline && !declining && <small className="table-row-meta">Not taking this grant? Decline the offer to return the reserved amount to the pool’s available balance right away.</small>}
           {item.canAccept && !item.canDecline && <small className="table-row-meta">Not taking this grant? Leave it unaccepted and the reserved amount returns to the pool after this deadline. Withdrawing this proposal lets the reservation be released sooner.</small>}
-          {item.status === "none" && data.canSelect && !eligible && <small className="table-row-meta">{item.canSelect === false ? "This proposal is not currently eligible for selection." : "Deposit more funds to cover this request."}</small>}
+          {needsPoolFunds && <small className="table-row-meta">The shared pool has <ConvertedAmount text={money(data.available)} /> available for this request.</small>}
+          {!needsPoolFunds && item.status === "none" && data.canSelect && !eligible && <small className="table-row-meta">{item.canSelect === false ? "This proposal is not currently eligible for selection." : "Deposit more funds to cover this request."}</small>}
           {declining && <div className="field-group" role="group" aria-label="Decline grant offer">
             <p>Declining is final: this proposal cannot be offered a grant from this pool again, and the reserved <ConvertedAmount text={money(item.amountBaseUnits)} /> returns to the pool’s available balance.</p>
             <Field label="Reason for declining" htmlFor={reasonId} error={reasonError}
@@ -125,6 +137,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
           </div>}
         </div><div className="table-row-actions">
           {canSelect && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("select", item.proposalId, { reviewedProposal: item.reviewedProposal })}>{proposalId ? `Offer ${money(item.amountBaseUnits)} grant` : "Select for funding"}</button>}
+          {needsPoolFunds && canOpenPool && <button type="button" className="primary small" onClick={openPool}>Add funds on the opportunity</button>}
           {eligible && !reviewedProposal && onNavigate && <button type="button" className="primary small" onClick={() => onNavigate(`proposal/${item.proposalId}?tab=funding`)}>Review proposal to offer grant</button>}
           {item.canAccept && <button type="button" className="primary small" disabled={disabled || integrityBlocked || declining} onClick={() => onAction("accept", item.proposalId)}>Accept grant</button>}
           {item.canDecline && !declining && <button type="button" className="secondary small" disabled={disabled} onClick={() => onDeclineChange?.({ proposalId: item.proposalId, reason: "" })}>Decline grant offer</button>}
@@ -134,29 +147,32 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
       })}
       {!selected.length && <p className="field-hint">{proposalId ? "No grant offer is available for this proposal yet." : "No proposals seeking a grant yet."}</p>}
       </div>
-      <div className="grant-pool-summary"><h4>Shared grant pool</h4><p className="field-hint">This balance funds proposals across the funding opportunity.</p>
-      <dl className="escrow-stats">
-        {[["Deposited", "totalDeposited"], ["Available", "available"], ["Reserved", "totalReserved"], ["Awarded to proposals", "totalAllocated"]].map(([label, key]) => <div key={key}><dt>{label}</dt><dd><ConvertedAmount text={money(data[key])} /></dd></div>)}
-      </dl></div>
-      {data.poolAddress ? <a href={escrowExplorer("address", data.poolAddress)} target="_blank" rel="noreferrer">View grant pool contract</a>
-        : <p className="field-hint">The owner must create this pool, then deposit funds to make funding available.</p>}
-      {!walletReady && <button type="button" className="secondary small" onClick={onConnect}>Sign in to use your wallet</button>}
-      {data.canCreate && !data.poolAddress && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("create")}>Create grant pool</button>}
-      {data.canDeposit && data.poolAddress && <div className="field-group grant-pool-topup">
-        <h4>Add money to the pool</h4><p className="field-hint">Top up the shared balance here. Use the proposal’s offer button above to make a grant.</p>
-        <Field label="Add funding" htmlFor="grant-deposit" hint={`Enter an additional amount in ${data.tokenSymbol}. You can increase the pool after awarding grants.`}>
-          {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" value={amount} aria-describedby={describedBy} maxLength={160} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
-        </Field>
-        <button type="button" className="primary small" disabled={disabled || integrityBlocked || !amount.trim()} onClick={() => onAction("deposit")}>{proposalId ? "Add to grant pool" : "Deposit funds"}</button>
-        <p className="field-hint">Approve the entered token amount, then confirm the deposit in your wallet.</p>
-      </div>}
-      {canWithdraw && <div className="field-group">
-        <Field label="Withdraw available funding" htmlFor="grant-withdrawal" hint={`This posting has closed. You can withdraw up to ${money(data.available)}. Reserved offers and awarded grants remain funded.`} error={withdrawalError}>
-          {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" value={withdrawalAmount} aria-describedby={describedBy} aria-invalid={Boolean(withdrawalError)} maxLength={160} disabled={disabled} onChange={event => setWithdrawalAmount(event.target.value)} />}
-        </Field>
-        <button type="button" className="secondary small" disabled={disabled || !withdrawalAmount.trim() || Boolean(withdrawalError)} onClick={() => onAction("withdraw")}>Withdraw funds</button>
-      </div>}
-      {data.truncated && <p className="field-hint">Showing a limited set of proposals. Open a proposal directly to check its offer.</p>}
+      {needsPoolSetup && canOpenPool && <button type="button" className="primary small" onClick={openPool}>Set up the opportunity’s grant pool</button>}
+      {!walletReady && (!proposalId || canUseOfferWallet || pending) && <button type="button" className="secondary small" onClick={onConnect}>Sign in to use your wallet</button>}
+      {!proposalId && <>
+        <div className="grant-pool-summary"><h4>Shared grant pool</h4><p className="field-hint">This balance funds proposals across the funding opportunity.</p>
+        <dl className="escrow-stats">
+          {[["Deposited", "totalDeposited"], ["Available", "available"], ["Reserved", "totalReserved"], ["Awarded to proposals", "totalAllocated"]].map(([label, key]) => <div key={key}><dt>{label}</dt><dd><ConvertedAmount text={money(data[key])} /></dd></div>)}
+        </dl></div>
+        {data.poolAddress ? <a href={escrowExplorer("address", data.poolAddress)} target="_blank" rel="noreferrer">View grant pool contract</a>
+          : <p className="field-hint">The owner must create this pool, then deposit funds to make funding available.</p>}
+        {data.canCreate && !data.poolAddress && <button type="button" className="primary small" disabled={disabled || integrityBlocked} onClick={() => onAction("create")}>Create grant pool</button>}
+        {data.canDeposit && data.poolAddress && <div className="field-group grant-pool-topup">
+          <h4>Add money to the pool</h4>
+          <Field label="Add funding" htmlFor="grant-deposit" hint={`Enter an additional amount in ${data.tokenSymbol}. You can increase the pool after awarding grants.`}>
+            {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" value={amount} aria-describedby={describedBy} maxLength={160} disabled={disabled} onChange={event => setAmount(event.target.value)} />}
+          </Field>
+          <button type="button" className="primary small" disabled={disabled || integrityBlocked || !amount.trim()} onClick={() => onAction("deposit")}>Deposit funds</button>
+          <p className="field-hint">Approve the entered token amount, then confirm the deposit in your wallet.</p>
+        </div>}
+        {canWithdraw && <div className="field-group">
+          <Field label="Withdraw available funding" htmlFor="grant-withdrawal" hint={`This posting has closed. You can withdraw up to ${money(data.available)}. Reserved offers and awarded grants remain funded.`} error={withdrawalError}>
+            {({ id, describedBy }) => <input id={id} type="text" inputMode="decimal" value={withdrawalAmount} aria-describedby={describedBy} aria-invalid={Boolean(withdrawalError)} maxLength={160} disabled={disabled} onChange={event => setWithdrawalAmount(event.target.value)} />}
+          </Field>
+          <button type="button" className="secondary small" disabled={disabled || !withdrawalAmount.trim() || Boolean(withdrawalError)} onClick={() => onAction("withdraw")}>Withdraw funds</button>
+        </div>}
+        {data.truncated && <p className="field-hint">Showing a limited set of proposals. Open a proposal directly to check its offer.</p>}
+      </>}
     </>}
     {pending && !busy && <div role="status"><p>A submitted transaction still needs confirmation. Confirm it before starting another action.</p>
       <a href={escrowExplorer("tx", pending.transactionHash)} target="_blank" rel="noreferrer">View transaction</a>{" "}
@@ -299,7 +315,7 @@ export function OpenFundingPanel({ problemId, postingOwnerId, proposalId, review
     } catch (err) { if (err.terminal) remember(null); if (currentPanel()) setError(escrowErrorMessage(err)); }
     finally { actionBusy.current = false; setBusy(false); setProgress(null); }
   };
-  return <><OpenFundingView {...{ data, loading, error, notice, busy, progress, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, proposalId, onNavigate, integrityBlocked, decline, reviewedProposal }}
+  return <><OpenFundingView {...{ data, loading, error, notice, busy, progress, walletReady, pending, amount, setAmount, withdrawalAmount, setWithdrawalAmount, problemId, proposalId, onNavigate, integrityBlocked, decline, reviewedProposal }}
     onDeclineChange={setDecline}
     onAction={act} onRefresh={() => { setError(""); void refresh(); }} onConfirm={confirm} onConnect={() => { void signIn(); }} /></>;
 }

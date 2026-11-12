@@ -76,18 +76,27 @@ describe("open funding grant workflow UI", () => {
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account, reviewedProposal: proposal.reviewedProposal })));
     expect(await screen.findByText("Offer recorded. The researcher has seven days to accept.")).toBeTruthy();
   });
-  it("puts this proposal's amount-specific grant offer before the shared-pool top up", async () => {
+  it("lets the owner offer the requested grant from the proposal without showing pool management", async () => {
     mocks.read.mockResolvedValue(model({ tokenSymbol: "USDT", totalDeposited: "1100000000", available: "1100000000", selections: [{ ...proposal, amountBaseUnits: "100000000" }] }));
     render(<OpenFundingPanel problemId="grant" proposalId="solution" />);
     const offer = await screen.findByRole("button", { name: "Offer 100 USDT grant" });
-    const topUp = screen.getByRole("button", { name: "Add to grant pool" });
-
-    expect(offer.compareDocumentPosition(topUp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByLabelText("Add funding")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Shared grant pool" })).toBeNull();
     expect(screen.getByText(/The researcher must accept before it moves into this proposal’s escrow/)).toBeTruthy();
     fireEvent.click(offer);
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ problemId: "grant", proposalId: "solution", action: "select", account, reviewedProposal: proposal.reviewedProposal })));
     expect(mocks.write).toHaveBeenCalledTimes(1);
     await screen.findByText("Offer recorded. The researcher has seven days to accept.");
+  });
+  it("links the owner to the opportunity when the pool cannot cover the request", async () => {
+    const onNavigate = vi.fn();
+    mocks.read.mockResolvedValue(model({ available: "0", canSelect: false, selections: [{ ...proposal, canSelect: false }] }));
+    render(<OpenFundingPanel problemId="grant" proposalId="solution" onNavigate={onNavigate} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add funds on the opportunity" }));
+    expect(onNavigate).toHaveBeenCalledWith("posting/grant?tab=funding");
+    expect(screen.queryByRole("button", { name: /Offer .* grant/ })).toBeNull();
+    expect(mocks.write).not.toHaveBeenCalled();
   });
   it("submits a top up using the current token's precision", async () => {
     render(<OpenFundingPanel problemId="grant" />);

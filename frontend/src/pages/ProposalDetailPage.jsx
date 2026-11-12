@@ -76,6 +76,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
     setOpenedTabs(previous => previous.has(next) ? previous : new Set([...previous, next]));
     setActiveTab(next);
   };
+  const [grantSection, setGrantSection] = useState("grant");
   const [escrowState, setEscrowState] = useState(null);
   const [grantSummary, setGrantSummary] = useState(null);
   const [fundingRefreshVersion, setFundingRefreshVersion] = useState(0);
@@ -102,6 +103,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
     setLoading(true); setProposal(null); setEscrowState(null); setError(""); setConfirm(false);
     setReason(""); setReasonError(""); setAnchoredWithdrawal(null); setTab(initialTab);
     setOpenedTabs(new Set([initialTab]));
+    setGrantSection("grant");
     setAuditBusy(anchorInFlight.current.has(proposalId));
     findProposal(proposalId).then((record) => { if (!cancelled) setProposal(record); })
       .catch((err) => { if (!cancelled) setError(messageForProposalError(err)); })
@@ -226,6 +228,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
   const showCollaboration = !independent && proposal.status !== "draft" && !isModerated(proposal);
   const showDiscussion = proposal.status !== "draft" && !isModerated(proposal);
   const showEscrow = !independent && proposal.status !== "draft" && Boolean(proposal.fundingTerms);
+  const hasGrantSections = isOpenFunding && showEscrow;
   const showFunding = (independent && proposal.status !== "draft") || showEscrow || showCollaboration;
   const reviewers = owns || (!independent && sponsors);
   const canReview = !independent && sponsors && !owns;
@@ -282,7 +285,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
         <div className="proposal-funding-summary-head"><div><span className="eyebrow">{isOpenFunding ? "Grant funding" : "This proposal’s funding"}</span><p>{isOpenFunding
           ? grantFundingLabel(grantOffer) ?? "Open Escrow & funding to check the grant offer."
           : "Contributions are held separately for this solution."}</p></div>
-          <button type="button" className="secondary small" onClick={() => setTab("funding")}>View escrow &amp; funding</button></div>
+        <button type="button" className="secondary small" onClick={() => setTab("funding")}>{isOpenFunding ? "View grant & payments" : "View escrow & funding"}</button></div>
         {(!isOpenFunding || (escrowState && hasConfirmedFunding(escrowState))) && <FundingProgress summary={escrowState ?? {}} compact label="This proposal's confirmed funding" />}
       </section>}
       <ContentModerationNotice record={proposal} />
@@ -360,12 +363,18 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
       </div>}
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
-        {!independent && proposal.fundingTerms && openedTabs.has("funding") && <AdminEscrowCancellation key={`${proposal.id}:${user?.id}`} proposalId={proposal.id} onConfirmed={() => { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); }} />}
-        {isOpenFunding && <OpenFundingPanel key={liveScope} integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} postingOwnerId={proposal.postingOwnerId} proposalId={proposal.id} reviewedProposalRecord={proposal} onNavigate={onNavigate} onSummaryChange={updateGrantSummary}
-          onChange={(change) => { if (activeProposalId.current === change.proposalId) { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); } }} />}
+        {hasGrantSections && <div className="grant-section-picker" role="group" aria-label="Escrow and funding sections">
+          {[["grant", "Grant offer"], ["payments", "Payments"], ["history", "History"]].map(([id, label]) =>
+            <button key={id} type="button" aria-pressed={grantSection === id} aria-controls={`proposal-funding-${id}`} onClick={() => setGrantSection(id)}>{label}</button>)}
+        </div>}
+        {isOpenFunding && <div id="proposal-funding-grant" hidden={hasGrantSections && grantSection !== "grant"}><OpenFundingPanel key={liveScope} integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} postingOwnerId={proposal.postingOwnerId} proposalId={proposal.id} reviewedProposalRecord={proposal} onNavigate={onNavigate} onSummaryChange={updateGrantSummary}
+          onChange={(change) => { if (activeProposalId.current === change.proposalId) { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); } }} /></div>}
         {independent ? <IndependentFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal}
           initialTransaction={pendingFundingTransaction} refreshVersion={fundingRefreshVersion} />
-          : proposal.fundingTerms ? <EscrowFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal} refreshVersion={fundingRefreshVersion} /> : !isOpenFunding && <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
+          : proposal.fundingTerms ? <EscrowFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal}
+            refreshVersion={fundingRefreshVersion} grantSection={hasGrantSections ? grantSection : undefined}>
+            {openedTabs.has("funding") && <AdminEscrowCancellation key={`${proposal.id}:${user?.id}`} proposalId={proposal.id} onConfirmed={() => { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); }} />}
+          </EscrowFundingPanel> : !isOpenFunding && <MatchingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} proposalId={proposal.id} onNavigate={onNavigate} onOpenAuditReceipt={showProposalReceipt} onChange={(next) => {
           const updated = next.proposals.find((item) => item.id === proposal.id);
           if (updated) setProposal((current) => current?.id === updated.id ? { ...current, matching: { ...current.matching, ...updated.matching, fundedAmount: updated.fundedAmount }, problemMatching: next.matching } : current);
         }} />}
@@ -397,7 +406,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
       {canWithdraw && <button type="button" className="secondary" disabled={withdrawing} onClick={() => setConfirm(true)}>Withdraw proposal</button>}
       {independent
         ? showFunding && <button type="button" className="primary" onClick={() => setTab("funding")}>Open crowdfunding</button>
-        : showEscrow && <button type="button" className="primary" onClick={() => setTab("funding")}>{isOpenFunding ? (sponsors ? "Manage grant offer" : "View grant & escrow") : "Open escrow"}</button>}
+        : showEscrow && (!isOpenFunding || activeTab !== "funding") && <button type="button" className="primary" onClick={() => setTab("funding")}>{isOpenFunding ? "Open grant funding" : "Open escrow"}</button>}
       {owns && proposal.status === "withdrawn" && <button type="button" className="primary" onClick={() => onNavigate(independent ? "create-proposal" : `submit-proposal/${proposal.problemId}`)}>{independent ? "Publish a replacement" : "Submit a replacement"}</button>}
       </div>
     </aside></div>
