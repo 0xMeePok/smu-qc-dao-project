@@ -88,7 +88,8 @@ export function openFundingFixture() {
         opportunityRevisionDigest: proposals[index].reviewedParentAudit.revisionDigest,
         proposalHash: expected[index].proposalHash, solutionHash: expected[index].solutionHash };
       if (addresses.some(row => sameAddress(address, row))) {
-        const values = { openFundingPool: poolAddress, totalDeposited: state.escrowDeposits[index], state: state.escrowDeposits[index] ? 1 : 0,
+        const values = { openFundingPool: poolAddress, totalDeposited: state.escrowDeposits[index],
+          state: declines.has(expected[index].entityId) ? 7 : state.escrowDeposits[index] ? 1 : 0,
           proposalOwner: proposals[index].researcherId,
           totalReleased: state.released[index], totalRefunded: state.refunded[index], currentTranche: 0n, selectionId: expected[index].entityId,
           ownerApproved: true, solutionApproved: true, yesWeight: 0n, approvalDeadline: 1950000000n, platformSigner: owner,

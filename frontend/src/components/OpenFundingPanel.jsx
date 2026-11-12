@@ -1,4 +1,5 @@
 import { ConvertedAmount } from "./CurrencyAmount.jsx";
+import { grantFundingLabel } from "../lib/grantOfferStatus.js";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { prepareStoredProposal } from "../../../firebase/functions/proposalAuditPayload.js";
@@ -101,8 +102,7 @@ export function OpenFundingView({ data, loading, error, notice, busy, progress, 
         const declining = Boolean(item.canDecline && decline?.proposalId === item.proposalId);
         const reasonId = `grant-decline-reason-${item.proposalId}`, reasonLength = declining ? declineLength(decline.reason) : 0;
         const reasonError = declining && reasonLength > 0 && reasonLength < DECLINE_MIN ? `Enter at least ${DECLINE_MIN} characters.` : "";
-        const status = expired ? "Offer expired" : item.declined ? "Offer declined by the researcher" : item.status === "pending" ? "Awaiting researcher acceptance"
-          : item.status === "accepted" ? "Grant accepted" : item.status === "voided" ? "Offer voided" : "Seeking a grant";
+        const status = grantFundingLabel(item);
         return <div className="table-row grant-offer-row" key={item.proposalId}><div><strong>{item.title || "Proposal"}</strong>
           <small className="table-row-meta">Requested <ConvertedAmount text={money(item.amountBaseUnits)} /> · {status}</small>
           {canSelect && <p className="grant-offer-explanation"><ConvertedAmount text={money(data.available)} /> available in the pool. Offering this grant reserves <ConvertedAmount text={money(item.amountBaseUnits)} /> for seven days. The researcher must accept before it moves into this proposal’s escrow.</p>}

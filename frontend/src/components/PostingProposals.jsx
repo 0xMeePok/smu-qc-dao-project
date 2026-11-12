@@ -13,6 +13,8 @@ import { useSignIn } from "../context/SessionContext.jsx";
 import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
 import { getPostingEscrowFundingSummary } from "../lib/escrowFunding.js";
 import { FundingProgress } from "./FundingProgress.jsx";
+import { OPEN_FUNDING_TYPE } from "../config/fundingOpportunity.js";
+import { grantFundingLabel } from "../lib/grantOfferStatus.js";
 
 const reasonLabel = moderationReasonLabel;
 
@@ -49,7 +51,7 @@ function RemovedProposalRow({ item }) {
   );
 }
 
-function Row({ item, onNavigate, problemMatching, fundingSummary }) {
+function Row({ item, onNavigate, problemMatching, fundingSummary, isOpenFunding, grantOffer }) {
   if (item.removed) return <RemovedProposalRow item={item} />;
   const isDraft = item.status === PROPOSAL_STATUS_DRAFT;
   return (
@@ -62,8 +64,10 @@ function Row({ item, onNavigate, problemMatching, fundingSummary }) {
             : <FundingMeta item={item} problemMatching={problemMatching} showDetail={!item.fundingTerms} />}
         </small>
         {!isDraft && item.fundingTerms && <div className="proposal-row-funding">
-          <span className="eyebrow">This proposal’s funding</span>
-          <FundingProgress summary={fundingSummary ?? {}} compact label={`Confirmed funding for ${item.title || "this proposal"}`} />
+          <span className="eyebrow">{isOpenFunding ? "Grant funding" : "This proposal’s funding"}</span>
+          {isOpenFunding
+            ? <p className="field-hint">{grantFundingLabel(grantOffer) ?? "See Grant funding for offer details."}</p>
+            : <FundingProgress summary={fundingSummary ?? {}} compact label={`Confirmed funding for ${item.title || "this proposal"}`} />}
         </div>}
       </div>
       <div className="table-row-actions">
@@ -81,11 +85,12 @@ function Row({ item, onNavigate, problemMatching, fundingSummary }) {
   );
 }
 
-export function PostingProposals({ posting, viewerId, isPoster, proposalCount, onNavigate }) {
+export function PostingProposals({ posting, viewerId, isPoster, proposalCount, onNavigate, grantOffers }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(Boolean(viewerId));
   const [error, setError] = useState("");
   const [fundingByProposal, setFundingByProposal] = useState({});
+  const isOpenFunding = posting?.opportunityType === OPEN_FUNDING_TYPE;
 
   useEffect(() => {
     if (!viewerId || !posting?.id) {
@@ -105,7 +110,7 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
       .then((found) => {
         if (cancelled) return;
         setItems(found);
-        if (found.some(item => !item.removed && item.status !== PROPOSAL_STATUS_DRAFT && item.fundingTerms)) {
+        if (!isOpenFunding && found.some(item => !item.removed && item.status !== PROPOSAL_STATUS_DRAFT && item.fundingTerms)) {
           void getPostingEscrowFundingSummary(posting.id).then(summary => {
             if (!cancelled) setFundingByProposal(Object.fromEntries((summary.items ?? []).map(item => [item.proposalId, item])));
           }).catch(() => { /* Unknown funding stays explicitly unverified. */ });
@@ -114,7 +119,7 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
       .catch((err) => { if (!cancelled) { setItems([]); setError(messageForProposalError(err)); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [posting?.id, posting?.matching?.status, posting?.matching?.proposalId, viewerId]);
+  }, [posting?.id, posting?.matching?.status, posting?.matching?.proposalId, viewerId, isOpenFunding]);
 
   const countLabel = `${proposalCount} ${proposalCount === 1 ? "proposal" : "proposals"} received`;
 
@@ -128,7 +133,8 @@ export function PostingProposals({ posting, viewerId, isPoster, proposalCount, o
         <p className="error-banner" role="alert">{error}</p>
       ) : items.length > 0 ? (
         <div className="card-table posting-proposals">
-          {items.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} problemMatching={posting.matching} fundingSummary={fundingByProposal[item.id]} />)}
+          {items.map((item) => <Row key={item.id} item={item} onNavigate={onNavigate} problemMatching={posting.matching}
+            fundingSummary={fundingByProposal[item.id]} isOpenFunding={isOpenFunding} grantOffer={grantOffers?.get(item.id)} />)}
         </div>
       ) : (
         <p className="table-empty">

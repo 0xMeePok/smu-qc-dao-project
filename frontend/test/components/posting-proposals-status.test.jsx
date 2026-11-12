@@ -4,7 +4,8 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const rows = vi.hoisted(() => ({ items: [] }));
 const funding = vi.hoisted(() => ({ items: [] }));
-vi.mock("../../src/lib/escrowFunding.js", () => ({ getPostingEscrowFundingSummary: async () => funding }));
+const getEscrowSummary = vi.hoisted(() => vi.fn(async () => funding));
+vi.mock("../../src/lib/escrowFunding.js", () => ({ getPostingEscrowFundingSummary: getEscrowSummary }));
 vi.mock("../../src/lib/proposals.js", () => ({
   PROPOSAL_STATUS_DRAFT: "draft",
   listProposalsForPosting: async () => rows.items,
@@ -15,6 +16,23 @@ vi.mock("../../src/context/AuthContext.jsx", () => ({ useAuth: () => ({ user: { 
 import { PostingProposals } from "../../src/components/PostingProposals.jsx";
 
 afterEach(cleanup);
+
+it("uses the grant pool's offer status and updates it when an open funding offer ends", async () => {
+  const proposal = { id: "grant-1", title: "Grant proposal", status: "submitted", currency: "USDT",
+    amount: 100, fundingTerms: { target: "100000000" }, createdAt: new Date() };
+  rows.items = [proposal, { ...proposal, id: "grant-2", title: "Another grant proposal" }];
+  const props = { posting: { id: "grant-post", opportunityType: "open-funding" }, viewerId: "0xabc", proposalCount: 2, onNavigate: vi.fn() };
+  const pending = new Map([["grant-1", { status: "pending" }]]);
+  const { rerender } = render(<PostingProposals {...props} grantOffers={pending} />);
+  expect(await screen.findByText("Awaiting researcher acceptance")).toBeTruthy();
+
+  rerender(<PostingProposals {...props} grantOffers={new Map([["grant-1", { status: "voided", declined: true, escrowState: "Voided" }]])} />);
+  expect(screen.getByText("Escrow cancelled · Offer declined by the researcher")).toBeTruthy();
+  expect(screen.getByText("See Grant funding for offer details.")).toBeTruthy();
+  expect(screen.queryByText(/progress needs verification/)).toBeNull();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  expect(getEscrowSummary).not.toHaveBeenCalled();
+});
 
 it("[FUT-ACM-193] shows a removed proposal as its reason and a claim button", async () => {
   rows.items = [{ id: "p1", removed: true, title: "Routing study", reason: "off_topic", details: "The result does not match the source.", claimFunds: true, summary: "Secret summary" }];

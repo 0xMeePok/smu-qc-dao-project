@@ -436,7 +436,8 @@ describe("researcher declines a pending grant offer", () => {
     await syncOpenFunding({ ...f, uid: researcher, transactionHash: hash });
     assert.equal(summary.totalReserved, "50000000000"); assert.equal(summary.available, "50000000000");
     const row = summary.selections[0];
-    assert.equal(row.status, "voided"); assert.equal(row.declined, true); assert.equal(row.declineReasonHash, prepared.reasonHash);
+    assert.equal(row.status, "voided"); assert.equal(row.escrowState, "Voided");
+    assert.equal(row.declined, true); assert.equal(row.declineReasonHash, prepared.reasonHash);
     assert.equal(row.declineReason, trimmed); assert.equal(row.canDecline, false); assert.equal(row.canAccept, false);
     const record = f.db.records.get(`${OPEN_FUNDING_DECLINES}/${f.config.chainId}_${f.config.address.toLowerCase()}_${prepared.reasonHash}`);
     assert.equal(record.status, "confirmed"); assert.equal(record.blockNumber, summary.blockNumber);

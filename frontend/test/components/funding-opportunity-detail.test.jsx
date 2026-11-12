@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  user: null,
   readPool: vi.fn(),
   syncPool: vi.fn(),
   verifyFunding: vi.fn(async () => ({ verified: true })),
@@ -26,7 +27,7 @@ vi.mock("../../src/components/RelatedAuditReceiptPane.jsx", () => ({
 vi.mock("../../src/context/AuthContext.jsx", () => ({
   useAuth: () => ({
     isAuthenticated: true,
-    user: { id: `0x${"a".repeat(40)}` },
+    user: mocks.user,
   }),
 }));
 
@@ -82,12 +83,14 @@ const pool = (overrides = {}) => ({
   available: "25100000000", selections: [], canDeposit: true, ...overrides,
 });
 beforeEach(() => {
+  mocks.user = { id: `0x${"a".repeat(40)}` };
   mocks.readPool.mockReset().mockResolvedValue(pool());
   mocks.syncPool.mockReset().mockResolvedValue(pool({ available: "25200000000", totalDeposited: "25200000000" }));
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -112,6 +115,22 @@ describe("[QCDAO-51] open-funding detail", () => {
 
 
 describe("contract-backed funding available", () => {
+  it("puts the confirmed balance and submission action before the posting tabs on mobile", async () => {
+    mocks.user = { id: `0x${"d".repeat(40)}`, roles: ["researcher"] };
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    const navigate = vi.fn();
+    render(<PostingDetailPage postingId="funding123" onNavigate={navigate} />);
+
+    const funding = await screen.findByRole("region", { name: "Posting funding" });
+    expect(await within(funding).findByText("USDT 25,100")).toBeTruthy();
+    const submit = screen.getByRole("button", { name: "Submit a proposal" });
+    expect(funding.contains(submit)).toBe(true);
+    const tabs = screen.getByRole("tablist", { name: "Posting sections" });
+    expect(funding.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(submit);
+    expect(navigate).toHaveBeenCalledWith("submit-proposal/funding123");
+  });
+
   it("uses the same contract balance as the grant panel before opening the funding tab", async () => {
     render(<PostingDetailPage postingId="funding123" onNavigate={() => {}} />);
     const sidebar = () => document.querySelector("aside.context-panel");

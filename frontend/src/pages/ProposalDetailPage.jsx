@@ -1,6 +1,6 @@
 import { ConvertedAmount } from "../components/CurrencyAmount.jsx";
 import { useLiveActivity } from "../hooks/useLiveActivity.js";
-import { formatFundingAmount } from "../lib/fundingDisplay.js";
+import { formatFundingAmount, hasConfirmedFunding } from "../lib/fundingDisplay.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import { EscrowPaymentPlanSummary } from "../components/EscrowPaymentPlanSummary.jsx";
 import { EscrowFundingPanel } from "../components/EscrowFundingPanel.jsx";
@@ -9,10 +9,11 @@ import { IndependentFundingPanel } from "../components/IndependentFundingPanel.j
 import { IndependentFundingTerms } from "../components/IndependentFundingTerms.jsx";
 import { getIndependentFundingState, independentFundingLocked } from "../lib/independentEscrow.js";
 import { OpenFundingPanel } from "../components/OpenFundingPanel.jsx";
+import { grantFundingLabel } from "../lib/grantOfferStatus.js";
 import { readEscrowFundingStarted } from "../lib/escrow.js";
 import { fetchAuditVerification, useAuditVerification } from "../lib/escrowReads.js";
 import { QueryClient, QueryClientContext, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useSignIn } from "../context/SessionContext.jsx";
@@ -76,6 +77,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
     setActiveTab(next);
   };
   const [escrowState, setEscrowState] = useState(null);
+  const [grantSummary, setGrantSummary] = useState(null);
   const [fundingRefreshVersion, setFundingRefreshVersion] = useState(0);
   const [author, setAuthor] = useState(null);
   useEffect(() => {
@@ -88,6 +90,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
     }
   }, [confirm, proposal?.matching, proposal?.problemMatching, proposal?.fundingTerms, escrowState, anchoredWithdrawal, withdrawing]);
   const liveScope = `${proposalId}:${user?.id || ""}`;
+  const updateGrantSummary = useCallback(summary => setGrantSummary({ scope: liveScope, summary }), [liveScope]);
   const activeLiveScope = useRef(liveScope); activeLiveScope.current = liveScope;
   useEffect(() => { activeLiveScope.current = liveScope; return () => { activeLiveScope.current = null; }; }, [liveScope]);
   const anchorInFlight = useRef(new Set());
@@ -213,6 +216,8 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
   if (loading) return <section className="page empty" role="status">Loading proposal…</section>;
   if (!proposal) return <section className="page empty"><h1>Proposal unavailable</h1><p role="alert">{error || "This proposal could not be found or you do not have access."}</p><button className="secondary" onClick={() => onNavigate("proposals")}>My proposals</button></section>;
   const isOpenFunding = proposal.opportunityType === OPEN_FUNDING_TYPE;
+  const grantOffer = grantSummary?.scope === liveScope
+    ? grantSummary.summary?.selections?.find(item => item.proposalId === proposal.id) : null;
   const independent = isIndependentProposal(proposal);
   const listingOpen = !independent || independentListingWindowOpen(proposal);
   const sponsors = Boolean(user?.id && proposal.postingOwnerId === user.id.toLowerCase());
@@ -274,9 +279,11 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
       </div>
       <p className="lead">{proposal.summary}</p>
       {showEscrow && activeTab !== "funding" && <section className="proposal-funding-summary" aria-label="This proposal's funding">
-        <div className="proposal-funding-summary-head"><div><span className="eyebrow">This proposal’s funding</span><p>Contributions are held separately for this solution.</p></div>
+        <div className="proposal-funding-summary-head"><div><span className="eyebrow">{isOpenFunding ? "Grant funding" : "This proposal’s funding"}</span><p>{isOpenFunding
+          ? grantFundingLabel(grantOffer) ?? "Open Escrow & funding to check the grant offer."
+          : "Contributions are held separately for this solution."}</p></div>
           <button type="button" className="secondary small" onClick={() => setTab("funding")}>View escrow &amp; funding</button></div>
-        <FundingProgress summary={escrowState ?? {}} compact label="This proposal's confirmed funding" />
+        {(!isOpenFunding || (escrowState && hasConfirmedFunding(escrowState))) && <FundingProgress summary={escrowState ?? {}} compact label="This proposal's confirmed funding" />}
       </section>}
       <ContentModerationNotice record={proposal} />
       {auditVerification?.kind === "mismatch" && <p className="error-banner" role="alert">This proposal does not match its on-chain record. New funding and approval actions are blocked. Open Record to review the differences.</p>}
@@ -354,7 +361,7 @@ function ProposalDetailBody({ proposalId, onNavigate, autoAnchor = false, justSu
 
       {showFunding && <div className={panel("funding")} role="tabpanel" id="proposal-panel-funding" aria-labelledby="proposal-tab-funding">
         {!independent && proposal.fundingTerms && openedTabs.has("funding") && <AdminEscrowCancellation key={`${proposal.id}:${user?.id}`} proposalId={proposal.id} onConfirmed={() => { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); }} />}
-        {isOpenFunding && <OpenFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} postingOwnerId={proposal.postingOwnerId} proposalId={proposal.id} reviewedProposalRecord={proposal} onNavigate={onNavigate}
+        {isOpenFunding && <OpenFundingPanel key={liveScope} integrityBlocked={auditVerification?.kind === "mismatch"} problemId={proposal.problemId} postingOwnerId={proposal.postingOwnerId} proposalId={proposal.id} reviewedProposalRecord={proposal} onNavigate={onNavigate} onSummaryChange={updateGrantSummary}
           onChange={(change) => { if (activeProposalId.current === change.proposalId) { setFundingRefreshVersion(previous => previous + 1); void reloadProposal(); } }} />}
         {independent ? <IndependentFundingPanel integrityBlocked={auditVerification?.kind === "mismatch"} key={proposal.id} proposal={proposal} onStateChange={setEscrowState} onConfirmed={reloadProposal}
           initialTransaction={pendingFundingTransaction} refreshVersion={fundingRefreshVersion} />

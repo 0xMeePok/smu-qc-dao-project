@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CurrencyAmount } from "../components/CurrencyAmount.jsx";
 import { StatusBadge } from "../components/StatusBadge.jsx";
 import { WORKFLOW_STATUS } from "../config/workflowStatus.js";
@@ -83,11 +83,48 @@ function daysLeft(expiresAt) {
   return `${days} ${days === 1 ? "day" : "days"} left`;
 }
 
+function workflowScrollRange(section, stage) {
+  const style = window.getComputedStyle(stage);
+  if (style.position !== "sticky") return null;
+  const top = section.getBoundingClientRect().top - parseFloat(style.top);
+  const distance = section.offsetHeight - stage.offsetHeight;
+  return distance > 0 ? { top, distance } : null;
+}
+
 export default function HomePage({ postings = [], loading = false, isAuthenticated = false, onNavigate, onOpenWorkspaces }) {
   const [step, setStep] = useState(0);
+  const how = useRef(null);
+  const stage = useRef(null);
   const featured = postings.slice(0, 8);
-  // Step selection is immediate. A sticky scroll narrative previously reserved
-  // 340vh and made visitors scroll several screens before reaching live listings.
+  useEffect(() => {
+    let frame;
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const updateStep = () => {
+      frame = undefined;
+      const range = workflowScrollRange(how.current, stage.current);
+      if (!range) return;
+      const index = Math.floor((-range.top / range.distance) * STEPS.length);
+      setStep(Math.min(STEPS.length - 1, Math.max(0, index)));
+    };
+    const schedule = () => { frame ??= window.requestAnimationFrame(updateStep); };
+    schedule();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    motion?.addEventListener("change", schedule);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      motion?.removeEventListener("change", schedule);
+    };
+  }, []);
+  const selectStep = index => {
+    const range = workflowScrollRange(how.current, stage.current);
+    if (range && index !== step) {
+      window.scrollTo({ top: window.scrollY + range.top + ((index + 0.5) / STEPS.length) * range.distance, behavior: "instant" });
+    }
+    setStep(index);
+  };
   const open = (item) => onNavigate(`${item.route ?? "posting"}/${item.id}`);
 
   return (
@@ -129,24 +166,32 @@ export default function HomePage({ postings = [], loading = false, isAuthenticat
         </ol>
       </section>
 
-      <section id="how" className="desk-how" aria-label="From brief to delivery">
-        <div className="desk-how-stage">
+      <section ref={how} id="how" className="desk-how" aria-label="From brief to delivery">
+        <div ref={stage} className="desk-how-stage">
           <div className="desk-how-grid">
             <div>
               <p className="desk-kicker">From brief to delivery</p>
               <ol>
                 {STEPS.map(([title, text], index) => (
                   <li key={title}>
-                    <button type="button" className={index === step ? "is-on" : ""} aria-current={index === step ? "step" : undefined} onClick={() => setStep(index)}>
+                    <button type="button" className={index === step ? "is-on" : ""} aria-current={index === step ? "step" : undefined} onClick={() => selectStep(index)}>
                       {title}
                     </button>
-                    {index === step && <p>{text}</p>}
                   </li>
                 ))}
               </ol>
+              <div className="desk-how-description">
+                {STEPS.map(([title, description], index) => (
+                  <p key={title} aria-hidden={index === step ? undefined : true}>{description}</p>
+                ))}
+              </div>
             </div>
             <div className="desk-panel" aria-live="polite">
-              <StepPanel index={step} />
+              {STEPS.map(([title], index) => (
+                <div key={title} className="desk-step-panel" role="group" aria-label={title} aria-hidden={index === step ? undefined : true}>
+                  <StepPanel index={index} />
+                </div>
+              ))}
             </div>
           </div>
         </div>
