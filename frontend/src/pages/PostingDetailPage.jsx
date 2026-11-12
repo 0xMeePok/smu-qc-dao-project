@@ -124,10 +124,7 @@ function RemovedProblemView({ posting, onNavigate, viewerId }) {
   );
 }
 
-function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
-  const actions = postingActions(posting, user, { isAuthenticated });
-  const blocked = proposalBlockReason(posting);
-  const isOpenFunding = posting.opportunityType === OPEN_FUNDING_TYPE;
+function ActionBar({ actions, blocked, showGrantHint, onNavigate, onReveal }) {
   if (!actions.length && !blocked) return null;
   return (
     <div className="posting-action-block">
@@ -150,14 +147,32 @@ function ActionBar({ posting, user, isAuthenticated, onNavigate, onReveal }) {
           ))}
         </div>
       )}
-      {isOpenFunding && !blocked ? (
+      {showGrantHint && !blocked ? (
         <p className="field-hint">Propose a problem and solution to this grant call. The owner can fund multiple proposals from their deposited pool.</p>
       ) : null}
     </div>
   );
 }
 
+const STACKED_POSTING_QUERY = "(max-width: 960px)";
+
+function useStackedPosting() {
+  const [stacked, setStacked] = useState(() => window.matchMedia?.(STACKED_POSTING_QUERY)?.matches ?? false);
+  useEffect(() => {
+    const media = window.matchMedia?.(STACKED_POSTING_QUERY);
+    if (!media) return undefined;
+    const update = () => setStacked(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+  return stacked;
+}
+
+const isSubmitAction = (action) => action.id === "submit" || action.id === "submit-signin";
+
 function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
+  const stacked = useStackedPosting();
   const { isAuthenticated, user } = useAuth();
   const { address: connectedAddress, isConnected } = useWallet();
   const queryClient = useQueryClient();
@@ -457,6 +472,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
     : "—";
 
   const pool = grantBalance?.scope === liveScope ? grantBalance.summary : null;
+  const grantOffers = pool?.supported ? new Map((pool.selections ?? []).map(offer => [offer.proposalId, offer])) : undefined;
   const available = pool?.supported ? fundingUnits(pool.available) : null;
   const fundingLabel = available !== null && Number.isInteger(pool.tokenDecimals) && pool.tokenDecimals >= 0 && pool.tokenDecimals <= 77
     ? formatFundingAmount(pool.tokenSymbol, formatUnits(available, pool.tokenDecimals))
@@ -479,6 +495,13 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
     document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   const timeLabel = expired || matchClosed ? "Closed" : matchingStatus === "awaiting_confirmation" ? "Creator response window" : "Time remaining";
+  const actions = postingActions(posting, user, { isAuthenticated });
+  const submitActions = stacked ? actions.filter(isSubmitAction) : [];
+  const sidebarActions = stacked ? actions.filter(action => !isSubmitAction(action)) : actions;
+  const fundingAmount = <>
+    <span className="eyebrow">{isOpenFunding ? "Funding available" : "Indicative proposal budget"}</span>
+    <strong><ConvertedAmount text={isOpenFunding ? fundingLabel : requestedLabel} /></strong>
+  </>;
 
   return (
     <section className="page detail-page blotter-posting">
@@ -504,6 +527,13 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
           <ContentModerationNotice record={posting} />
           {auditVerification?.kind === "mismatch" && <p className="error-banner" role="alert">This posting does not match its on-chain record. New funding and approval actions are blocked. Open Record to review the differences.</p>}
           {error && !confirm && <p className="attachment-error" role="alert">{error}</p>}
+
+          {stacked && (
+            <section className="posting-funding-overview" aria-label="Posting funding">
+              {fundingAmount}
+              <ActionBar actions={submitActions} onNavigate={onNavigate} onReveal={reveal} />
+            </section>
+          )}
 
           {/* Verification and financial state stay live on entry. Optional
               lists/history mount on first use, then remain mounted so selections
@@ -607,11 +637,13 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
               isPoster={ownsPosting}
               proposalCount={proposalCount}
               onNavigate={onNavigate}
+              grantOffers={grantOffers}
             />}
             {showCollaboration && openedTabs.has("proposals") && (
               <ProposalComparison
                 integrityBlocked={auditVerification?.kind === "mismatch"}
                 problemId={posting.id}
+                grantOffers={grantOffers}
                 refreshKey={`${posting.matching?.status || ""}:${posting.matching?.totalFundedMinor || 0}`}
                 onNavigate={onNavigate}
                 onSelected={() => setMatchingRefresh((current) => current + 1)}
@@ -652,8 +684,7 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
         </article>
 
         <aside className="context-panel">
-          <span className="eyebrow">{isOpenFunding ? "Funding available" : "Indicative proposal budget"}</span>
-          <strong><ConvertedAmount text={isOpenFunding ? fundingLabel : requestedLabel} /></strong>
+          {!stacked && fundingAmount}
           <dl>
             <PosterIdentity
               ownerId={posting.ownerId}
@@ -675,9 +706,9 @@ function PostingDetailBody({ postingId, onNavigate, initialTab = "overview" }) {
           </dl>
 
           <ActionBar
-            posting={posting}
-            user={user}
-            isAuthenticated={isAuthenticated}
+            actions={sidebarActions}
+            blocked={proposalBlockReason(posting)}
+            showGrantHint={isOpenFunding && submitActions.length === 0}
             onNavigate={onNavigate}
             onReveal={reveal}
           />

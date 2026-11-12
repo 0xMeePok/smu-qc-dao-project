@@ -95,7 +95,7 @@ function useRoute() {
   useEffect(() => {
     const updateRoute = () => {
       setRouteInfo(parseHash());
-      window.scrollTo({ top: 0, behavior: "auto" });
+      window.scrollTo({ top: 0, behavior: "instant" });
     };
 
     window.addEventListener("hashchange", updateRoute);
@@ -339,7 +339,7 @@ function Shell({ route, children }) {
         <span className="footer-brand">QC DAO</span>
         <div className="footer-links">
           <button type="button" onClick={() => go("architecture")}>On-chain vs off-chain</button>
-          <button type="button" onClick={() => go("architecture")}>Status reference</button>
+          <button type="button" onClick={() => go("architecture?section=workflow-status")}>Status reference</button>
           <span>Arbitrum Sepolia (421614)</span>
           <span>Proof of concept</span>
         </div>
@@ -870,7 +870,7 @@ function AppContent() {
       </RouteGuard>
     );
   } else if (section === "architecture") {
-    pageComponent = <ArchitectureHelpPage onNavigate={go} />;
+    pageComponent = <ArchitectureHelpPage onNavigate={go} showStatusReference={params.get("section") === "workflow-status"} />;
   } else if (section === "access-denied") {
     pageComponent = <AccessDenied onNavigate={go} />;
   }

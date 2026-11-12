@@ -9,6 +9,7 @@ import { formatInstant } from "../lib/datetime.js";
 import { matchingError, proposalFundingStatus, selectMockProposal } from "../lib/matching.js";
 import { listReportableComments } from "../lib/moderation.js";
 import { findProposal } from "../lib/proposals.js";
+import { grantFundingLabel } from "../lib/grantOfferStatus.js";
 import { messageForProposalError } from "../lib/proposalValidation.js";
 import {
   COMPARISON_SORTS, categoryLabel, comparisonError, filterComparisonRows, getProposalComparison,
@@ -25,7 +26,7 @@ function developerLabel(row) {
 
 const FILTERS = [["", "All"], ...RECOMMENDATIONS];
 
-export function ProposalComparison({ problemId, refreshKey = "", onSelected, onNavigate, integrityBlocked = false }) {
+export function ProposalComparison({ problemId, refreshKey = "", onSelected, onNavigate, integrityBlocked = false, grantOffers }) {
   const { user } = useAuth();
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
@@ -89,6 +90,7 @@ export function ProposalComparison({ problemId, refreshKey = "", onSelected, onN
     {state && rows.length === 0 && <p className="comparison-empty">{state.rows?.length ? "No proposals match this recommendation." : "No submitted proposals to compare yet."}</p>}
     {state && rows.length > 0 && <div className="comparison-list" role={showDecision ? "radiogroup" : undefined} aria-label={showDecision ? "Choose the proposal to match" : undefined}>
       {rows.map((row) => <ComparisonRow key={row.id} row={row} problemMatching={state.problemMatching} showDecision={showDecision && !integrityBlocked}
+        grantOffer={grantOffers?.get(row.id)}
         open={openId === row.id} checked={selected?.id === row.id}
         onToggle={() => setOpenId((current) => current === row.id ? "" : row.id)}
         onOpen={() => onNavigate?.(`proposal/${row.id}`)}
@@ -161,8 +163,9 @@ export function SelectProposalDialog({ problemId, proposal, onCancel, onSelected
   </Modal>;
 }
 
-function ComparisonRow({ row, problemMatching, showDecision, open, checked, onToggle, onOpen, onChoose }) {
+function ComparisonRow({ row, problemMatching, showDecision, open, checked, onToggle, onOpen, onChoose, grantOffer }) {
   const funding = proposalFundingStatus(row, problemMatching);
+  const fundingDetail = grantFundingLabel(grantOffer) ?? funding.detail;
   const escrow = Object.hasOwn(row, "fundingTerms");
   const eligible = !escrow && Boolean(row.canSelect);
   const decision = showDecision && !eligible && !escrow ? row.selectionHint : "";
@@ -189,7 +192,7 @@ function ComparisonRow({ row, problemMatching, showDecision, open, checked, onTo
           <dt>Funding status</dt>
           <dd className="funding-status">
             {escrow ? <span className="draft-badge">{funding.label}</span> : <StatusBadge status={funding.status} />}
-            {funding.detail && <small>{funding.detail}</small>}
+            {fundingDetail && <small>{fundingDetail}</small>}
           </dd>
         </div>
       </dl>

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { OnChainOffChainLegend } from "../components/OnChainOffChainLegend.jsx";
 import { StatusLegend } from "../components/StatusBadge.jsx";
 import { useSession } from "../context/SessionContext.jsx";
@@ -7,9 +8,15 @@ import { isAdmin } from "../lib/roles.js";
  * Public architecture help screen. Explains the hybrid split for a non-technical
  * evaluator and surfaces the same legend used on admin audit tabs.
  */
-export default function ArchitectureHelpPage({ onNavigate }) {
+export default function ArchitectureHelpPage({ onNavigate, showStatusReference = false }) {
   const { profile } = useSession();
   const showAuditTrail = isAdmin(profile?.role) && !profile?.suspended;
+  const statusReference = useRef(null);
+  useEffect(() => {
+    if (!showStatusReference) return;
+    statusReference.current?.focus({ preventScroll: true });
+    statusReference.current?.scrollIntoView?.({ behavior: "instant", block: "start" });
+  }, [showStatusReference]);
 
   return (
     <section className="page architecture-page">
@@ -36,8 +43,8 @@ export default function ArchitectureHelpPage({ onNavigate }) {
         </p>
       </div>
 
-      <div className="detail-section" id="workflow-status">
-        <h2>Workflow status reference</h2>
+      <div className="detail-section" id="workflow-status" ref={statusReference} tabIndex={-1} aria-labelledby="workflow-status-title">
+        <h2 id="workflow-status-title">Workflow status reference</h2>
         <p>
           Posting and proposal cards, dashboards and notifications use these
           workflow statuses. Escrow panels show funding and payment status

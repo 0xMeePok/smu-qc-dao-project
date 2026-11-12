@@ -9,7 +9,7 @@ import { canReadContent, memberNoticeFields, writeMemberNotice } from "./moderat
 import { prepareStoredProposal } from "./proposalAuditPayload.js";
 import { verifyProposalEscrow, requireAddress } from "./escrowAudit.js";
 import { deploymentKey, enqueueEscrowFunding, loadFundingContext } from "./escrowFunding.js";
-import { same } from "./escrowFundingEvents.js";
+import { ESCROW_STATES, same } from "./escrowFundingEvents.js";
 import { OPEN_FUNDING_SELECTIONS, saveFundingSnapshot } from "./fundingSnapshots.js";
 import { memberCallFromReceipt } from "./memberCall.js";
 export { OPEN_FUNDING_SELECTIONS } from "./fundingSnapshots.js";
@@ -167,26 +167,28 @@ export async function readOpenFunding({ db, client, config, uid, problemId, prop
     const offer = offers[index], state = Number(at(offer, "state", 2)), deadline = BigInt(at(offer, "acceptanceDeadline", 1));
     if (!OFFER_STATES[state]) fail("failed-precondition", "The grant selection state cannot be verified.");
     const expired = state === 1 && deadline <= block.timestamp;
-    let escrowAddress, deposited, active, invalidated, revisionCount;
+    let escrowAddress, escrowState, deposited, active, invalidated, revisionCount;
     try {
       const escrow = await verifyProposalEscrow({ expected, config, readContract: request => client.readContract({ ...request, blockNumber }) });
       escrowAddress = escrow.address;
-      const [linkedPool, actual, paid, fundingActive, fundingInvalidated, revisions] = await Promise.all([
+      const [linkedPool, actual, paid, fundingActive, fundingInvalidated, revisions, contractState] = await Promise.all([
         read(escrowAddress, config.escrow.escrowAbi, "openFundingPool"), read(config.address, config.abi, "getProposal", [expected.entityId]),
         read(escrowAddress, config.escrow.escrowAbi, "totalDeposited"),
         read(config.address, config.abi, "isFundingActive", [expected.entityId, escrowAddress]),
         read(config.address, config.abi, "isFundingInvalidated", [expected.entityId, escrowAddress]),
         read(config.address, config.abi, "revisionCount", [expected.entityId]),
+        read(escrowAddress, config.escrow.escrowAbi, "state"),
       ]);
       if (!same(linkedPool, base.poolAddress) || !same(expected.fundingTerms.token, base.tokenAddress)
           || !same(at(actual, "researcher", 0), expected.expectedResearcher) || !same(at(actual, "opportunityId", 1), expected.opportunityId)
           || !same(at(actual, "proposalHash", 4), expected.proposalHash) || !same(at(actual, "solutionHash", 5), expected.solutionHash)) return null;
       deposited = BigInt(paid); active = fundingActive; invalidated = fundingInvalidated; revisionCount = String(revisions);
+      escrowState = ESCROW_STATES[Number(contractState)] ?? null;
     } catch { return null; }
     const declineReasonHash = declineHashes[index] && !same(declineHashes[index], ZERO_HASH) ? String(declineHashes[index]).toLowerCase() : null;
     return { proposalId: proposal.id, entityId: ids[index], title: proposal.title || "Proposal", researcherId: proposal.researcherId,
       reviewedProposal: { entityId: expected.entityId, revisionCount, proposalHash: expected.proposalHash, solutionHash: expected.solutionHash },
-      escrowAddress, amountBaseUnits: state === 0 ? expected.fundingTerms.target.toString() : String(at(offer, "amount", 0)), acceptanceDeadline: deadline.toString(),
+      escrowAddress, escrowState, amountBaseUnits: state === 0 ? expected.fundingTerms.target.toString() : String(at(offer, "amount", 0)), acceptanceDeadline: deadline.toString(),
       status: expired ? "expired" : OFFER_STATES[state], declined: Boolean(declineReasonHash), declineReasonHash,
       canAccept: state === 1 && !expired && active && !hidden(proposal) && !hidden(record) && same(uid, proposal.researcherId),
       // Declining is an exit: moderation pauses and hidden content never block it.
